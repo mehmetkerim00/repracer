@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodSearch, type DecisionListView, type FeedQuery, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
+import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodSearch, type DecisionListView, type FeedQuery, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
 import { DecisionsView } from './Decisions.tsx';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, Pager, PeriodPicker, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Field } from '../forms.tsx';
+import { PeriodPicker } from '../date-range.tsx';
 
 /**
  * Шаг 95 [Р-217]: Price changes — единственный журнал цен. «Kind» выбирает, что в нём: записи в канал (как было) или все решения —
@@ -171,7 +172,7 @@ function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch }: J
     <>
       <div className="filters toolbar field-toolbar">
         <KindField kind="writes" onKind={onKind} />
-        <PeriodPicker value={period} onChange={(p) => { onPeriod(p); change({}); }} />
+        <PeriodPicker value={period} maxDays={FEED_MAX_DAYS} onChange={(p) => { onPeriod(p); change({}); }} />
         {/* Р-136: предложение выбирается поиском; шаг 96 (Б11) — поиск по мере ввода фильтрует и саму таблицу */}
         <Field label={f.filters.offer}><OfferPicker worldId={worldId} value={query.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all} search={search}
           onSearch={(text) => { onSearch(text); change({}); }} onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} onCounter={setPickerCount} /></Field>

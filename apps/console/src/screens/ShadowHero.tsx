@@ -55,7 +55,7 @@ function DayChart({ chart }: { chart: ShadowChartView }) {
           {ticks.map((t) => <span key={t} className="chart-grid" style={{ bottom: `${(t / top) * 100}%` }} aria-hidden="true" />)}
           <div className="chart-bars">
             {chart.points.map((p, i) => (
-              <div key={p.day} className={`chart-slot${i === n - 1 ? ' today' : ''}`} title={p.title}>
+              <div key={p.day} className={`chart-slot${p.partial ? ' today' : ''}`} title={p.title}>
                 {values ? <span className="chart-value">{nf.format(p.value)}</span> : null}
                 <span className="chart-bar" style={{ height: p.value > 0 ? `max(2px, ${(p.value / top) * 100}%)` : '0' }} />
               </div>
@@ -63,7 +63,7 @@ function DayChart({ chart }: { chart: ShadowChartView }) {
           </div>
         </div>
         <div className="chart-days" aria-hidden="true" ref={daysRef}>
-          {chart.points.map((p, i) => <span key={p.day} className={i === n - 1 ? 'today' : undefined}>{labelled(i) ? p.label : ''}</span>)}
+          {chart.points.map((p, i) => <span key={p.day} className={p.partial ? 'today' : undefined}>{labelled(i) ? p.label : ''}</span>)}
         </div>
       </div>
     </figure>

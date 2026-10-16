@@ -369,7 +369,8 @@ export const de: Messages = {
       /** Шаг 92 [Р-216]: знак и строчное имя «pricetrail» в шапке; вкладка — имя в прозе (documentTitle) */
       title: 'pricetrail · Verkäuferkonsole',
       documentTitle: 'PriceTrail · Verkäuferkonsole',
-      theme: { label: 'Darstellung', system: 'Wie das System', light: 'Hell', dark: 'Dunkel', switchTo: (current: string, next: string) => `Darstellung: ${current}. Wechseln zu ${next}` },
+      // Шаг 96.1: кнопка темы — солнце или луна; подсказка называет, куда переключит
+      theme: { label: 'Darstellung', light: 'Hell', dark: 'Dunkel', toLight: 'Zur hellen Darstellung wechseln', toDark: 'Zur dunklen Darstellung wechseln' },
       stand: 'Testumgebung, synthetische Daten',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo-Shop (Simulator)', demoWorldDescription: 'Synthetischer Shop auf dem Kanalsimulator: jedes Angebot hat drei Wettbewerber — einer driftet, einer unterbietet, einer in Preiswellen.',
@@ -659,6 +660,21 @@ export const de: Messages = {
         awaitingAck: 'wartet auf Ihre Bestätigung der Nebenwirkung',
         shared: (marketplaces: string) => `ein Wert für: ${marketplaces}`,
         managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `verwaltet ${channel} · ${marketplace}: ${n} (${when}) — nur Anzeige, wir ändern es nie`,
+        // Шаг 96.1: строка — коротко; что значит состояние и на какой момент — один раз над таблицей
+        toPublish: (n: number) => `${n} zu veröffentlichen`,
+        channelShows: (n: number) => `Kanal zeigt ${n}`,
+        managedShort: (channel: string, marketplace: string, n: number) => `${channel} · ${marketplace} — ${n}, verwaltet von ${channel}`,
+        asOf: (when: string) => `Kanalzahlen vom ${when}.`,
+        legend: {
+          shadow: 'Im Schattenmodus zurückgehalten — die zu veröffentlichende Zahl ist berechnet, aber nichts wird an den Shop gesendet, daher hat der Kanal sie nicht bestätigt.',
+          synced: 'Abgeglichen — der Kanal hat die gesendete Zahl bestätigt.',
+          sending: 'Wartet auf Bestätigung — die Zahl ist gesendet, der Kanal hat sie noch nicht bestätigt.',
+          idle: 'Noch nichts gesendet — die zu veröffentlichende Zahl ist berechnet, eine Aktualisierung wurde noch nicht gesendet.',
+          diverged: 'Abweichend — die letzte Aktualisierung endete mit einem Fehler oder der Kanal zeigt eine andere Zahl; die Zeile unter dem Produkt sagt, welche.',
+          awaiting: 'Braucht Ihre Bestätigung — der Abgleich beginnt, sobald Sie die Nebenwirkung des Kanals unter der Tabelle bestätigen.',
+          off: 'Abgleich aus — an diesen Kanal wird nichts gesendet.',
+          managed: 'Vom Kanal verwaltet (zum Beispiel Amazon FBA) — nur Anzeige, wir ändern es nie.',
+        },
         diverged: (status: string, when: string) => `Die letzte Bestandsaktualisierung endete mit ${status} (${when}) — der Kanal zeigt etwas anderes`,
       },
       // Р-153: die Fallen werden VOR dem ersten Schreiben aus der Kanalfähigkeit benannt, nicht danach entdeckt
@@ -891,7 +907,7 @@ export const de: Messages = {
     },
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
-      chartTitle: 'Entscheidungen pro Tag',
+      chartTitle: 'Entscheidungen pro Tag', chartToday: 'Heute', chartPartialDay: 'angebrochener Tag',
       /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
       list: {
         period: 'Zeitraum', floorHeld: 'Preis landete genau auf der Untergrenze', floorHeldHint: 'sie hat ihn bestimmt, ohne sie wäre er tiefer gegangen',
@@ -1400,12 +1416,17 @@ export const de: Messages = {
       rulesNone: (phrase: string) => `Sonst wurde ${phrase} nichts gestoppt oder korrigiert. Jedes Mal, wenn eine Grenze, die Eingangsprüfung oder das Anhalten einer Storefront einen Preis stoppt oder korrigiert, erscheint es hier mit dem Grund.`,
     },
     period: {
-      label: 'Zeitraum', presets: { '24h': '24 Std.', '7d': '7 Tage', '30d': '30 Tage' }, custom: 'Eigener', from: 'Von', to: 'Bis', apply: 'Anzeigen',
+      label: 'Zeitraum',
+      // Шаг 96.1: один контрол диапазона — кнопка с датами, календарь, пресеты слева, Apply / Cancel внизу
+      presetsLong: { '24h': 'Letzte 24 Stunden', '7d': 'Letzte 7 Tage', '30d': 'Letzte 30 Tage' },
+      dialog: 'Zeitraum wählen', prevMonth: 'Vorheriger Monat', nextMonth: 'Nächster Monat', cancel: 'Abbrechen', applyRange: 'Übernehmen',
+      pickEnd: (start: string) => `Wählen Sie jetzt den letzten Tag — ${start} oder später.`,
+      endBeforeStart: (start: string) => `Das Ende kann nicht vor dem Anfang liegen: Wählen Sie ${start} oder einen späteren Tag.`,
+      chosen: (range: string) => `Ausgewählt: ${range}.`,
+      limit: (days: number) => `Wählbar sind nur die letzten ${days} Tage.`,
       phrase: { '24h': 'in den letzten 24 Stunden', '7d': 'in den letzten 7 Tagen', '30d': 'in den letzten 30 Tagen' },
       between: (from: string, to: string) => `vom ${from} bis ${to}`,
       clipped: (days: number) => `Hier werden nur die letzten ${days} Tage aufbewahrt: frühere Tage werden nicht gezeigt.`,
-      zone: (zone: string) => `Tage in ${zone}.`,
-      badRange: 'Das Startdatum liegt nach dem Enddatum.',
     },
     costImport: {
       requiredCaption: 'Pflichtfeld.', fileLabel: 'Exportdatei', fileCaption: 'CSV oder XLSX. Vor dem Anwenden der Vorschau ändert sich nichts.',

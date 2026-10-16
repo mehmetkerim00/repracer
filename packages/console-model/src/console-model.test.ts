@@ -492,11 +492,18 @@ test('step 82: the shadow chart folds hourly decisions into the seller\'s own da
   assert.deepEqual(la.points.map((p) => [p.day, p.value]),
     [['2026-10-07', 0], ['2026-10-08', 0], ['2026-10-09', 0], ['2026-10-10', 0], ['2026-10-11', 0], ['2026-10-12', 5], ['2026-10-13', 2]],
     'seven days ending today, empty days as zero, hours in the seller\'s days');
-  assert.deepEqual([la.points[6]!.label, la.title], ['Tue', 'Decisions per day']);
+  // Шаг 96.1 (решение владельца): последние сутки — сегодняшние и неполные: «Today», «partial day» в подсказке; остальные — днём недели
+  assert.deepEqual([la.points[5]!.label, la.points[6]!.label, la.title], ['Mon', 'Today', 'Decisions per day']);
+  assert.deepEqual(la.points.map((p) => p.partial), [false, false, false, false, false, false, true]);
+  assert.ok(la.points[6]!.title.endsWith('· partial day') && !la.points[5]!.title.includes('partial'), la.points[6]!.title);
+  // Шаг 96.1: свой диапазон Oct 6 – Oct 12 кончается полуночью Лос-Анджелеса ПОСЛЕ последней даты — последний столбик Oct 12, и это не
+  // «сегодня» (сегодня — Oct 16): прежде график рисовался со сдвигом на день, а последний столбик ошибочно звался «Today»
+  const custom = shadowChart(byHour, '2026-10-13T07:00:00Z', 7, en, 'America/Los_Angeles', '2026-10-16T18:00:00Z');
+  assert.deepEqual([custom.points[0]!.day, custom.points[6]!.day, custom.points[6]!.label, custom.points[6]!.partial, custom.points[6]!.value], ['2026-10-06', '2026-10-12', 'Mon', false, 5]);
   // Control: the same hours in UTC fall into other days — the zone is what moves them, not the order of the rows
   assert.deepEqual(shadowChart(byHour, until, 7, en, null).points.map((p) => p.value), [0, 0, 0, 0, 0, 0, 7]);
   assert.equal(shadowChart(byHour, until, 30, en, 'Mars/Olympus_Mons').points.length, 30, 'an unknown zone falls back to UTC and does not break the screen');
-  assert.deepEqual([shadowChart([], until, 7, messagesFor('de'), 'Europe/Berlin').points[6]!.label, shadowChart([], until, 30, messagesFor('de'), 'Europe/Berlin').points[29]!.label], ['Di', '13. Okt.']);
+  assert.deepEqual([shadowChart([], until, 7, messagesFor('de'), 'Europe/Berlin').points[5]!.label, shadowChart([], until, 30, messagesFor('de'), 'Europe/Berlin').points[28]!.label, shadowChart([], until, 30, messagesFor('de'), 'Europe/Berlin').points[29]!.label], ['Mo', '12. Okt.', 'Heute']);
 });
 
 test('step 84: the shadow summary as «metric — value» says what the sentences said, caveats go to the footnote', () => {

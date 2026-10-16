@@ -154,6 +154,10 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
         // Шаг 79: итоги и источники — карточкой над таблицей, а не текстом на фоне страницы
         <div className="toolbar stock-summary">
           {v.rows.length > 0 ? <strong>{v.summaryText}</strong> : null}
+          {/* Шаг 96.1: что значат состояния каналов и на какой момент — строкой при сводке, один раз, а не в каждой строке таблицы */}
+          {v.rows.length > 0 && (v.asOfText || v.legend.length > 0) ? (
+            <p className="small stock-legend">{v.asOfText ? <span className="muted">{v.asOfText} </span> : null}{v.legend.join(' ')}</p>
+          ) : null}
           <ul className="small plain">{v.sources.map((s) => <li key={s.stockSourceId}>{s.name} — {s.modeText}; {s.productsText}{s.hasKey ? `; ${t.sources.keyPresent}` : ''}</li>)}</ul>
         </div>
       )}
@@ -180,15 +184,16 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
                 <td className="product card-title">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
                 <td className="num" data-label={t.columns.onHand}>{r.onHand}</td><td className="num" data-label={t.columns.reserved}>{r.reserved}</td><td className="num money" data-label={t.columns.available}>{r.available}</td>
                 <td className="text-cell" data-label={t.columns.channels}>
-                  {r.channelManaged.length > 0 ? <ul className="small muted plain">{r.channelManaged.map((text, i) => <li key={i}>{text}</li>)}</ul> : null}
+                  {r.channelManaged.length > 0 ? <ul className="small muted plain">{r.channelManaged.map((x, i) => <li key={i} title={x.detail}>{x.text}</li>)}</ul> : null}
                   {r.channels.length === 0 ? (r.channelManaged.length > 0 ? null : <span className="muted">—</span>) : (
                     <ul className="small plain stock-channels">
                       {r.channels.map((c) => (
-                        <li key={c.writeScopeId}>
-                          {/* Шаг 79 (ревью): витрина — текстом, состояние — пилюлей своего цвета; подробности — строкой ниже */}
+                        <li key={c.writeScopeId} title={c.detailText}>
+                          {/* Шаг 96.1: в строке — канал · витрина, пилюля и «N to publish»; что значит состояние — один раз над таблицей,
+                              полное предложение — подсказкой строки */}
                           <span className="channel-name">{c.label}</span> <Badge tone={c.tone}>{c.statusText}</Badge>
-                          <div className="muted">{c.sharedText ? <em>{c.sharedText}; </em> : null}
-                            {c.syncEnabled ? <>{t.channel.published(c.published)}; {c.sentText}; {c.confirmedText}</> : c.awaitingAck ? t.channel.awaitingAck : t.channel.off}</div>
+                          {c.toPublishText ? <span className="nowrap"> {c.toPublishText}</span> : null}
+                          {c.differsText ? <span className="muted nowrap"> · {c.differsText}</span> : null}
                           {c.divergedText ? <p className="error">{c.divergedText}</p> : null}
                         </li>
                       ))}

@@ -51,7 +51,7 @@
 
 ## Меню рабочего пространства (шаг 95, Р-217; шаг 96)
 
-Девять пунктов в четырёх разделах: **Overview** / **Überblick** — Shadow mode; **Pricing** / **Preise** — Price changes, Strategies, Costs &
+Девять пунктов в четырёх разделах (у раздела из одного пункта заголовок не показывается — шаг 96.1): **Overview** / **Überblick** — Shadow mode; **Pricing** / **Preise** — Price changes, Strategies, Costs &
 floors, Protections, Offers; **Inventory** / **Lagerbestand** — Inventory; **Workspace** / **Arbeitsbereich** — Channels, Stop pricing.
 Пункт меню и заголовок его страницы — одни и те же слова (правило браузерного смоука «step 86» на обоих языках). У каждого пункта своя
 иконка из Primer Octicons, все разные (правило «step 96» в токен-тесте и браузерном смоуке).
@@ -59,7 +59,7 @@ floors, Protections, Offers; **Inventory** / **Lagerbestand** — Inventory; **W
 | Пункт | EN | DE | Что внутри |
 |---|---|---|---|
 | Тень | **Shadow mode** | **Schattenmodus** | Что движок сделал бы, пока в магазин ничего не уходит [Р-169]; сверху — карточка **Next step** / **Nächster Schritt** (шаг 96) |
-| Журнал цен | **Price changes** | **Preisänderungen** | Единственный журнал цен. «Kind» / «Art»: **Prices sent** / **Gesendete Preise** — цены, отправленные в магазин или удержанные; **All decisions** / **Alle Entscheidungen** — все решения, с отправкой и без (шаг 96 — с фильтром **Outcome** / **Ergebnis**). Период — **Period** / **Zeitraum**: 24h / 7d / 30d / **Custom** (24 Std. / 7 Tage / 30 Tage / **Eigener**). Строка целиком ведёт на квитанцию **Why this price** / **Warum dieser Preis** — своей страницей |
+| Журнал цен | **Price changes** | **Preisänderungen** | Единственный журнал цен. «Kind» / «Art»: **Prices sent** / **Gesendete Preise** — цены, отправленные в магазин или удержанные; **All decisions** / **Alle Entscheidungen** — все решения, с отправкой и без (шаг 96 — с фильтром **Outcome** / **Ergebnis**). Период — **Period** / **Zeitraum**: кнопка с датами и календарь (шаг 96.1), пресеты **Last 24 hours / Last 7 days / Last 30 days** (**Letzte 24 Stunden / Letzte 7 Tage / Letzte 30 Tage**), внизу **Apply / Cancel** (**Übernehmen / Abbrechen**). Строка целиком ведёт на квитанцию **Why this price** / **Warum dieser Preis** — своей страницей |
 | Стратегии | **Strategies** | **Strategien** | Стратегии, назначение, предпросмотр |
 | Себестоимость и пол | **Costs & floors** | **Kosten & Untergrenzen** | Границы всех предложений и массовая правка (**Set minimum & maximum price** / **Mindest- und Höchstpreis festlegen**, кнопка **Preview changes** / **Änderungen ansehen**), ниже — импорт себестоимости («Import unit costs» / «Stückkosten importieren»). Страница предложения — **Bounds and price floor** / **Grenzen und Preisuntergrenze**, кнопка **Change this floor** / **Diese Untergrenze ändern** |
 | Защита | **Protections** | **Schutz** | **Stopped by people** / **Von Menschen gestoppt** и **Prevented by rules** / **Durch Regeln verhindert** (сверху — «пол удержал цену N раз») |
@@ -107,3 +107,10 @@ Channel accounts, Why this price, Stopped changes, Dangerous changes, Bounds, Un
 
 Блок под экраном — то, что продавцу полезно знать, его словами («Gut zu wissen zu dieser Seite»). Заметки разработчика сюда не
 попадают — ни об уровнях опроса, ни о способе подтверждения, ни о симуляторе стенда. Их коды убраны вместе с текстами (шаг 69).
+
+## Тема (шаг 96.1)
+
+Кнопка темы в шапке — солнце (светлая) или луна (тёмная): та тема, которую человек видит сейчас. Подсказка и имя для экранного диктора
+называют, куда она переключит: **Switch to dark theme** / **Zur dunklen Darstellung wechseln**, **Switch to light theme** /
+**Zur hellen Darstellung wechseln**. Пока человек не выбрал, действует тема системы; выбора «System» на кнопке больше нет.
+

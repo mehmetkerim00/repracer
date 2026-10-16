@@ -386,7 +386,8 @@ export const en = {
       documentTitle: 'PriceTrail · seller console',
       /** Шаг 93: тема — свойство устройства */
       // Шаг 94: тема — кнопкой-иконкой; подпись называет нынешний выбор и следующий по кругу
-      theme: { label: 'Theme', system: 'System', light: 'Light', dark: 'Dark', switchTo: (current: string, next: string) => `Theme: ${current}. Switch to ${next}` },
+      // Шаг 96.1: кнопка темы — солнце или луна; подсказка называет, куда переключит
+      theme: { label: 'Theme', light: 'Light', dark: 'Dark', toLight: 'Switch to light theme', toDark: 'Switch to dark theme' },
       stand: 'test environment, synthetic data',
       // Шаг 64 (проход консоли): имя и описание демо-мира на языке интерфейса, а не строкой посева по-немецки
       demoWorldTitle: 'Demo store (simulator)', demoWorldDescription: 'Synthetic store on the channel simulator: every offer has three competitors — one drifting, one undercutting, one in price waves.',
@@ -687,6 +688,21 @@ export const en = {
         awaitingAck: 'waiting for your confirmation of the side effect',
         shared: (marketplaces: string) => `one value for: ${marketplaces}`,
         managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `managed by ${channel} · ${marketplace}: ${n} (${when}) — shown only, we never change it`,
+        // Шаг 96.1: строка — коротко; что значит состояние и на какой момент — один раз над таблицей
+        toPublish: (n: number) => `${n} to publish`,
+        channelShows: (n: number) => `channel shows ${n}`,
+        managedShort: (channel: string, marketplace: string, n: number) => `${channel} · ${marketplace} — ${n}, managed by ${channel}`,
+        asOf: (when: string) => `Channel figures as of ${when}.`,
+        legend: {
+          shadow: 'Held by shadow mode — the number to publish is computed, but nothing is sent to the store, so the channel has not confirmed it.',
+          synced: 'In sync — the channel confirmed the number we sent.',
+          sending: 'Awaiting confirmation — the number was sent, the channel has not confirmed it yet.',
+          idle: 'Nothing sent yet — the number to publish is computed, no update has been sent.',
+          diverged: 'Diverged — the last update ended with an error or the channel shows another number; the line under the product says which.',
+          awaiting: 'Needs your confirmation — sync starts once you confirm the side effect of the channel below the table.',
+          off: 'Sync off — nothing is sent to this channel.',
+          managed: 'Managed by the channel (for example Amazon FBA) — shown only, we never change it.',
+        },
         diverged: (status: string, when: string) => `The last stock update ended ${status} (${when}) — the channel shows something else`,
       },
       // Р-153: the traps are named BEFORE the first write, from the channel capability, not discovered afterwards
@@ -930,7 +946,7 @@ export const en = {
     },
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
-      chartTitle: 'Decisions per day',
+      chartTitle: 'Decisions per day', chartToday: 'Today', chartPartialDay: 'partial day',
       /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
       list: {
         period: 'Period', floorHeld: 'Price landed exactly on the floor', floorHeldHint: 'the floor decided it, and without the floor it would have gone lower',
@@ -1454,12 +1470,17 @@ export const en = {
     },
     /** Шаг 96: период экранов — 24 часа, 7 и 30 дней или свой диапазон дат в поясе пространства */
     period: {
-      label: 'Period', presets: { '24h': '24h', '7d': '7d', '30d': '30d' }, custom: 'Custom', from: 'From', to: 'To', apply: 'Show',
+      label: 'Period',
+      // Шаг 96.1: один контрол диапазона — кнопка с датами, календарь, пресеты слева, Apply / Cancel внизу
+      presetsLong: { '24h': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days' },
+      dialog: 'Choose a period', prevMonth: 'Previous month', nextMonth: 'Next month', cancel: 'Cancel', applyRange: 'Apply',
+      pickEnd: (start: string) => `Now pick the last day — ${start} or later.`,
+      endBeforeStart: (start: string) => `The end can’t be before the start: pick ${start} or a later day.`,
+      chosen: (range: string) => `Selected: ${range}.`,
+      limit: (days: number) => `Only the last ${days} days can be chosen.`,
       phrase: { '24h': 'in the last 24 hours', '7d': 'in the last 7 days', '30d': 'in the last 30 days' },
       between: (from: string, to: string) => `from ${from} to ${to}`,
       clipped: (days: number) => `Only the last ${days} days are kept here: earlier days are not shown.`,
-      zone: (zone: string) => `Days in ${zone}.`,
-      badRange: 'The start date is after the end date.',
     },
     costImport: {
       requiredCaption: 'Required.', fileLabel: 'Export file', fileCaption: 'CSV or XLSX. Nothing changes until you apply the preview.',

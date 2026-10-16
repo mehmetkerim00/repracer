@@ -1,11 +1,11 @@
 /**
  * Шаг 93: тема — свойство УСТРОЙСТВА (язык остаётся свойством тенанта). По умолчанию системная (`prefers-color-scheme`); ручной выбор
  * «светлая» или «тёмная» хранится в браузере и пишет `data-theme` на корень страницы — значения цветов в tokens.css. Хранилище может быть
- * недоступно (приватное окно) — тогда выбор живёт до перезагрузки, страница работает
+ * недоступно (приватное окно) — тогда выбор живёт до перезагрузки, страница работает.
+ * Шаг 96.1 (решение владельца): кнопка — только солнце и луна; нажатие переключает светлую ↔ тёмную. Пока человек не выбрал руками,
+ * действует системная тема (`system` — «выбора нет»); прежний сохранённый выбор «system» читается так же
  */
 export type ThemeChoice = 'system' | 'light' | 'dark';
-/** Шаг 94: порядок круга кнопки темы — Light → Dark → System */
-export const THEME_CHOICES: readonly ThemeChoice[] = ['light', 'dark', 'system'];
 const THEME_KEY = 'repracer.theme';
 
 export function storedTheme(): ThemeChoice {
@@ -14,6 +14,15 @@ export function storedTheme(): ThemeChoice {
     return v === 'light' || v === 'dark' ? v : 'system';
   } catch {
     return 'system';
+  }
+}
+
+/** Тема, которую человек видит: ручной выбор, а без него — системная */
+export function systemDark(): boolean {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return false;
   }
 }
 

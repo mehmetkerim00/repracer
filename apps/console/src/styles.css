@@ -84,6 +84,8 @@ main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-di
 .sidebar .workspace a { font-size: var(--font-size-sm); color: var(--text-2); }
 .sidebar .workspace a:hover { color: var(--accent); }
 .nav-group { margin-bottom: var(--space-3); }
+/* Шаг 96.1: раздел из одного пункта — без заголовка; от соседнего блока его отделяет тонкая линия Primer */
+.nav-group.solo + .nav-group, .nav-group + .nav-group.solo { border-top: var(--border-width) solid var(--divider); padding-top: var(--space-2); }
 .nav-group .group-title { padding: var(--space-1) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--weight-heading); color: var(--text-2); }
 /* пункт NavList: иконка 20px тонким штрихом и подпись; выбранный — фоном выбора и полосой акцента слева */
 .nav-group a {
@@ -161,6 +163,8 @@ p.empty {
 .chart-days { grid-column: 2; display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-2) 0; }
 .chart-days span { flex: 1; text-align: center; font-size: var(--font-size-xs); color: var(--text-2); white-space: nowrap; }
 .chart-days span.today { color: var(--text); font-weight: var(--weight-heading); }
+/* Шаг 96.1 (решение владельца): сегодняшние сутки неполные — столбик приглушённым тоном той же зелени Primer, подпись «Today» */
+.chart-slot.today .chart-bar { background: var(--success-border); }
 /* шаг 84: сводка — список «показатель — значение» с разделителями, оговорки сноской */
 .summary-list { margin: 0; }
 .summary-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-4); padding: var(--space-2) 0; }
@@ -353,6 +357,7 @@ td .basis { color: var(--text); }
 .toolbar.field-toolbar { align-items: flex-end; }
 .toolbar .toolbar-end { margin-left: auto; align-self: flex-end; }
 .toolbar.stock-summary { flex-direction: column; gap: var(--space-1); }
+.stock-summary .stock-legend { margin: 0; }
 ul.plain { list-style: none; padding: 0; margin: 0; color: var(--text-2); }
 ul.plain.cost-lines { color: var(--text); }
 ul.plain.cost-lines li, ul.fee-estimates.plain li { padding: var(--base-size-2) 0; }
@@ -487,7 +492,6 @@ details.more-block > :last-child { margin-bottom: var(--space-4); }
 .field > .segmented { margin: 0; }
 /* ряд пресетов периода — по своему содержимому: немецкие подписи длиннее («24 Std.», «Eigener»), ряд не переносится */
 .field-toolbar > .field:has(> .segmented) { flex-basis: auto; min-width: 0; }
-.period-presets { flex-wrap: nowrap; }
 /* пилюля режима аккаунта переносится внутри своей колонки, а не наезжает на соседнюю (немецкий текст длиннее) */
 .account-mode .badge { white-space: normal; text-align: left; }
 .period-bar { margin-bottom: var(--space-3); }
@@ -990,3 +994,57 @@ p.notice.live-blocked { margin: 0; }
   .periods, .segmented { flex-wrap: wrap; }
   ul.link-list > li { flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 }
+
+/*
+ * Шаг 96.1 (решение владельца): выбор периода — один контрол диапазона по образцу Primer Overlay + Button. Кнопка показывает даты,
+ * календарь — карточкой поверх страницы: пресеты слева, два месяца рядом, Apply / Cancel внизу; на телефоне и узком планшете — лист во
+ * весь экран, один месяц, касание 44 px. Начало и конец — заливкой акцента, дни внутри — мягким акцентом, сегодня — подчёркнуто
+ */
+.drp { position: relative; }
+.drp-trigger { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+.drp-trigger .octicon { color: var(--text-2); }
+.drp-trigger .drp-preset { color: var(--text-2); }
+.drp-pop {
+  position: absolute; top: calc(100% + var(--space-1)); left: 0; z-index: 10; display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-4); background: var(--surface); color: var(--text); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.drp-body { display: flex; gap: var(--space-4); }
+.drp-presets { display: flex; flex-direction: column; gap: var(--space-1); min-width: var(--base-size-96); }
+.drp-presets button { text-align: left; box-shadow: none; white-space: nowrap; }
+.drp-presets button.on { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text); }
+.drp-calendar { position: relative; }
+.drp-nav { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; pointer-events: none; }
+.drp-nav button { pointer-events: auto; border-color: transparent; background: transparent; box-shadow: none; padding: 0 var(--space-2); }
+.drp-months { display: flex; gap: var(--space-5); }
+.drp-month-title { min-height: var(--control-h); display: flex; align-items: center; justify-content: center; font-weight: var(--weight-heading); }
+.drp-month table { width: auto; border-collapse: collapse; }
+.drp-month th, .drp-month td { padding: 0; border: 0; background: none; text-align: center; vertical-align: middle; }
+.drp-month th { position: static; height: var(--control-h); color: var(--text-2); font-size: var(--font-size-xs); font-weight: var(--weight-medium); }
+.drp-month tbody tr:hover td { background: none; }
+.drp-day {
+  width: var(--control-h); height: var(--control-h); min-height: 0; padding: 0; border: 0; border-radius: var(--radius); background: transparent; box-shadow: none;
+  color: var(--text); font-weight: 400; font-variant-numeric: tabular-nums;
+}
+.drp-day:hover { background: var(--control-bg-hover); }
+.drp-day.inside { background: var(--accent-soft); border-radius: 0; }
+.drp-day.edge, .drp-day.edge:hover { background: var(--accent-emphasis); color: var(--on-emphasis); }
+.drp-day.today { font-weight: var(--weight-heading); text-decoration: underline; }
+.drp-day.disabled, .drp-day.disabled:hover { background: transparent; color: var(--text-3); cursor: not-allowed; }
+.drp-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-3); border-top: var(--border-width) solid var(--divider); }
+.drp-hint { margin: 0; font-size: var(--font-size-sm); }
+.drp-foot .form-actions { margin: 0; flex: none; }
+.drp-title { display: none; }
+@media (width < 48rem) {
+  .drp-pop.sheet { position: fixed; inset: 0; z-index: 30; border: 0; border-radius: 0; overflow-y: auto; }
+  .drp-pop.sheet .drp-title { display: block; font-size: var(--font-size-md); font-weight: var(--weight-heading); }
+  /* лист во весь экран: страница под ним не прокручивается */
+  body:has(.drp-pop.sheet) { overflow: hidden; }
+  .drp-pop.sheet .drp-body { flex-direction: column; }
+  .drp-pop.sheet .drp-presets { flex-direction: row; flex-wrap: wrap; }
+  .drp-pop.sheet .drp-presets button, .drp-pop.sheet .drp-nav button { min-height: var(--touch-target); }
+  .drp-pop.sheet .drp-month-title { min-height: var(--touch-target); }
+  .drp-pop.sheet .drp-day { width: var(--touch-target); height: var(--touch-target); }
+  .drp-pop.sheet .drp-foot { flex-direction: column; align-items: stretch; }
+}
+

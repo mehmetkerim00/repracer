@@ -867,6 +867,9 @@ test('шаг 94: поле ввода консоли живёт только вн
   assert.deepEqual(controls('export function A() { return <div><input value="" /></div>; }'), ['input'], 'голый input роняет правило');
   assert.deepEqual(controls('export function A() { return <label>Name <select><option /></select> tail</label>; }'), ['select'], 'родной label — не поле стандарта');
   assert.deepEqual(controls('export function A() { return <OfferPicker worldId="w" value="" onChange={() => {}} />; }'), ['OfferPicker']);
+  // Шаг 96.1: контрол диапазона дат вне поля — нарушение, внутри поля — нет
+  assert.deepEqual(controls('export function A() { return <div><DateRangePicker value={p} onChange={f} /></div>; }'), ['DateRangePicker']);
+  assert.deepEqual(controls('export function A() { return <Field label="Period"><DateRangePicker value={p} onChange={f} /></Field>; }'), []);
   assert.deepEqual(controls('export function A() { const f = () => <textarea />; return <Field label="x">{f()}</Field>; }'), ['textarea'], 'поле в вызывающем коде не прячет помощник');
   assert.deepEqual(controls('export function A() { return <Field label="x"><input value="" /></Field>; }'), []);
   assert.deepEqual(controls('export function A({ xs }) { return <FieldGrid>{xs.map((x) => (x ? <Field key={x} label={x}><select /></Field> : null))}</FieldGrid>; }'), []);

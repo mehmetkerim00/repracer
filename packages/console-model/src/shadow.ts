@@ -149,7 +149,8 @@ export function shadowSummaryList(summary: ShadowSummary, m: Messages): { rows: 
 
 export interface ShadowChartView {
   title: string;
-  points: Array<{ day: string; label: string; value: number; title: string }>;
+  /** Шаг 96.1 (решение владельца): последние сутки — сегодняшние, неполные: подпись «Today», подсказка «partial day», тон приглушённый */
+  points: Array<{ day: string; label: string; value: number; title: string; partial: boolean }>;
 }
 
 /**
@@ -157,12 +158,17 @@ export interface ShadowChartView {
  * ровно `days` суток, заканчивая сегодняшними, пустые сутки — нулём (провал на графике честнее, чем пропущенный день). Пояс, которого не
  * знает Intl среды, — UTC, как у `messagesFor`
  */
-export function shadowChart(byHour: ShadowPage['decisionsByHour'], until: string, days: number, m: Messages, timeZone: string | null | undefined): ShadowChartView {
+export function shadowChart(byHour: ShadowPage['decisionsByHour'], until: string, days: number, m: Messages, timeZone: string | null | undefined, now: string = until): ShadowChartView {
   const make = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
   let fmt: Intl.DateTimeFormat;
   try { fmt = make(timeZone || 'UTC'); } catch (error) { if (!(error instanceof RangeError)) throw error; fmt = make('UTC'); }
   const localDay = (iso: string) => fmt.format(new Date(Date.parse(iso)));
-  const last = localDay(until);
+  /**
+   * Шаг 96.1: последний день окна — день его последнего мгновения. Свой диапазон кончается полуночью ПОСЛЕ последней даты, и график
+   * «Oct 7 – Oct 13» рисовался со сдвигом на день (четверг…среда); «сегодня» — только если последний день окна и есть сегодняшний
+   */
+  const last = fmt.format(new Date(Date.parse(until) - 1));
+  const today = localDay(now);
   const [y, mo, d] = last.split('-').map(Number) as [number, number, number];
   const dayKeys = Array.from({ length: days }, (_, i) => new Date(Date.UTC(y, mo - 1, d - (days - 1 - i))).toISOString().slice(0, 10));
   const totals = new Map<string, number>(dayKeys.map((k) => [k, 0]));
@@ -175,9 +181,11 @@ export function shadowChart(byHour: ShadowPage['decisionsByHour'], until: string
   const nf = new Intl.NumberFormat(intl);
   return {
     title: m.ui.shadow.chartTitle,
-    points: dayKeys.map((k) => {
+    points: dayKeys.map((k, i) => {
       const value = totals.get(k) ?? 0;
-      return { day: k, label: label.format(new Date(`${k}T00:00:00Z`)), value, title: `${m.date(k)} · ${nf.format(value)}` };
+      const partial = i === dayKeys.length - 1 && k === today;
+      return { day: k, label: partial ? m.ui.shadow.chartToday : label.format(new Date(`${k}T00:00:00Z`)), value, partial,
+        title: `${m.date(k)} · ${nf.format(value)}${partial ? ` · ${m.ui.shadow.chartPartialDay}` : ''}` };
     }),
   };
 }
@@ -362,7 +370,7 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
     anyShadow: accounts.some((a) => a.writeMode === 'SHADOW' && a.authStatus === 'ACTIVE'),
     summary: page.summary, summaryLines: shadowSummaryLines(page.summary, m),
     ...(() => { const l = shadowSummaryList(page.summary, m); return { summaryList: l.rows, summaryNotes: l.notes }; })(),
-    chart: shadowChart(page.decisionsByHour, page.summary.until, periodDays(range, timeZone), m, timeZone),
+    chart: shadowChart(page.decisionsByHour, page.summary.until, periodDays(range, timeZone), m, timeZone, world.now),
     // Превью недельного письма — у недели: письмо считает семь суток
     digestPreview: world.demo === true && 'preset' in period && period.preset === '7d' ? digestPreview(world, page, accounts, m) : null,
     accounts,

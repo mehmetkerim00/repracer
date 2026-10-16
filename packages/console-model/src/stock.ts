@@ -20,6 +20,18 @@ export interface StockChannelCell {
   published: number;
   sentText: string;
   confirmedText: string;
+  /**
+   * Шаг 96.1: в строке — только канал · витрина, пилюля и «N to publish»; что значит состояние и метка времени — ОДИН раз над таблицей
+   * (`StockView.legend`, `asOfText`), прежнее полное предложение — подсказкой строки (`detailText`). «Канал показывает N» — только
+   * когда подтверждённое канала отличается от посчитанного: это данные строки, а не служебный текст
+   */
+  toPublishText: string | null;
+  differsText: string | null;
+  detailText: string;
+  /** Состояние — для общей строки-легенды над таблицей */
+  state: 'off' | 'awaiting' | 'diverged' | 'shadow' | 'synced' | 'sending' | 'idle';
+  /** Последний момент, о котором говорит строка (отправка или подтверждение) — для «as of» над таблицей */
+  at: string | null;
   divergedText: string | null;
   awaitingAck: boolean;
   tone: 'ok' | 'progress' | 'stop' | 'off' | 'warn';
@@ -37,8 +49,11 @@ export interface StockRowView {
   reserved: number;
   available: number;
   channels: StockChannelCell[];
-  /** Шаг 52: количество, которым управляет канал (Amazon FBA), — текстом «управляет Amazon», только для чтения [Р-6] */
-  channelManaged: string[];
+  /**
+   * Шаг 52: количество, которым управляет канал (Amazon FBA), — только для чтения [Р-6]. Шаг 96.1: в строке — коротко («Amazon ·
+   * amazon.com — 12, managed by Amazon»), «only shown, we never change it» и время — один раз над таблицей и подсказкой строки
+   */
+  channelManaged: Array<{ text: string; detail: string }>;
 }
 
 export interface StockTrap {
@@ -59,6 +74,10 @@ export interface StockView {
   intro: string;
   summary: StockPage['summary'];
   summaryText: string;
+  /** Шаг 96.1: что значат состояния каналов на этой странице — по строке на состояние, один раз над таблицей */
+  legend: string[];
+  /** Шаг 96.1: «Channel figures as of …» — самый поздний момент, о котором говорят строки страницы */
+  asOfText: string | null;
   rows: StockRowView[];
   page: PageInfo;
   /** Шаг 69 (K8): поиск и фильтр, которыми построена страница; `matchedText` — только когда они заданы */
@@ -104,15 +123,25 @@ export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
   const channelName = (m.values as Record<string, string | undefined>)[c.channel] ?? c.channel;
   const awaitingAck = c.sideEffects.requiresAck && !c.sideEffects.acknowledged;
   const status = (v: string) => (m.ui.writeStatus as Record<string, string | undefined>)[v] ?? v;
+  const sentText = !c.sent ? s.notSent : c.sent.status === 'SHADOW_HELD' ? s.heldInShadow(c.sent.quantity, m.when(c.sent.at)) : s.sent(c.sent.quantity, status(c.sent.status), m.when(c.sent.at));
+  const confirmedText = c.confirmed ? `${s.confirmed(c.confirmed.quantity, m.when(c.confirmed.at))}${c.confirmed.ownRecordOnly ? ` — ${m.ui.ownRecordConfirmation}` : ''}` : s.notConfirmed;
+  const sharedText = c.marketplaces.length > 1 ? s.shared(storefronts(c.channel, c.marketplaces, m)) : null;
+  const state: StockChannelCell['state'] = !c.syncEnabled ? (awaitingAck ? 'awaiting' : 'off') : c.divergence ? 'diverged' : c.sent?.status === 'SHADOW_HELD' ? 'shadow'
+    : c.sent && c.confirmed && c.sent.quantity === c.confirmed.quantity ? 'synced' : c.sent ? 'sending' : 'idle';
+  const times = [c.sent?.at, c.confirmed?.at].filter((t): t is NonNullable<typeof t> => !!t).map(String).sort();
   return {
     // Шаг 69 (K10, K9): витрины — словами, как в подписи предложения, а не кодами (ATVPDKIKX0DER, EBAY_US)
     writeScopeId: c.writeScopeId, channel: c.channel, label: `${channelName} · ${storefronts(c.channel, c.marketplaces, m)}`,
-    sharedText: c.marketplaces.length > 1 ? s.shared(storefronts(c.channel, c.marketplaces, m)) : null,
+    sharedText,
     syncEnabled: c.syncEnabled, published: c.published,
     // Шаг 64: удержанное тенью не «отправлено» — в канал ничего не ушло [Р-169]
-    sentText: !c.sent ? s.notSent : c.sent.status === 'SHADOW_HELD' ? s.heldInShadow(c.sent.quantity, m.when(c.sent.at)) : s.sent(c.sent.quantity, status(c.sent.status), m.when(c.sent.at)),
+    sentText,
     // Р-190 (находка 9 ревью шага 49): подтверждение только нашей записью у канала названо словами
-    confirmedText: c.confirmed ? `${s.confirmed(c.confirmed.quantity, m.when(c.confirmed.at))}${c.confirmed.ownRecordOnly ? ` — ${m.ui.ownRecordConfirmation}` : ''}` : s.notConfirmed,
+    confirmedText,
+    toPublishText: c.syncEnabled ? s.toPublish(c.published) : null,
+    differsText: c.syncEnabled && c.confirmed && c.confirmed.quantity !== c.published ? s.channelShows(c.confirmed.quantity) : null,
+    detailText: [sharedText, c.syncEnabled ? `${s.published(c.published)}; ${sentText}; ${confirmedText}` : awaitingAck ? s.awaitingAck : s.off].filter(Boolean).join('; '),
+    state, at: times.at(-1) ?? null,
     divergedText: c.divergence ? s.diverged(status(c.divergence.status), m.when(c.divergence.since)) : null,
     awaitingAck,
     // Шаг 79: удержанное тенью — янтарным, как тень на всех экранах
@@ -128,15 +157,21 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
   const t = m.ui.stock;
   const search = filter.search?.trim() ?? '';
   const filtered = search !== '' || filter.withReservations === true;
+  const channelName = (channel: string) => (m.values as Record<string, string | undefined>)[channel] ?? channel;
+  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)),
+    channelManaged: (r.channelManaged ?? []).map((c) => ({
+      text: t.channel.managedShort(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity),
+      detail: t.channel.managedByChannel(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity, m.when(c.observedAt)),
+    })) }));
   return {
     worldId: world.id, demo: world.demo === true, intro: t.intro, summary: page.summary, summaryText: t.summary(page.summary),
+    ...stockLegend(page, rows, m),
     filter: {
       search, withReservations: filter.withReservations === true,
       matchedText: filtered ? t.filter.matched(page.total, page.summary.products) : null,
       noneText: filtered && page.total === 0 ? t.filter.none : null,
     },
-    rows: page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)),
-      channelManaged: (r.channelManaged ?? []).map((c) => t.channel.managedByChannel((m.values as Record<string, string | undefined>)[c.channel] ?? c.channel, storefrontName(c.channel, c.marketplace, m), c.quantity, m.when(c.observedAt))) })),
+    rows,
     page: pageInfo(query, page.total, m),
     sources: sources.map((s) => ({ ...s, modeText: t.sources.modes[s.mode], productsText: t.sources.products(s.products) })),
     traps: stockTraps(world, m),
@@ -144,6 +179,23 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
     cannot: t.divergences.cannot,
     gaps: [gap(m, 'STOCK_CHANNEL_NOT_READ')],
   };
+}
+
+/**
+ * Шаг 96.1: что значат состояния каналов страницы и на какой момент — один раз над таблицей. Прежде каждая строка повторяла одно и то же
+ * служебное предложение («to publish: N; held by shadow mode: N would be sent (…) — nothing was sent; channel has not confirmed yet»);
+ * теперь строка говорит только своё, а класс держит правило браузерного смоука «служебное предложение не повторяется в строках»
+ */
+function stockLegend(page: StockPage, rows: readonly StockRowView[], m: Messages): { legend: string[]; asOfText: string | null } {
+  const l = m.ui.stock.channel.legend;
+  const cells = rows.flatMap((r) => r.channels);
+  const order: Array<StockChannelCell['state']> = ['shadow', 'synced', 'sending', 'idle', 'diverged', 'awaiting', 'off'];
+  const present = new Set(cells.map((c) => c.state));
+  const legend = order.filter((st) => present.has(st)).map((st) => l[st]);
+  const managedAt = page.items.flatMap((r) => (r.channelManaged ?? []).map((c) => String(c.observedAt)));
+  if (managedAt.length > 0) legend.push(l.managed);
+  const latest = [...cells.map((c) => c.at).filter((t): t is string => t !== null), ...managedAt].sort().at(-1);
+  return { legend, asOfText: latest ? m.ui.stock.channel.asOf(m.when(latest)) : null };
 }
 
 export function stockDivergencesView(world: StandWorld, rows: readonly StockDivergenceRow[], m: Messages): StockDivergencesView {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -418,6 +419,29 @@ const OUT_OF_BOX = `(() => {
   return out.slice(0, 5);
 })()`;
 
+/**
+ * Шаг 96.1 [Р-146]: служебное предложение не повторяется в строках таблицы. Inventory повторял в каждой строке «to publish: N; held by shadow
+ * mode: N would be sent (<время>) — nothing was sent; channel has not confirmed yet» — тот же класс, что лента чинила на шаге 84.1. Правило:
+ * строка ячейки (по видимым строкам текста) с десятью и больше словами, одинаковая с точностью до чисел, стоит не больше чем в трёх строках
+ * одной таблицы. Числа и время различают строки, но не делают предложение своим — поэтому они маскируются
+ */
+const REPEATED_IN_ROWS = `(() => {
+  const out = [];
+  for (const table of document.querySelectorAll('.world-content table')) {
+    const rows = [...table.querySelectorAll('tbody tr')];
+    if (rows.length < 4) continue;
+    const seen = new Map();
+    for (const tr of rows) {
+      // по ячейкам: строка таблицы в innerText склеивает ячейки табуляцией
+      const lines = new Set([...tr.querySelectorAll('td')].flatMap((td) => td.innerText.split('\\n')).map((l) => l.trim().replace(/\\d+([.,:]\\d+)*/g, '#'))
+        .filter((l) => l.split(/\\s+/).filter((w) => /\\p{L}{2,}/u.test(w) && !w.includes('#')).length >= 10));
+      for (const l of lines) seen.set(l, (seen.get(l) ?? 0) + 1);
+    }
+    for (const [l, n] of seen) if (n > 3) out.push('×' + n + ' «' + l.slice(0, 100) + '»');
+  }
+  return out.slice(0, 5);
+})()`;
+
 test('step 86: every menu item and the heading of its page are the same words — English and German', async () => {
   const b = browser!;
   await b.setViewport(1440, 900);
@@ -447,6 +471,7 @@ test('step 86: every menu item and the heading of its page are the same words �
       const heading = await b.evaluate<string>(`(document.querySelector('.world-content h2') ?? document.querySelector('.world-content h3'))?.childNodes[0]?.textContent?.trim() ?? ''`);
       if (heading !== l.text) mismatches.push(`«${l.text}» → «${heading}»`);
       assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${m.locale} ${l.text}: content sticks out of its frame`);
+      assert.deepEqual(await b.evaluate<string[]>(REPEATED_IN_ROWS), [], `${m.locale} ${l.text}: a service sentence repeats in the rows of a table`);
     }
     assert.deepEqual(mismatches, [], `${scheme} ${m.locale}: a menu item leads to a page with another heading`);
   }
@@ -458,6 +483,15 @@ test('step 86: every menu item and the heading of its page are the same words �
   await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="out-control"><table style="margin: 0 -24px; width: calc(100% + 48px)"><tbody><tr><td>control</td></tr></tbody></table></section>'), true)`);
   assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
   await b.evaluate(`(document.getElementById('out-control').remove(), true)`);
+  // Положительный контроль правила повторов: прежняя строка канала Inventory (шаг 96) в четырёх строках с разными числами и временем —
+  // повтор; три таких строки — ещё нет
+  const old = (n: number, at: string) => `${en.ui.stock.channel.published(n)}; ${en.ui.stock.channel.heldInShadow(n, at)}; ${en.ui.stock.channel.notConfirmed}`;
+  const table = (k: number) => `<table id="repeat-control"><tbody>${Array.from({ length: k }, (_, i) => `<tr><td>Offer ${i}</td><td><div>${old(50 + i, `Oct ${10 + i}, 2026, 0${i}:31 UTC−4`)}</div></td></tr>`).join('')}</tbody></table>`;
+  await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', ${JSON.stringify(table(4))}), true)`);
+  assert.match((await b.evaluate<string[]>(REPEATED_IN_ROWS)).join(' | '), /^×4 «to publish: #; held by shadow mode: # would be sent/);
+  await b.evaluate(`(document.getElementById('repeat-control').remove(), document.querySelector('.world-content').insertAdjacentHTML('beforeend', ${JSON.stringify(table(3))}), true)`);
+  assert.deepEqual(await b.evaluate<string[]>(REPEATED_IN_ROWS), [], 'three rows are not yet a repeat');
+  await b.evaluate(`(document.getElementById('repeat-control').remove(), true)`);
 });
 
 /**
@@ -631,13 +665,122 @@ test('step 96: menu icons differ; the price journal search filters the table as 
 });
 
 /**
- * Шаг 93: тема — свойство устройства. По умолчанию — системная (`prefers-color-scheme`); ручной выбор «светлая» или «тёмная» перебивает
- * систему и переживает перезагрузку; «как система» возвращает системную. Значения — пары Primer: канва `--bgColor-muted`, карточка
- * `--bgColor-default`, текст `--fgColor-default`. Шапка называет человека по имени от поставщика identity, адрес — подсказкой.
- * Шаг 94: выбор — кнопкой-иконкой (солнце, луна, монитор) по кругу Light → Dark → System; имя кнопки и подсказка говорят, какая тема
- * сейчас и на какую переключит; «System» следует системе НА ЛЕТУ — смена системной темы без перезагрузки меняет страницу
+ * Шаг 96.1 (решение владельца): период — один контрол диапазона. Кнопка показывает даты; календарь — два месяца рядом (на телефоне — лист во
+ * весь экран и один месяц), пресеты слева, Apply / Cancel внизу; диапазон — двумя нажатиями; конец раньше начала — живая подсказка и
+ * Apply недоступна; стрелки двигают фокус по дням, Esc закрывает без изменений; цвета — токены Primer в обеих темах. Подпись «Period» —
+ * метка самой кнопки (стандарт Field). Разделы меню из одного пункта — без заголовка
  */
-test('step 93/94: the theme belongs to the device — an icon button cycles light, dark and system, kept over a reload; system follows the system live; the header names the person', async () => {
+test('step 96.1: the period is one date-range control — dates on the button, two months, presets, two clicks, the end never before the start, keyboard, aria, both themes, a sheet on a phone; menu sections of one item have no title', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  // Меню: у раздела из одного пункта заголовка нет, у остальных — есть
+  const groups = await b.evaluate<Array<{ title: string | null; items: number }>>(`[...document.querySelectorAll('.nav-group')].map((g) => ({ title: g.querySelector('.group-title')?.textContent.trim() ?? null, items: g.querySelectorAll('a').length }))`);
+  assert.ok(groups.every((g) => (g.items === 1) === (g.title === null)), `a title only above a section of several items — ${JSON.stringify(groups)}`);
+  assert.deepEqual(groups.filter((g) => g.items === 1).length, 2, `Overview and Inventory are sections of one item — ${JSON.stringify(groups)}`);
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed`)}, true)`);
+  await settled(b, 'feed');
+  const trigger = () => b.evaluate<{ text: string; expanded: string | null; label: string | null; focused: boolean }>(`(() => { const x = document.querySelector('.drp-trigger');
+    const l = document.querySelector('label[for="' + x.id + '"]'); return { text: x.textContent.trim(), expanded: x.getAttribute('aria-expanded'), label: l?.textContent.trim() ?? null, focused: document.activeElement === x }; })()`);
+  const state = () => b.evaluate<{ dialog: string | null; months: number; focused: string | null; today: string | null; hint: string; applyOff: boolean; selected: string[]; presets: string[] }>(`(() => ({
+    dialog: document.querySelector('.drp-pop[role="dialog"]')?.getAttribute('aria-label') ?? null,
+    months: document.querySelectorAll('.drp-month table[role="grid"]').length,
+    focused: document.activeElement?.dataset?.day ?? null,
+    today: document.querySelector('.drp-day[aria-current="date"]')?.dataset.day ?? null,
+    hint: (document.querySelector('.drp-hint')?.firstChild?.textContent ?? '').trim(),
+    applyOff: !!document.querySelector('.drp-foot button.primary')?.disabled,
+    selected: [...document.querySelectorAll('.drp-month td[aria-selected="true"] button')].map((x) => x.dataset.day),
+    presets: [...document.querySelectorAll('.drp-presets button')].map((x) => x.textContent.trim()),
+  }))()`);
+  const openIt = () => b.evaluate(`(document.querySelector('.drp-trigger').click(), true)`);
+  const day = (d: string) => b.evaluate(`(document.querySelector('.drp-day[data-day="${d}"]').click(), true)`);
+  const key = (k: string) => b.evaluate(`(document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true })), true)`);
+  const add = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  const short = (d: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(Date.parse(`${d}T00:00:00Z`));
+  const full = (d: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(Date.parse(`${d}T00:00:00Z`));
+  const range = (a: string, z: string) => `${a.slice(0, 4) === z.slice(0, 4) ? short(a) : full(a)} – ${full(z)}`;
+  const t = en.ui.period;
+  const closed = await trigger();
+  assert.equal(closed.label, t.label, 'the field label «Period» labels the button itself');
+  assert.equal(closed.expanded, 'false');
+  assert.match(closed.text, /^Last 7 days · [A-Z][a-z]{2} \d{1,2}(, \d{4})? – [A-Z][a-z]{2} \d{1,2}, \d{4}$/, `the button shows the dates — ${closed.text}`);
+  assert.equal(await b.evaluate<number>(`document.querySelectorAll('.world-content input[type="date"]').length`), 0, 'no native date fields any more');
+  await openIt();
+  let s1 = await state();
+  const today = s1.today!;
+  assert.deepEqual([s1.dialog, s1.months, s1.focused, (await trigger()).expanded, s1.presets], [t.dialog, 2, today, 'true', [t.presetsLong['24h'], t.presetsLong['7d'], t.presetsLong['30d']]],
+    'open: a dialog of two months, the focus on today, presets on the left');
+  assert.ok(s1.selected.length >= 7 && s1.selected.includes(today), `the last 7 days are marked selected — ${s1.selected.length}`);
+  // клавиатура: стрелки двигают фокус по дням и неделям
+  await key('ArrowLeft');
+  assert.equal((await state()).focused, add(today, -1), 'ArrowLeft — the day before');
+  await key('ArrowUp');
+  assert.equal((await state()).focused, add(today, -8), 'ArrowUp — a week earlier');
+  // два нажатия; конец раньше начала — подсказка, Apply недоступна
+  const [a, early, z] = [add(today, -3), add(today, -5), add(today, -1)];
+  await day(a);
+  s1 = await state();
+  assert.deepEqual([s1.hint, s1.applyOff, s1.selected], [t.pickEnd(full(a)), true, [a]], 'the first click starts the range');
+  await day(early);
+  s1 = await state();
+  assert.deepEqual([s1.hint, s1.applyOff], [t.endBeforeStart(full(a)), true], 'an end before the start is refused in words, live');
+  assert.equal(await b.evaluate<string | null>(`document.querySelector('.drp-hint').getAttribute('aria-live')`), 'polite');
+  await day(z);
+  s1 = await state();
+  assert.deepEqual([s1.hint, s1.applyOff, s1.selected], [t.chosen(range(a, z)), false, [a, add(a, 1), z]], 'the second click closes the range');
+  await b.evaluate(`(document.querySelector('.drp-foot button.primary').click(), true)`);
+  await settled(b, 'feed after apply');
+  assert.deepEqual([(await state()).dialog, (await trigger()).text], [null, range(a, z)], 'Apply closes the calendar; the button shows the chosen dates');
+  assert.ok(await b.evaluate<boolean>(`[...performance.getEntriesByType('resource')].some((e) => e.name.includes('/feed?') && e.name.includes('from=${a}') && e.name.includes('to=${z}'))`),
+    'the journal is read for the chosen days');
+  // Esc закрывает без изменений и возвращает фокус на кнопку; пресет — одним нажатием и Apply
+  await openIt();
+  await b.evaluate(`(document.querySelector('.drp-pop').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
+  const afterEsc = await trigger();
+  assert.deepEqual([(await state()).dialog, afterEsc.text, afterEsc.focused], [null, range(a, z), true], 'Escape closes without a change, the focus is back on the button');
+  // цвета — токены Primer: начало и конец диапазона — заливка акцента своей темы
+  const edge = () => b.evaluate<{ bg: string; accent: string }>(`(() => { const probe = document.createElement('span'); probe.style.background = 'var(--accent-emphasis)'; document.body.append(probe);
+    const accent = getComputedStyle(probe).backgroundColor; probe.remove(); return { bg: getComputedStyle(document.querySelector('.drp-day.edge')).backgroundColor, accent }; })()`);
+  await openIt();
+  const light = await edge();
+  assert.equal(light.bg, light.accent, 'light: the ends of the range are the accent of the light theme');
+  await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
+  await b.setColorScheme('dark');
+  await openIt();
+  const dark = await edge();
+  assert.ok(dark.bg === dark.accent && dark.bg !== light.bg, `dark: the accent of the dark theme — ${JSON.stringify({ light, dark })}`);
+  await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
+  // телефон: лист во весь экран, один месяц, дни — цель касания 44 px
+  await b.setViewport(375, 812);
+  await openIt();
+  // во весь экран — во всю видимую область окна (у безголового Chrome полоса прокрутки занимает её край)
+  const sheet = await b.evaluate<{ x: number; y: number; w: number; h: number; months: number; day: number; modal: string | null }>(`(() => { const r = document.querySelector('.drp-pop').getBoundingClientRect();
+    const d = document.querySelector('.drp-day').getBoundingClientRect(); const v = document.documentElement;
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) - v.clientWidth, h: Math.round(r.height) - v.clientHeight, months: document.querySelectorAll('.drp-month').length, day: Math.round(Math.min(d.width, d.height)), modal: document.querySelector('.drp-pop').getAttribute('aria-modal') }; })()`);
+  assert.deepEqual(sheet, { x: 0, y: 0, w: 0, h: 0, months: 1, day: 44, modal: 'true' }, 'a phone gets a full-screen sheet with one month and 44px days');
+  assert.ok(await b.evaluate<boolean>(`document.documentElement.clientWidth > 340`), 'the 375px phone viewport');
+  await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
+  await b.setViewport(1440, 900);
+  await b.setColorScheme(null);
+  assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors');
+});
+
+/**
+ * Шаг 93: тема — свойство устройства. По умолчанию — системная (`prefers-color-scheme`); ручной выбор «светлая» или «тёмная» перебивает
+ * систему и переживает перезагрузку. Значения — пары Primer: канва `--bgColor-muted`, карточка `--bgColor-default`, текст
+ * `--fgColor-default`. Шапка называет человека по имени от поставщика identity, адрес — подсказкой.
+ * Шаг 96.1 (решение владельца): кнопка — только солнце и луна, то есть тема, которую видно сейчас; нажатие переключает светлую ↔ тёмную;
+ * пока выбора нет, тема и иконка следуют системе НА ЛЕТУ; имя кнопки и подсказка называют, куда она переключит
+ */
+test('step 93/96.1: the theme belongs to the device — sun or moon toggles light and dark, kept over a reload; without a choice the system rules live; the header names the person', async () => {
   const b = browser!;
   await b.setViewport(1440, 900);
   await b.setColorScheme('dark');
@@ -645,40 +788,55 @@ test('step 93/94: the theme belongs to the device — an icon button cycles ligh
   await b.waitText(en.ui.app.login.roleCan.OWNER);
   const colours = () => b.evaluate<{ canvas: string; card: string; text: string }>(`(() => { const card = document.querySelector('.card.login') ?? document.querySelector('.card');
     return { canvas: getComputedStyle(document.body).backgroundColor, card: getComputedStyle(card).backgroundColor, text: getComputedStyle(card).color }; })()`);
-  const button = () => b.evaluate<{ choice: string; label: string; title: string; icon: boolean; selects: number } | null>(`(() => { const x = document.querySelector('.topbar .theme-button');
-    return x ? { choice: x.dataset.themeChoice, label: x.getAttribute('aria-label'), title: x.getAttribute('title'), icon: !!x.querySelector('svg'),
+  const button = () => b.evaluate<{ choice: string; seen: string; label: string; title: string; icon: string | null; selects: number } | null>(`(() => { const x = document.querySelector('.topbar .theme-button');
+    const d = x?.querySelector('svg path')?.getAttribute('d') ?? null;
+    return x ? { choice: x.dataset.themeChoice, seen: x.dataset.themeSeen, label: x.getAttribute('aria-label'), title: x.getAttribute('title'), icon: d,
       selects: document.querySelectorAll('.topbar select').length } : null; })()`);
   const press = () => b.evaluate(`(document.querySelector('.topbar .theme-button').click(), true)`);
   const t = en.ui.app.theme;
-  const expectButton = async (choice: 'system' | 'light' | 'dark', next: 'system' | 'light' | 'dark') => {
-    const label = t.switchTo(t[choice], t[next]);
-    assert.deepEqual(await button(), { choice, label, title: label, icon: true, selects: 0 }, `the button shows «${choice}» and offers «${next}»`);
+  // иконка — по первому пути Octicons из icons.tsx (файл с JSX тест не импортирует — читает): солнце или луна, монитора больше нет
+  const icons = readFileSync(fileURLToPath(new URL('../src/icons.tsx', import.meta.url)), 'utf8');
+  const pathOf = (name: string) => new RegExp(`'${name}': \\["([^"]+)"`).exec(icons)?.[1] ?? `no ${name}`;
+  assert.equal(icons.includes("'device-desktop'"), false, 'the monitor icon is gone from the theme switch');
+  const ICON = { light: pathOf('sun'), dark: pathOf('moon') };
+  const expectButton = async (choice: 'system' | 'light' | 'dark', seen: 'light' | 'dark') => {
+    const label = seen === 'dark' ? t.toLight : t.toDark;
+    const want = { choice, seen, label, title: label, icon: ICON[seen], selects: 0 };
+    // смена системной темы доходит до кнопки событием matchMedia — после того, как CSS уже перекрасил страницу: ждём до 3 с
+    let got = await button();
+    for (let i = 0; i < 30 && JSON.stringify(got) !== JSON.stringify(want); i++) { await new Promise((r) => setTimeout(r, 100)); got = await button(); }
+    assert.deepEqual(got, want, `choice «${choice}», seen «${seen}»: the button offers «${label}»`);
   };
   const DARK = { canvas: 'rgb(21, 27, 35)', card: 'rgb(13, 17, 23)', text: 'rgb(240, 246, 252)' };
   const LIGHT = { canvas: 'rgb(246, 248, 250)', card: 'rgb(255, 255, 255)', text: 'rgb(31, 35, 40)' };
   assert.deepEqual(await colours(), DARK, 'a dark system gets the dark Primer pairs without a choice');
-  await expectButton('system', 'light');
-  // «System» на лету: системная тема меняется без перезагрузки — страница за ней (жалоба владельца после шага 93)
+  await expectButton('system', 'dark');
+  // Без выбора — система на лету: смена системной темы без перезагрузки меняет и страницу, и иконку
   await b.setColorScheme('light');
-  assert.deepEqual(await colours(), LIGHT, '«system» follows a system switched to light without a reload');
+  assert.deepEqual(await colours(), LIGHT, 'without a choice the page follows a system switched to light without a reload');
+  await expectButton('system', 'light');
   await b.setColorScheme('dark');
-  assert.deepEqual(await colours(), DARK, '«system» follows a system switched back to dark without a reload');
+  assert.deepEqual(await colours(), DARK, 'and follows it back to dark');
+  await expectButton('system', 'dark');
   await press();
-  await expectButton('light', 'dark');
-  assert.deepEqual(await colours(), LIGHT, 'the light choice wins over a dark system');
+  await expectButton('light', 'light');
+  assert.deepEqual(await colours(), LIGHT, 'the moon switches a dark page to light — and the choice wins over a dark system');
   await b.open(pageUrl);
   await b.waitText(en.ui.app.login.roleCan.OWNER);
-  await expectButton('light', 'dark');
+  await expectButton('light', 'light');
   assert.deepEqual(await colours(), LIGHT, 'the choice is kept on the device over a reload');
+  await press();
+  await expectButton('dark', 'dark');
+  assert.deepEqual(await colours(), DARK, 'the sun switches back to dark: two states, no third');
   await b.setColorScheme('light');
+  assert.deepEqual(await colours(), DARK, 'a manual choice ignores the system');
   await press();
-  await expectButton('dark', 'system');
-  assert.deepEqual(await colours(), DARK, 'the dark choice wins over a light system');
-  await press();
+  await expectButton('light', 'light');
+  // уборка: выбор хранится в профиле браузера — следующие тесты начинают без выбора, с системной темой
+  await b.evaluate(`(localStorage.removeItem('repracer.theme'), delete document.documentElement.dataset.theme, true)`);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
   await expectButton('system', 'light');
-  assert.deepEqual(await colours(), LIGHT, '«system» follows the system again');
-  await b.setColorScheme('dark');
-  assert.deepEqual(await colours(), DARK, 'and keeps following it live');
   // на узком экране кнопка темы — цель касания 44×44
   await b.setViewport(375, 812);
   assert.deepEqual(await b.evaluate<{ w: number; h: number }>(`(() => { const r = document.querySelector('.topbar .theme-button').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; })()`),

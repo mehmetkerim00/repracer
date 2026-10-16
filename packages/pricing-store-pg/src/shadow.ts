@@ -201,12 +201,20 @@ export class PgShadowStore {
              FROM channel_data.price_decision d
             WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2 AND d.decided_at < $3`, [tenantId, since, upper]),
         tx.query(
+          /**
+           * Шаг 96.1: удержанная запись относится к моменту своего повода (`trigger_received_at` — часы приложения), а без повода — к
+           * моменту записи. В работе это одно и то же: повод, решение и удержанная запись — одна транзакция [Р-54]. На виртуальных часах
+           * (прожатая неделя демо, живые прогоны) время записи ставит база — «сейчас», и за 24 часа «Held back» показывал всю неделю
+           * (1 447 при 312 решениях). Нижняя граница по времени записи верна всегда (запись не раньше повода) и держит индекс
+           * `channel_write_history_shadow_idx`
+           */
           `SELECT count(*)::int AS held,
                   count(*) FILTER (WHERE h.field <> 'QUANTITY')::int AS held_price,
                   count(*) FILTER (WHERE h.field = 'QUANTITY')::int AS held_quantity,
                   count(*) FILTER (WHERE h.would_spend_budget)::int AS would_spend
              FROM tenant_data.channel_write_history h
-            WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2 AND h.finished_at < $3`, [tenantId, since, upper]),
+            WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2
+              AND coalesce(h.trigger_received_at, h.finished_at) >= $2 AND coalesce(h.trigger_received_at, h.finished_at) < $3`, [tenantId, since, upper]),
         tx.query(
           /**
            * Шаг 68: сперва страница удержанных записей, затем подписи (товар, витрина) только её строк — подзапрос витрины не
@@ -215,7 +223,10 @@ export class PgShadowStore {
           `WITH page AS (SELECT h.channel_write_id, h.write_scope_id, h.field, h.amount_minor, h.currency, h.quantity, h.price_decision_id,
                                 h.would_spend_budget, h.finished_at
                            FROM tenant_data.channel_write_history h
-                          WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2 AND h.finished_at < $5
+                          -- окно — как у счётчиков выше (по моменту повода); порядок и «Held at» — момент записи, как до шага 96.1:
+                          -- по поводу строки остатка (повода нет) на виртуальных часах вставали выше всех цен
+                          WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2
+                            AND coalesce(h.trigger_received_at, h.finished_at) >= $2 AND coalesce(h.trigger_received_at, h.finished_at) < $5
                           ORDER BY h.finished_at DESC, h.channel_write_id
                           LIMIT $3 OFFSET $4)
            SELECT page.channel_write_id, page.write_scope_id, ws.channel, ws.channel_account_id, p.sku, p.title, page.field,

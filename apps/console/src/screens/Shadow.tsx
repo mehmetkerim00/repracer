@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { periodSearch, type ListQuery, type Period, type ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, PeriodPicker, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { PeriodPicker } from '../date-range.tsx';
 import { Field, FormActions } from '../forms.tsx';
 import { NextStepCard } from './Onboarding.tsx';
 import { ShadowHero } from './ShadowHero.tsx';

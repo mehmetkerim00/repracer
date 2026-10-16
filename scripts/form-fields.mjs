@@ -18,12 +18,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Каталог страницы консоли */
 export const FORM_ROOT = 'apps/console/src';
 /** Элементы, которые вводят значение: родные поля и компоненты, которые их рисуют */
-export const CONTROLS = new Set(['input', 'select', 'textarea', 'DateTimeField', 'OfferPicker', 'FileDrop']);
+// Шаг 96.1: контрол диапазона дат периода (`DateRangePicker`) — тоже поле ввода: только внутри `Field`
+export const CONTROLS = new Set(['input', 'select', 'textarea', 'DateTimeField', 'OfferPicker', 'FileDrop', 'DateRangePicker']);
 /** Поле стандарта: контрол внутри него получает подпись над собой и пояснение под собой */
 export const WRAPPERS = new Set(['Field']);
 /** Компоненты-контролы: в их телах контрол определяется, а не используется; только в файлах стандарта */
-export const DEFINITIONS = new Set(['Field', 'CheckField', 'DateTimeField', 'OfferPicker', 'FileDrop']);
-export const DEFINITION_FILES = new Set(['forms.tsx', 'components.tsx']);
+export const DEFINITIONS = new Set(['Field', 'CheckField', 'DateTimeField', 'OfferPicker', 'FileDrop', 'DateRangePicker']);
+export const DEFINITION_FILES = new Set(['forms.tsx', 'components.tsx', 'date-range.tsx']);
 
 const tagName = (node) => {
   const tag = ts.isJsxElement(node) ? node.openingElement.tagName : ts.isJsxSelfClosingElement(node) ? node.tagName : null;

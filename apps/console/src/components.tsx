@@ -399,48 +399,6 @@ export function SectionAnchor({ id, focus }: { id: string; focus: boolean }) {
 }
 
 /** Сегодняшняя дата и дата `back` дней назад по часам браузера — начальные значения своего диапазона (сервер считает их в поясе пространства) */
-function localDate(back = 0): string {
-  const d = new Date(Date.now() - back * 86_400_000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/**
- * Шаг 96 (аудит, II): период экрана — одно правило на Shadow mode, Protections и Price changes. Пресеты 24h / 7d / 30d — кнопками
- * одного ряда (выбранный нажат), Custom открывает два поля дат по стандарту Field и кнопку «Show»; даты — дни пространства (сервер
- * переводит их в его поясе). Ряд стоит в панели фильтров: подписи над полями, низ полей на одной линии
- */
-export function PeriodPicker({ value, onChange }: { value: Period; onChange: (period: Period) => void }) {
-  const m = useMessages();
-  const t = m.ui.period;
-  const isCustom = !('preset' in value);
-  const [custom, setCustom] = useState(isCustom);
-  const [from, setFrom] = useState(isCustom ? value.from : localDate(6));
-  const [to, setTo] = useState(isCustom ? value.to : localDate(0));
-  const bad = from === '' || to === '' || from > to;
-  return (
-    <>
-      <Field group label={t.label}>
-        <div className="segmented period-presets">
-          {PERIOD_PRESETS.map((p) => {
-            const on = !custom && 'preset' in value && value.preset === p;
-            return <button key={p} type="button" aria-pressed={on} disabled={on} onClick={() => { setCustom(false); onChange({ preset: p }); }}>{t.presets[p]}</button>;
-          })}
-          <button type="button" aria-pressed={custom} disabled={custom} onClick={() => setCustom(true)}>{t.custom}</button>
-        </div>
-      </Field>
-      {custom ? (
-        <>
-          <Field label={t.from}><input type="date" value={from} max={to || localDate(0)} onChange={(e) => setFrom(e.currentTarget.value)} /></Field>
-          <Field label={t.to}><input type="date" value={to} min={from || undefined} max={localDate(0)} onChange={(e) => setTo(e.currentTarget.value)} /></Field>
-          <div className="form-actions-row">
-            <button type="button" className="primary" disabled={bad} title={bad ? t.badRange : undefined} onClick={() => onChange({ from, to })}>{t.apply}</button>
-          </div>
-        </>
-      ) : null}
-    </>
-  );
-}
-
 /**
  * Шаг 96 (аудит Б12): одинаковые строки отчёта (то же предложение, тот же вид и та же причина) — одной строкой «×N»; строки идут
  * новыми сверху, поэтому в группе остаётся самая свежая

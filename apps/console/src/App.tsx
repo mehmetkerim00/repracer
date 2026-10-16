@@ -4,7 +4,8 @@ import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages } from './components.tsx';
 import { BrandMark, Icon, Octicon } from './icons.tsx';
-import { applyTheme, storedTheme, THEME_CHOICES, type ThemeChoice } from './theme.ts';
+import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
+import { ZoneContext } from './date-range.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
@@ -235,6 +236,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   const active = MENU_OF[route.screen] ?? route.screen;
   return (
     <MessagesContext.Provider value={m}>
+      {/* Шаг 96.1: календарь периода считает дни в поясе пространства — в том же, что сервер */}
+      <ZoneContext.Provider value={world.timeZone}>
       {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них; шаг 77 — тонкой полосой под шапкой */}
       {world.demo ? <p className="demo-strip demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <div className={`world-layout${nav.open ? ' nav-open' : ''}`}>
@@ -247,16 +250,21 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
           <a href="#/">{m.ui.app.backToWorlds}</a>
         </div>
         <nav className="tabs-nav" aria-label={world.title}>
-          {NAV_GROUPS.map(([group, keys]) => (
-            <div key={group} className="nav-group">
-              <div className="group-title">{m.ui.app.navGroups[group]}</div>
-              {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
-              {/* Шаг 87 [Р-214]: Omnibus — правило ЕС; в профиле без правила ЕС пункта меню нет вовсе */}
-              {keys.filter((key) => key !== 'compliance' || (world.euStorefronts && market.omnibus)).map((key) => (
-                <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Octicon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
-              ))}
-            </div>
-          ))}
+          {NAV_GROUPS.map(([group, keys]) => {
+            // Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123]
+            // Шаг 87 [Р-214]: Omnibus — правило ЕС; в профиле без правила ЕС пункта меню нет вовсе
+            const shown = keys.filter((key) => key !== 'compliance' || (world.euStorefronts && market.omnibus));
+            // Шаг 96.1 (решение владельца): у раздела из одного пункта заголовка нет — пункт стоит своим блоком за разделителем
+            const solo = shown.length === 1;
+            return (
+              <div key={group} className={`nav-group${solo ? ' solo' : ''}`}>
+                {solo ? null : <div className="group-title">{m.ui.app.navGroups[group]}</div>}
+                {shown.map((key) => (
+                  <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Octicon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
+                ))}
+              </div>
+            );
+          })}
         </nav>
         {nav.extras ? <div className="sidebar-extras">{nav.extras}</div> : null}
         </div>
@@ -292,6 +300,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         : <NotFound title={m.ui.app.notFoundTitle} text={m.ui.app.screenNotFound} back={m.ui.app.screens.channels} href={href(world.id, 'channels')} />}
       </div>
       </div>
+      </ZoneContext.Provider>
     </MessagesContext.Provider>
   );
 }
@@ -424,15 +433,25 @@ export function App() {
   // Шаг 93: тема — свойство устройства: системная, светлая или тёмная; выбор хранится в браузере
   const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
   /**
-   * Шаг 94: тема — кнопкой-иконкой, как в приложениях: солнце, луна или монитор (как у системы); нажатие ведёт по кругу
-   * Light → Dark → System. Подпись для экранного диктора и подсказка называют нынешний выбор и следующий
+   * Шаг 96.1 (решение владельца): кнопка — солнце или луна, то есть тема, которую человек видит сейчас; нажатие переключает светлую ↔
+   * тёмную и запоминает выбор. Пока выбора нет, тема — системная, и иконка следует системе на лету. Подпись для экранного диктора и
+   * подсказка называют, куда кнопка переключит
    */
-  const nextTheme = THEME_CHOICES[(THEME_CHOICES.indexOf(theme) + 1) % THEME_CHOICES.length]!;
-  const themeLabel = m.ui.app.theme.switchTo(m.ui.app.theme[theme], m.ui.app.theme[nextTheme]);
+  const [dark, setDark] = useState<boolean>(systemDark);
+  useEffect(() => {
+    let query: MediaQueryList;
+    try { query = window.matchMedia('(prefers-color-scheme: dark)'); } catch { return undefined; }
+    const follow = () => setDark(query.matches);
+    query.addEventListener('change', follow);
+    return () => query.removeEventListener('change', follow);
+  }, []);
+  const seen: 'light' | 'dark' = theme === 'system' ? (dark ? 'dark' : 'light') : theme;
+  const target: 'light' | 'dark' = seen === 'dark' ? 'light' : 'dark';
+  const themeLabel = target === 'dark' ? m.ui.app.theme.toDark : m.ui.app.theme.toLight;
   const themeSwitch = (
-    <button type="button" className="ghost theme-button" aria-label={themeLabel} title={themeLabel} data-theme-choice={theme}
-      onClick={() => { setTheme(nextTheme); applyTheme(nextTheme); }}>
-      <Octicon name={theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'device-desktop'} size={20} />
+    <button type="button" className="ghost theme-button" aria-label={themeLabel} title={themeLabel} data-theme-choice={theme} data-theme-seen={seen}
+      onClick={() => { setTheme(target); applyTheme(target); }}>
+      <Octicon name={seen === 'dark' ? 'moon' : 'sun'} size={20} />
     </button>
   );
   // Шаг 85: на узких экранах внутри рабочего пространства язык, адрес и выход — в выдвижной панели; разметка та же, что в шапке

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { periodSearch, type Period } from '@repracer/console-model';
-import { href, PeriodPicker, useMessages } from '../components.tsx';
+import { href, useMessages } from '../components.tsx';
+import { PeriodPicker } from '../date-range.tsx';
 import { DangerousScreen } from './Dangerous.tsx';
 import { RejectedScreen } from './Rejected.tsx';
 
