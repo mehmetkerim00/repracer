@@ -96,4 +96,4 @@ export type { DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStat
 export { feedGroupOf, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT } from './store.ts';
 
 /** Шаг 97 (ревью, в1): пауза подъёма «Win the Buy Box» — одно число у движка, хранилища в памяти и PostgreSQL */
-export { CREEP_PAUSE_PERIODS, STRATEGY_STALENESS_SECONDS } from '@repracer/strategy-engine';
+export { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS } from '@repracer/strategy-engine';

@@ -80,3 +80,12 @@ test('I4: the competitor table shows no column the channel did not give and turn
   // цена с доставкой известна не у всех — колонка называется «Price», подпись говорит почему
   assert.equal(competitorColumns([{ ...row(null, null, null), landedKnown: false }], m).landedKnown, false);
 });
+
+/** Решение владельца после шага 97.1: возраст снимка — в квитанции решения; старше свежести — сказано, почему так можно */
+test('step 97.3: the receipt names the age of the reading; an older one says it served only a raise step while the Buy Box was ours', async () => {
+  const { readingAgeText } = await import('./trace.ts');
+  const m = messagesFor('en');
+  assert.equal(readingAgeText('2026-10-17T10:00:00.000Z', '2026-10-17T10:04:30.000Z', m), m.ui.trace.ageValue(4));
+  assert.equal(readingAgeText('2026-10-17T10:00:00.000Z', '2026-10-17T10:00:20.000Z', m), m.ui.trace.ageValue(0));
+  assert.equal(readingAgeText('2026-10-17T10:00:00.000Z', '2026-10-17T10:22:00.000Z', m), m.ui.trace.ageQuiet(22));
+});

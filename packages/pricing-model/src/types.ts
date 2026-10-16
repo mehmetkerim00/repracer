@@ -277,3 +277,9 @@ export interface PriceDecisionDraft {
   gateProfile?: string | null;
   sanityRuleset?: string | null;
 }
+
+/**
+ * Свежесть снимка для стратегий из данных конкурентов, секунды: старше — движок не оценивает (кроме ступени подъёма «Win the Buy Box» при
+ * нашем Buy Box, решение владельца после шага 97.1). Одно число у движка и у квитанции решения (возраст снимка)
+ */
+export const STRATEGY_STALENESS_SECONDS = 900;

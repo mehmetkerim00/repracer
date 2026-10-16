@@ -1320,7 +1320,9 @@ export const en = {
       snapshotSummary: (source: string, observed: string) => `${source}, observed ${observed}`,
       // шаг 93: источник без слов в словаре — общими словами, а не кодом
       sourceUnnamed: 'Competitor data from the channel',
-      source: 'Source', observed: 'Observed', snapshotRef: 'Full snapshot', refUntil: (when: string) => `available until ${when}`, refExpired: 'reference expired',
+      source: 'Source', observed: 'Observed', readingAge: 'Age at the decision', ageValue: (min: number) => (min < 1 ? 'under a minute' : `${min} min`),
+      ageQuiet: (min: number) => `${min} min — older than 15 minutes: such a reading serves only a raise step while the Buy Box is yours`,
+      snapshotRef: 'Full snapshot', refUntil: (when: string) => `available until ${when}`, refExpired: 'reference expired',
       sanityMissing: 'The input check result was not stored with the snapshot',
       warning: 'Warning',
       sanityTitle: (_ruleset: string) => 'Input check',

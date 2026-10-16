@@ -1,6 +1,6 @@
 import type { DecisionDetail, DecisionPage } from '@repracer/pricing-pipeline';
 import type { CompetitorView, ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, StrategyDefinition, StrategyParams } from '@repracer/pricing-model';
-import { classifyBoundIntervention, expandExplanation, explanationRowOf } from '@repracer/pricing-model';
+import { classifyBoundIntervention, expandExplanation, explanationRowOf, STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
 import { competitorColumns, type CompetitorColumns } from './competition.ts';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
@@ -114,6 +114,16 @@ function strategyOf(e: ExpandedExplanation): StrategyDefinition | null {
   return { strategyId: e.strategy.strategyId, version: e.strategy.version, params: params as unknown as StrategyParams, deadbandMinor: Number(deadbandMinor ?? 0) };
 }
 
+/**
+ * Решение владельца после шага 97.1: возраст снимка на момент решения — в квитанции. Старше свежести стратегии (15 минут) снимок бывает
+ * только у ступени подъёма «Win the Buy Box» при нашем Buy Box — так и сказано
+ */
+export function readingAgeText(observedAt: string, decidedAt: string, m: Messages): string {
+  const seconds = Math.max(0, (Date.parse(decidedAt) - Date.parse(observedAt)) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return seconds > STRATEGY_STALENESS_SECONDS ? m.ui.trace.ageQuiet(minutes) : m.ui.trace.ageValue(minutes);
+}
+
 /** Шаг 97 [Р-218]: «кто подвинул цену» одной фразой — та же, что в квитанции и (коротко) в строке журнала цен */
 export function triggerPhrase(view: CompetitorView | null | undefined, currency: string, m: Messages): string | null {
   const tr = view?.trigger;
@@ -210,6 +220,7 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
         items: [
           { label: t.source, value: source },
           { label: t.observed, value: ref ? m.when(ref.observedAt) : t.refExpired },
+          ...(ref ? [{ label: t.readingAge, value: readingAgeText(ref.observedAt, d.decidedAt, m) }] : []),
           ...(ref ? [{ label: t.snapshotRef, value: t.refUntil(m.when(snapshotRefUntil(d.decidedAt))) }] : []),
         ],
         gaps: stepGaps,

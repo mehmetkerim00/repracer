@@ -22,7 +22,7 @@ export type {
   StrategyType,
   TriggerType,
 } from './types.ts';
-export { COMPETITOR_DERIVED_RULES, fulfilmentKind, isCompetitorDerived, markAcceptedBySanity } from './types.ts';
+export { COMPETITOR_DERIVED_RULES, fulfilmentKind, isCompetitorDerived, markAcceptedBySanity, STRATEGY_STALENESS_SECONDS } from './types.ts';
 export * from './reasons.ts';
 export {
   EXPLANATION_FIELD_KINDS,

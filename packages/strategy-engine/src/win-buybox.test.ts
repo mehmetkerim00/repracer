@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CompetitorOffer, CompetitorSnapshot, CompetitorSourceDescriptor } from '@repracer/channel-port';
 import { markAcceptedBySanity, type StrategyParams } from '@repracer/pricing-model';
-import { CREEP_PAUSE_PERIODS, runStrategy, strategyAvailability, type CreepState, type EngineInput, type EngineResult } from './index.ts';
+import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, runStrategy, strategyAvailability, type CreepState, type EngineInput, type EngineResult } from './index.ts';
 
 /**
  * Шаг 97 [Р-219, Р-221]: «Win the Buy Box» — взятие (цель от landed-цены победителя с гандикапом за исполнение), удержание, подъём ступенью
@@ -155,6 +155,27 @@ test('step 97 (review): a step back only right after the raise and only within t
   assert.equal(stuck.intentClass, 'CHANGED', 'the step back below the floor does not hold the price for a day');
   assert.equal(stuck.proposedMinor, 1825);
   assert.equal(stuck.reason.code, 'BUYBOX_WIN_TARGET');
+});
+
+/**
+ * Решение владельца после шага 97.1: ступень ВВЕРХ — и на снимке возрастом до двух периодов, но только пока Buy Box наш (тихий рынок без
+ * событий — безопасное время дожимать маржу; подрез конкурента сам принесёт свежий снимок). Всё остальное — взятие, шаг назад, удержание без
+ * подъёма — только на свежем снимке
+ */
+test('step 97.3: a raise step may use a reading up to two periods old while the Buy Box is ours; nothing else may', () => {
+  const params = win({ creepUp: true });
+  const quiet = (age: number, m: Market, p: StrategyParams = params) => runStrategy({ ...input(p, m, 0), now: at(age), snapshot: markAcceptedBySanity(snapshot(m, 1), 'test') });
+  // снимок 20 минут назад (свежесть — 15): Buy Box наш — ступень вверх
+  const up = intentOf(quiet(21, { holder: 'SELF', winnerMinor: 1900, selfMinor: 1795 }));
+  assert.equal(up.reason.code, 'CREEP_UP', 'a quiet market: the raise step uses the older reading');
+  assert.equal(CREEP_STALE_PERIODS, 2);
+  // старше двух периодов — не оценивается
+  const tooOld = quiet(32, { holder: 'SELF', winnerMinor: 1900, selfMinor: 1795 });
+  assert.equal(tooOld.kind, 'NOT_EVALUATED', 'older than two periods: no step');
+  // Buy Box чужой — взятие только по свежему снимку
+  assert.equal(quiet(21, { holder: 'OTHER', winnerMinor: 1800, selfMinor: 1900 }).kind, 'NOT_EVALUATED', 'a take needs a fresh reading');
+  // подъём выключен — удержание без подъёма по старому снимку не оценивается
+  assert.equal(quiet(21, { holder: 'SELF', winnerMinor: 1900, selfMinor: 1795 }, win()).kind, 'NOT_EVALUATED', 'without the raise nothing uses the older reading');
 });
 
 test('step 97: the fulfilment handicap applies only when the channel named both fulfilments', () => {

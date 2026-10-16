@@ -72,6 +72,11 @@ export interface CreepState {
 export const CREEP_PAUSE_PERIODS = 4;
 /** Ревью шага 97: шаг назад — только если Buy Box потерян не позже стольких периодов после подъёма */
 export const CREEP_STEP_BACK_WINDOW_PERIODS = 2;
+/**
+ * Решение владельца после шага 97.1: ступень ВВЕРХ — и на снимке возрастом до стольких периодов планового пересчёта, пока Buy Box наш (тихий
+ * рынок — безопасное время дожимать маржу; подрез конкурента сам принесёт свежий снимок). Взятие, шаг назад и прочее — только свежий снимок
+ */
+export const CREEP_STALE_PERIODS = 2;
 
 export type EngineResult =
   | { kind: 'INTENT'; intent: PriceIntentDraft }
@@ -81,8 +86,9 @@ export type EngineResult =
 // Требуемая полнота данных [Р-39]
 // ---------------------------------------------------------------------------
 
-/** Свежесть снимка для стратегий из данных конкурентов; шаг 97 (ревью): таймер подъёма берёт единицу только со снимком не старше этого */
-export const STRATEGY_STALENESS_SECONDS = 900;
+/** Свежесть снимка — одно число с квитанцией решения (pricing-model) */
+export { STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
+import { STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
 
 export function requirementOf(params: StrategyParams): CompetitorRequirement {
   switch (params.type) {
@@ -250,7 +256,11 @@ export function runStrategy(input: EngineInput): EngineResult {
 
   const req = requirementOf(params);
   const unmet = unmetRequirements(req, snapshot, now);
-  if (unmet.length > 0) {
+  // Решение владельца после шага 97.1: снимок старше свежести, но не старше двух периодов, при нашем Buy Box — только для ветки подъёма
+  const quietRaise = params.type === 'WIN_BUYBOX' && params.creepUp && unmet.length === 1 && unmet[0] === 'STALENESS'
+    && snapshot?.buybox?.isSelf === true && current !== null && !belowFloor && pace !== null
+    && Date.parse(now) - Date.parse(snapshot.observedAt) <= CREEP_STALE_PERIODS * pace.paceSeconds * 1000;
+  if (unmet.length > 0 && !quietRaise) {
     /**
      * Р-210 (шаг 73, OQ-253): нынешняя цена ниже пола — подъём к полу и без свежего снимка конкурентов: он опирается только на данные
      * продавца (себестоимость, комиссию, маржу), а наблюдения конкурента можно ждать часами. Р-209: так же — переоценка после отказа

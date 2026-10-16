@@ -10,7 +10,7 @@ const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
-import { CREEP_PAUSE_PERIODS, STRATEGY_STALENESS_SECONDS, strategyAvailability, type CreepState } from '@repracer/strategy-engine';
+import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, strategyAvailability, type CreepState } from '@repracer/strategy-engine';
 import {
   BOUND_CAUSES,
   can,
@@ -2018,7 +2018,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     };
     const creeping = (s: ScopeRow) => s.strategy?.params.type === 'WIN_BUYBOX' && s.strategy.params.creepUp
       && (last.get(s.writeScopeId) ?? 0) <= Date.parse(now) - creepPaceSeconds * 1000 && stepPossible(s)
-      && ((st) => st?.buyboxIsSelf === true && Date.parse(st.observedAt) >= Date.parse(now) - STRATEGY_STALENESS_SECONDS * 1000)(
+      && ((st) => st?.buyboxIsSelf === true && Date.parse(st.observedAt) >= Date.parse(now) - CREEP_STALE_PERIODS * creepPaceSeconds * 1000)(
         this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition })));
     return [...this.scopes.values()]
       .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy

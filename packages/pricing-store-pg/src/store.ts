@@ -48,7 +48,7 @@ import type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow } from '@repracer/pricing-pipeline';
-import { CREEP_PAUSE_PERIODS, DECISION_OUTCOME_GROUPS, STRATEGY_STALENESS_SECONDS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
+import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -3000,8 +3000,9 @@ export class PgPricingStore implements PricingStore {
                            ON cs.tenant_id = om.tenant_id AND cs.channel_account_id = om.channel_account_id AND cs.marketplace = om.marketplace
                           AND cs.channel_product_ref = om.channel_product_ref AND cs.condition = om.condition
                           WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id AND om.status <> 'ENDED' AND cs.buybox_is_self
-                            -- ревью шага 97: снимок ещё свежий для стратегии — со старым движок не оценивает, и заход был бы впустую
-                            AND cs.observed_at >= $3::timestamptz - make_interval(secs => $7)))
+                            -- ревью шага 97 и решение владельца после 97.1: ступень вверх — по снимку не старше двух периодов, со старым движок
+                            -- не оценивает, и заход был бы впустую
+                            AND cs.observed_at >= $3::timestamptz - make_interval(secs => $5 * $7)))
             OR ps.type IN ('FIXED', 'TARGET_MARGIN')
             AND (last.decided_at IS NULL OR last.decided_at < $3::timestamptz - interval '24 hours'
                  -- Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу, а не через сутки от прошлого решения
@@ -3023,7 +3024,7 @@ export class PgPricingStore implements PricingStore {
                      AND EXISTS (SELECT 1 FROM tenant_data.channel_write_history sh
                                   WHERE sh.tenant_id = s.tenant_id AND sh.price_decision_id = last.price_decision_id AND sh.final_status = 'SHADOW_HELD'))))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
-          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit), creepPaceSeconds, CREEP_PAUSE_PERIODS, STRATEGY_STALENESS_SECONDS]);
+          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit), creepPaceSeconds, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS]);
       return rows.map((r) => r.write_scope_id as string);
     });
   }

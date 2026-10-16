@@ -1266,7 +1266,9 @@ export const de: Messages = {
       snapshotSummary: (source: string, observed: string) => `${source}, beobachtet ${observed}`,
       // шаг 93: источник без слов в словаре — общими словами, а не кодом
       sourceUnnamed: 'Wettbewerbsdaten des Kanals',
-      source: 'Quelle', observed: 'Beobachtet', snapshotRef: 'Vollständige Wettbewerbsdaten', refUntil: (when: string) => `verfügbar bis ${when}`, refExpired: 'Verweis abgelaufen',
+      source: 'Quelle', observed: 'Beobachtet', readingAge: 'Alter bei der Entscheidung', ageValue: (min: number) => (min < 1 ? 'unter einer Minute' : `${min} Min.`),
+      ageQuiet: (min: number) => `${min} Min. — älter als 15 Minuten: solche Wettbewerbsdaten dienen nur einem Anhebungsschritt, solange die Buy Box Ihnen gehört`,
+      snapshotRef: 'Vollständige Wettbewerbsdaten', refUntil: (when: string) => `verfügbar bis ${when}`, refExpired: 'Verweis abgelaufen',
       sanityMissing: 'Das Ergebnis der Eingangsprüfung wurde nicht mit den Wettbewerbsdaten gespeichert',
       warning: 'Hinweis',
       sanityTitle: (_ruleset: string) => 'Eingangsprüfung',

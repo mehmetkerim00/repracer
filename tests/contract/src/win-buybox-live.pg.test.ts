@@ -182,6 +182,14 @@ test('step 97 (review): the creep timer picks an offer only when a step is possi
   await shadow.snap();
   minutes(15); assert.equal(await shadow.timer(), 0, 'in shadow mode the creep timer stays silent');
 
+  // Решение владельца после шага 97.1 — тихий рынок: снимка 25 минут не было, Buy Box наш — ступень вверх по снимку до двух периодов
+  const quiet = await worldOf(3975, 397_100_006, 'LIVE', { competitorChannelFulfilled: false, competitorStartMinor: 1950 });
+  await quiet.snap();                                   // Buy Box наш с начала: ступень 18,50 → 18,68
+  assert.equal(quiet.ours(), 1868);
+  minutes(25); assert.equal(await quiet.timer(), 1, 'a quiet market: the timer picks the offer on a reading 25 minutes old');
+  assert.equal(quiet.ours(), 1886, 'and steps up');
+  minutes(40); assert.equal(await quiet.timer(), 0, 'a reading older than two periods: no step');
+
   // Положительный контроль: свежий снимок, Buy Box наш, ступень возможна — таймер берёт единицу и делает ступень
   const ok = await worldOf(3974, 397_100_005, 'LIVE', { competitorChannelFulfilled: false, competitorStartMinor: 1900 });
   await ok.snap();                                      // Buy Box наш с начала: ступень 18,50 → 18,68
