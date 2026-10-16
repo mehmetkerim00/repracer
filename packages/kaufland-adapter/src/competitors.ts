@@ -79,7 +79,9 @@ export function buyboxSnapshot(data: BuyboxData, query: CompetitorQuery, observe
       deliveryDays: { min: unit.delivery_time_min ?? null, max: unit.delivery_time_max ?? null },
     });
   }
+  // Держатель Buy Box — ранг 1 ответа /buybox (buybox_rank); шаг 97: он же назван у предложения, а у Buy Box — его доставка и продавец
   const winner = offers.find((o) => o.rank === 1);
+  if (winner) winner.holdsBuyBox = true;
   return {
     marketplace: query.marketplace,
     channelProductRef: query.channelProductRef,
@@ -87,7 +89,7 @@ export function buyboxSnapshot(data: BuyboxData, query: CompetitorQuery, observe
     source: SOURCE_BUYBOX,
     observedAt,
     completeness: { kind: 'TOP_N', n: KAUFLAND_LIMITS.buyboxMaxOffers },
-    ...(winner ? { buybox: { price: winner.price, isSelf: winner.isSelf } } : {}),
+    ...(winner ? { buybox: { price: winner.price, isSelf: winner.isSelf, ...(winner.shipping ? { shipping: winner.shipping } : {}), ...(winner.sellerRef && !winner.isSelf ? { sellerRef: winner.sellerRef } : {}) } } : {}),
     offers,
   };
 }
@@ -191,7 +193,12 @@ export function buyBoxChangedSnapshot(
   const offers = (payload.offers ?? []).map(bbcOffer).filter((o): o is CompetitorOffer => o !== null)
     .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity));
   const winnerPrice = minorMoney(payload.winner_offer?.prices?.sales_price);
+  const winnerShipping = minorMoney(payload.winner_offer?.prices?.shipping_cost);
   const selfIsWinner = payload.buy_box_change === 'won' || payload.seller_offer?.rank === 1;
+  // Шаг 97: держатель Buy Box — ранг 1 предложений уведомления
+  const top = offers.find((o) => o.rank === 1);
+  if (top) top.holdsBuyBox = true;
+  const winnerSeller = payload.winner_offer?.seller?.pseudonym;
   const target = minorMoney(payload.seller_offer?.prices?.target_price);
   return {
     marketplace: storefront,
@@ -201,7 +208,8 @@ export function buyBoxChangedSnapshot(
     sourceEventId: idMessage,
     observedAt: Number.isNaN(ts) ? fallbackObservedAt : new Date(ts).toISOString(),
     completeness: { kind: 'TOP_N', n: KAUFLAND_LIMITS.buyboxMaxOffers },
-    ...(winnerPrice ? { buybox: { price: winnerPrice, isSelf: selfIsWinner } } : {}),
+    ...(winnerPrice ? { buybox: { price: winnerPrice, isSelf: selfIsWinner, ...(winnerShipping ? { shipping: winnerShipping } : {}),
+      ...(winnerSeller && !selfIsWinner ? { sellerRef: winnerSeller } : {}) } } : {}),
     offers,
     ...(target ? { channelSuggestedPrice: target } : {}),
   };

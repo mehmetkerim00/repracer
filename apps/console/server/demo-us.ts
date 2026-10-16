@@ -119,21 +119,27 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
       writeScopeId: r.write_scope_id, productId: r.product_id, channelAccountId: r.channel_account_id, marketplace: r.marketplace,
       channelProductRef: r.channel_product_ref, sku: r.external_sku,
     }));
-    const strategy = async (name: string, type: string, params: Record<string, unknown>, undercutMinor: number | null) => {
+    const strategy = async (name: string, type: string, params: Record<string, unknown>, undercutMinor: number | null, handicapMinor: number | null = null) => {
       const { rows: [s] } = await tx.query(
         `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
          VALUES ($1, gen_random_uuid(), 1, $2, $3, $4, $5, 'ACTIVE', $6) RETURNING pricing_strategy_id`,
         [a.tenantId, name, type, JSON.stringify({ ...params, deadbandMinor: 0 }), ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], a.ownerMembershipId]);
       // Р-91: подрез — в таблице с 18-месячным сроком, а не в вечной версии стратегии
       if (undercutMinor !== null) {
-        await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, 1, $3)`,
-          [a.tenantId, s!.pricing_strategy_id, undercutMinor]);
+        await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor) VALUES ($1, $2, 1, $3, $4)`,
+          [a.tenantId, s!.pricing_strategy_id, undercutMinor, handicapMinor]);
       }
       return s!.pricing_strategy_id as string;
     };
     const margin = await strategy('Target margin 30%', 'TARGET_MARGIN', { type: 'TARGET_MARGIN', targetMarginBp: 3000 }, null);
     const beat = await strategy('Beat the lowest by 1 cent', 'BEAT_LOWEST',
       { type: 'BEAT_LOWEST', scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP' }, 1);
+    /**
+     * Шаг 97 [Р-219]: walmart.com — «Win the Buy Box» с подъёмом при удержании (в демо включён, чтобы подъём был виден): цель от цены
+     * победителя с доставкой минус цент; поправка на исполнение каналом — 0 (исполнения модель Walmart не называет, W-05). Подрез и
+     * поправка — в таблице с 18-месячным сроком [Р-91], не в вечной версии
+     */
+    const winBuyBox = a.walmartAccountId ? await strategy('Win the Buy Box', 'WIN_BUYBOX', { type: 'WIN_BUYBOX', creepUp: true, creepStepBp: 100, atBound: 'CAP' }, 1, 0) : null;
     for (const s of scopes) {
       const ebay = s.channelAccountId === a.ebayAccountId;
       const walmart = s.channelAccountId === a.walmartAccountId;
@@ -168,7 +174,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
          VALUES ($1, $2, 'PRICE', $3, $4, $4, 'READBACK', 'IN_SYNC')`, [a.tenantId, s.writeScopeId, ebay ? 1999 : walmart ? WALMART_LISTING_MINOR(k) : 1850, validFrom]);
       await tx.query(
         `UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = $3, pricing_strategy_version = 1
-          WHERE tenant_id = $1 AND write_scope_id = $2`, [a.tenantId, s.writeScopeId, ebay ? margin : beat]);
+          WHERE tenant_id = $1 AND write_scope_id = $2`, [a.tenantId, s.writeScopeId, ebay ? margin : walmart && winBuyBox ? winBuyBox : beat]);
     }
     return scopes;
   }, a.userId, { mfa: true });
@@ -187,7 +193,7 @@ export async function startDemoUsMarket(input: {
   titleOffsets?: DemoTitleOffsets;
 }): Promise<DemoUsMarket> {
   const { pools, store, accounts: a, log } = input;
-  const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US } = await import('@repracer/contract-tests/simulator');
+  const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US, LANDED_CHANNEL_BONUS, sellersFor } = await import('@repracer/contract-tests/simulator');
   const realStart = systemClock.nowMs();
   const begin = realStart - input.pressDays * DAY_MS;
   /** Часы мира США: виртуальные, пока идёт прожатая неделя, затем настоящие */
@@ -224,9 +230,13 @@ export async function startDemoUsMarket(input: {
   const steps = Math.floor(SCHEDULE_DAYS * DAY_MS / COMPETITOR_STEP_MS);
   const port = new SimulatedAmazonPort({
     seed: 68, params: { anyOfferChanged: { delayMs: 30_000, lossShare: 0 } }, descriptor: AMAZON_SIM_DESCRIPTOR_US,
+    // Шаг 97 [H]: победитель — по формуле (FBA −0,50), а уведомление держателя не называет (A-29) — экран Competition говорит это прямо
+    buyBox: LANDED_CHANNEL_BONUS,
     skus: amazonScopes.map((s) => ({ sku: s.sku, asin: s.channelProductRef!, marketplaces: [AMAZON_US], priceMinor: 1850, quantity: 5 })),
     competitors: amazonScopes.map((s, i) => ({
-      sellerRef: `Synthetic US competitor ${i + 1}`, marketplace: AMAZON_US, asin: s.channelProductRef!, priceMinor: 1800,
+      // Шаг 97 [H]: продавец пула — вымышленное имя, исполнение каналом (FBA) и рейтинг, как SellerFeedbackRating
+      sellerRef: sellersFor(i)[0]!.name, channelFulfilled: sellersFor(i)[0]!.channelFulfilled,
+      rating: { positivePct: sellersFor(i)[0]!.ratingPct, count: sellersFor(i)[0]!.ratingCount }, marketplace: AMAZON_US, asin: s.channelProductRef!, priceMinor: 1800,
       // Фаза ступени — своя у каждого предложения: в один момент рынок движется вразброс, а не единым сдвигом [Р-50]
       schedule: Array.from({ length: steps }, (_, k) => ({ atOffsetMs: (k + 1) * COMPETITOR_STEP_MS + i * 10 * MINUTE_MS, priceMinor: AMAZON_US_RAMP[(k + i) % AMAZON_US_RAMP.length]! })),
     })),
@@ -244,6 +254,8 @@ export async function startDemoUsMarket(input: {
     }
   };
   const recomputeEbay = async () => { counts.ebay += (await ebay.recomputeScheduled(ctx(a.ebayAccountId), { limit: 100 })).scopes; };
+  // Шаг 97 [Р-219]: плановый пересчёт walmart.com — таймер ступени подъёма «Win the Buy Box» (в тени предложения удерживаются)
+  const recomputeWalmart = async () => { if (walmartSim) await walmartSim.pipeline.recomputeScheduled(ctx(walmartSim.account), { limit: 100 }); };
 
   /**
    * Шаг 89: walmart.com — модель канала по правилам настоящего Walmart (HTTP, корзины токенов с заголовками) и НАСТОЯЩИЙ адаптер Walmart
@@ -257,9 +269,10 @@ export async function startDemoUsMarket(input: {
       // Корзина пуста — ждать пополнения: в прожатой неделе — виртуальным временем, дальше — настоящим
       sleep: (ms: number) => (virtualMs === null ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : (virtualMs += ms, Promise.resolve())),
     };
+    // Шаг 97 [H]: рынок — продавцы пула с волнами своей фазы и размаха у каждого товара (разброс против ложной остановки Р-50), победитель — формула
     const channel = new SimulatedWalmartChannel({
-      seed: 89, clientId: 'syn-walmart-demo', clientSecret: 'syn-walmart-demo-secret', nowMs: clock.nowMs,
-      items: walmartScopes.map((sc, k) => ({ sku: sc.sku, productName: `Synthetic product ${sc.sku}`, priceMinor: WALMART_LISTING_MINOR(k), quantity: DEMO_WALMART_QUANTITY,
+      seed: 89, clientId: 'syn-walmart-demo', clientSecret: 'syn-walmart-demo-secret', nowMs: clock.nowMs, market: 'NAMED_WAVES', buyBox: LANDED_CHANNEL_BONUS,
+      items: walmartScopes.map((sc, k) => ({ sku: sc.sku, productName: `Synthetic product ${sc.sku}`, priceMinor: WALMART_LISTING_MINOR(k), shippingMinor: 0, quantity: DEMO_WALMART_QUANTITY,
         otherMarketplacePriceMinor: WALMART_ELSEWHERE_MINOR(k), competitorBaseMinor: 1850 + 10 * k })),
     });
     const walmartDeps: AdapterDependencies = {
@@ -320,7 +333,8 @@ export async function startDemoUsMarket(input: {
       virtualMs = t;
       try {
         await deliver();
-        if ((t - begin) % HOUR_MS === 0) await recomputeEbay();
+        // Шаг 97: плановый пересчёт walmart.com (ступень подъёма) в прожатой неделе — раз в час, как у eBay: подготовка демо не растёт вдвое
+        if ((t - begin) % HOUR_MS === 0) { await recomputeEbay(); await recomputeWalmart(); }
         if (t === begin) await syncWalmartStatuses();
         // Шаг 89: Buy Box Walmart — товар раз в два часа, товары со сдвигом в 10 минут
         await pollWalmart(walmartScopes.filter((_sc, i) => (t - begin - i * 10 * MINUTE_MS) >= 0 && (t - begin - i * 10 * MINUTE_MS) % WALMART_PRESS_POLL_MS === 0).map((sc) => sc.sku));
@@ -349,7 +363,7 @@ export async function startDemoUsMarket(input: {
       try {
         await deliver();
         if (systemClock.nowMs() - lastEbay >= EBAY_RECOMPUTE_EVERY_MS) { lastEbay = systemClock.nowMs(); await recomputeEbay(); }
-        if (systemClock.nowMs() - lastWalmartPoll >= WALMART_LIVE_POLL_MS) { lastWalmartPoll = systemClock.nowMs(); await pollWalmart(walmartScopes.map((sc) => sc.sku)); }
+        if (systemClock.nowMs() - lastWalmartPoll >= WALMART_LIVE_POLL_MS) { lastWalmartPoll = systemClock.nowMs(); await pollWalmart(walmartScopes.map((sc) => sc.sku)); await recomputeWalmart(); }
         if (systemClock.nowMs() - lastWalmartStatus >= WALMART_STATUS_EVERY_MS) { lastWalmartStatus = systemClock.nowMs(); await syncWalmartStatuses(); }
         await syncOrders();
       } catch (error) {

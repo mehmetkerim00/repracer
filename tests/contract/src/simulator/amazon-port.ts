@@ -26,6 +26,7 @@ import type {
 } from '@repracer/channel-port';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { DEFAULT_ERROR_CLASS, isNeverWritten } from '@repracer/channel-port';
+import { rankForBuyBox, type BuyBoxRuleSpec } from './buybox-rule.ts';
 import { defaultAmazonParams, type AmazonModelParams } from './params.ts';
 import { SeededRandom } from './random.ts';
 
@@ -52,11 +53,22 @@ export const AMAZON_SIM_SOURCE = 'AMAZON_ANY_OFFER_CHANGED';
  * «Synthetic product <sku>», null — канал названия не отдал
  */
 export interface AmazonSkuSpec { sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number; title?: string | null }
-export interface AmazonCompetitorSpec { sellerRef: string; marketplace: string; asin: string; priceMinor: number; schedule?: Array<{ atOffsetMs: number; priceMinor: number }> }
+/**
+ * Шаг 97 [H]: `channelFulfilled` — предложение исполняет Amazon (FBA), `rating` — SellerFeedbackRating продавца (синтетический),
+ * `shippingMinor` — доставка продавца
+ */
+export interface AmazonCompetitorSpec {
+  sellerRef: string; marketplace: string; asin: string; priceMinor: number; schedule?: Array<{ atOffsetMs: number; priceMinor: number }>;
+  channelFulfilled?: boolean; shippingMinor?: number; rating?: { positivePct: number; count: number };
+}
 export interface AmazonPortModelSpec {
   seed: number; params?: Partial<AmazonModelParams>; skus: AmazonSkuSpec[]; competitors: AmazonCompetitorSpec[];
   /** Витрина модели: по умолчанию amazon.de (EUR, брутто), для витрины США — `AMAZON_SIM_DESCRIPTOR_US` */
   descriptor?: ChannelDescriptor;
+  /** Шаг 97 [H]: формула победителя Buy Box; без поля — прежнее правило (минимальная цена товара) */
+  buyBox?: BuyBoxRuleSpec;
+  /** Шаг 97 [H]: наши предложения исполняет Amazon (FBA) */
+  selfChannelFulfilled?: boolean;
 }
 
 interface Listing { sku: string; asin: string; marketplace: string; title: string | null; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
@@ -124,8 +136,10 @@ export class SimulatedAmazonPort implements ChannelAdapter {
   private readonly summary: Bucket;
   private readonly events: Array<{ dueMs: number; marketplace: string; asin: string }> = [];
   private nowMs: number;
+  private readonly spec: AmazonPortModelSpec;
 
   constructor(spec: AmazonPortModelSpec, deps: AdapterDependencies) {
+    this.spec = spec;
     // Шаг 42: витрина модели объявляется спецификацией — витрина США отличается регионом, валютой, базой и отсутствием пояса
     this.descriptor = spec.descriptor ?? AMAZON_SIM_DESCRIPTOR;
     this.deps = deps;
@@ -289,18 +303,31 @@ export class SimulatedAmazonPort implements ChannelAdapter {
 
   private snapshotOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
     const offers = [
-      ...[...this.listings.values()].filter((l) => l.marketplace === marketplace && l.asin === asin).map((l) => ({ isSelf: true, sellerRef: 'self', minor: l.priceMinor })),
-      ...this.competitors.filter((c) => c.marketplace === marketplace && c.asin === asin).map((c) => ({ isSelf: false, sellerRef: c.sellerRef, minor: c.priceMinor })),
+      ...[...this.listings.values()].filter((l) => l.marketplace === marketplace && l.asin === asin)
+        .map((l) => ({ isSelf: true, sellerRef: 'self', minor: l.priceMinor, shippingMinor: 0, channelFulfilled: this.spec.selfChannelFulfilled === true, rating: undefined as AmazonCompetitorSpec['rating'] })),
+      ...this.competitors.filter((c) => c.marketplace === marketplace && c.asin === asin)
+        .map((c) => ({ isSelf: false, sellerRef: c.sellerRef, minor: c.priceMinor, shippingMinor: c.shippingMinor ?? 0, channelFulfilled: c.channelFulfilled === true, rating: c.rating })),
     ].sort((a, b) => a.minor - b.minor);
     const { currency, basis } = this.money();
     const money = (minor: number) => ({ amountMinor: minor, currency, basis });
+    // Шаг 97 [H]: победитель — по формуле мира (landed минус бонус FBA) или прежнему правилу (минимальная цена товара)
+    const order = new Map(this.competitors.map((c, i) => [c.sellerRef, i]));
+    const winner = this.spec.buyBox
+      ? rankForBuyBox(offers.map((o) => ({ ...o, key: o.isSelf ? '$self' : o.sellerRef, self: o.isSelf, landedMinor: o.minor + o.shippingMinor,
+        order: o.isSelf ? Number.MAX_SAFE_INTEGER : order.get(o.sellerRef) ?? Number.MAX_SAFE_INTEGER })), null, this.spec.buyBox)[0]
+      : offers[0];
     return {
       marketplace, channelProductRef: asin, condition: 'new', source: AMAZON_SIM_SOURCE, sourceEventId: `sim-aoc-${asin}-${observedAt}`,
       observedAt: new Date(observedAt).toISOString(),
       // Полнота ANY_OFFER_CHANGED — (проверить) по схеме уведомления; модель отдаёт топ-20
       completeness: { kind: 'TOP_N', n: 20 },
-      ...(offers[0] ? { buybox: { price: money(offers[0].minor), isSelf: offers[0].isSelf } } : {}),
-      offers: offers.map((o, i) => ({ rank: i + 1, isSelf: o.isSelf, sellerRef: o.sellerRef, price: money(o.minor), shipping: money(0), totalPrice: money(o.minor) })),
+      /**
+       * Шаг 97 [Р-221]: как разбор настоящего уведомления — цена и доставка Buy Box (Summary.BuyBoxPrices), держатель НЕ назван (A-29), ранга
+       * у предложений нет; исполнение (IsFulfilledByAmazon) и рейтинг (SellerFeedbackRating) — у предложений
+       */
+      ...(winner ? { buybox: { price: money(winner.minor), shipping: money(winner.shippingMinor), isSelf: null } } : {}),
+      offers: offers.map((o) => ({ isSelf: o.isSelf, ...(o.isSelf ? {} : { sellerRef: o.sellerRef }), price: money(o.minor), shipping: money(o.shippingMinor), totalPrice: money(o.minor + o.shippingMinor),
+        fulfillment: o.channelFulfilled ? 'AFN' : 'MFN', ...(o.rating ? { rating: o.rating } : {}) })),
     };
   }
 
@@ -311,7 +338,7 @@ export class SimulatedAmazonPort implements ChannelAdapter {
    */
   private summaryOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
     const pushed = this.snapshotOf(marketplace, asin, observedAt);
-    const offers = pushed.offers.map((o) => ({ isSelf: o.isSelf, ...(o.isSelf ? {} : { sellerRef: o.sellerRef }), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice })) as CompetitorSnapshot['offers'];
+    const offers = pushed.offers.map((o) => ({ isSelf: o.isSelf, ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice })) as CompetitorSnapshot['offers'];
     return {
       marketplace, channelProductRef: asin, condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: new Date(observedAt).toISOString(),
       completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers,

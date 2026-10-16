@@ -1,11 +1,12 @@
 import type { DecisionDetail, DecisionPage } from '@repracer/pricing-pipeline';
-import type { ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, StrategyDefinition, StrategyParams } from '@repracer/pricing-model';
+import type { CompetitorView, ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, StrategyDefinition, StrategyParams } from '@repracer/pricing-model';
 import { classifyBoundIntervention, expandExplanation, explanationRowOf } from '@repracer/pricing-model';
+import { competitorColumns, type CompetitorColumns } from './competition.ts';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { strategyLabel } from './products.ts';
-import { gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
+import { channelOf, gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
  * Экран B «почему эта цена» из неизменяемого слепка решения [Р-68]: снимок, проверка входов, якоря, стратегия, Gate,
@@ -33,6 +34,22 @@ export interface TraceStep {
   summary: string;
   items: TraceItem[];
   gaps: Gap[];
+  /** Шаг 97 [Р-218]: шаг снимка раскрывается в таблицу конкурентов того момента и «кто подвинул цену» */
+  competitors?: TraceCompetitors;
+}
+
+/** Шаг 97 [Р-218]: картина рынка в квитанции: строки — то, что канал назвал; наша строка подсвечена; подвинувшиеся помечены «было → стало» */
+export interface TraceCompetitors {
+  /** Одна фраза-повод сверху квитанции: «Triggered by Harbor Goods: $18.00 → $17.50»; null — никто не двигался или таблицы нет (срок хранения истёк) */
+  trigger: string | null;
+  rows: Array<{
+    seller: string; self: boolean; landed: string; fulfilment: string | null; buyBox: boolean | null; rating: string | null;
+    move: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was: string | null; landedKnown: boolean;
+  }>;
+  /** Правило таблиц 96.2: колонки из одного значения — подписью */
+  columns: CompetitorColumns;
+  /** Подпись честности: сколько хранятся детали, или что срок истёк */
+  note: string;
 }
 
 export interface DecisionTrace {
@@ -97,6 +114,38 @@ function strategyOf(e: ExpandedExplanation): StrategyDefinition | null {
   return { strategyId: e.strategy.strategyId, version: e.strategy.version, params: params as unknown as StrategyParams, deadbandMinor: Number(deadbandMinor ?? 0) };
 }
 
+/** Шаг 97 [Р-218]: «кто подвинул цену» одной фразой — та же, что в квитанции и (коротко) в строке журнала цен */
+export function triggerPhrase(view: CompetitorView | null | undefined, currency: string, m: Messages): string | null {
+  const tr = view?.trigger;
+  if (!tr) return null;
+  const c = m.ui.trace.competitors;
+  const seller = tr.seller ?? c.unnamedSeller;
+  const money = (v: number | undefined) => m.money(v ?? null, currency);
+  return tr.move === 'APPEARED' ? c.triggerAppeared(seller, money(tr.nowMinor))
+    : tr.move === 'GONE' ? c.triggerGone(seller, money(tr.wasMinor))
+      : c.trigger(seller, money(tr.wasMinor), money(tr.nowMinor));
+}
+
+function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messages): TraceCompetitors {
+  const c = m.ui.trace.competitors;
+  const view = d.competitorView ?? null;
+  if (!view) return { trigger: null, rows: [], columns: competitorColumns([], m), note: c.expired };
+  const channel = channelOf(world, scopeById(world, d.writeScopeId)?.channelAccountId ?? '');
+  const channelName = (m.values as Record<string, string | undefined>)[channel] ?? channel;
+  const money = (v: number | null | undefined) => (v === null || v === undefined ? null : m.money(v, view.currency));
+  const rows = view.offers.map((o) => ({
+      seller: o.self ? c.you : o.seller ?? c.unnamedSeller, self: o.self,
+      landed: money(o.landedMinor ?? o.priceMinor)!,
+      fulfilment: o.fulfilment === 'CHANNEL' ? m.ui.competition.fulfilment.channel(channelName) : o.fulfilment === 'MERCHANT' ? m.ui.competition.fulfilment.merchant : null,
+      buyBox: o.holdsBuyBox ?? null,
+      rating: o.ratingPct !== undefined && o.ratingCount !== undefined ? m.ui.competition.rating(m.percentBp(Math.round(o.ratingPct * 100)), o.ratingCount) : null,
+      move: o.move ?? null, was: money(o.wasMinor), landedKnown: o.landedMinor !== undefined && o.landedMinor !== null,
+    }));
+  // Повод — одной фразой сверху квитанции; никто не двигался — так и сказано в подписи таблицы, а не наверху
+  const trigger = triggerPhrase(view, view.currency, m);
+  return { trigger, rows, columns: competitorColumns(rows, m), note: trigger ? c.kept : `${c.noTrigger} ${c.kept}` };
+}
+
 export function isDangerous(d: ConsoleDecision): boolean {
   return d.rejectionReason !== null && BOUND_STOPS.has(d.rejectionReason) && d.boundDeviationBp !== null && classifyBoundIntervention(d.boundDeviationBp) === 'DANGEROUS';
 }
@@ -151,7 +200,9 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
       // Шаг 93: источник — словами словаря; неизвестный — общими словами «данные конкурентов канала», код источника на экран не выходит
       const source = (m.ui.sources as Record<string, string | undefined>)[e.snapshot.source] ?? t.sourceUnnamed;
       const ref = d.snapshotRef;
-      const stepGaps: Gap[] = [gap(m, 'SNAPSHOT_CONTENT')];
+      // Шаг 97 [Р-218]: картина рынка решения живёт с ним 30 суток — тогда пробела «предложения того момента» нет
+      const competitors = traceCompetitors(d, world, m);
+      const stepGaps: Gap[] = d.competitorView ? [] : [gap(m, 'SNAPSHOT_CONTENT')];
       if (!ref) stepGaps.push(gap(m, 'SNAPSHOT_REF_EXPIRED'));
       steps.push({
         key: 'SNAPSHOT', title: t.titles.SNAPSHOT, status: 'OK',
@@ -162,6 +213,7 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
           ...(ref ? [{ label: t.snapshotRef, value: t.refUntil(m.when(snapshotRefUntil(d.decidedAt))) }] : []),
         ],
         gaps: stepGaps,
+        competitors,
       });
     }
 

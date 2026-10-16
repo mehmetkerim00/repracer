@@ -8,7 +8,7 @@ import { InMemoryPricingStore, standUserOf, type MemorySeedScope } from './memor
  * как write_scope_strategy_guard в PostgreSQL, а не по каналу мира. Данные синтетические.
  */
 const push: CompetitorSourceDescriptor = {
-  source: 'SYN_PUSH', kind: 'PUSH', completeness: { kind: 'TOP_N', n: 20 }, conditions: ['new'], hasBuyboxWinner: true, hasOwnRank: false, hasShipping: true,
+  source: 'SYN_PUSH', kind: 'PUSH', completeness: { kind: 'TOP_N', n: 20 }, conditions: ['new'], hasBuyboxWinner: true, hasBuyboxPrice: true, hasOwnRank: false, hasShipping: true,
   typicalStalenessSeconds: 60, availability: 'AVAILABLE', role: 'PRIMARY',
 };
 const scope = (id: string, account: string): MemorySeedScope => ({

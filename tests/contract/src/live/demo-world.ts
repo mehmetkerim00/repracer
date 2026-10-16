@@ -2,6 +2,7 @@ import type { PgPool } from '@repracer/pricing-store-pg';
 import { createScheduler, jobSource, PgSchedulerState, pgJobDeps, runScheduler, type JobDeps } from '@repracer/scheduler';
 import { VirtualClock } from '../harness/world.ts';
 import type { CompetitorBehaviour } from '../simulator/kaufland-channel.ts';
+import { sellersFor } from '../simulator/buybox-rule.ts';
 import { kauflandLiveWorld, type KauflandLiveWorld, type LiveProduct } from './kaufland-world.ts';
 
 /**
@@ -43,9 +44,10 @@ export function demoCompetitors(idProduct: number): NonNullable<LiveProduct['mor
     { atOffsetMs: i * 2 * HOUR + 70 * 60_000, priceMinor: base + 20 },
   ]).flat();
   return [
-    { sellerRef: `Demo War ${idProduct}`, startMinor: base + 10,
+    // Шаг 97 [H]: продавцы — вымышленные имена пула (buybox-rule.ts), у каждого товара своя тройка; правило Buy Box демо прежнее
+    { sellerRef: sellersFor(idProduct)[1]!.name, startMinor: base + 10,
       behaviour: { kind: 'UNDERCUT_SELF', undercutMinor: 5, reactionMs: 15 * 60_000, floorMinor: Math.round(base * 0.85), ceilingMinor: base + 200 } as CompetitorBehaviour },
-    { sellerRef: `Demo Wave ${idProduct}`, startMinor: base + 20,
+    { sellerRef: sellersFor(idProduct)[2]!.name, startMinor: base + 20,
       behaviour: { kind: 'SCHEDULE', points: wave } as CompetitorBehaviour },
   ];
 }
@@ -73,7 +75,7 @@ export function demoProducts(options: { bare: boolean }): LiveProduct[] {
     const idProduct = 340_100_001 + i;
     return {
       cls: i % 5 === 0 ? 'HOT' : 'WARM', idProduct, marketplace: 'de', title: demoTitle(i),
-      behaviour: DEMO_DRIFT, competitorStartMinor: 1850 + (i % 7) * 10 + 30,
+      behaviour: DEMO_DRIFT, competitorStartMinor: 1850 + (i % 7) * 10 + 30, competitorName: sellersFor(idProduct)[0]!.name,
       pastMovesEveryMinutes: i % 5 === 0 ? 30 : 180,
       ...(options.bare ? { bare: true } : { pricingMode: 'ENGINE' as const, costMinor: 1000 + (i % 9) * 25 }),
       moreCompetitors: demoCompetitors(idProduct),

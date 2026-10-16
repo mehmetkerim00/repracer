@@ -301,6 +301,25 @@ const ROW_MISALIGNED = `[...document.querySelectorAll('.cards, .worlds, .stats, 
  * у галочки контрол слева от подписи и на линии её первой строки. Отзыв владельца после шага 93: поля «летали» — подпись, поле и хвост фразы
  * одной строкой, чекбокс в углу; правило репозитория `scripts/form-fields.mjs` держит, что поле в стандарте есть, это — что оно так стоит
  */
+/**
+ * Шаг 97 [Р-146]: поле стандарта не выше своего содержимого. На телефоне ряд фильтров встаёт столбиком, и основа flex полей ряда (18rem,
+ * у выбора — 12rem) становилась их ВЫСОТОЙ: под каждым полем журнала цен, Shadow mode и Protections — пустота 12–18rem (с шага 96, найдено
+ * снимками шага 97). Правило: у поля ряда фильтров высота минус высота содержимого (подпись, контрол, пояснение) — не больше 24px (в сетке формы
+ * поля законно тянутся до высоты соседа по строке — они правилом не судятся)
+ */
+const FIELD_SLACK = `(() => {
+  const out = [];
+  for (const f of document.querySelectorAll('.world-content .field-toolbar > .field')) {
+    const r = f.getBoundingClientRect();
+    if (r.height === 0) continue;
+    const kids = [...f.children].map((c) => c.getBoundingClientRect()).filter((k) => k.height > 0);
+    if (kids.length === 0) continue;
+    const content = Math.max(...kids.map((k) => k.bottom)) - Math.min(...kids.map((k) => k.top));
+    if (r.height - content > 24) out.push((f.querySelector('label, .field-label')?.textContent.trim() ?? '?') + ': ' + Math.round(r.height) + 'px for ' + Math.round(content) + 'px of content');
+  }
+  return out.slice(0, 5);
+})()`;
+
 const FORM_GEOMETRY = `(() => {
   const vis = (el) => el && el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().width > 0;
   const bad = [];
@@ -352,6 +371,7 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       if (narrow) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${width}px, ${what}: touch targets lower than 44px`);
       assert.deepEqual(await b.evaluate<string[]>(ROW_MISALIGNED), [], `${scheme} ${width}px, ${what}: cards of one row do not stand on one line`);
       assert.deepEqual(await b.evaluate<string[]>(FORM_GEOMETRY), [], `${scheme} ${width}px, ${what}: a form field breaks the standard`);
+      assert.deepEqual(await b.evaluate<string[]>(FIELD_SLACK), [], `${scheme} ${width}px, ${what}: a field is taller than its content`);
     };
     // поля стандарта, которые правило геометрии увидело на этой ширине: без них проверка выше ничего не мерит
     let fieldsSeen = 0;
@@ -371,6 +391,16 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       await b.waitText(en.ui.app.worlds);
     }
     const world = (await b.evaluate<string>(`document.querySelector('h3 a').getAttribute('href')`)).split('/')[2]!;
+    // Шаг 97: страница Competition предложения — те же правила адаптива на каждой ширине и в обеих темах (адрес — из строки Offers)
+    {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${width}px products for competition`);
+      const competition = await b.evaluate<string | null>(`document.querySelector('.world-content a[href*="/competition/"]')?.getAttribute('href') ?? null`);
+      assert.ok(competition, `${width}px: an offer row links its Competition page`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(competition)}, true)`);
+      await settled(b, `${width}px competition`);
+      await checkPage('competition');
+    }
     for (const screen of SCREENS) {
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
       await settled(b, `${width}px ${screen}`);
@@ -379,6 +409,17 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       checksSeen += await b.evaluate<number>(`document.querySelectorAll('.check-field').length`);
     }
     assert.ok(fieldsSeen >= 10 && checksSeen >= 3, `${scheme} ${width}px: the screens show fields of the standard — ${fieldsSeen} fields, ${checksSeen} checkboxes`);
+    if (width === 375 && scheme === 'light') {
+      // Шаг 97: положительный контроль — прежняя основа flex поля в столбике (18rem) — правило «поле не выше содержимого» краснеет на журнале цен
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed`)}, true)`);
+      await settled(b, `${width}px feed, field control`);
+      await b.evaluate(`(() => { const st = document.createElement('style'); st.id = 'slack-control'; st.textContent = '.field-toolbar > .field { flex: 0 1 18rem !important; }'; document.head.append(st); return true; })()`);
+      const slack = await b.evaluate<string[]>(FIELD_SLACK);
+      await b.evaluate(`(document.getElementById('slack-control').remove(), true)`);
+      assert.ok(slack.length > 0, 'control: a filter field 18rem tall in a column is caught');
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+      await settled(b, `${width}px back to costs`);
+    }
     if (width === 1440 && scheme === 'light') {
       // положительный контроль: прежний отступ «карточка после карточки» внутри сетки — правило краснеет на экране остановок
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stop`)}, true)`);
@@ -883,6 +924,15 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
     await visit('costs');
     const bounds = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
     if (bounds) { await b.evaluate(`(location.hash = ${JSON.stringify(bounds)}, true)`); await settled(b, 'bounds page'); const f = await findings(); if (f.length) found['bounds/<id>'] = f; }
+    // Шаг 97 [I5]: страница Competition предложения — ссылкой из строки Offers, те же правила таблиц; меню остаётся из девяти пунктов
+    await visit('products');
+    const competition = await b.evaluate<string | null>(`[...document.querySelectorAll('.world-content table a.secondary-link')].find((a) => a.textContent.trim() === ${JSON.stringify(en.ui.competition.link)})?.getAttribute('href') ?? null`);
+    assert.ok(competition, 'every offer row links its Competition page');
+    await b.evaluate(`(location.hash = ${JSON.stringify(competition)}, true)`);
+    await settled(b, 'competition page');
+    assert.equal(await b.evaluate<string>(`document.querySelector('.world-content h2')?.textContent.trim() ?? ''`), en.ui.competition.pageTitle);
+    assert.equal(await b.evaluate<string>(`document.querySelector('.nav-group a.active')?.getAttribute('href')?.split('/')[3] ?? ''`), 'products', 'the Competition page belongs to Offers — no menu item of its own');
+    { const f = await findings(); if (f.length) found['competition/<id>'] = f; }
     assert.deepEqual([found['protections/rules'] ?? [], found['protections/people'] ?? []], [[], []], `Protections: tables say each thing once — ${JSON.stringify(found)}`);
     const elsewhere = Object.fromEntries(Object.entries(found).filter(([r]) => !r.startsWith('protections')));
     assert.deepEqual(elsewhere, KNOWN_TABLE_FINDINGS, 'findings outside Protections are exactly the known list of docs/deferred.md (it only shrinks)');

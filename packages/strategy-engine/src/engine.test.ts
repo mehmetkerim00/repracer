@@ -102,9 +102,9 @@ test('stale snapshot does not meet the requirement', () => {
 
 test('availability on Kaufland sources: buy box via pull; early-access push does not count; market minimum unavailable', () => {
   const sources: CompetitorSourceDescriptor[] = [
-    { source: 'KAUFLAND_BUY_BOX_CHANGED', kind: 'PUSH', completeness: { kind: 'TOP_N', n: 10 }, conditions: ['new'], hasBuyboxWinner: true, hasOwnRank: true, hasShipping: true, typicalStalenessSeconds: null, availability: 'EARLY_ACCESS', role: 'PRIMARY' },
-    { source: 'KAUFLAND_BUYBOX', kind: 'PULL', completeness: { kind: 'TOP_N', n: 10 }, conditions: ['new', 'used'], hasBuyboxWinner: true, hasOwnRank: true, hasShipping: true, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'PRIMARY' },
-    { source: 'KAUFLAND_COMPETITORS_COMPARER', kind: 'REPORT', completeness: { kind: 'CHEAPEST_ONLY' }, conditions: ['new', 'used'], hasBuyboxWinner: false, hasOwnRank: false, hasShipping: false, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'RECONCILIATION' },
+    { source: 'KAUFLAND_BUY_BOX_CHANGED', kind: 'PUSH', completeness: { kind: 'TOP_N', n: 10 }, conditions: ['new'], hasBuyboxWinner: true, hasBuyboxPrice: true, hasOwnRank: true, hasShipping: true, typicalStalenessSeconds: null, availability: 'EARLY_ACCESS', role: 'PRIMARY' },
+    { source: 'KAUFLAND_BUYBOX', kind: 'PULL', completeness: { kind: 'TOP_N', n: 10 }, conditions: ['new', 'used'], hasBuyboxWinner: true, hasBuyboxPrice: true, hasOwnRank: true, hasShipping: true, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'PRIMARY' },
+    { source: 'KAUFLAND_COMPETITORS_COMPARER', kind: 'REPORT', completeness: { kind: 'CHEAPEST_ONLY' }, conditions: ['new', 'used'], hasBuyboxWinner: false, hasBuyboxPrice: false, hasOwnRank: false, hasShipping: false, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'RECONCILIATION' },
   ];
   const buybox = strategyAvailability(matchBuybox(), sources);
   assert.deepEqual(buybox, { available: true, via: 'KAUFLAND_BUYBOX' });

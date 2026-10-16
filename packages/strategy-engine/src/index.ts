@@ -1,5 +1,6 @@
 import type { CompetitorSnapshot, CompetitorSourceDescriptor, Instant, PriceBasis } from '@repracer/channel-port';
 import {
+  fulfilmentKind,
   storefrontPriceForMarginBp,
   type AcceptedSnapshot,
   type CompetitorRequirement,
@@ -50,10 +51,25 @@ export interface EngineInput {
    * ускоряют
    */
   ladderPace?: { lastStepAt: Instant | null; paceSeconds: number } | null;
+  /**
+   * Шаг 97 [Р-219]: подъём «Win the Buy Box» — последний одобренный подъём (CREEP_UP: когда, от какой цены, к какой) и последний возврат
+   * после потери (CREEP_STEP_BACK: когда, на какой цене Buy Box ушёл). Период — тот же `ladderPace.paceSeconds` (плановый пересчёт канала)
+   */
+  creep?: CreepState | null;
   now: Instant;
   trigger: { type: TriggerType; sourceEventId?: string };
   intentTtlSeconds?: number;
 }
+
+export interface CreepState {
+  lastUp: { at: Instant; fromMinor: number; toMinor: number } | null;
+  lastBack: { at: Instant; lostAtMinor: number } | null;
+  /** Последнее одобренное взятие Buy Box (цель от победителя): ступень подъёма — не раньше периода и после него (живой прогон I3) */
+  lastTake?: { at: Instant } | null;
+}
+
+/** Шаг 97 [Р-219]: пауза подъёма после потери Buy Box — столько периодов планового пересчёта (решение владельца: 4, при 15 минутах — час) */
+export const CREEP_PAUSE_PERIODS = 4;
 
 export type EngineResult =
   | { kind: 'INTENT'; intent: PriceIntentDraft }
@@ -69,13 +85,17 @@ export function requirementOf(params: StrategyParams): CompetitorRequirement {
   switch (params.type) {
     case 'FIXED':
     case 'TARGET_MARGIN':
-      return { kind: null, needsBuyboxWinner: false, needsOwnRank: false, needsShipping: false, conditions: [], maxStalenessSeconds: null };
+      return { kind: null, needsBuyboxWinner: false, needsBuyboxPrice: false, needsOwnRank: false, needsShipping: false, conditions: [], maxStalenessSeconds: null };
+    // Шаг 97 [Р-221]: «Match the Buy Box» нужна цена Buy Box; держатель — только чтобы не подрезать самих себя, и без него цена держится
     case 'MATCH_BUYBOX':
-      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: true, needsOwnRank: false, needsShipping: false, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
+      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: false, needsBuyboxPrice: true, needsOwnRank: false, needsShipping: false, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
     case 'BEAT_LOWEST':
       return params.scope === 'MARKET'
-        ? { kind: 'CHEAPEST_ONLY', needsBuyboxWinner: false, needsOwnRank: false, needsShipping: params.compareLanded, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS }
-        : { kind: 'TOP_N', minN: 1, needsBuyboxWinner: false, needsOwnRank: false, needsShipping: params.compareLanded, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
+        ? { kind: 'CHEAPEST_ONLY', needsBuyboxWinner: false, needsBuyboxPrice: false, needsOwnRank: false, needsShipping: params.compareLanded, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS }
+        : { kind: 'TOP_N', minN: 1, needsBuyboxWinner: false, needsBuyboxPrice: false, needsOwnRank: false, needsShipping: params.compareLanded, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
+    // Шаг 97 [Р-219]: «Win the Buy Box» — держатель Buy Box (наш или чужой) и доставка: цель — от landed-цены победителя
+    case 'WIN_BUYBOX':
+      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: true, needsBuyboxPrice: true, needsOwnRank: false, needsShipping: true, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
   }
 }
 
@@ -93,7 +113,9 @@ export function unmetRequirements(req: CompetitorRequirement, snapshot: Competit
   if (!snapshot) return ['NO_SNAPSHOT'];
   const unmet: string[] = [];
   if (!completenessSatisfies(snapshot.completeness, req)) unmet.push('COMPLETENESS');
-  if (req.needsBuyboxWinner && !snapshot.buybox) unmet.push('BUYBOX_WINNER');
+  if (req.needsBuyboxPrice && !snapshot.buybox) unmet.push('BUYBOX_PRICE');
+  // Шаг 97: держатель нужен названным — цена Buy Box без держателя (`isSelf: null`) его не заменяет
+  if (req.needsBuyboxWinner && (!snapshot.buybox || snapshot.buybox.isSelf === null)) unmet.push('BUYBOX_WINNER');
   if (req.needsOwnRank && !snapshot.offers.some((o) => o.isSelf && o.rank !== undefined)) unmet.push('OWN_RANK');
   if (req.needsShipping && snapshot.offers.some((o) => !o.isSelf && !o.shipping)) unmet.push('SHIPPING');
   if (req.conditions.length > 0 && !req.conditions.includes(snapshot.condition.toLowerCase())) unmet.push('CONDITION');
@@ -117,6 +139,7 @@ export function strategyAvailability(
     if (s.role !== 'PRIMARY') u.push('RECONCILIATION_ONLY');
     if (s.availability !== 'AVAILABLE') u.push(`AVAILABILITY_${s.availability}`);
     if (!completenessSatisfies(s.completeness, req)) u.push('COMPLETENESS');
+    if (req.needsBuyboxPrice && !s.hasBuyboxPrice) u.push('BUYBOX_PRICE');
     if (req.needsBuyboxWinner && !s.hasBuyboxWinner) u.push('BUYBOX_WINNER');
     if (req.needsOwnRank && !s.hasOwnRank) u.push('OWN_RANK');
     if (req.needsShipping && !s.hasShipping) u.push('SHIPPING');
@@ -220,7 +243,7 @@ export function runStrategy(input: EngineInput): EngineResult {
     const step = raiseStep();
     return propose(step.to, [...chain, step.reason], reference, true);
   };
-  const marketFollowing = params.type === 'MATCH_BUYBOX' || params.type === 'BEAT_LOWEST';
+  const marketFollowing = params.type === 'MATCH_BUYBOX' || params.type === 'BEAT_LOWEST' || params.type === 'WIN_BUYBOX';
 
   const req = requirementOf(params);
   const unmet = unmetRequirements(req, snapshot, now);
@@ -285,6 +308,15 @@ export function runStrategy(input: EngineInput): EngineResult {
       if (!Number.isSafeInteger(params.undercutMinor) || params.undercutMinor < 0) return invalidMoney('undercutMinor', params.undercutMinor, 'NON_NEGATIVE');
       const bb = snapshot!.buybox!;
       capable = true;
+      /**
+       * Шаг 97 [Р-221]: канал не называет держателя (Amazon, A-29), а наша цена равна цене Buy Box — возможно, Buy Box наш. Подрез здесь
+       * подрезал бы нашу же цену на каждом уведомлении до пола; цена держится. Цена Buy Box НЕ равна нашей — держатель не мы, и это
+       * обычный путь
+       */
+      if (bb.isSelf === null && current !== null && current === bb.price.amountMinor) {
+        const unknown = r('BUYBOX_HOLDER_UNKNOWN', { buyboxMinor: bb.price.amountMinor, currentMinor: current, currency });
+        return holdOrRaise(current, unknown, [unknown], bb.price.amountMinor);
+      }
       if (bb.isSelf) {
         if (params.holdWhenWinning) {
           return holdOrRaise(current ?? bb.price.amountMinor, r('ALREADY_WINNING_BUYBOX'), [r('ALREADY_WINNING_BUYBOX')], bb.price.amountMinor);
@@ -321,6 +353,92 @@ export function runStrategy(input: EngineInput): EngineResult {
       explanation.push(params.undercutMinor > 0
         ? r('LOWEST_UNDERCUT', { lowestMinor: referenceMinor, undercutMinor: params.undercutMinor, targetMinor: target, scope: params.scope, n, currency })
         : r('LOWEST_MATCH', { lowestMinor: referenceMinor, scope: params.scope, n, targetMinor: target, currency }));
+      break;
+    }
+    case 'WIN_BUYBOX': {
+      if (!Number.isSafeInteger(params.undercutMinor) || params.undercutMinor < 0) return invalidMoney('undercutMinor', params.undercutMinor, 'NON_NEGATIVE');
+      if (!Number.isSafeInteger(params.fulfillmentHandicapMinor) || params.fulfillmentHandicapMinor < 0) {
+        return invalidMoney('fulfillmentHandicapMinor', params.fulfillmentHandicapMinor, 'NON_NEGATIVE');
+      }
+      if (params.creepUp && (!Number.isSafeInteger(params.creepStepBp) || params.creepStepBp <= 0)) {
+        return notEvaluated(r('INVALID_STRATEGY_PARAMS', { param: 'creepStepBp', settingBp: Number.isInteger(params.creepStepBp) ? params.creepStepBp : null, allowed: 'POSITIVE' }));
+      }
+      capable = true;
+      const bb = snapshot!.buybox!;
+      const creep = input.creep ?? null;
+      const period = pace?.paceSeconds ?? null;
+      const pausedUntilMs = creep?.lastBack && period !== null ? Date.parse(creep.lastBack.at) + CREEP_PAUSE_PERIODS * period * 1000 : null;
+      const paused = pausedUntilMs !== null && Date.parse(now) < pausedUntilMs;
+      if (bb.isSelf) {
+        // Buy Box наш: цену не снижаем (Keep when winning); подъём — только за флагом creepUp
+        if (!params.creepUp || current === null || belowFloor) {
+          const keep = r('ALREADY_WINNING_BUYBOX');
+          return holdOrRaise(current ?? bb.price.amountMinor, keep, [keep], bb.price.amountMinor);
+        }
+        if (paused) {
+          const wait = r('CREEP_PAUSED', { currentMinor: current, pausedUntil: new Date(pausedUntilMs!).toISOString(), currency });
+          return intent('NO_OP', current, wait, [wait], bb.price.amountMinor);
+        }
+        if (current >= bounds.maxMinor) {
+          const top = r('CREEP_AT_MAX', { currentMinor: current, maxMinor: bounds.maxMinor, currency });
+          return intent('NO_OP', current, top, [top], bb.price.amountMinor);
+        }
+        // Подъём не чаще периода планового пересчёта — от прошлой ступени или от взятия Buy Box (взятие — тоже изменение цены); допуск
+        // в минуту — только пересчёту (как у лестницы, Р-212)
+        const lastMoveMs = Math.max(creep?.lastUp ? Date.parse(creep.lastUp.at) : Number.NEGATIVE_INFINITY, creep?.lastTake ? Date.parse(creep.lastTake.at) : Number.NEGATIVE_INFINITY);
+        if (Number.isFinite(lastMoveMs) && period !== null) {
+          const tolerance = input.trigger.type === 'COMPETITOR_CHANGE' ? 0 : Math.min(LADDER_PACE_TOLERANCE_SECONDS, Math.floor(period / 10));
+          const nextAt = lastMoveMs + period * 1000;
+          if (Date.parse(now) < nextAt - tolerance * 1000) {
+            const wait = r('CREEP_PACED', { currentMinor: current, nextStepAt: new Date(nextAt).toISOString(), currency });
+            return intent('NO_OP', current, wait, [wait], bb.price.amountMinor);
+          }
+        }
+        // Шаг — в пределах шага Gate (больший урезается до предела), не меньше цента и не выше максимума
+        const stepBp = stepLimit !== null ? Math.min(params.creepStepBp, stepLimit) : params.creepStepBp;
+        const up = Math.min(bounds.maxMinor, current + Math.max(1, Math.floor((current * stepBp) / 10_000)));
+        referenceMinor = bb.price.amountMinor;
+        target = up;
+        explanation.push(r('CREEP_UP', { fromMinor: current, toMinor: up, creepStepBp: stepBp, currency }));
+        break;
+      }
+      /**
+       * Buy Box чужой. Потерян сразу после нашего подъёма (цена — та, к которой мы поднялись, возврата после него не было) — назад к
+       * последней выигрышной цене и пауза подъёма; цена потери — потолок на время паузы
+       */
+      const up = creep?.lastUp ?? null;
+      if (up && current !== null && current === up.toMinor && up.fromMinor < up.toMinor
+          && (!creep!.lastBack || Date.parse(creep!.lastBack.at) < Date.parse(up.at))) {
+        const until = new Date(Date.parse(now) + CREEP_PAUSE_PERIODS * (period ?? 0) * 1000).toISOString();
+        // Возврат проходит те же рамки: пол, потолок, Gate — прежняя выигрышная цена могла оказаться ниже поднявшегося с тех пор пола
+        referenceMinor = bb.price.amountMinor;
+        target = up.fromMinor;
+        explanation.push(r('CREEP_STEP_BACK', { lostAtMinor: current, backToMinor: up.fromMinor, pausedUntil: until, currency }));
+        break;
+      }
+      // Цель — от landed-цены победителя: цена Buy Box и доставка победителя (у Buy Box или у предложения-держателя)
+      const winner = snapshot!.offers.find((o) => !o.isSelf && o.holdsBuyBox === true)
+        ?? (bb.sellerRef ? snapshot!.offers.find((o) => !o.isSelf && o.sellerRef === bb.sellerRef) : undefined);
+      const winnerShipping = bb.shipping?.amountMinor ?? winner?.shipping?.amountMinor ?? null;
+      if (winnerShipping === null) return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', { unmet: 'SHIPPING' }));
+      const self = snapshot!.offers.find((o) => o.isSelf);
+      if (!self?.shipping) return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', { unmet: 'OWN_SHIPPING' }));
+      const winnerLanded = bb.price.amountMinor + winnerShipping;
+      const winnerKind = fulfilmentKind(winner?.fulfillment);
+      // Гандикап — только когда канал назвал оба исполнения: победителя исполняет канал, а нас — нет
+      const handicap = winnerKind === 'CHANNEL' && fulfilmentKind(self.fulfillment) === 'MERCHANT' ? params.fulfillmentHandicapMinor : 0;
+      referenceMinor = winnerLanded;
+      target = winnerLanded - params.undercutMinor - handicap - self.shipping.amountMinor;
+      explanation.push(r('BUYBOX_WIN_TARGET', {
+        winnerLandedMinor: winnerLanded, undercutMinor: params.undercutMinor, handicapMinor: handicap, ownShippingMinor: self.shipping.amountMinor,
+        ...(winnerKind ? { winnerFulfilment: winnerKind } : {}), targetMinor: target, currency,
+      }));
+      // Пока идёт пауза, цена потери — потолок: выше неё не предлагаем
+      if (paused && creep?.lastBack && target >= creep.lastBack.lostAtMinor) {
+        const ceiling = creep.lastBack.lostAtMinor;
+        explanation.push(r('CAPPED_AT_CREEP_CEILING', { targetMinor: target, ceilingMinor: ceiling, currency }));
+        target = ceiling - 1;
+      }
       break;
     }
   }

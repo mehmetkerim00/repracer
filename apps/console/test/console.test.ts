@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -157,13 +157,24 @@ test('stand API serves every screen of every world in German and English and ref
       assert.equal(path.demo, false, `${w.id}: мир сценария — не демо`);
       for (const d of (await get<DecisionListView>(auth, api(w.id, 'decisions') + q)).items) await get<DecisionTrace>(auth, api(w.id, 'decisions', d.decisionId) + q);
       await get<RejectedView>(auth, api(w.id, 'rejected') + q);
-      for (const b of (await get<BoundsIndexView>(auth, api(w.id, 'bounds') + q)).items) await get<BoundsView>(auth, api(w.id, 'bounds', b.writeScopeId) + q);
+      for (const b of (await get<BoundsIndexView>(auth, api(w.id, 'bounds') + q)).items) {
+        await get<BoundsView>(auth, api(w.id, 'bounds', b.writeScopeId) + q);
+        // Шаг 97 [E]: страница Competition — у каждого предложения каждого мира; eBay конкурентов не даёт, Amazon держателя не называет (A-29)
+        const c = await get<CompetitionView>(auth, `${api(w.id, 'competition', b.writeScopeId)}${q}&period=24h`);
+        if (c.unit.channel === 'EBAY') assert.equal(c.state, 'NO_COMPETITOR_DATA', `${w.id}: eBay says it has no competitor data`);
+        if (c.unit.channel === 'AMAZON' && c.state === 'OK') assert.equal(c.holder?.kind, 'UNKNOWN', `${w.id}: Amazon names no Buy Box holder`);
+        if (c.unit.channel === 'AMAZON') assert.equal(c.share.available, false, `${w.id}: no share where the holder is unknown`);
+      }
       await get<StrategyListView>(auth, api(w.id, 'strategies') + q);
       await get<PriceFeedView>(auth, api(w.id, 'feed') + q);
       await get<StopView>(auth, api(w.id, 'stop') + q);
     }
   }
   assert.equal((await call(auth, 'GET', api('no-such-world', 'products'))).status, 404);
+  // Шаг 97: Competition — неизвестное предложение 404, неверный период 400
+  assert.equal((await call(auth, 'GET', api(WORLDS[0]!, 'competition', 'ws-no-such-offer'))).status, 404);
+  const anyScope = (await get<BoundsIndexView>(auth, api(WORLDS[0]!, 'bounds'))).items[0]!.writeScopeId;
+  assert.equal((await call(auth, 'GET', `${api(WORLDS[0]!, 'competition', anyScope)}?period=90d`)).status, 400);
   const missing = await call(auth, 'GET', `${api(WORLDS[0]!, 'decisions', 'decision-9999')}?locale=de`);
   assert.deepEqual([missing.status, (missing.body as { error: { message: string } }).error.message], [404, 'Nicht gefunden.']);
 });

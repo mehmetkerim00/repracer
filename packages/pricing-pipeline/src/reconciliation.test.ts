@@ -9,12 +9,14 @@ const snap = (observedAt: string, buybox: number | null, offers: Array<[number, 
   ...(buybox !== null ? { buybox: { price: money(buybox), isSelf: false } } : {}),
   offers: offers.map(([minor, isSelf]) => ({ isSelf, price: money(minor) })),
 });
-const push = { kind: 'PUSH', hasBuyboxWinner: true } as never;
+const push = { kind: 'PUSH', hasBuyboxPrice: true } as never;
 
 test('Р-121: what is compared — the Buy Box only when both the notification and the poll carry it', () => {
-  assert.equal(comparedValue(push, { hasBuyboxWinner: true } as never), 'BUYBOX');
-  assert.equal(comparedValue(push, { hasBuyboxWinner: false } as never), 'LOWEST_COMPETITOR');
-  assert.equal(comparedValue(undefined, { hasBuyboxWinner: true } as never), 'LOWEST_COMPETITOR');
+  assert.equal(comparedValue(push, { hasBuyboxPrice: true } as never), 'BUYBOX');
+  assert.equal(comparedValue(push, { hasBuyboxPrice: false } as never), 'LOWEST_COMPETITOR');
+  assert.equal(comparedValue(undefined, { hasBuyboxPrice: true } as never), 'LOWEST_COMPETITOR');
+  // Шаг 97: держатель Buy Box сверке не нужен — только цена (Amazon ANY_OFFER_CHANGED держателя не называет, A-29)
+  assert.equal(comparedValue({ kind: 'PUSH', hasBuyboxWinner: false, hasBuyboxPrice: true } as never, { hasBuyboxWinner: false, hasBuyboxPrice: true } as never), 'BUYBOX');
 });
 
 test('Р-121: a poll diverges from the held state only when it is newer and the compared value differs', () => {

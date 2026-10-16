@@ -18,7 +18,7 @@ export interface DraftForm {
   strategyId: string | null;
   baseVersion: number | null;
   name: string;
-  type: 'FIXED' | 'TARGET_MARGIN' | 'MATCH_BUYBOX' | 'BEAT_LOWEST';
+  type: 'FIXED' | 'TARGET_MARGIN' | 'MATCH_BUYBOX' | 'BEAT_LOWEST' | 'WIN_BUYBOX';
   /** Суммы — в основных единицах валюты («19,99»), маржа — в процентах («12,5») */
   price: string;
   targetMargin: string;
@@ -28,11 +28,15 @@ export interface DraftForm {
   atBound: 'CAP' | 'HOLD';
   scope: 'VISIBLE_TOP_N' | 'MARKET';
   compareLanded: boolean;
+  /** Шаг 97 [Р-219]: Win the Buy Box — поправка на исполнение каналом, подъём при удержании (по умолчанию выключен) и его шаг в процентах */
+  handicap: string;
+  creepUp: boolean;
+  creepStep: string;
 }
 
 export const EMPTY_DRAFT: DraftForm = {
   strategyId: null, baseVersion: null, name: '', type: 'MATCH_BUYBOX', price: '', targetMargin: '20', undercut: '0.05', deadband: '0',
-  holdWhenWinning: true, atBound: 'CAP', scope: 'VISIBLE_TOP_N', compareLanded: false,
+  holdWhenWinning: true, atBound: 'CAP', scope: 'VISIBLE_TOP_N', compareLanded: false, handicap: '0', creepUp: false, creepStep: '1',
 };
 
 // Шаг 79 (ревью): суммы черновика — в формате языка экрана («0,05» по-немецки); разбор принимает и запятую, и точку
@@ -54,6 +58,8 @@ export function formOf(item: StrategyListItem, locale = 'en'): DraftForm {
     undercut: amountText(p.undercutMinor as number | undefined, locale), deadband: amountText(item.draft.deadbandMinor, locale),
     holdWhenWinning: p.holdWhenWinning === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP', scope: p.scope === 'MARKET' ? 'MARKET' : 'VISIBLE_TOP_N',
     compareLanded: p.compareLanded === true,
+    handicap: amountText((p.fulfillmentHandicapMinor as number | undefined) ?? 0, locale), creepUp: p.creepUp === true,
+    creepStep: percentText((p.creepStepBp as number | undefined) ?? 100, locale),
   };
 }
 
@@ -61,6 +67,7 @@ export function draftOf(f: DraftForm): unknown {
   const params = f.type === 'FIXED' ? { type: f.type, priceMinor: minorOf(f.price) }
     : f.type === 'TARGET_MARGIN' ? { type: f.type, targetMarginBp: bpOf(f.targetMargin) }
       : f.type === 'MATCH_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), holdWhenWinning: f.holdWhenWinning, atBound: f.atBound }
+        : f.type === 'WIN_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), fulfillmentHandicapMinor: minorOf(f.handicap), creepUp: f.creepUp, creepStepBp: bpOf(f.creepStep), atBound: f.atBound }
         : { type: f.type, undercutMinor: minorOf(f.undercut), scope: f.scope, compareLanded: f.compareLanded, atBound: f.atBound };
   return { name: f.name, params, deadbandMinor: minorOf(f.deadband) } satisfies Record<keyof StrategyDraft, unknown>;
 }
@@ -264,10 +271,12 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
               {(Object.keys(t.types) as Array<keyof typeof t.types>).map((k) => <option key={k} value={k}>{t.types[k]}</option>)}
             </select></Field>
           </FieldGrid>
-          <FieldGrid cols={form.type === 'BEAT_LOWEST' ? 4 : form.type === 'MATCH_BUYBOX' ? 3 : 2}>
+          {/* Шаг 97 [G]: карточка типа — что делает «Win the Buy Box» и чего не обещает */}
+          {form.type === 'WIN_BUYBOX' ? <p className="notice type-about">{t.winBuyboxAbout}</p> : null}
+          <FieldGrid cols={form.type === 'BEAT_LOWEST' || form.type === 'WIN_BUYBOX' ? 4 : form.type === 'MATCH_BUYBOX' ? 3 : 2}>
             {form.type === 'FIXED' ? <Field label={t.fields.priceMinor} caption={t.captions.priceMinor}><input inputMode="decimal" value={form.price} onChange={(e) => set('price', e.target.value)} /></Field> : null}
             {form.type === 'TARGET_MARGIN' ? <Field label={t.fields.targetMarginBp} caption={t.captions.targetMarginBp}><input inputMode="decimal" value={form.targetMargin} onChange={(e) => set('targetMargin', e.target.value)} /></Field> : null}
-            {form.type === 'MATCH_BUYBOX' || form.type === 'BEAT_LOWEST' ? (
+            {form.type === 'MATCH_BUYBOX' || form.type === 'BEAT_LOWEST' || form.type === 'WIN_BUYBOX' ? (
               <>
                 <Field label={t.fields.undercutMinor} caption={t.captions.undercutMinor}><input inputMode="decimal" value={form.undercut} onChange={(e) => set('undercut', e.target.value)} /></Field>
                 <Field label={t.fields.atBound} caption={t.captions.atBound}><select value={form.atBound} onChange={(e) => set('atBound', e.target.value as DraftForm['atBound'])}>
@@ -275,6 +284,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
                 </select></Field>
               </>
             ) : null}
+            {form.type === 'WIN_BUYBOX' ? <Field label={t.fields.fulfillmentHandicapMinor} caption={t.captions.fulfillmentHandicapMinor}><input inputMode="decimal" value={form.handicap} onChange={(e) => set('handicap', e.target.value)} /></Field> : null}
             {form.type === 'BEAT_LOWEST' ? (
               <Field label={t.fields.scope} caption={t.captions.scope}><select value={form.scope} onChange={(e) => set('scope', e.target.value as DraftForm['scope'])}>
                 <option value="VISIBLE_TOP_N">{t.scopes.VISIBLE_TOP_N}</option><option value="MARKET">{t.scopes.MARKET}</option>
@@ -284,6 +294,12 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
           </FieldGrid>
           {form.type === 'MATCH_BUYBOX' ? <CheckField label={t.fields.holdWhenWinning} caption={t.captions.holdWhenWinning} checked={form.holdWhenWinning} onChange={(v) => set('holdWhenWinning', v)} /> : null}
           {form.type === 'BEAT_LOWEST' ? <CheckField label={t.fields.compareLanded} caption={t.captions.compareLanded} checked={form.compareLanded} onChange={(v) => set('compareLanded', v)} /> : null}
+          {form.type === 'WIN_BUYBOX' ? <CheckField label={t.fields.creepUp} caption={t.captions.creepUp} checked={form.creepUp} onChange={(v) => set('creepUp', v)} /> : null}
+          {form.type === 'WIN_BUYBOX' && form.creepUp ? (
+            <FieldGrid cols={4}>
+              <Field label={t.fields.creepStepBp} caption={t.captions.creepStepBp}><input inputMode="decimal" value={form.creepStep} onChange={(e) => set('creepStep', e.target.value)} /></Field>
+            </FieldGrid>
+          ) : null}
         </FieldGroup>
       ) : null}
 

@@ -102,6 +102,22 @@
                     }
                   }
                 ],
+                "ListPrice": {
+                  "Amount": 18.5,
+                  "CurrencyCode": "EUR"
+                },
+                "MinimumAdvertisedPrice": {
+                  "Amount": 17.8,
+                  "CurrencyCode": "EUR"
+                },
+                "SuggestedLowerPricePlusShipping": {
+                  "Amount": 17.8,
+                  "CurrencyCode": "EUR"
+                },
+                "CompetitivePriceThreshold": {
+                  "Amount": 18.5,
+                  "CurrencyCode": "EUR"
+                },
                 "TotalBuyBoxEligibleOffers": 2,
                 "SalesRankings": [],
                 "NumberOfBuyBoxEligibleOffers": []
@@ -117,7 +133,10 @@
                   "ShippingTime": {
                     "MinimumHours": 24,
                     "MaximumHours": 72,
-                    "AvailabilityType": "NOW"
+                    "AvailabilityType": "NOW",
+                    "AvailableDate": {
+                      "$clockIso": -5000
+                    }
                   },
                   "ListingPrice": {
                     "Amount": 17.8,
@@ -128,10 +147,13 @@
                     "CurrencyCode": "EUR"
                   },
                   "ShipsFrom": {
-                    "Country": "DE"
+                    "Country": "DE",
+                    "State": "BE"
+                  },
+                  "Points": {
+                    "PointsNumber": 0
                   },
                   "IsFulfilledByAmazon": false,
-                  "IsBuyBoxWinner": true,
                   "PrimeInformation": {
                     "IsOfferPrime": false,
                     "IsOfferNationalPrime": false
@@ -151,7 +173,10 @@
                   "ShippingTime": {
                     "MinimumHours": 24,
                     "MaximumHours": 72,
-                    "AvailabilityType": "NOW"
+                    "AvailabilityType": "NOW",
+                    "AvailableDate": {
+                      "$clockIso": -5000
+                    }
                   },
                   "ListingPrice": {
                     "Amount": 18.5,
@@ -162,10 +187,13 @@
                     "CurrencyCode": "EUR"
                   },
                   "ShipsFrom": {
-                    "Country": "DE"
+                    "Country": "DE",
+                    "State": "BE"
+                  },
+                  "Points": {
+                    "PointsNumber": 0
                   },
                   "IsFulfilledByAmazon": false,
-                  "IsBuyBoxWinner": false,
                   "PrimeInformation": {
                     "IsOfferPrime": false,
                     "IsOfferNationalPrime": false
@@ -197,7 +225,12 @@
                   "currency": "EUR",
                   "basis": "GROSS"
                 },
-                "isSelf": false
+                "isSelf": null,
+                "shipping": {
+                  "amountMinor": 0,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
               }
             }
           }
@@ -269,6 +302,22 @@
                     }
                   }
                 ],
+                "ListPrice": {
+                  "Amount": 18.5,
+                  "CurrencyCode": "EUR"
+                },
+                "MinimumAdvertisedPrice": {
+                  "Amount": 17.8,
+                  "CurrencyCode": "EUR"
+                },
+                "SuggestedLowerPricePlusShipping": {
+                  "Amount": 17.8,
+                  "CurrencyCode": "EUR"
+                },
+                "CompetitivePriceThreshold": {
+                  "Amount": 18.5,
+                  "CurrencyCode": "EUR"
+                },
                 "TotalBuyBoxEligibleOffers": 2,
                 "SalesRankings": [],
                 "NumberOfBuyBoxEligibleOffers": []
@@ -284,7 +333,10 @@
                   "ShippingTime": {
                     "MinimumHours": 24,
                     "MaximumHours": 72,
-                    "AvailabilityType": "NOW"
+                    "AvailabilityType": "NOW",
+                    "AvailableDate": {
+                      "$clockIso": -5000
+                    }
                   },
                   "ListingPrice": {
                     "Amount": 17.8,
@@ -295,10 +347,13 @@
                     "CurrencyCode": "EUR"
                   },
                   "ShipsFrom": {
-                    "Country": "DE"
+                    "Country": "DE",
+                    "State": "BE"
+                  },
+                  "Points": {
+                    "PointsNumber": 0
                   },
                   "IsFulfilledByAmazon": false,
-                  "IsBuyBoxWinner": true,
                   "PrimeInformation": {
                     "IsOfferPrime": false,
                     "IsOfferNationalPrime": false
@@ -318,7 +373,10 @@
                   "ShippingTime": {
                     "MinimumHours": 24,
                     "MaximumHours": 72,
-                    "AvailabilityType": "NOW"
+                    "AvailabilityType": "NOW",
+                    "AvailableDate": {
+                      "$clockIso": -5000
+                    }
                   },
                   "ListingPrice": {
                     "Amount": 18.5,
@@ -329,10 +387,13 @@
                     "CurrencyCode": "EUR"
                   },
                   "ShipsFrom": {
-                    "Country": "DE"
+                    "Country": "DE",
+                    "State": "BE"
+                  },
+                  "Points": {
+                    "PointsNumber": 0
                   },
                   "IsFulfilledByAmazon": false,
-                  "IsBuyBoxWinner": false,
                   "PrimeInformation": {
                     "IsOfferPrime": false,
                     "IsOfferNationalPrime": false
@@ -412,6 +473,22 @@
                     }
                   }
                 ],
+                "ListPrice": {
+                  "Amount": 18.5,
+                  "CurrencyCode": "EUR"
+                },
+                "MinimumAdvertisedPrice": {
+                  "Amount": 17.7,
+                  "CurrencyCode": "EUR"
+                },
+                "SuggestedLowerPricePlusShipping": {
+                  "Amount": 17.7,
+                  "CurrencyCode": "EUR"
+                },
+                "CompetitivePriceThreshold": {
+                  "Amount": 18.5,
+                  "CurrencyCode": "EUR"
+                },
                 "TotalBuyBoxEligibleOffers": 2,
                 "SalesRankings": [],
                 "NumberOfBuyBoxEligibleOffers": []
@@ -427,7 +504,10 @@
                   "ShippingTime": {
                     "MinimumHours": 24,
                     "MaximumHours": 72,
-                    "AvailabilityType": "NOW"
+                    "AvailabilityType": "NOW",
+                    "AvailableDate": {
+                      "$clockIso": -5000
+                    }
                   },
                   "ListingPrice": {
                     "Amount": 17.7,
@@ -438,10 +518,13 @@
                     "CurrencyCode": "EUR"
                   },
                   "ShipsFrom": {
-                    "Country": "DE"
+                    "Country": "DE",
+                    "State": "BE"
+                  },
+                  "Points": {
+                    "PointsNumber": 0
                   },
                   "IsFulfilledByAmazon": false,
-                  "IsBuyBoxWinner": true,
                   "PrimeInformation": {
                     "IsOfferPrime": false,
                     "IsOfferNationalPrime": false
@@ -461,7 +544,10 @@
                   "ShippingTime": {
                     "MinimumHours": 24,
                     "MaximumHours": 72,
-                    "AvailabilityType": "NOW"
+                    "AvailabilityType": "NOW",
+                    "AvailableDate": {
+                      "$clockIso": -5000
+                    }
                   },
                   "ListingPrice": {
                     "Amount": 18.5,
@@ -472,10 +558,13 @@
                     "CurrencyCode": "EUR"
                   },
                   "ShipsFrom": {
-                    "Country": "DE"
+                    "Country": "DE",
+                    "State": "BE"
+                  },
+                  "Points": {
+                    "PointsNumber": 0
                   },
                   "IsFulfilledByAmazon": false,
-                  "IsBuyBoxWinner": false,
                   "PrimeInformation": {
                     "IsOfferPrime": false,
                     "IsOfferNationalPrime": false

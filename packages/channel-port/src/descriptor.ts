@@ -63,7 +63,13 @@ export interface CompetitorSourceDescriptor {
   kind: 'PUSH' | 'PULL' | 'REPORT';
   completeness: { kind: 'TOP_N'; n: number } | { kind: 'CHEAPEST_ONLY' } | { kind: 'FULL' };
   conditions: string[];
+  /** Источник называет держателя Buy Box (наш или чужой) — нужно стратегии «Win the Buy Box» и доле Buy Box (шаг 97) */
   hasBuyboxWinner: boolean;
+  /**
+   * Шаг 97: источник отдаёт цену Buy Box — нужно стратегии «Match the Buy Box». Отдельно от держателя: Amazon ANY_OFFER_CHANGED даёт
+   * цену (Summary.BuyBoxPrices), но не держателя (A-29)
+   */
+  hasBuyboxPrice: boolean;
   hasOwnRank: boolean;
   hasShipping: boolean;
   /** null — зависит от расписания опроса или не документировано */

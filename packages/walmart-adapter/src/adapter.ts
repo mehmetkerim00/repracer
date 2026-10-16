@@ -217,18 +217,24 @@ export class WalmartAdapter implements ChannelAdapter {
       try {
         const r = await client.request('GET', `${WALMART_PATHS.buybox}?sku=${encodeURIComponent(q.channelProductRef)}`);
         if (r.status !== 200) { result.failures.push({ query: q, error: classifyStatus(r.status, 'getBuyBox', Date.parse(this.deps.now())) }); continue; }
-        const b = r.body as { buyBox?: { price?: WalmartMoney; isSelf?: boolean }; offers?: Array<{ sellerRef?: string; isSelf?: boolean; price?: WalmartMoney; shipping?: WalmartMoney }>; observedAt?: string };
+        const b = r.body as { buyBox?: { price?: WalmartMoney; isSelf?: boolean; sellerRef?: string }; offers?: Array<{ sellerRef?: string; isSelf?: boolean; price?: WalmartMoney; shipping?: WalmartMoney }>; observedAt?: string };
+        const bbSelf = b.buyBox?.isSelf === true;
+        const bbSeller = typeof b.buyBox?.sellerRef === 'string' ? b.buyBox.sellerRef : null;
         const offers = (b.offers ?? []).flatMap((o, i) => {
           const minor = toMinor(o.price?.amount);
           if (minor === null) return [];
           const ship = toMinor(o.shipping?.amount);
-          return [{ rank: i + 1, isSelf: o.isSelf === true, price: usd(minor), ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), ...(ship !== null ? { shipping: usd(ship) } : {}) }];
+          // Шаг 97: держатель Buy Box — продавец, названный у Buy Box (свой — признаком isSelf); исполнения модель Walmart не называет (W-05)
+          const holds = o.isSelf === true ? bbSelf : bbSeller !== null && o.sellerRef === bbSeller;
+          return [{ rank: i + 1, isSelf: o.isSelf === true, price: usd(minor), ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), ...(ship !== null ? { shipping: usd(ship) } : {}),
+            ...(holds ? { holdsBuyBox: true } : {}) }];
         });
         const bb = toMinor(b.buyBox?.price?.amount);
+        const holder = offers.find((o) => o.holdsBuyBox);
         const snapshot: CompetitorSnapshot = {
           marketplace: q.marketplace, channelProductRef: q.channelProductRef, condition: q.condition, source: SOURCE_WALMART_BUY_BOX,
           observedAt: (b.observedAt ?? this.deps.now()) as Instant, completeness: { kind: 'TOP_N', n: 10 }, offers,
-          ...(bb !== null ? { buybox: { price: usd(bb), isSelf: b.buyBox?.isSelf === true } } : {}),
+          ...(bb !== null ? { buybox: { price: usd(bb), isSelf: bbSelf, ...(holder?.shipping ? { shipping: holder.shipping } : {}), ...(bbSeller && !bbSelf ? { sellerRef: bbSeller } : {}) } } : {}),
         };
         result.snapshots.push(snapshot);
       } catch (e) {

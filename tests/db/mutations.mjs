@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0184_verify_schema_invariants_v50.sql';
+const VERIFY = 'migrations/0190_verify_schema_invariants_v51.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2442,6 +2442,74 @@ export const STEP74_ROWS = [
         verify('tenant_data\\.price_history\\.amount_minor: SELECT of the alert delivery role is not in its allow list')),
       m('GRANT EXECUTE ON FUNCTION tenant_data.price_ladder_from(uuid,uuid) TO repracer_alert_delivery',
         verify('tenant_data\\.price_ladder_from\\(uuid,uuid\\): SECURITY DEFINER function executable by the alert delivery role')),
+    ],
+  },
+];
+
+/**
+ * Шаг 97 [Р-218…Р-221]: картина рынка в квитанции решения (0187), отрезки держателя Buy Box (0188), стратегия «Win the Buy Box» и её
+ * гандикап, доступность стратегий по держателю и цене Buy Box, единый список правил из данных конкурентов (0189)
+ */
+const CP = T('competitors.pg.test.ts');
+const CDR = T('competitor-derived-rules.pg.test.ts');
+export const STEP97_ROWS = [
+  {
+    row: 'шаг 97 (Р-218)', critical: false,
+    invariant: 'картина рынка — только у цены из данных конкурентов и решения не «без изменения», и только полями списка',
+    mutations: [
+      m(dropConstraint('price_decision_competitor_view_shape', 'channel_data.price_decision'),
+        node(CP, 'the database refuses a malformed competitor view', 'a competitor view with a field outside the list is refused', 'resolved')),
+      m(dropConstraint('price_decision_competitor_view_scope', 'channel_data.price_decision'),
+        node(CP, 'the database refuses a malformed competitor view', 'a fixed price carries no competitor view', 'resolved')),
+    ],
+  },
+  {
+    row: 'шаг 97 (Р-220)', critical: false,
+    invariant: 'отрезок держателя Buy Box: держатель из перечня, продавец — только у чужого, видим не раньше начала, хотя бы один снимок; меняется только продление вперёд',
+    mutations: [
+      m(dropConstraint('buybox_span_holder_known', 'channel_data.buybox_span'),
+        node(CP, 'the database refuses a malformed competitor view', 'a holder outside SELF, OTHER, NONE is refused', 'resolved')),
+      m(dropConstraint('buybox_span_winner_only_other', 'channel_data.buybox_span'),
+        node(CP, 'the database refuses a malformed competitor view', 'a seller is named only for another holder', 'resolved')),
+      m(dropConstraint('buybox_span_seen_after_start', 'channel_data.buybox_span'),
+        node(CP, 'the database refuses a malformed competitor view', 'a span is not seen before it starts', 'resolved')),
+      m(dropConstraint('buybox_span_snapshots_positive', 'channel_data.buybox_span'),
+        node(CP, 'the database refuses a malformed competitor view', 'a span has at least one snapshot', 'resolved')),
+      m(dropTrigger('a_buybox_span_guard', 'channel_data.buybox_span'),
+        node(CP, 'the database refuses a malformed competitor view', 'the holder of a span is not rewritten', 'resolved')),
+      m(replaceInFunction('channel_data.buybox_span_guard()', 'IF NEW.last_seen_at < OLD.last_seen_at OR NEW.snapshots < OLD.snapshots THEN', 'IF false THEN'),
+        node(CP, 'the database refuses a malformed competitor view', 'a span is not shortened', 'resolved')),
+    ],
+  },
+  {
+    row: 'шаг 97 (Р-219, Р-91)', critical: false,
+    invariant: 'гандикап «Win the Buy Box» — рядом с подрезом, не в вечной версии стратегии, не отрицательный и не пропущенный',
+    mutations: [
+      m(dropConstraint('pricing_strategy_handicap_not_eternal', 'tenant_data.pricing_strategy'),
+        node(CP, 'the fulfilment handicap lives with the undercut', 'the handicap is not kept in the eternal strategy version', 'resolved')),
+      m(dropConstraint('pricing_strategy_undercut_handicap_non_negative', 'channel_data.pricing_strategy_undercut'),
+        node(CP, 'the fulfilment handicap lives with the undercut', 'a negative handicap is refused', 'resolved')),
+      m(replaceInFunction('tenant_data.pricing_strategy_requires_undercut()', "IF NEW.type = 'WIN_BUYBOX' AND NOT EXISTS (", 'IF false AND NOT EXISTS ('),
+        node(CP, 'the fulfilment handicap lives with the undercut', 'Win the Buy Box without a handicap is refused', 'resolved')),
+    ],
+  },
+  {
+    row: 'шаг 97 (Р-39, Р-221)', critical: false,
+    invariant: '«Win the Buy Box» недоступна, где канал не называет держателя Buy Box (Amazon, A-29); «Match the Buy Box» нужна только цена Buy Box',
+    mutations: [
+      m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', "IF bb_winner AND NOT s.has_buybox_winner THEN u := u || 'BUYBOX_WINNER'::text; END IF;", 'NULL;'),
+        node(CP, 'Win the Buy Box needs a named holder', 'Win the Buy Box is unavailable where the channel does not name the holder', '^\\{\\}$')),
+    ],
+  },
+  {
+    row: 'шаг 97 (правило-страж)', critical: false,
+    invariant: 'правило «цена из данных конкурентов» в коде одно, и база отвечает так же: намерение, вечное ядро, снятие остановки выборкой',
+    mutations: [
+      m(`ALTER TABLE channel_data.price_intent DROP COLUMN competitor_derived;
+         ALTER TABLE channel_data.price_intent ADD COLUMN competitor_derived boolean GENERATED ALWAYS AS (coalesce(rule_code IN ('MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'), false)) STORED`,
+        node(CDR, 'the competitor-derived rule list of the code equals the database', 'channel_data.price_intent.competitor_derived agrees with COMPETITOR_DERIVED_RULES', 'WIN_BUYBOX: database false')),
+      m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamp with time zone)', "'POSITION', 'WIN_BUYBOX')", "'POSITION')"),
+        node(CDR, 'the competitor-derived rule list of the code equals the database', 'the halt review samples offers of every competitor-derived strategy type', '^(?!.*WIN_BUYBOX)')),
     ],
   },
 ];

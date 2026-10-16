@@ -4,7 +4,7 @@
   "channel": "KAUFLAND",
   "apiVersion": "2.44.0",
   "title": "GET /buybox: цены double переводятся в центы, своё предложение — по id_unit",
-  "description": "Р-36: /buybox — основной источник конкурентов вместе с buy_box_changed. Спецификация: price — number «в валюте витрины»; адаптер считает это евро и округляет до центов [KFL_C06, K-17], включая значения с ошибкой представления (17.95, 4.95, 19.99). Своё предложение определяется по наличию id_unit [KFL_C18]. Запросы с витриной вне аккаунта и нечисловым id_product отклоняются без обращения к каналу.",
+  "description": "Р-36: /buybox — основной источник конкурентов вместе с buy_box_changed. Спецификация: price — number «в валюте витрины»; адаптер считает это евро и округляет до центов [KFL_C06, K-17], включая значения с ошибкой представления (17.95, 4.95, 19.99). Своё предложение определяется по наличию id_unit [KFL_C18]. Шаг 97: держатель Buy Box — ранг 1 (holdsBuyBox), у Buy Box — его доставка и продавец. Запросы с витриной вне аккаунта и нечисловым id_product отклоняются без обращения к каналу.",
   "tags": ["competitors", "conservative:KFL_C06", "conservative:KFL_C18"],
   "provenance": {
     "kind": "SYNTHETIC_FROM_DOCS",
@@ -38,7 +38,7 @@
             "source": "KAUFLAND_BUYBOX",
             "observedAt": "2026-09-14T10:00:00.000Z",
             "completeness": { "kind": "TOP_N", "n": 10 },
-            "buybox": { "price": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" }, "isSelf": false },
+            "buybox": { "price": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" }, "isSelf": false, "shipping": { "amountMinor": 0, "currency": "EUR", "basis": "GROSS" }, "sellerRef": "Synthetic Competitor" },
             "offers": {
               "$exact": [
                 {
@@ -46,7 +46,7 @@
                   "price": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" },
                   "shipping": { "amountMinor": 0, "currency": "EUR", "basis": "GROSS" },
                   "totalPrice": { "amountMinor": 1795, "currency": "EUR", "basis": "GROSS" },
-                  "condition": "new", "fulfillment": "fulfilled_by_merchant", "deliveryDays": { "min": 1, "max": 2 }
+                  "condition": "new", "fulfillment": "fulfilled_by_merchant", "deliveryDays": { "min": 1, "max": 2 }, "holdsBuyBox": true
                 },
                 {
                   "rank": 2, "sellerRef": "Synthetic Seller", "isSelf": true,

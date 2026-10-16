@@ -913,6 +913,12 @@ p.notice.live-blocked { margin: 0; }
   /* ряды фильтров — столбиком, элементы на всю ширину, счётчик — под ними */
   .field-toolbar, .toolbar.field-toolbar { flex-direction: column; align-items: stretch; }
   .field-toolbar > * { width: 100%; max-width: none; flex-basis: auto; }
+  /*
+   * Шаг 97: в столбике основа flex — это ВЫСОТА. Ширины полей ряда (18rem, 12rem у выбора) специфичнее строки выше и становились
+   * высотой — под каждым полем фильтров на телефоне пустота 12–18rem (журнал цен, Shadow mode, Protections с шага 96). Правило смоука
+   * «поле не выше своего содержимого» держит это
+   */
+  .field-toolbar > .field, .field-toolbar > .field:has(> select), .field-toolbar > .field:has(> .segmented), .field-toolbar > .field:has(.offer-picker.inline) { flex: 0 0 auto; }
   .offer-picker.inline input[type='search'], .offer-picker.inline select { min-width: 0; width: 100%; max-width: none; }
   .offer-picker, .offer-picker.inline { flex-direction: column; width: 100%; }
   .filters-count { margin-left: 0; align-self: flex-start; line-height: inherit; order: 99; }
@@ -1081,3 +1087,33 @@ th .legend { display: block; color: var(--text-3); font-size: var(--font-size-xs
 .uniform-caption { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
 .uniform-state { display: inline-flex; align-items: center; gap: var(--space-1); }
 
+
+/* Шаг 97 [Р-218…Р-221]: конкуренты и Buy Box — таблица конкурентов (квитанция и страница Competition), чип журнала цен */
+/* подсветка нашей строки — слоем поверх фона карточки: закреплённая первая ячейка на телефоне непрозрачна и не пропускает прокрутку */
+table.competitors tr.self-row td { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface); }
+table.competitors tr.gone-row td { color: var(--text-3); }
+table.competitors td.landed { white-space: nowrap; }
+table.competitors .was { color: var(--text-2); }
+.move { display: inline-flex; align-items: center; min-height: var(--badge-h); padding: 0 var(--space-1); border-radius: var(--radius-pill); font-size: var(--font-size-xs); font-weight: var(--weight-medium); }
+.move-down { color: var(--danger-strong); background: var(--danger-soft); }
+.move-up { color: var(--success-strong); background: var(--success-soft); }
+.move-new, .move-gone { color: var(--text-2); background: var(--neutral-soft); }
+.trigger-chip {
+  display: inline-flex; align-items: center; min-height: var(--badge-h); margin-top: var(--space-1); padding: 0 var(--space-2); border-radius: var(--radius-pill);
+  background: var(--neutral-soft); color: var(--text-2); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.verdict-body > p.trigger-line { margin: var(--space-1) 0 0; color: var(--text-2); }
+details.competitors-at { margin-top: var(--space-2); }
+details.competitors-at > summary { cursor: pointer; color: var(--accent-text); font-weight: var(--weight-medium); }
+details.competitors-at > .table-wrap { margin-top: var(--space-2); }
+.competition .card { margin-bottom: var(--space-4); }
+.competition .holder { margin: 0 0 var(--space-2); }
+.competition .facts { margin: 0 0 var(--space-3); }
+.competition .facts li + li { margin-top: var(--space-1); }
+.competition-share .big { margin: var(--space-2) 0 0; }
+.competition-why .reasons-list { margin: 0 0 var(--space-2); padding-left: var(--space-4); }
+.competition-why .reasons-list li + li { margin-top: var(--space-1); }
+@media (width < 48rem) {
+  /* закреплённая первая ячейка нашей строки на телефоне — та же подсветка, непрозрачная */
+  .table-wrap > table.competitors:not(.cardify) tr.self-row td:first-child { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface); }
+}

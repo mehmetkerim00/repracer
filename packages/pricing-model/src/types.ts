@@ -26,12 +26,27 @@ export type ReasonCode = SanityReasonCode | SanityWarningCode | EngineReasonCode
 
 /**
  * Правила, цена которых выведена из данных конкурентов. Остановка канала блокирует только их [Р-51];
- * совпадает с генерируемым столбцом channel_data.price_intent.competitor_derived (0032).
+ * совпадает с генерируемыми столбцами channel_data.price_intent.competitor_derived и tenant_data.price_intent_core.competitor_derived
+ * (0032, 0052; шаг 97 — 0189 добавил WIN_BUYBOX). Единственный список кода: остальные списки выводятся из него, а равенство с базой
+ * держит правило-страж (packages/pricing-store-pg/test/competitor-derived-rules.pg.test.ts)
  */
-export const COMPETITOR_DERIVED_RULES: ReadonlySet<string> = new Set(['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION']);
+export const COMPETITOR_DERIVED_RULES: ReadonlySet<string> = new Set(['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION', 'WIN_BUYBOX']);
 
 export function isCompetitorDerived(ruleCode: string): boolean {
   return COMPETITOR_DERIVED_RULES.has(ruleCode);
+}
+
+/**
+ * Шаг 97: кто исполняет предложение, по значению канала. Значения — только документированные: Amazon IsFulfilledByAmazon (адаптер
+ * пишет AFN/MFN), Kaufland fulfillment_type (`fulfilled_by_kaufland` / `fulfilled_by_merchant`, спецификация 2.44.0), обнаружение
+ * предложений (`CHANNEL` / `MERCHANT`). Остальное — null: канал не назвал, и гандикап и диагностика исполнения не применяются
+ */
+export function fulfilmentKind(fulfillment: string | undefined | null): 'CHANNEL' | 'MERCHANT' | null {
+  switch ((fulfillment ?? '').toLowerCase()) {
+    case 'afn': case 'fulfilled_by_kaufland': case 'channel': return 'CHANNEL';
+    case 'mfn': case 'fulfilled_by_merchant': case 'merchant': return 'MERCHANT';
+    default: return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +129,10 @@ export interface CompetitorRequirement {
   /** null — стратегии конкуренты не нужны */
   kind: CompletenessKind | null;
   minN?: number;
+  /** Шаг 97: нужен держатель Buy Box (наш или чужой) — «Win the Buy Box» */
   needsBuyboxWinner: boolean;
+  /** Шаг 97: нужна цена Buy Box — «Match the Buy Box»; держатель ей не обязателен (Amazon его не называет, A-29) */
+  needsBuyboxPrice: boolean;
   needsOwnRank: boolean;
   needsShipping: boolean;
   conditions: string[];
@@ -140,6 +158,26 @@ export type StrategyParams =
       scope: 'VISIBLE_TOP_N' | 'MARKET';
       /** Сравнивать цену с доставкой */
       compareLanded: boolean;
+      atBound: 'CAP' | 'HOLD';
+    }
+  | {
+      /**
+       * Шаг 97 [Р-219]: «Win the Buy Box». Buy Box не наш — цель = landed-цена победителя минус подрез и гандикап за исполнение, минус наша
+       * доставка; Buy Box наш — цену не снижаем; за флагом creepUp — подъём ступенью за период, пока Buy Box наш; потеряли — назад к
+       * последней выигрышной цене и пауза. Все рамки (пол, потолок, шаг, частота, Price Gate, проверка входов) — как у остальных
+       */
+      type: 'WIN_BUYBOX';
+      /** На сколько центов встать ниже landed-цены победителя (0 — сравняться); величина — в таблице подреза [Р-91] */
+      undercutMinor: number;
+      /**
+       * Гандикап за исполнение: победителя исполняет канал (Amazon FBA, Kaufland, Walmart WFS), а нас — нет; быть ниже ещё на столько.
+       * По умолчанию 0; величина — в таблице подреза, как и подрез [Р-91]
+       */
+      fulfillmentHandicapMinor: number;
+      /** Подъём цены, пока Buy Box наш (по умолчанию выключен) */
+      creepUp: boolean;
+      /** Шаг подъёма в базисных пунктах; не больше предела шага Gate (больший — урезается до предела) */
+      creepStepBp: number;
       atBound: 'CAP' | 'HOLD';
     };
 

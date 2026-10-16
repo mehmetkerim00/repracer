@@ -20,8 +20,9 @@ export const LOSS_GRACE_BASIS = 'ASSUMPTION (OQ-175): notification delay of the 
 
 export interface HeldState { observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null }
 
+/** Шаг 97: сверяется цена Buy Box — достаточно, что оба источника её отдают; держатель (`hasBuyboxWinner`) сверке не нужен */
 export function comparedValue(push: CompetitorSourceDescriptor | undefined, poll: CompetitorSourceDescriptor | undefined): ReconciliationCompared {
-  return push?.hasBuyboxWinner && poll?.hasBuyboxWinner ? 'BUYBOX' : 'LOWEST_COMPETITOR';
+  return push?.hasBuyboxPrice && poll?.hasBuyboxPrice ? 'BUYBOX' : 'LOWEST_COMPETITOR';
 }
 
 /** Те же значения, что у последнего принятого состояния (competitor_state): Buy Box — со своим, наименьшая — без своих предложений */

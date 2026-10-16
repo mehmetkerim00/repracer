@@ -6,7 +6,7 @@ export type { Fmt, Locale, Template } from './i18n/types.ts';
 /** Права по роли [OQ-125] — те же, что проверяют хранилище и БД */
 export { can, EXTENDED_ROLES, offeredRoles, VISIBLE_ROLES, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 export { boundText, channelNotes, productList, strategyLabel, type ChannelNote, type FloorCell, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
-export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
+export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, triggerPhrase, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceCompetitors, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';
 export { planStop, stopView, type AuditCard, type DistrustCard, type HaltCard, type StopKindRow, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
@@ -33,3 +33,4 @@ export { REJECTED_WINDOW_DAYS } from './rejected.ts';
 export { connectionsView, accountState, channelLimitText, externalWritersView, OTHER_TOOLS_ANSWERS, type ConnectionsView, type ConnectionAccountView, type ConnectionChannelView, type ConnectionState, type ConnectableChannel, type OtherToolsAnswer, type OtherToolsView, type QuantityWritesView } from './connections.ts';
 // Шаг 87 [Р-214]: профиль рынка развёртывания — каналы, витрины, языки и правило Omnibus, которые консоль предлагает
 export { connectableInMarket, DEFAULT_MARKET_PROFILE, extendedRolesOf, isMarketProfile, localeInMarket, MARKET_PROFILES, marketProfileOf, marketScope, storefrontInMarket, US_STOREFRONTS, worldInMarket, type MarketProfile, type MarketScope } from './market.ts';
+export { BUYBOX_SHARE_HORIZON_MS, BUYBOX_SHARE_KEEP_DAYS, buyboxDiagnosis, buyboxShare, competitionView, competitorColumns, type CompetitorColumns, type BuyboxShare, type CompetitionInput, type CompetitionRow, type CompetitionView, type DiagnosisReason, type ShareSpan } from './competition.ts';

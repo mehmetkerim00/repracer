@@ -1,4 +1,5 @@
-import type { FloorRaiseReason, OmnibusPriorPrice } from '@repracer/pricing-model';
+import type { CompetitorView, FloorRaiseReason, OmnibusPriorPrice, PreviousOffers } from '@repracer/pricing-model';
+import type { CreepState } from '@repracer/strategy-engine';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
 import type { CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
@@ -68,6 +69,11 @@ export interface PriceScopeContext {
   /** Р-212: до какой цены дошла последняя БОЕВАЯ ступень за сутки — ступень от неё продолжает лестницу, от другой цены начинает новую */
   lastLadderStepFinalMinor?: number | null;
   /**
+   * Шаг 97 [Р-219]: подъём «Win the Buy Box» — последний одобренный подъём и последний возврат после потери (из горячих намерений,
+   * 3 суток); у прочих стратегий не читается
+   */
+  creep?: CreepState | null;
+  /**
    * Шаг 75 (ревью шага 74): подпись предложения для писем — название товара или SKU продавца, как подпись K10 консоли. Название — только
    * данное продавцом: прочитанное из канала живёт 18 месяцев [Р-3], а событие алерта хранится до закрытия тенанта (ревью шага 75)
    */
@@ -136,6 +142,8 @@ export interface EvaluationContext {
   scopes: ScopeEvaluationContext[];
   /** Контекст проверки входов; ourPrice и unitCost — по основной единице записи (ENGINE, иначе первая) */
   sanity: SanityContext;
+  /** Шаг 97 [Р-218]: предложения предыдущего ПРИНЯТОГО снимка товара — для диффа «кто подвинул цену»; нет снимка — null */
+  previousAccepted?: PreviousOffers | null;
 }
 
 export interface RejectedSnapshotRecord {
@@ -239,6 +247,26 @@ export interface SnapshotOutcome {
   log?: { competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; delivery: SnapshotDelivery };
   /** Р-121: проверка потери уведомления по этому снимку опроса — в той же транзакции */
   lossCheck?: NotificationLossCheck;
+  /**
+   * Шаг 97 [Р-220]: держатель Buy Box по принятому снимку — только когда источник его называет: отрезок доли Buy Box
+   * (`channel_data.buybox_span`) открывается или продлевается в той же транзакции
+   */
+  buyboxHolder?: BuyboxHolderObservation;
+}
+
+/** Шаг 97 [Р-220]: держатель Buy Box в момент снимка: мы, другой продавец (если канал его назвал) или никто */
+export interface BuyboxHolderObservation {
+  holder: 'SELF' | 'OTHER' | 'NONE';
+  sellerRef: string | null;
+}
+
+/** Шаг 97 [Р-220]: отрезок держателя Buy Box — с какого снимка по какой, кто держал */
+export interface BuyboxSpanRow {
+  holder: 'SELF' | 'OTHER' | 'NONE';
+  sellerRef: string | null;
+  startedAt: Instant;
+  lastSeenAt: Instant;
+  snapshots: number;
 }
 
 /**
@@ -291,6 +319,8 @@ export interface DecisionToCommit {
   /** Решение со слепком объяснения (decision.explanation) [Р-68] */
   decision: PriceDecisionDraft;
   snapshotRef: SnapshotRef | null;
+  /** Шаг 97 [Р-218]: картина рынка и «кто подвинул» — только у цены из данных конкурентов и решения не «без изменения» (0187) */
+  competitorView?: CompetitorView | null;
 }
 
 export interface EvaluationCommit {
@@ -651,7 +681,8 @@ export interface PricingStore {
    * Ревью шага 47, находка 5: только ДОЛЖНЫЕ — без решения за последние 24 часа (первый раз — сразу после включения), самые давние
    * первыми, не больше `limit`. Иначе 10 000 единиц давали бы ~960 000 решений NO_OP в сутки на тенанта
    */
-  listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]>;
+  /** Шаг 97: `creepPaceSeconds` — период ступени подъёма «Win the Buy Box» (плановый пересчёт канала) */
+  listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number, creepPaceSeconds?: number): Promise<string[]>;
   /**
    * Шаг 73: единицы аккаунта, которые пересчёт поднимает к полу без наблюдения конкурентов — запрос на переоценку, поставленный базой
    * (повод — изменившийся вход пола [Р-209…Р-211]), и лестница к полу в работе у боевого аккаунта (последнее одобренное изменение —
@@ -751,6 +782,13 @@ export interface PricingStore {
   // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -----------------------------------------------------
   decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
   decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
+  /**
+   * Шаг 97 [Р-220]: отрезки держателя Buy Box предложения единицы, задевающие период [from, to) (и последний до него — его состояние
+   * действует с начала периода); консоль считает долю Buy Box по ним
+   */
+  buyboxSpans(tenantId: string, writeScopeId: string, from: Instant, to: Instant): Promise<BuyboxSpanRow[]>;
+  /** Шаг 97 [Р-218]: последний принятый снимок товара единицы — нынешняя картина рынка страницы Competition; нет снимка — null */
+  competitionSnapshot(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null>;
   scopeDecisionStats(tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]>;
   interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice>;
   feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage>;
@@ -911,6 +949,8 @@ export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationInten
   /** Нет у решения NO_OP [Р-74] */
   explanation?: DecisionExplanation | null;
   snapshotRef: SnapshotRef | null;
+  /** Шаг 97 [Р-218]: картина рынка в момент решения; живёт с решением 30 суток, у старых решений и прочих — null */
+  competitorView?: CompetitorView | null;
 }
 
 /** Остановки и системные остановки в журнале аудита [Р-76]; с шага 88 [Р-213] — и смены ролей участников */

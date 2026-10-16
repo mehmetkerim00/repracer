@@ -18,6 +18,7 @@ import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, waitingForBudget as waitForChannel
 import { assessShift, DEFAULT_SANITY_CONFIG, evaluateSnapshot, SANITY_RULESET, type AnchorName, type SanityCheck, type SanityConfig } from '@repracer/input-sanity';
 import { decide, GATE_PROFILE, repricingWarnings, resolveMarginFloor, validateRepricingEnablement } from '@repracer/price-gate';
 import {
+  buildCompetitorView,
   buildExplanation,
   isCompetitorDerived,
   sellerActionFor,
@@ -30,6 +31,7 @@ import {
   type Reason,
   type StrategyDefinition,
   type TriggerType,
+  type CompetitorView,
 } from '@repracer/pricing-model';
 import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
@@ -228,7 +230,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
   function evaluateScope(
     sc: ScopeEvaluationContext, snapshot: AcceptedSnapshot | null, trigger: { type: TriggerType; sourceEventId?: string },
     now: Instant, effects: Effect[], stages: StageRecord[],
-    source: { snapshotRef: SnapshotRef | null; sanity: SanitySummary | null },
+    source: { snapshotRef: SnapshotRef | null; sanity: SanitySummary | null; view?: CompetitorView | null },
     raise: { after: FloorRaiseAfter | null } = { after: null },
   ): ScopeEvaluation {
     const { scope, bounds } = sc;
@@ -267,6 +269,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       raiseAfter: raise.after,
       // Р-212: ступень лестницы — не чаще периода планового пересчёта канала, откуда бы ни пришла оценка
       ladderPace: { lastStepAt: scope.lastLadderStepAt ?? null, paceSeconds: adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS },
+      // Шаг 97 [Р-219]: подъём «Win the Buy Box» — не чаще того же периода; после потери — пауза
+      creep: scope.creep ?? null,
       currentPriceMinor: scope.currentPriceMinor,
       // Р-171: в тени сравнение идёт и с уже удержанным предложением — иначе оно повторялось бы на каждом опросе
       ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),
@@ -335,7 +339,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
     if (decision.alert) {
       effects.push({ kind: 'alert', code: decision.alert.code, severity: decision.alert.severity, details: { writeScopeId: scope.writeScopeId, reason: decision.reason.code } });
     }
-    return { report, toCommit: { context: sc, intent, decision, snapshotRef: usesSnapshot ? source.snapshotRef : null }, invoked: 1 };
+    // Шаг 97 [Р-218]: картина рынка — там же, где ссылка на снимок: цена из данных конкурентов и решение не «без изменения» (0187)
+    return { report, toCommit: { context: sc, intent, decision, snapshotRef: usesSnapshot ? source.snapshotRef : null, competitorView: usesSnapshot ? source.view ?? null : null }, invoked: 1 };
   }
 
   /** Отправка записей, уже переведённых в отправку транзакцией фиксации; итог — третья транзакция */
@@ -605,8 +610,17 @@ export function createPricingPipeline(deps: PipelineDeps) {
       }
       if (context.scopes.length === 0) report.reason = { code: 'NO_SCOPE_FOR_PRODUCT', params: {} };
       const trigger = { type: 'COMPETITOR_CHANGE' as const, ...(snapshot.sourceEventId ? { sourceEventId: snapshot.sourceEventId } : {}) };
+      // Шаг 97 [Р-218]: дифф против предыдущего ПРИНЯТОГО снимка того же товара — кто подвинул цену
+      const view = buildCompetitorView(verdict.snapshot, context.previousAccepted ?? null);
+      // Шаг 97 [Р-220]: держатель Buy Box — только когда источник его называет (Amazon ANY_OFFER_CHANGED — нет, A-29)
+      const holderNamed = sourcesOf().some((c) => c.source === snapshot.source && c.hasBuyboxWinner);
+      if (holderNamed && (!verdict.snapshot.buybox || verdict.snapshot.buybox.isSelf !== null)) {
+        const bb = verdict.snapshot.buybox;
+        snapshotOutcome.buyboxHolder = !bb ? { holder: 'NONE', sellerRef: null }
+          : bb.isSelf ? { holder: 'SELF', sellerRef: null } : { holder: 'OTHER', sellerRef: bb.sellerRef ?? verdict.snapshot.offers.find((o) => o.holdsBuyBox && !o.isSelf)?.sellerRef ?? null };
+      }
       for (const sc of context.scopes) {
-        const evaluation = evaluateScope(sc, verdict.snapshot, trigger, now, effects, [{ stage: 'SANITY', outcome: 'ACCEPT' }], { snapshotRef, sanity });
+        const evaluation = evaluateScope(sc, verdict.snapshot, trigger, now, effects, [{ stage: 'SANITY', outcome: 'ACCEPT' }], { snapshotRef, sanity, view });
         scopeReports.push(evaluation.report);
         report.engineInvocations += evaluation.invoked;
         if (evaluation.toCommit) commit.decisions.push(evaluation.toCommit);
@@ -938,7 +952,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
       }
       // Ревью шага 47, находка 5: только должные (без решения за 24 часа), не больше предела за заход, самые давние первыми.
       // Находка 6: запись, которой бюджет правок отказал, даёт CRITICAL PRICE_WRITE_NOT_SENT — при пересчёте раз в сутки не чаще раза в сутки
-      const ids = (await store.listScheduledScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000)).filter((id) => !done.has(id));
+      // Шаг 97 [Р-219]: и единицы «Win the Buy Box» с включённым подъёмом — таймер ступени, тот же период, что у лестницы
+      const ids = (await store.listScheduledScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000,
+        adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS)).filter((id) => !done.has(id));
       for (const id of ids) {
         try {
           const r = await this.recompute(ctx, id, { type: 'SCHEDULE' });
@@ -964,7 +980,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
           return { commit: { key: { channelAccountId: ctx.channelAccountId, marketplace: '', channelProductRef: '', condition: '' }, now, decisions: [] }, effects, reports: [report] };
         }
         const { scope } = loaded.context;
-        const evaluation = evaluateScope(loaded.context, loaded.snapshot, trigger, now, effects, [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null },
+        // Шаг 97: пересчёт без нового снимка — картина рынка по последнему принятому снимку, без диффа (сравнивать не с чем)
+        const view = loaded.snapshot ? buildCompetitorView(loaded.snapshot, null) : null;
+        const evaluation = evaluateScope(loaded.context, loaded.snapshot, trigger, now, effects, [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null, view },
           { after: options.raiseAfter ?? null });
         report = evaluation.report;
         const key = { channelAccountId: scope.channelAccountId, marketplace: scope.marketplace, channelProductRef: scope.channelProductRef, condition: scope.condition };

@@ -7,3 +7,5 @@ export { SeededRandom } from './random.ts';
 export { channelFetch, type TraceEntry } from '../harness/channel.ts';
 /** Шаг 89: модель Walmart Marketplace (HTTP): корзины токенов с заголовками, правило неконкурентной цены, три конкурента Buy Box */
 export { defaultWalmartParams, SimulatedWalmartChannel, WALMART_PARAMETERS, type WalmartCompetitorBehaviour, type WalmartItemSpec, type WalmartModelParams, type WalmartModelSpec, type WalmartSimulatorStats } from './walmart-channel.ts';
+/** Шаг 97 [H]: формула победителя Buy Box и синтетические продавцы с признаком исполнения каналом */
+export { DEFAULT_CHANNEL_FULFILMENT_BONUS_MINOR, LANDED_CHANNEL_BONUS, rankForBuyBox, sellersFor, SYNTHETIC_SELLERS, type BuyBoxRuleSpec, type SyntheticSeller } from './buybox-rule.ts';

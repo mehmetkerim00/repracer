@@ -102,6 +102,10 @@ export const ENGINE_REASON_CODES = [
   'BUYBOX_UNDERCUT',
   'LOWEST_MATCH',
   'LOWEST_UNDERCUT',
+  // Шаг 97 [Р-219]: «Win the Buy Box» — цель от landed-цены победителя; подъём, пока Buy Box наш; возврат после потери
+  'BUYBOX_WIN_TARGET',
+  'CREEP_UP',
+  'CREEP_STEP_BACK',
   // шаги расчёта
   'CAPPED_AT_MIN_PRICE',
   'CAPPED_AT_MAX_PRICE',
@@ -110,6 +114,8 @@ export const ENGINE_REASON_CODES = [
   'RAISED_TO_FLOOR',
   // Р-208 (шаг 73): подъём к полу больше предела шага — ступень на предел шага, «осталось ~N шагов»
   'RAISED_TOWARD_FLOOR',
+  // Шаг 97 [Р-219]: пока идёт пауза после потери Buy Box, цена потери — потолок
+  'CAPPED_AT_CREEP_CEILING',
   // NO_OP
   'ALREADY_AT_TARGET',
   'WITHIN_DEADBAND',
@@ -120,6 +126,13 @@ export const ENGINE_REASON_CODES = [
   'ALREADY_WINNING_BUYBOX',
   'NO_COMPETITOR_OFFERS',
   'TARGET_OUTSIDE_BOUNDS_HOLD',
+  // Шаг 97 [Р-221]: «Match the Buy Box» — канал не называет держателя (Amazon, A-29), а наша цена равна цене Buy Box: возможно, Buy Box
+  // наш, и подрезать самих себя нельзя — цена держится
+  'BUYBOX_HOLDER_UNKNOWN',
+  // Шаг 97 [Р-219]: «Win the Buy Box» держит Buy Box; подъём (creep) — не чаще периода, после потери — пауза; у потолка — без подъёма
+  'CREEP_PACED',
+  'CREEP_PAUSED',
+  'CREEP_AT_MAX',
   // не рассчитано
   'COMPETITOR_REQUIREMENT_NOT_MET',
   'COST_INPUTS_MISSING',
@@ -279,15 +292,17 @@ export const SHIFT_DIRECTIONS = ['UP', 'DOWN'] as const;
 export const SCALE_ANCHORS = ['COST', 'CROSS_CHANNEL', 'HISTORY', 'LAST_ACCEPTED'] as const;
 export const CHANNELS = ['KAUFLAND', 'AMAZON', 'EBAY', 'OTTO'] as const;
 export const FX_CAUSES = ['FX_RATE_UNAVAILABLE', 'FX_RATE_STALE', 'UNSUPPORTED_CURRENCY', 'INVALID_INPUT'] as const;
-export const RULE_CODES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'] as const;
-export const STRATEGY_TYPES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_LOWEST'] as const;
+export const RULE_CODES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION', 'WIN_BUYBOX'] as const;
+export const STRATEGY_TYPES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_LOWEST', 'WIN_BUYBOX'] as const;
 export const LOWEST_SCOPES = ['VISIBLE_TOP_N', 'MARKET'] as const;
+/** Шаг 97: кто исполняет предложение — канал (Amazon FBA, Kaufland, Walmart WFS) или продавец; без значения — канал не назвал */
+export const FULFILMENT_KINDS = ['CHANNEL', 'MERCHANT'] as const;
 /** Шаг 47: NO_COMPETITOR_SOURCE — у канала нет ни одного источника конкурентов (eBay, Р-39), как в channel_data.strategy_unmet (0082) */
-export const UNMET_REQUIREMENTS = ['NO_COMPETITOR_SOURCE', 'NO_SNAPSHOT', 'COMPLETENESS', 'BUYBOX_WINNER', 'OWN_RANK', 'SHIPPING', 'CONDITION', 'STALENESS', 'OWN_SHIPPING'] as const;
+export const UNMET_REQUIREMENTS = ['NO_COMPETITOR_SOURCE', 'NO_SNAPSHOT', 'COMPLETENESS', 'BUYBOX_WINNER', 'OWN_RANK', 'SHIPPING', 'CONDITION', 'STALENESS', 'OWN_SHIPPING', 'BUYBOX_PRICE'] as const;
 export const COMPLETENESS_KINDS = ['TOP_N', 'CHEAPEST_ONLY', 'FULL'] as const;
 export const COST_INPUTS = ['COST_PROFILE', 'VAT_RATE'] as const;
 export const CURRENCY_SOURCES = ['SNAPSHOT', 'COST'] as const;
-export const STRATEGY_PARAM_NAMES = ['deadbandMinor', 'priceMinor', 'targetMarginBp', 'undercutMinor'] as const;
+export const STRATEGY_PARAM_NAMES = ['deadbandMinor', 'priceMinor', 'targetMarginBp', 'undercutMinor', 'fulfillmentHandicapMinor', 'creepStepBp'] as const;
 export const PARAM_CONSTRAINTS = ['POSITIVE', 'NON_NEGATIVE', 'MARGIN_BELOW_100_PERCENT'] as const;
 export const BOUND_NAMES = ['min', 'max', 'margin_floor', 'both'] as const;
 /** Чем был пол, до которого поднята цена [Р-207]: min_price или пол маржи */
@@ -401,6 +416,21 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   BUYBOX_UNDERCUT: { buyboxMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   LOWEST_MATCH: { lowestMinor: money('CHANNEL'), scope: oneOf(LOWEST_SCOPES, 'TENANT'), n: count('CHANNEL', N), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   LOWEST_UNDERCUT: { lowestMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), scope: oneOf(LOWEST_SCOPES, 'TENANT'), n: count('CHANNEL', N), targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
+  /**
+   * Шаг 97 [Р-219]: цель «Win the Buy Box» — landed-цена победителя минус подрез и гандикап за исполнение (только когда победителя
+   * исполняет канал, а нас — нет, и канал это назвал), минус наша доставка. Всё, кроме нашей цены, — из данных канала или выводится из них
+   */
+  BUYBOX_WIN_TARGET: {
+    winnerLandedMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), handicapMinor: money('CHANNEL_DERIVED'), ownShippingMinor: money('CHANNEL'),
+    winnerFulfilment: oneOf(FULFILMENT_KINDS, 'CHANNEL', O), targetMinor: money('CHANNEL_DERIVED'), currency: currency(),
+  },
+  /** Шаг 97 [Р-219]: Buy Box наш — подъём на шаг: от нашей цены к нашей цене, шаг — настройка продавца (данные тенанта, Р-3) */
+  CREEP_UP: { fromMinor: money('TENANT'), toMinor: money('TENANT'), creepStepBp: bp('TENANT'), currency: currency() },
+  /**
+   * Шаг 97 [Р-219]: Buy Box потерян после подъёма — назад к последней выигрышной цене, пауза подъёма; цена потери — потолок паузы.
+   * Цена потери выводится из наблюдения канала (на ней Buy Box ушёл) — в вечное ядро не идёт [Р-85]
+   */
+  CREEP_STEP_BACK: { lostAtMinor: money('CHANNEL_DERIVED'), backToMinor: money('TENANT'), pausedUntil: instant('TENANT'), currency: currency() },
   CAPPED_AT_MIN_PRICE: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MAX_PRICE: { targetMinor: money('CHANNEL_DERIVED'), maxMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MARGIN_FLOOR: { targetMinor: money('CHANNEL_DERIVED'), floorMinor: money('TENANT'), minMinor: money('TENANT'), minMarginBp: bp('TENANT'), currency: currency() },
@@ -412,6 +442,7 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
     currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O),
     stepLimitBp: bp('TENANT'), stepsLeft: count('TENANT'), after: oneOf(RAISE_AFTER, 'TENANT', O), currency: currency(),
   },
+  CAPPED_AT_CREEP_CEILING: { targetMinor: money('CHANNEL_DERIVED'), ceilingMinor: money('CHANNEL_DERIVED'), currency: currency() },
   ALREADY_AT_TARGET: { targetMinor: money('CHANNEL_DERIVED'), currency: currency() },
   WITHIN_DEADBAND: { deltaMinor: money('CHANNEL_DERIVED'), deadbandMinor: money('TENANT'), currency: currency() },
   ALREADY_WINNING_BUYBOX: {},
@@ -498,6 +529,14 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
    */
   SHADOW_ALREADY_PROPOSED: { proposedMinor: money('TENANT'), heldMinor: money('TENANT'), currency: currency() },
   LADDER_PACED: { currentMinor: money('TENANT'), floorMinor: money('TENANT'), nextStepAt: instant('TENANT'), currency: currency() },
+  /** Шаг 97 [Р-221]: держатель Buy Box неизвестен, наша цена — цена Buy Box: подрезать возможно самих себя нельзя */
+  BUYBOX_HOLDER_UNKNOWN: { buyboxMinor: money('CHANNEL'), currentMinor: money('TENANT'), currency: currency() },
+  /** Шаг 97 [Р-219]: подъём не чаще периода планового пересчёта канала */
+  CREEP_PACED: { currentMinor: money('TENANT'), nextStepAt: instant('TENANT'), currency: currency() },
+  /** Шаг 97 [Р-219]: пауза подъёма после потери Buy Box */
+  CREEP_PAUSED: { currentMinor: money('TENANT'), pausedUntil: instant('TENANT'), currency: currency() },
+  /** Шаг 97 [Р-219]: Buy Box наш, цена уже на допущенном максимуме — подниматься некуда */
+  CREEP_AT_MAX: { currentMinor: money('TENANT'), maxMinor: money('TENANT'), currency: currency() },
 
   WRITE_SUPERSEDED_BY_NEWER_VERSION: { newerVersion: count('TENANT'), newerWriteId: id('TENANT', O) },
   WRITE_RETRIES_EXHAUSTED: { attempts: count('TENANT'), code: oneOf(WRITE_ERROR_CODES, 'TENANT') },

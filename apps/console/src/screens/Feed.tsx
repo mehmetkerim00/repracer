@@ -107,7 +107,9 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
                   <td className="card-status"><Badge tone={i.tone}>{i.status}</Badge>{i.confirmation ? <div className="note">{i.confirmation}</div> : null}</td>
                   {/* Шаг 79 (ревью): источник — подписью над причиной, а не своей колонкой: таблица помещается в окно */}
                   <td data-label={c.reason}>{i.reason && shared.includes(i.reason.text) ? <span className="basis">{i.source}</span>
-                    : <><div className="note">{i.source}</div>{i.reason ? <ReasonLine reason={i.reason} /> : null}</>}</td>
+                    : <><div className="note">{i.source}</div>{i.reason ? <ReasonLine reason={i.reason} /> : null}</>}
+                    {/* Шаг 97 [D]: кто подвинул цену — коротким чипом; полная фраза — подсказкой и на квитанции */}
+                    {i.trigger ? <span className="trigger-chip" title={i.trigger.full}>{i.trigger.chip}</span> : null}</td>
                   <td className="nowrap card-action">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}

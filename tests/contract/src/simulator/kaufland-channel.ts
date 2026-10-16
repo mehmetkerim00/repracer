@@ -1,5 +1,6 @@
 import type { ChannelBehaviour, ChannelReply, ObservedRequest } from '../harness/channel.ts';
 import type { InboundDeliverySpec } from '../harness/scenario.ts';
+import { rankForBuyBox, type BuyBoxRuleSpec } from './buybox-rule.ts';
 import { defaultKauflandParams, type KauflandModelParams } from './params.ts';
 import { SeededRandom } from './random.ts';
 
@@ -11,7 +12,8 @@ import { SeededRandom } from './random.ts';
  * - конкуренты с дрейфом цены и победитель Buy Box, GET /buybox (K-17), уведомления buy_box_changed с debounce и потерями (K-10);
  * - сбои: тайм-аут записи с применением или без (K-14), пропуск и 5xx элемента пакета.
  * Не моделируется (ответы канала неизвестны или шагу не нужны): подписки, отчёты, заказы как ресурс, item_unit_*,
- * реальный алгоритм Buy Box (у нас — минимальная цена с доставкой, при равенстве — прежний победитель).
+ * реальный алгоритм Buy Box (у нас — минимальная цена с доставкой, при равенстве — прежний победитель; шаг 97 — формула `buyBox`
+ * мира: landed минус бонус исполнению каналом, buybox-rule.ts).
  * Все данные синтетические.
  */
 
@@ -48,6 +50,8 @@ export interface SimUnitSpec {
 
 export interface SimCompetitorSpec {
   sellerRef: string;
+  /** Шаг 97 [H]: предложение исполняет Kaufland (`fulfilled_by_kaufland`); по умолчанию — продавец */
+  channelFulfilled?: boolean;
   storefront: string;
   idProduct: number;
   condition?: string;
@@ -66,6 +70,10 @@ export interface KauflandChannelModelSpec {
   sellerPseudonym?: string;
   units: SimUnitSpec[];
   competitors: SimCompetitorSpec[];
+  /** Шаг 97 [H]: формула победителя Buy Box; без поля — прежнее правило (минимальная цена с доставкой) */
+  buyBox?: BuyBoxRuleSpec;
+  /** Шаг 97 [H]: наши предложения исполняет Kaufland */
+  selfChannelFulfilled?: boolean;
   /**
    * Шаг 35: спрос. Модель сама создаёт заказы (`order-units`): раз в `orderEveryMs` — одна единица случайного оффера с остатком;
    * через `shipAfterMs` заказ отгружается (`sent`), доля `cancelShare` — отменяется. Заказ уменьшает amount по K-11.
@@ -108,7 +116,7 @@ interface CompetitorState extends SimCompetitorSpec {
   reactToChangeAtMs: number | null;
 }
 
-interface Offer { self: boolean; sellerRef: string; priceMinor: number; shippingMinor: number; unit?: UnitState; deliveryDays: { min: number; max: number } }
+interface Offer { self: boolean; sellerRef: string; priceMinor: number; shippingMinor: number; unit?: UnitState; deliveryDays: { min: number; max: number }; channelFulfilled: boolean }
 
 export interface SimulatorStats {
   requests: Record<string, number>;
@@ -378,13 +386,20 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
     const entry = this.offersIndex().get(key);
     for (const u of entry?.units ?? []) {
       if (u.isLive && u.amount > 0) {
-        offers.push({ self: true, sellerRef: this.spec.sellerPseudonym ?? 'Synthetic Seller', priceMinor: this.buyerPrice(u), shippingMinor: u.shippingMinor, unit: u, deliveryDays: u.deliveryDays });
+        offers.push({ self: true, sellerRef: this.spec.sellerPseudonym ?? 'Synthetic Seller', priceMinor: this.buyerPrice(u), shippingMinor: u.shippingMinor, unit: u, deliveryDays: u.deliveryDays,
+          channelFulfilled: this.spec.selfChannelFulfilled === true });
       }
     }
     for (const c of entry?.competitors ?? []) {
-      offers.push({ self: false, sellerRef: c.sellerRef, priceMinor: c.priceMinor, shippingMinor: c.shippingMinor, deliveryDays: c.deliveryDays });
+      offers.push({ self: false, sellerRef: c.sellerRef, priceMinor: c.priceMinor, shippingMinor: c.shippingMinor, deliveryDays: c.deliveryDays, channelFulfilled: c.channelFulfilled === true });
     }
     const previous = this.winners.get(key)?.sellerRef;
+    // Шаг 97 [H]: формула мира — landed минус бонус исполнению каналом, при равенстве — прежний держатель, затем порядок продавцов
+    if (this.spec.buyBox) {
+      const order = new Map(this.spec.competitors.map((c, i) => [c.sellerRef, i]));
+      return rankForBuyBox(offers.map((o) => ({ ...o, key: o.self ? '$self' : o.sellerRef, landedMinor: o.priceMinor + o.shippingMinor,
+        order: o.self ? Number.MAX_SAFE_INTEGER : order.get(o.sellerRef) ?? Number.MAX_SAFE_INTEGER })), previous ?? null, this.spec.buyBox);
+    }
     // Упрощение модели: Buy Box — минимальная цена с доставкой; при равенстве — прежний победитель
     return offers.sort((a, b) => (a.priceMinor + a.shippingMinor) - (b.priceMinor + b.shippingMinor)
       || Number(b.sellerRef === previous) - Number(a.sellerRef === previous));
@@ -535,7 +550,8 @@ export class SimulatedKauflandChannel implements ChannelBehaviour {
         id_product: Number(request.query.id_product), condition: request.query.condition ?? 'new', storefront, num_units: offers.length,
         units: offers.map((o, i) => ({
           buybox_rank: i + 1, seller: o.sellerRef, price: units(o.priceMinor), shipping_rate: units(o.shippingMinor),
-          delivery_time_min: o.deliveryDays.min, delivery_time_max: o.deliveryDays.max, fulfillment_type: 'fulfilled_by_merchant', condition: request.query.condition ?? 'new',
+          delivery_time_min: o.deliveryDays.min, delivery_time_max: o.deliveryDays.max,
+          fulfillment_type: o.channelFulfilled ? 'fulfilled_by_kaufland' : 'fulfilled_by_merchant', condition: request.query.condition ?? 'new',
           ...(o.self && o.unit ? { id_unit: o.unit.idUnit, id_offer: o.unit.idOffer } : {}),
         })),
       } });

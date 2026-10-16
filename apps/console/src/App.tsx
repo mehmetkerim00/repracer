@@ -7,6 +7,7 @@ import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
 import { ZoneContext } from './date-range.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
+import { CompetitionScreen } from './screens/Competition.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { CostsScreen } from './screens/Costs.tsx';
@@ -63,7 +64,8 @@ export function redirectOf(route: Pick<Route, 'screen' | 'param'>): string[] | n
 }
 
 /** Пункт меню экрана, у которого своего пункта нет: квитанция решения — журнал цен, страница предложения — Costs & floors */
-const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: 'costs' };
+// Шаг 97: страница Competition предложения — из строки Offers, своего пункта меню у неё нет (меню остаётся из 9 пунктов)
+const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: 'costs', competition: 'products' };
 
 /**
  * Р-142 (шаг 31): у массовых операций есть СВОЙ экран. Без него готовый файл и кнопка отмены жили только в состоянии того
@@ -279,6 +281,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
         : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} target={route.param2 ?? null} />
         : route.screen === 'bounds' && route.param ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
+        : route.screen === 'competition' && route.param ? <CompetitionScreen worldId={world.id} writeScopeId={route.param} />
         : route.screen === 'protections' ? <ProtectionsScreen worldId={world.id} tab={route.param === 'people' ? 'people' : 'rules'} days={[1, 7, 30].includes(Number(route.param2)) ? Number(route.param2) : 7} />
         : route.screen === 'products' && route.param === 'bulk'
           ? <><p className="back"><a href={href(world.id, 'products')}>{m.ui.jobs.back}</a></p><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p>

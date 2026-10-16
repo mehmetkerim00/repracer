@@ -2,6 +2,7 @@ import type { DecisionListItem, DecisionTrace, StepStatus } from '@repracer/cons
 import { useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Icon } from '../icons.tsx';
+import { CompetitorTable } from './Competition.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
 /** Шаг 81: знак исхода в карточке итога — по тону решения */
@@ -41,6 +42,7 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
 export function TraceView({ trace }: { trace: DecisionTrace }) {
   const m = useMessages();
   const t = m.ui.trace;
+  const competitors = trace.steps.find((s) => s.competitors)?.competitors ?? null;
   return (
     <article className="trace">
       <p className="back"><a href={href(trace.worldId, 'feed', 'decisions')}>{t.back}</a></p>
@@ -55,6 +57,8 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
         <div className="verdict-body">
           {trace.headlinePrice ? <div className="verdict-price">{trace.headlinePrice}</div> : null}
           <p className="headline">{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
+          {/* Шаг 97 [C]: кто подвинул цену — одной фразой сверху; таблица — в шаге снимка конкурентов */}
+          {competitors?.trigger ? <p className="trigger-line">{competitors.trigger}</p> : null}
         </div>
       </section>
       {/* Шаг 79 (ревью): шаги расчёта — в карточке, а не на сером фоне страницы */}
@@ -79,6 +83,13 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
                 ))}
               </ul>
             ) : null}
+            {/* Шаг 97 [C]: шаг снимка раскрывается таблицей конкурентов того момента; срок хранения деталей — подписью */}
+            {step.competitors ? (step.competitors.rows.length > 0 ? (
+              <details className="competitors-at" open>
+                <summary>{t.competitors.title} ({step.competitors.rows.length})</summary>
+                <CompetitorTable rows={step.competitors.rows} columns={step.competitors.columns} foot={[step.competitors.note]} />
+              </details>
+            ) : <p className="note">{step.competitors.note}</p>) : null}
           </li>
         ))}
       </ol>

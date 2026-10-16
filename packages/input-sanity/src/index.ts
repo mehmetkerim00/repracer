@@ -305,7 +305,9 @@ export function evaluateSnapshot(snapshot: CompetitorSnapshot, ctx: SanityContex
   // Значения, которые использует стратегия: Buy Box конкурента, минимальная цена конкурента, подсказка канала
   const competitors = snapshot.offers.filter((o) => !o.isSelf && isAmount(o.price.amountMinor));
   const lowestOffer = competitors.reduce<(typeof competitors)[number] | null>((best, o) => (!best || o.price.amountMinor < best.price.amountMinor ? o : best), null);
-  const buybox = snapshot.buybox && !snapshot.buybox.isSelf ? snapshot.buybox.price.amountMinor : null;
+  // Шаг 97 [Р-221]: держатель Buy Box не назван (`isSelf: null`, Amazon) — цена Buy Box может быть нашей, и в цены конкурентов она не идёт:
+  // иначе наши собственные изменения цены выглядели бы движением рынка (массовый сдвиг, Р-50). Чужие предложения остаются в `lowest`
+  const buybox = snapshot.buybox && snapshot.buybox.isSelf === false ? snapshot.buybox.price.amountMinor : null;
   const probes: Probe[] = [];
   if (buybox !== null) probes.push({ field: 'buybox', valueMinor: buybox });
   if (lowestOffer) probes.push({ field: 'lowest', valueMinor: lowestOffer.price.amountMinor });
@@ -314,7 +316,7 @@ export function evaluateSnapshot(snapshot: CompetitorSnapshot, ctx: SanityContex
   // Движение относительно последнего принятого снимка и продавец нового значения — только по ценам конкурентов. Р-128 (шаг 26): Buy Box
   // с нашим предложением давал движение нашей цены — товар, где мы держим Buy Box, выглядел неподвижным при любых ценах конкурентов,
   // уходил в холодный ярус опроса и терял Buy Box незамеченным до суток (проверка в живом режиме)
-  if (ctx.lastAccepted?.buyboxMinor && ctx.lastAccepted.buyboxIsSelf !== true && buybox !== null) {
+  if (ctx.lastAccepted?.buyboxMinor && ctx.lastAccepted.buyboxIsSelf === false && buybox !== null) {
     move = { productRef, moveBp: clampBp(buybox / ctx.lastAccepted.buyboxMinor), sellerRef: rankOne?.sellerRef ?? null };
   } else if (ctx.lastAccepted && competitors.length === 0) {
     // Ревью шага 26, находка 7: у товара без конкурентов (мы единственный продавец) сравнивать нечего — это наблюдение «цена не двигалась»,

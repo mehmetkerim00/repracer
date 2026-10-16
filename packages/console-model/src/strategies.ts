@@ -50,6 +50,15 @@ export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDra
       type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), scope: p.scope === 'MARKET' ? 'MARKET' : 'VISIBLE_TOP_N',
       compareLanded: p.compareLanded === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP',
     };
+  } else if (type === 'WIN_BUYBOX') {
+    // Шаг 97 [Р-219]: подъём по умолчанию выключен; его шаг — базисные пункты, не больше 10 % (больший шаг урежет предел шага Gate)
+    const creepUp = p.creepUp === true;
+    const creepStepBp = creepUp ? minor('creepStepBp', p.creepStepBp, 1) : (Number.isSafeInteger(p.creepStepBp) ? (p.creepStepBp as number) : 100);
+    if (creepUp && creepStepBp > 1000) problems.push({ field: 'creepStepBp', code: 'OUT_OF_RANGE' });
+    params = {
+      type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), fulfillmentHandicapMinor: minor('fulfillmentHandicapMinor', p.fulfillmentHandicapMinor ?? 0, 0),
+      creepUp, creepStepBp: Math.max(1, Math.min(1000, creepStepBp)), atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP',
+    };
   } else problems.push({ field: 'type', code: 'UNSUPPORTED_TYPE' });
   return problems.length > 0 || !params ? { ok: false, problems } : { ok: true, draft: { name, params, deadbandMinor } };
 }

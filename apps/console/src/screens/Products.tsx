@@ -111,6 +111,8 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                     ? <a className="row-link" href={href(view.worldId, 'decisions', r.latestDecisionId)}>{p.why}</a>
                     : <span className="muted small">{p.noDecisions}</span>}
                   <a className="secondary-link" href={href(view.worldId, 'bounds', r.unit.writeScopeId)}>{m.ui.app.screens.bounds}</a>
+                  {/* Шаг 97 [E]: страница конкурентов предложения — ссылкой из строки, не пунктом меню */}
+                  <a className="secondary-link" href={href(view.worldId, 'competition', r.unit.writeScopeId)}>{m.ui.competition.link}</a>
                   {r.canEnable && onEnable ? <button type="button" onClick={() => onEnable(r)}>{p.enable}</button> : null}
                 </td>
               </tr>

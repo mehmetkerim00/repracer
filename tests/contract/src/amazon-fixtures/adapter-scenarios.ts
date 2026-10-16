@@ -104,7 +104,9 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
     [
       { id: 'first', kind: 'inbound', delivery: aoc('syn-notification-0001', 1780), expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0001',
         events: [{ kind: 'COMPETITOR_SNAPSHOT', snapshot: { marketplace: DE, channelProductRef: 'B000007001', source: 'AMAZON_ANY_OFFER_CHANGED', sourceEventId: 'syn-notification-0001',
-          buybox: { price: { amountMinor: 1780, currency: 'EUR', basis: 'GROSS' }, isSelf: false } } }] } },
+          // Шаг 97 [Р-221]: цена Buy Box — из Summary.BuyBoxPrices, держатель не назван (A-29); прежде здесь стояло isSelf: false,
+          // выведенное из поля IsBuyBoxWinner, которого в схеме уведомления нет
+          buybox: { price: { amountMinor: 1780, currency: 'EUR', basis: 'GROSS' }, isSelf: null, shipping: { amountMinor: 0, currency: 'EUR', basis: 'GROSS' } } } }] } },
       { id: 'one-second', kind: 'advanceClock', ms: 1000 },
       { id: 'repeat', kind: 'inbound', delivery: aoc('syn-notification-0001', 1780), expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0001' } },
       { id: 'next', kind: 'inbound', delivery: aoc('syn-notification-0002', 1770), expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0002' } },

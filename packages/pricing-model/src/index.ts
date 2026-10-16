@@ -22,7 +22,7 @@ export type {
   StrategyType,
   TriggerType,
 } from './types.ts';
-export { COMPETITOR_DERIVED_RULES, isCompetitorDerived, markAcceptedBySanity } from './types.ts';
+export { COMPETITOR_DERIVED_RULES, fulfilmentKind, isCompetitorDerived, markAcceptedBySanity } from './types.ts';
 export * from './reasons.ts';
 export {
   EXPLANATION_FIELD_KINDS,
@@ -72,3 +72,4 @@ export function reason<C extends string>(code: C, params: Readonly<Record<string
 }
 export { BASIS_MISMATCH_TOLERANCE_MINOR, priceBasisMismatch, type BasisMismatchDirection } from './price-basis.ts';
 export { addDays, localDate, OMNIBUS_WINDOW_DAYS, omnibusLowestPriorPrice, omnibusVerdict, zonedDayStart, type OmnibusPriorPrice, type OmnibusStatus, type OmnibusVerdict } from './omnibus.ts';
+export * from './competitor-view.ts';

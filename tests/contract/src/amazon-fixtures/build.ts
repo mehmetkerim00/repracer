@@ -165,11 +165,18 @@ export function accepted(skuValue: string, issues: unknown[] = []): Exchange['re
 // Уведомления
 // ---------------------------------------------------------------------------
 
-export interface AocOffer { seller: string; minor: number; shippingMinor?: number; buyBoxWinner?: boolean; minDays?: number; maxDays?: number; currency?: string }
+/**
+ * `buyBoxWinner` — чьи цены несёт Summary.BuyBoxPrices. Шаг 97 [Р-221]: САМ держатель в уведомлении не назван — признака у предложения
+ * в схеме нет, и генератор его не пишет; тело проходит официальную схему (amazon-notification-schema.test.ts)
+ */
+export interface AocOffer { seller: string; minor: number; shippingMinor?: number; buyBoxWinner?: boolean; minDays?: number; maxDays?: number; currency?: string; fba?: boolean }
 
 export function anyOfferChanged(notificationId: string, marketplace: string, asinValue: string, time: unknown, offers: readonly AocOffer[], sellerId = SELLER): Record<string, unknown> {
   const money = (minor: number, currency: string) => ({ Amount: major(minor), CurrencyCode: currency });
   const winner = offers.find((o) => o.buyBoxWinner);
+  const currency = offers[0]?.currency ?? 'EUR';
+  const top = Math.max(0, ...offers.map((o) => o.minor + (o.shippingMinor ?? 0)));
+  const low = offers.length ? Math.min(...offers.map((o) => o.minor + (o.shippingMinor ?? 0))) : 0;
   return {
     NotificationVersion: '1.0', NotificationType: 'ANY_OFFER_CHANGED', PayloadVersion: '1.0', EventTime: time,
     NotificationMetadata: { ApplicationId: 'amzn1.sellerapps.app.syn0001', SubscriptionId: 'syn-subscription-0001', PublishTime: time, NotificationId: notificationId },
@@ -179,13 +186,17 @@ export function anyOfferChanged(notificationId: string, marketplace: string, asi
       Summary: {
         NumberOfOffers: [{ Condition: 'new', FulfillmentChannel: 'Merchant', OfferCount: offers.length }],
         LowestPrices: [], BuyBoxPrices: winner ? [{ Condition: 'new', LandedPrice: money(winner.minor + (winner.shippingMinor ?? 0), winner.currency ?? 'EUR'), ListingPrice: money(winner.minor, winner.currency ?? 'EUR'), Shipping: money(winner.shippingMinor ?? 0, winner.currency ?? 'EUR') }] : [],
+        // Обязательны по схеме снимка; значения синтетические и в разбор цены не идут
+        ListPrice: money(top, currency), MinimumAdvertisedPrice: money(low, currency), SuggestedLowerPricePlusShipping: money(low, currency),
+        CompetitivePriceThreshold: money(top, currency),
         TotalBuyBoxEligibleOffers: offers.length, SalesRankings: [], NumberOfBuyBoxEligibleOffers: [],
       },
       Offers: offers.map((o) => ({
         SellerId: o.seller === 'self' ? sellerId : sellerIdOf(o.seller), SubCondition: 'new', SellerFeedbackRating: { FeedbackCount: 120, SellerPositiveFeedbackRating: 98 },
-        ShippingTime: { MinimumHours: (o.minDays ?? 1) * 24, MaximumHours: (o.maxDays ?? 3) * 24, AvailabilityType: 'NOW' },
-        ListingPrice: money(o.minor, o.currency ?? 'EUR'), Shipping: money(o.shippingMinor ?? 0, o.currency ?? 'EUR'), ShipsFrom: { Country: 'DE' },
-        IsFulfilledByAmazon: false, IsBuyBoxWinner: Boolean(o.buyBoxWinner), PrimeInformation: { IsOfferPrime: false, IsOfferNationalPrime: false },
+        ShippingTime: { MinimumHours: (o.minDays ?? 1) * 24, MaximumHours: (o.maxDays ?? 3) * 24, AvailabilityType: 'NOW', AvailableDate: time },
+        ListingPrice: money(o.minor, o.currency ?? 'EUR'), Shipping: money(o.shippingMinor ?? 0, o.currency ?? 'EUR'), ShipsFrom: { Country: 'DE', State: 'BE' },
+        Points: { PointsNumber: 0 },
+        IsFulfilledByAmazon: o.fba === true, PrimeInformation: { IsOfferPrime: false, IsOfferNationalPrime: false },
         IsExpeditedShippingAvailable: false, IsFeaturedMerchant: true, ShipsDomestically: true, ShipsInternationally: false,
       })),
     } },
@@ -261,6 +272,15 @@ export interface Conversion {
 }
 
 /** Сценарий Kaufland → черновик Amazon: мир, шаги, обмены и ожидания с переведёнными идентификаторами */
+/**
+ * Шаг 97 [Р-221]: у Amazon держатель Buy Box не назван, и цена Buy Box в цены конкурентов проверки входов не идёт (она может быть нашей);
+ * та же испорченная цена конкурента ловится его предложением — поле «самая низкая цена конкурента», а не «Buy Box». Ожидание сценария
+ * Kaufland переносится с этой заменой; сам отказ, его правило и значение те же
+ */
+function buyboxProbeAsLowest<T>(expected: T): T {
+  return JSON.parse(JSON.stringify(expected).replaceAll('"field":"buybox"', '"field":"lowest"')) as T;
+}
+
 export function convertKauflandScenario(file: string, id: string, title: string): Conversion {
   const k = JSON.parse(readFileSync(`${KAUFLAND}${file}`, 'utf8')) as Scenario;
   const refs = new Set<string>();
@@ -275,7 +295,7 @@ export function convertKauflandScenario(file: string, id: string, title: string)
     if (step.kind === 'pipelineInbound') {
       const body = step.delivery.body as { id_message: string; payload: { id_product: number; timestamp: unknown; offers?: KauflandOffer[] } };
       refs.add(String(body.payload.id_product));
-      steps.push({ ...step, delivery: delivery(anyOfferChanged(`syn-${body.id_message}`, DE, asin(String(body.payload.id_product)), body.payload.timestamp,
+      steps.push({ ...buyboxProbeAsLowest(step), delivery: delivery(anyOfferChanged(`syn-${body.id_message}`, DE, asin(String(body.payload.id_product)), body.payload.timestamp,
         kauflandOffersToAoc(body.payload.offers ?? [])), step.delivery.claimed) } as Step);
     } else if (step.kind === 'pipelinePoll') {
       // Опроса у Amazon нет [AMZ_C07]: тот же ответ /buybox приходит уведомлением
@@ -287,7 +307,7 @@ export function convertKauflandScenario(file: string, id: string, title: string)
         refs.add(q.channelProductRef);
         steps.push({ id: `${step.id}-${i + 1}`, kind: 'pipelineInbound',
           delivery: delivery(anyOfferChanged(`syn-poll-${q.channelProductRef}-${++n}`, DE, asin(q.channelProductRef), { $clockIso: 0 }, buyboxUnitsToAoc(units))),
-          ...(expected[i] ? { expect: { inbound: { kind: 'EVENTS' }, snapshots: [expected[i]] } } : {}) } as Step);
+          ...(expected[i] ? { expect: { inbound: { kind: 'EVENTS' }, snapshots: [buyboxProbeAsLowest(expected[i])] } } : {}) } as Step);
       });
     } else {
       steps.push(step);

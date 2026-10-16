@@ -54,13 +54,18 @@ export interface CompetitorSnapshotRow {
   buybox_amount_minor: number | null;
   buybox_shipping_minor: number | null;
   buybox_is_self: boolean | null;
+  /** Шаг 97 (097): продавец Buy Box, если канал его назвал */
+  buybox_seller_ref: string | null;
   channel_suggested_amount_minor: number | null;
   'offers.seller_ref': string[];
   'offers.amount_minor': number[];
-  'offers.shipping_minor': number[];
+  /** Шаг 97 (097): доставка, которую канал не назвал, — null, а не 0 */
+  'offers.shipping_minor': Array<number | null>;
   'offers.condition': string[];
   'offers.fulfillment': string[];
   'offers.is_self': boolean[];
+  /** Шаг 97 (097): канал назвал предложение держателем Buy Box; null — не сказал */
+  'offers.holds_buybox': Array<boolean | null>;
   'offers.rank': Array<number | null>;
   'offers.delivery_min_days': Array<number | null>;
   'offers.delivery_max_days': Array<number | null>;
@@ -85,22 +90,25 @@ export function competitorSnapshotRow(
   // Валюта строки не подставляется по умолчанию (у столбца DEFAULT 'EUR', 050): пустой снимок без валюты не пишется [Р-71]
   if (!currency || !basis) throw new Error('competitor snapshot without prices has no currency: not written');
   const o = snapshot.offers;
-  // Находка 2 ревью шага 21: доставка Buy Box — у предложения-победителя (первый ранг или та же цена и сторона); снимок её отдельно не несёт
-  const winner = snapshot.buybox
-    ? o.find((x) => x.rank === 1 && x.isSelf === snapshot.buybox!.isSelf) ?? o.find((x) => x.isSelf === snapshot.buybox!.isSelf && x.price.amountMinor === snapshot.buybox!.price.amountMinor)
-    : undefined;
+  // Находка 2 ревью шага 21: доставка Buy Box — у предложения-победителя. Шаг 97: канал называет её у Buy Box или держателя у предложения;
+  // держатель не назван (Amazon, A-29) — доставки Buy Box в строке нет, а не «доставка первого ранга»
+  const winner = snapshot.buybox ? o.find((x) => x.holdsBuyBox === true) : undefined;
   return {
     tenant_id: tenantId, competitor_snapshot_id: snapshotId, received_at: receivedAt, observed_at: snapshot.observedAt,
     channel_account_id: channelAccountId, channel, marketplace: snapshot.marketplace, channel_product_ref: snapshot.channelProductRef,
     condition: snapshot.condition, currency, price_basis: basis, source: snapshot.source, source_event_id: snapshot.sourceEventId ?? null, sanity_verdict: sanityVerdict, delivery,
     completeness: snapshot.completeness.kind, completeness_n: snapshot.completeness.kind === 'TOP_N' ? snapshot.completeness.n : null,
-    buybox_amount_minor: snapshot.buybox?.price.amountMinor ?? null, buybox_shipping_minor: winner?.shipping?.amountMinor ?? null, buybox_is_self: snapshot.buybox?.isSelf ?? null,
+    buybox_amount_minor: snapshot.buybox?.price.amountMinor ?? null,
+    buybox_shipping_minor: snapshot.buybox?.shipping?.amountMinor ?? winner?.shipping?.amountMinor ?? null, buybox_is_self: snapshot.buybox?.isSelf ?? null,
+    buybox_seller_ref: snapshot.buybox?.sellerRef ?? null,
     channel_suggested_amount_minor: snapshot.channelSuggestedPrice?.amountMinor ?? null,
     'offers.seller_ref': o.map((x) => x.sellerRef ?? ''), 'offers.amount_minor': o.map((x) => x.price.amountMinor),
-    'offers.shipping_minor': o.map((x) => x.shipping?.amountMinor ?? 0), 'offers.condition': o.map((x) => x.condition ?? snapshot.condition),
-    'offers.fulfillment': o.map((x) => x.fulfillment ?? ''), 'offers.is_self': o.map((x) => x.isSelf), 'offers.rank': o.map((x) => x.rank ?? null),
+    'offers.shipping_minor': o.map((x) => x.shipping?.amountMinor ?? null), 'offers.condition': o.map((x) => x.condition ?? snapshot.condition),
+    'offers.fulfillment': o.map((x) => x.fulfillment ?? ''), 'offers.is_self': o.map((x) => x.isSelf), 'offers.holds_buybox': o.map((x) => x.holdsBuyBox ?? null),
+    'offers.rank': o.map((x) => x.rank ?? null),
     'offers.delivery_min_days': o.map((x) => x.deliveryDays?.min ?? null), 'offers.delivery_max_days': o.map((x) => x.deliveryDays?.max ?? null),
-    'offers.feedback_count': o.map(() => null), 'offers.feedback_pct': o.map(() => null),
+    // Шаг 97: рейтинг — только если канал его дал (Amazon); доля положительных отзывов — целые проценты столбца UInt8
+    'offers.feedback_count': o.map((x) => x.rating?.count ?? null), 'offers.feedback_pct': o.map((x) => (x.rating ? Math.round(x.rating.positivePct) : null)),
     offer_counts: {}, data_class: channel === 'AMAZON' ? 'AMAZON_INFO' : 'CHANNEL_INFO',
   };
 }
@@ -113,8 +121,11 @@ export function competitorSnapshotFromRow(row: CompetitorSnapshotRow): Competito
     ...(row['offers.seller_ref'][i] ? { sellerRef: row['offers.seller_ref'][i]! } : {}),
     isSelf: row['offers.is_self'][i] ?? false,
     price: money(amount),
-    shipping: money(row['offers.shipping_minor'][i] ?? 0),
-    totalPrice: money(amount + (row['offers.shipping_minor'][i] ?? 0)),
+    // Шаг 97: неизвестная доставка (NULL с 097) не превращается обратно в ноль; строки до 097 несут 0 — отличить их нечем
+    ...(row['offers.shipping_minor'][i] != null ? { shipping: money(row['offers.shipping_minor'][i]!), totalPrice: money(amount + row['offers.shipping_minor'][i]!) } : {}),
+    ...(row['offers.holds_buybox']?.[i] === true ? { holdsBuyBox: true } : {}),
+    ...(row['offers.feedback_pct']?.[i] != null && row['offers.feedback_count']?.[i] != null
+      ? { rating: { positivePct: row['offers.feedback_pct'][i]!, count: row['offers.feedback_count'][i]! } } : {}),
     ...(row['offers.condition'][i] ? { condition: row['offers.condition'][i]! } : {}),
     ...(row['offers.fulfillment'][i] ? { fulfillment: row['offers.fulfillment'][i]! } : {}),
     deliveryDays: { min: row['offers.delivery_min_days'][i] ?? null, max: row['offers.delivery_max_days'][i] ?? null },
@@ -127,7 +138,8 @@ export function competitorSnapshotFromRow(row: CompetitorSnapshotRow): Competito
     marketplace: row.marketplace, channelProductRef: row.channel_product_ref, condition: row.condition, source: row.source,
     ...(row.source_event_id ? { sourceEventId: row.source_event_id } : {}),
     observedAt: iso(row.observed_at), completeness,
-    ...(row.buybox_amount_minor != null ? { buybox: { price: money(row.buybox_amount_minor), isSelf: row.buybox_is_self ?? false } } : {}),
+    ...(row.buybox_amount_minor != null ? { buybox: { price: money(row.buybox_amount_minor), isSelf: row.buybox_is_self ?? null,
+      ...(row.buybox_shipping_minor != null ? { shipping: money(row.buybox_shipping_minor) } : {}), ...(row.buybox_seller_ref ? { sellerRef: row.buybox_seller_ref } : {}) } } : {}),
     offers,
     ...(row.channel_suggested_amount_minor != null ? { channelSuggestedPrice: money(row.channel_suggested_amount_minor) } : {}),
   };

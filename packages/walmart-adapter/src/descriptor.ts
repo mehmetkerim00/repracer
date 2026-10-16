@@ -88,6 +88,7 @@ export const WALMART_DESCRIPTOR: ChannelDescriptor = {
       completeness: { kind: 'TOP_N', n: 10 },
       conditions: ['new'],
       hasBuyboxWinner: true,
+      hasBuyboxPrice: true,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,

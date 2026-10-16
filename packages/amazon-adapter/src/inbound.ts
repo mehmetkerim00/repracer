@@ -24,11 +24,24 @@ interface PricingHealth {
     summary?: { referencePrice?: { competitivePriceThreshold?: HealthMoney } };
   };
 }
-interface AocOffer { SellerId?: unknown; SubCondition?: unknown; ListingPrice?: Price; Shipping?: Price; IsBuyBoxWinner?: unknown; IsFulfilledByAmazon?: unknown; ShippingTime?: { MinimumHours?: unknown; MaximumHours?: unknown } }
+/**
+ * Шаг 97 [Р-221]: предложение — только поля схемы снимка. Признака «держит Buy Box» (`IsBuyBoxWinner`) в схеме ANY_OFFER_CHANGED НЕТ:
+ * прежний разбор читал его, фикстуры его содержали, и дефект прятался (A-29). Держатель Buy Box в уведомлении не назван
+ */
+interface AocOffer {
+  SellerId?: unknown; SubCondition?: unknown; ListingPrice?: Price; Shipping?: Price; IsFulfilledByAmazon?: unknown;
+  ShippingTime?: { MinimumHours?: unknown; MaximumHours?: unknown };
+  SellerFeedbackRating?: { SellerPositiveFeedbackRating?: unknown; FeedbackCount?: unknown };
+}
+/** Summary.BuyBoxPrices — цена Buy Box по состоянию товара: цена, доставка, landed; продавца нет */
+interface AocBuyBoxPrice { Condition?: unknown; ListingPrice?: Price; Shipping?: Price; LandedPrice?: Price }
 interface Notification {
   NotificationType?: unknown;
   NotificationMetadata?: { NotificationId?: unknown };
-  Payload?: { AnyOfferChangedNotification?: { SellerId?: unknown; OfferChangeTrigger?: { MarketplaceId?: unknown; ASIN?: unknown; ItemCondition?: unknown; TimeOfOfferChange?: unknown }; Offers?: AocOffer[] } };
+  Payload?: { AnyOfferChangedNotification?: {
+    SellerId?: unknown; OfferChangeTrigger?: { MarketplaceId?: unknown; ASIN?: unknown; ItemCondition?: unknown; TimeOfOfferChange?: unknown };
+    Summary?: { BuyBoxPrices?: AocBuyBoxPrice[] }; Offers?: AocOffer[];
+  } };
 }
 
 function money(p: Price | undefined, basis: PriceBasis): Money | null {
@@ -80,6 +93,14 @@ export async function handleInboundAmazon(options: AmazonAdapterOptions, deliver
   return type === 'ANY_OFFER_CHANGED' ? anyOfferChanged(aoc, id, marketplace, basis, session.sellerId, deliveryId) : pricingHealth(ph, id, marketplace, basis, deliveryId);
 }
 
+/** Шаг 97: рейтинг продавца — доля положительных отзывов (0–100) и их число; значение вне схемы не берётся */
+function ratingOf(r: AocOffer['SellerFeedbackRating']): { rating?: { positivePct: number; count: number } } {
+  const pct = r?.SellerPositiveFeedbackRating;
+  const count = r?.FeedbackCount;
+  return typeof pct === 'number' && Number.isFinite(pct) && pct >= 0 && pct <= 100 && Number.isSafeInteger(count) && (count as number) >= 0
+    ? { rating: { positivePct: pct, count: count as number } } : {};
+}
+
 const asinOf = (v: unknown) => (typeof v === 'string' && /^[A-Z0-9]{10}$/.test(v) ? v : null);
 const instantOf = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
 
@@ -90,7 +111,19 @@ function anyOfferChanged(body: Notification, id: string, marketplace: string, ba
   const observed = instantOf(trigger?.TimeOfOfferChange);
   if (!asin || !observed) return { kind: 'REJECTED', error: channelError('VALIDATION', 'BATCH', 'notification lacks ASIN or TimeOfOfferChange', { raiseAlert: true }), responseStatus: 400 };
   const offers: CompetitorOffer[] = [];
+  const condition = typeof trigger?.ItemCondition === 'string' ? trigger.ItemCondition.toLowerCase() : 'new';
+  /**
+   * Шаг 97 [Р-221]: цена Buy Box — Summary.BuyBoxPrices того же состояния товара; держатель неизвестен (`isSelf: null`): схема его не
+   * называет, а угадывать «наш или нет» по совпадению цены нельзя
+   */
   let buybox: CompetitorSnapshot['buybox'];
+  const bbp = (Array.isArray(n.Summary?.BuyBoxPrices) ? n.Summary!.BuyBoxPrices! : [])
+    .find((b) => typeof b?.Condition === 'string' && b.Condition.toLowerCase() === condition);
+  if (bbp) {
+    const price = money(bbp.ListingPrice, basis);
+    const shipping = money(bbp.Shipping, basis);
+    if (price && price.amountMinor > 0) buybox = { price, isSelf: null, ...(shipping ? { shipping } : {}) };
+  }
   for (const o of Array.isArray(n.Offers) ? n.Offers : []) {
     const price = money(o.ListingPrice, basis);
     if (!price || price.amountMinor === 0) continue;
@@ -102,12 +135,12 @@ function anyOfferChanged(body: Notification, id: string, marketplace: string, ba
       ...(typeof o.SubCondition === 'string' ? { condition: o.SubCondition.toLowerCase() } : {}),
       fulfillment: o.IsFulfilledByAmazon === true ? 'AFN' : 'MFN',
       deliveryDays: { min: days(o.ShippingTime?.MinimumHours), max: days(o.ShippingTime?.MaximumHours) },
+      ...ratingOf(o.SellerFeedbackRating),
     };
     offers.push(offer);
-    if (o.IsBuyBoxWinner === true) buybox = { price, isSelf };
   }
   const snapshot: CompetitorSnapshot = {
-    marketplace, channelProductRef: asin, condition: typeof trigger?.ItemCondition === 'string' ? trigger.ItemCondition.toLowerCase() : 'new',
+    marketplace, channelProductRef: asin, condition,
     source: SOURCE_ANY_OFFER_CHANGED, sourceEventId: id, observedAt: observed,
     completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, ...(buybox ? { buybox } : {}), offers,
   };

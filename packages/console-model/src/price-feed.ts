@@ -4,7 +4,8 @@ import type { Messages } from './i18n/index.ts';
 import { OFFER_CHOICES } from './compliance.ts';
 import { strategyLabel } from './products.ts';
 import { describe, type HumanReason } from './explain.ts';
-import { explanationOf } from './trace.ts';
+import type { CompetitorView } from '@repracer/pricing-model';
+import { explanationOf, triggerPhrase } from './trace.ts';
 import { catalogFirst, catalogTotal, gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
@@ -26,6 +27,11 @@ export interface FeedItem {
   decisionId: string | null;
   /** Шаг 49 [Р-190]: применённая запись подтверждена только нашей записью у канала — словами, иначе null */
   confirmation: string | null;
+  /**
+   * Шаг 97 [Р-218]: компактный чип причины — кто подвинул цену («Harbor Goods ↓ $17.50»); полная фраза — подсказкой и на квитанции.
+   * null — решение не из данных конкурентов, никто не двигался или детали истекли (30 суток)
+   */
+  trigger: { chip: string; full: string } | null;
 }
 
 export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT', 'SUPERSEDED', 'SHADOW_HELD'] as const;
@@ -156,7 +162,18 @@ export function feedItemOf(world: StandWorld, m: Messages, item: FeedPageItem): 
     status: f.statuses[w.status as keyof typeof f.statuses] ?? w.status, tone: STATUS_TONE[w.status] ?? 'unknown', source,
     reason: ended ?? (decision ? describe(decision.reason, m) : null), decisionId: w.decisionId,
     confirmation: w.status === 'APPLIED' && w.confirmedByOwnRecord ? m.ui.ownRecordConfirmation : null,
+    trigger: triggerChip(decision?.competitorView ?? null, w.currency, m),
   };
+}
+
+/** Шаг 97 [Р-218]: чип «продавец, стрелка, цена» без длинных предложений (правила читаемости 96.2); полная фраза — подсказкой */
+function triggerChip(view: CompetitorView | null, currency: string, m: Messages): FeedItem['trigger'] {
+  const tr = view?.trigger;
+  if (!tr) return null;
+  const c = m.ui.trace.competitors;
+  const seller = tr.seller ?? c.unnamedSeller;
+  const price = tr.move === 'GONE' ? m.money(tr.wasMinor ?? null, currency) : m.money(tr.nowMinor ?? null, currency);
+  return { chip: c.chip[tr.move](seller, price), full: triggerPhrase(view, currency, m)! };
 }
 
 /**

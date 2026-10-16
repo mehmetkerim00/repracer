@@ -1,5 +1,6 @@
 import type { AdapterCallContext, ChannelAdapter, InboundDelivery } from '@repracer/channel-port';
 import { createPricingPipeline, type MemorySeed, type MemorySeedScope, type PricingPipeline } from '@repracer/pricing-pipeline';
+import type { StrategyDefinition } from '@repracer/pricing-model';
 import { PgPricingStore, PgStockStore, PgWriteQueueStore, seedPricingWorld, translateStore, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
 import { createStockPipeline, type StockPipeline } from '@repracer/stock-sync';
 import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } from '@repracer/write-dispatcher';
@@ -43,7 +44,13 @@ export interface LiveProduct {
    */
   bare?: boolean;
   /** Шаг 34 [Р-151]: конкурентов у товара может быть несколько — демо ставит трёх с разным поведением */
-  moreCompetitors?: Array<{ sellerRef: string; behaviour: CompetitorBehaviour; startMinor: number }>;
+  moreCompetitors?: Array<{ sellerRef: string; behaviour: CompetitorBehaviour; startMinor: number; channelFulfilled?: boolean }>;
+  /** Шаг 97 [Р-219]: своя стратегия предложения (по умолчанию у ENGINE — «Buy Box» шага 26); имя — для экрана */
+  strategy?: { definition: StrategyDefinition; name: string };
+  /** Шаг 97 [H]: основного конкурента исполняет Kaufland (`fulfilled_by_kaufland`) */
+  competitorChannelFulfilled?: boolean;
+  /** Шаг 97 [H]: имя основного конкурента (по умолчанию «Synthetic Competitor <id>») */
+  competitorName?: string;
 }
 
 export interface KauflandLiveWorld {
@@ -92,9 +99,9 @@ function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
   return {
     writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, ...(p.title ? { title: p.title } : {}), channelAccountId: account, marketplace: p.marketplace,
     externalUnitId: id.slice(-6), externalOfferId: `SYN-OFFER-${id}`, channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: p.pricingMode ?? 'OFF',
-    strategy: p.pricingMode === 'ENGINE' ? { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, deadbandMinor: 0 } : null,
+    strategy: p.pricingMode !== 'ENGINE' ? null : p.strategy?.definition ?? { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, deadbandMinor: 0 },
     // Шаг 78: человеку — имя, а не идентификатор сценария «st-buybox»
-    ...(p.pricingMode === 'ENGINE' ? { strategyName: 'Buy Box' } : {}),
+    ...(p.pricingMode === 'ENGINE' ? { strategyName: p.strategy?.name ?? 'Buy Box' } : {}),
     ...(p.costMinor ? { cost: { currency: 'EUR', costProfileId: `cp-${id}`, unitCostMinor: p.costMinor, fixedFeeMinor: 0, feeRateBp: 1500, tax: { regime: 'VAT_INCLUDED', vatRateBp: p.marketplace === 'at' ? 2000 : 1900 } } } : {}),
     currentPriceMinor: 1850, minPrice: { amountMinor: 1200, id: `min-${p.marketplace}-${id}` }, maxPrice: { amountMinor: 3000, id: `max-${p.marketplace}-${id}` },
   } as MemorySeedScope;
@@ -132,6 +139,8 @@ export async function kauflandLiveWorld(input: {
   stock?: { onHand: number; bufferUnits: number; stockPool: PgPool };
   /** Спрос модели канала: заказы, отгрузки, отмены (K-11 — заказ уменьшает amount у канала сам) */
   demand?: KauflandChannelModelSpec['demand'];
+  /** Шаг 97 [H]: формула победителя Buy Box модели (buybox-rule.ts); без неё — прежнее правило */
+  buyBox?: KauflandChannelModelSpec['buyBox'];
   /**
    * Шаг 36 [Р-156]: куда мир кладёт алерты СВЕРХ своего журнала — обычно в базу (`PgAlertSink`), откуда их забирает
    * доставка. Без этого алерт остаётся в памяти прогона, и проверить доставку нечем.
@@ -165,13 +174,15 @@ export async function kauflandLiveWorld(input: {
   const channelModel: KauflandChannelModelSpec = {
     seed: input.seed, webhookUrl: `https://hooks.example.invalid/kaufland/${webhookToken}`,
     ...(input.demand ? { demand: input.demand } : {}),
+    ...(input.buyBox ? { buyBox: input.buyBox } : {}),
     units: [...input.products, ...(input.channelOnly ?? [])].map((p) => ({
       idUnit: Number(String(p.idProduct).slice(-6)), storefront: p.marketplace, idOffer: `SYN-OFFER-${p.idProduct}`, idProduct: p.idProduct, listingPriceMinor: 1850, amount: 5,
       ...(p.channelMinimumPriceMinor ? { minimumPriceMinor: p.channelMinimumPriceMinor } : {}),
     })),
-    competitors: [...input.products, ...(input.channelOnly ?? [])].flatMap((p) => [{ sellerRef: `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour },
+    competitors: [...input.products, ...(input.channelOnly ?? [])].flatMap((p) => [{ sellerRef: p.competitorName ?? `Synthetic Competitor ${p.idProduct}`, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: p.competitorStartMinor ?? 1800, behaviour: p.behaviour,
+      ...(p.competitorChannelFulfilled ? { channelFulfilled: true } : {}) },
       // Шаг 34: дополнительные конкуренты товара — у демо с ними выходит три с разным поведением [Р-151]
-      ...(p.moreCompetitors ?? []).map((c) => ({ sellerRef: c.sellerRef, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: c.startMinor, behaviour: c.behaviour })),
+      ...(p.moreCompetitors ?? []).map((c) => ({ sellerRef: c.sellerRef, storefront: p.marketplace, idProduct: p.idProduct, priceMinor: c.startMinor, behaviour: c.behaviour, ...(c.channelFulfilled ? { channelFulfilled: true } : {}) })),
     ]),
     // Р-45: buy_box_changed — ранний доступ; без доступа уведомлений нет, конкуренты — только опрос. Доступ — явный параметр мира
     params: { ...input.params, buyBoxChanged: input.buyBoxChanged ? { delivered: true, debounceMs: input.buyBoxChanged.debounceMs, lossShare: input.buyBoxChanged.lossShare } : { delivered: false, debounceMs: 0, lossShare: 1 } },

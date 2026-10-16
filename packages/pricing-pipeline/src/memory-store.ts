@@ -1,8 +1,8 @@
-import { systemClock } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/channel-port';
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
+import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -10,10 +10,11 @@ const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
-import { strategyAvailability } from '@repracer/strategy-engine';
+import { strategyAvailability, type CreepState } from '@repracer/strategy-engine';
 import {
   BOUND_CAUSES,
   can,
+  COMPETITOR_DERIVED_RULES,
   convertMinor,
   isCompetitorDerived,
   localDate,
@@ -250,7 +251,7 @@ interface WriteRow {
 interface CompetitorRow {
   observedAt: Instant;
   buyboxMinor: number | null;
-  buyboxIsSelf?: boolean;
+  buyboxIsSelf?: boolean | null;
   lowestMinor: number | null;
   snapshot: AcceptedSnapshot | null;
   competitorSnapshotId: string | null;
@@ -261,7 +262,10 @@ const KAUFLAND_STOREFRONTS: Record<string, { currency: string; basis: PriceBasis
   de: { currency: 'EUR', basis: 'GROSS', timeZone: 'Europe/Berlin' }, at: { currency: 'EUR', basis: 'GROSS', timeZone: 'Europe/Vienna' },
 };
 const productKey = (k: { marketplace: string; channelProductRef: string; condition: string }) => `${k.marketplace}|${k.channelProductRef}|${k.condition}`;
-const COMPETITOR_STRATEGIES = new Set(['MATCH_BUYBOX', 'BEAT_LOWEST']);
+/** Шаг 97 [Р-220]: горизонт отрезка держателя Buy Box — как BUYBOX_SPAN_HORIZON_HOURS в PostgreSQL */
+const BUYBOX_SPAN_HORIZON_MS = 24 * 3_600_000;
+/** Стратегии, цена которых из данных конкурентов: типы стратегий из единственного списка правил (`COMPETITOR_DERIVED_RULES`, шаг 97) */
+const COMPETITOR_STRATEGIES: ReadonlySet<string> = COMPETITOR_DERIVED_RULES;
 /** Ставки НДС по умолчанию витрин стенда (0033, 0075: amazon.de — Германия) */
 const DEFAULT_VAT_BP: Readonly<Record<string, number>> = { de: 1900, at: 2000, A1PA6795UKMFR9: 1900 };
 const NOTE_OK = (note: string | null | undefined) => typeof note === 'string' && note.trim().length >= 10 && note.length <= 2000;
@@ -286,6 +290,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly scopes = new Map<string, ScopeRow>();
   private readonly competitorDaily = new Map<string, DailyRange[]>();
   private readonly competitorState = new Map<string, CompetitorRow>();
+  /** Шаг 97 [Р-220]: отрезки держателя Buy Box по ключу товара — как channel_data.buybox_span */
+  private readonly buyboxSpanRows = new Map<string, BuyboxSpanRow[]>();
   private readonly crossChannel: Record<string, CrossChannelReference[]>;
   private readonly fxRates: FxQuote[];
   /** Р-211: действующие курсы ЕЦБ, уже обращённые в запросы, — по аккаунту, как tenant_data.floor_raise_watermark */
@@ -418,8 +424,32 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       // Р-212: последняя боевая ступень лестницы единицы за сутки — как last_ladder_step в PostgreSQL. Признака тени у решения стенд в
       // памяти не хранит: ступени аккаунта, который сейчас в тени, не считаются
       ...this.lastLadderStep(row),
+      creep: row.strategy?.params.type === 'WIN_BUYBOX' ? this.creepState(row) : null,
       productTitle: row.title ?? null, productSku: seedSkuOf(row),
     };
+  }
+
+  /** Шаг 97 [Р-219]: как столбец `creep` в PostgreSQL — последний одобренный подъём и возврат после потери за сутки по намерениям */
+  private creepState(row: ScopeRow): CreepState {
+    const nowMs = this.nowMs();
+    let lastUp: CreepState['lastUp'] = null;
+    let lastBack: CreepState['lastBack'] = null;
+    let lastTake: CreepState['lastTake'] = null;
+    for (const i of this.intents) {
+      if (i.writeScopeId !== row.writeScopeId || i.ruleCode !== 'WIN_BUYBOX') continue;
+      const at = Date.parse(i.createdAt);
+      if (at > nowMs || at <= nowMs - 86_400_000) continue;
+      const d = this.decisions.find((x) => x.intentId === i.intentId);
+      if (!d || d.outcome !== 'APPROVED') continue;
+      const up = i.explanation.find((x) => x.code === 'CREEP_UP');
+      if (up && (!lastUp || Date.parse(lastUp.at) <= Date.parse(d.decidedAt))) {
+        lastUp = { at: d.decidedAt, fromMinor: Number(up.params.fromMinor), toMinor: Number(d.finalMinor) };
+      }
+      const back = i.explanation.find((x) => x.code === 'CREEP_STEP_BACK');
+      if (back && (!lastBack || Date.parse(lastBack.at) <= Date.parse(d.decidedAt))) lastBack = { at: d.decidedAt, lostAtMinor: Number(back.params.lostAtMinor) };
+      if (i.explanation.some((x) => x.code === 'BUYBOX_WIN_TARGET') && (!lastTake || Date.parse(lastTake.at) <= Date.parse(d.decidedAt))) lastTake = { at: d.decidedAt };
+    }
+    return { lastUp, lastBack, lastTake };
   }
 
   private lastLadderStep(row: ScopeRow): { lastLadderStepAt: Instant | null; lastLadderStepFinalMinor: number | null } {
@@ -653,7 +683,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       crossChannel: this.crossChannel[productKey(key)] ?? [],
       fxRates: this.fxRates,
       competitorDaily: this.competitorDaily.get(productKey(key)) ?? [],
-      lastAccepted: state ? { observedAt: state.observedAt, buyboxMinor: state.buyboxMinor, lowestMinor: state.lowestMinor, buyboxIsSelf: state.buyboxIsSelf ?? false } : null,
+      lastAccepted: state ? { observedAt: state.observedAt, buyboxMinor: state.buyboxMinor, lowestMinor: state.lowestMinor, buyboxIsSelf: state.buyboxIsSelf ?? null } : null,
       ourPriceMinor: primary?.scope.currentPriceMinor ?? null,
       ourKnownPricesMinor: primary?.scope.knownPricesMinor ?? [],
       channel: {
@@ -661,7 +691,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         ...this.shiftWindow(key.marketplace, productRef, now, shift),
       },
     };
-    return { scopes, sanity };
+    // Шаг 97 [Р-218]: предложения предыдущего принятого снимка — дифф «кто подвинул цену»
+    return { scopes, sanity, previousAccepted: state?.snapshot ? { offers: state.snapshot.offers } : null };
   }
 
   async loadScopeContext(_tenantId: string, writeScopeId: string, now: Instant) {
@@ -807,6 +838,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (s.log) this.snapshotLog.push({ competitorSnapshotId: s.log.competitorSnapshotId, receivedAt: s.log.receivedAt, verdict: s.verdict, delivery: s.log.delivery, key: input.key, snapshot: s.log.snapshot });
       if (s.move) this.rememberMove({ marketplace: input.key.marketplace, productRef: s.move.productRef, evaluatedAt: input.now, moveBp: s.move.moveBp, verdict: s.verdict, sellerRef: s.move.sellerRef });
       if (s.accepted) this.acceptSnapshot(input.key, s.accepted.snapshot, s.accepted.competitorSnapshotId, s.accepted.sanity);
+      if (s.accepted && s.buyboxHolder) this.recordBuyboxSpan(input.key, s.observedAt, s.buyboxHolder);
       if (s.rejected) {
         rejectedSnapshotId = this.id('rej');
         this.rejectedSnapshots.push({ ...s.rejected, key: input.key, rejectedSnapshotId });
@@ -839,8 +871,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       const intentId = this.id('intent');
       this.intents.push({ ...d.intent, intentId });
       const decisionId = this.id('decision');
+      // Как ограничения 0187: картина рынка — только у цены из данных конкурентов и решения не «без изменения»
+      if (d.competitorView && (noChange || !isCompetitorDerived(d.intent.ruleCode))) {
+        throw new Error(`decision for ${row.writeScopeId}: a competitor view belongs only to a competitor-derived decision that did something (0187)`);
+      }
       this.decisions.push({
-        ...d.decision, decisionId, intentId, snapshotRef: d.snapshotRef,
+        ...d.decision, decisionId, intentId, snapshotRef: d.snapshotRef, competitorView: d.competitorView ?? null,
         // Как триггер price_decision_intent_columns (0049): столбцы intent — в решении, слепок их не повторяет [Р-80]
         strategyId: d.intent.strategyId, strategyVersion: d.intent.strategyVersion, ruleCode: d.intent.ruleCode, trigger: d.intent.trigger.type, proposedMinor: d.intent.proposedMinor,
       });
@@ -894,10 +930,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const buybox = snapshot.buybox?.price.amountMinor ?? null;
     const competitors = snapshot.offers.filter((o) => !o.isSelf).map((o) => o.price.amountMinor);
     const lowest = competitors.length ? Math.min(...competitors) : null;
-    this.competitorState.set(k, { observedAt: snapshot.observedAt, buyboxMinor: buybox, buyboxIsSelf: snapshot.buybox?.isSelf ?? false, lowestMinor: lowest, snapshot, competitorSnapshotId, sanity });
+    this.competitorState.set(k, { observedAt: snapshot.observedAt, buyboxMinor: buybox, buyboxIsSelf: snapshot.buybox ? snapshot.buybox.isSelf : null, lowestMinor: lowest, snapshot, competitorSnapshotId, sanity });
     const day = snapshot.observedAt.slice(0, 10);
     // История — цены конкурентов: наш собственный Buy Box в якорь не попадает [Р-49]
-    const competitorBuybox = snapshot.buybox && !snapshot.buybox.isSelf ? buybox : null;
+    // Шаг 97: держатель не назван — цена Buy Box может быть нашей и в историю конкурентов не идёт
+    const competitorBuybox = snapshot.buybox && snapshot.buybox.isSelf === false ? buybox : null;
     const values = [competitorBuybox, lowest].filter((v): v is number => v !== null);
     if (values.length === 0) return;
     const days = this.competitorDaily.get(k) ?? [];
@@ -1963,14 +2000,20 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (r && Date.parse(r.requestedAt) <= Date.parse(requestedAt)) this.floorRaiseRequests.delete(key);
   }
 
-  async listScheduledScopes(_tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]> {
+  async listScheduledScopes(_tenantId: string, channelAccountId: string, now: Instant, limit: number, creepPaceSeconds = DEFAULT_SCHEDULED_RECOMPUTE_SECONDS): Promise<string[]> {
     const dayAgo = Date.parse(now) - 86_400_000;
     const last = new Map<string, number>();
     for (const d of this.decisions) last.set(d.writeScopeId, Math.max(last.get(d.writeScopeId) ?? 0, Date.parse(d.decidedAt)));
+    // Шаг 97 [Р-219]: как PostgreSQL — «Win the Buy Box» с подъёмом, Buy Box наш по последнему снимку, решения не было дольше периода
+    const creeping = (s: ScopeRow) => s.strategy?.params.type === 'WIN_BUYBOX' && s.strategy.params.creepUp
+      && (last.get(s.writeScopeId) ?? 0) <= Date.parse(now) - creepPaceSeconds * 1000
+      && this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }))?.buyboxIsSelf === true;
     return [...this.scopes.values()]
-      .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy && !COMPETITOR_STRATEGIES.has(s.strategy.params.type))
+      .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy
+        && (!COMPETITOR_STRATEGIES.has(s.strategy.params.type) || creeping(s)))
       // Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу
       .filter((s) => {
+        if (creeping(s)) return true;
         if ((last.get(s.writeScopeId) ?? 0) < dayAgo) return true;
         // Как PostgreSQL (ревью шага 53, находка 7): после обновления бюджета — один раз, пока решения после отказа не было
         const b = this.priceBudgetExhausted(s.writeScopeId, now);
@@ -2232,6 +2275,37 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       && (!query.since || Date.parse(d.decidedAt) >= Date.parse(query.since)) && (!query.until || Date.parse(d.decidedAt) < Date.parse(query.until))
       && (outcomes === null || outcomes.includes(d.outcome))).sort(InMemoryPricingStore.newestFirst);
     return { items: all.slice(query.offset, query.offset + query.limit).map((d) => ({ ...d })), total: all.length };
+  }
+
+  /** Шаг 97 [Р-220]: отрезок держателя Buy Box — как запись снимка в PostgreSQL (0188) */
+  private recordBuyboxSpan(key: ProductKey, observedAt: Instant, h: BuyboxHolderObservation): void {
+    const k = productKey(key);
+    const spans = this.buyboxSpanRows.get(k) ?? [];
+    const last = spans.at(-1);
+    const at = Date.parse(observedAt);
+    if (last && at < Date.parse(last.lastSeenAt)) return;
+    const seller = h.holder === 'OTHER' ? h.sellerRef : null;
+    if (last && last.holder === h.holder && last.sellerRef === seller && at - Date.parse(last.lastSeenAt) <= BUYBOX_SPAN_HORIZON_MS) {
+      last.lastSeenAt = observedAt;
+      last.snapshots += 1;
+    } else {
+      spans.push({ holder: h.holder, sellerRef: seller, startedAt: observedAt, lastSeenAt: observedAt, snapshots: 1 });
+    }
+    this.buyboxSpanRows.set(k, spans);
+  }
+
+  async buyboxSpans(_tenantId: string, writeScopeId: string, from: Instant, to: Instant): Promise<BuyboxSpanRow[]> {
+    const s = this.scopes.get(writeScopeId);
+    if (!s) return [];
+    const spans = this.buyboxSpanRows.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition })) ?? [];
+    return spans.filter((x) => Date.parse(x.startedAt) < Date.parse(to) && Date.parse(x.lastSeenAt) >= Date.parse(from) - BUYBOX_SPAN_HORIZON_MS).map((x) => ({ ...x }));
+  }
+
+  async competitionSnapshot(_tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {
+    const s = this.scopes.get(writeScopeId);
+    if (!s) return null;
+    const state = this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }));
+    return state?.snapshot ? { snapshot: state.snapshot, source: state.snapshot.source, observedAt: state.observedAt } : null;
   }
 
   async decisionDetail(_tenantId: string, decisionId: string): Promise<DecisionDetail | null> {

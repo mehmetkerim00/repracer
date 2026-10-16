@@ -85,6 +85,16 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
         detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}, ${p.scope === 'MARKET' ? s.marketScope : s.visibleScope}${p.compareLanded ? `, ${s.landed}` : ''}; ${atBound(p.atBound)}${tail}`,
         competitorDerived,
       };
+    // Шаг 97 [Р-219]: подрез и гандикап хранятся 18 месяцев после замены версии [Р-91]
+    case 'WIN_BUYBOX': {
+      const handicap = (p as { fulfillmentHandicapMinor?: number }).fulfillmentHandicapMinor;
+      return {
+        label: s.winBuybox,
+        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)} ${s.winLanded}${handicap ? `, ${s.handicap(money(handicap))}` : ''}; `
+          + `${p.creepUp ? s.creep(m.percentBp(p.creepStepBp)) : s.noCreep}; ${atBound(p.atBound)}${tail}`,
+        competitorDerived,
+      };
+    }
   }
 }
 

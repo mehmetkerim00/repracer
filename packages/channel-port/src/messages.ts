@@ -175,6 +175,16 @@ export interface CompetitorOffer {
   condition?: string;
   fulfillment?: string;
   deliveryDays?: { min: number | null; max: number | null };
+  /**
+   * Шаг 97 [A]: канал сам назвал это предложение держателем Buy Box (Kaufland — ранг 1 ответа /buybox, Walmart — продавец Buy Box).
+   * Нет поля — канал этого не сказал (у Amazon ANY_OFFER_CHANGED признака держателя в схеме нет, A-29), а не «не держит»
+   */
+  holdsBuyBox?: boolean;
+  /**
+   * Шаг 97 [A]: рейтинг продавца, если канал его даёт (Amazon SellerFeedbackRating: доля положительных отзывов в процентах и число
+   * отзывов); у Kaufland и Walmart поля нет — честное отсутствие
+   */
+  rating?: { positivePct: number; count: number };
 }
 
 export interface CompetitorSnapshot {
@@ -187,7 +197,11 @@ export interface CompetitorSnapshot {
   observedAt: Instant;
   /** Что именно содержит снимок: топ-N предложений, только минимальные цены, полный список */
   completeness: { kind: 'TOP_N'; n: number } | { kind: 'CHEAPEST_ONLY' } | { kind: 'FULL' };
-  buybox?: { price: Money; isSelf: boolean };
+  /**
+   * Цена Buy Box. Шаг 97: `isSelf: null` — держатель неизвестен: канал отдаёт цену Buy Box, но не говорит, чья она (Amazon
+   * ANY_OFFER_CHANGED — Summary.BuyBoxPrices без продавца, A-29). `sellerRef` и `shipping` — только если канал их назвал
+   */
+  buybox?: { price: Money; isSelf: boolean | null; shipping?: Money; sellerRef?: string };
   offers: CompetitorOffer[];
   /** Подсказка канала о цене для выигрыша (Kaufland target_price) — вход стратегии, не решение */
   channelSuggestedPrice?: Money;

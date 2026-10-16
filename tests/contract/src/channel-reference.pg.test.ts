@@ -28,11 +28,11 @@ const DESCRIPTORS: ChannelDescriptor[] = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR
 test('Р-119, Р-39: platform.channel_behaviour and platform.competitor_source equal the adapter descriptors', async () => {
   const { rows: behaviour } = await pool.query('SELECT channel, halt_release, basis FROM platform.channel_behaviour ORDER BY channel');
   assert.deepEqual(behaviour, DESCRIPTORS.map((d) => ({ channel: d.channel, halt_release: d.haltRelease.kind, basis: d.haltRelease.basis })).sort((a, b) => a.channel.localeCompare(b.channel)));
-  const { rows: sources } = await pool.query(`SELECT channel, source, kind, completeness_kind, completeness_n, conditions, has_buybox_winner, has_own_rank, has_shipping,
+  const { rows: sources } = await pool.query(`SELECT channel, source, kind, completeness_kind, completeness_n, conditions, has_buybox_winner, has_buybox_price, has_own_rank, has_shipping,
                                                      typical_staleness_seconds, availability, role FROM platform.competitor_source ORDER BY channel, source`);
   const expected = DESCRIPTORS.flatMap((d) => (d.competitorSources ?? []).map((s) => ({
     channel: d.channel, source: s.source, kind: s.kind, completeness_kind: s.completeness.kind, completeness_n: s.completeness.kind === 'TOP_N' ? s.completeness.n : null,
-    conditions: s.conditions, has_buybox_winner: s.hasBuyboxWinner, has_own_rank: s.hasOwnRank, has_shipping: s.hasShipping,
+    conditions: s.conditions, has_buybox_winner: s.hasBuyboxWinner, has_buybox_price: s.hasBuyboxPrice, has_own_rank: s.hasOwnRank, has_shipping: s.hasShipping,
     typical_staleness_seconds: s.typicalStalenessSeconds, availability: s.availability, role: s.role,
   }))).sort((a, b) => a.channel.localeCompare(b.channel) || a.source.localeCompare(b.source));
   // Порядок строк — одним сравнением в коде: сортировка базы зависит от правил сравнения кластера
@@ -48,6 +48,8 @@ test('OQ-166: channel_data.strategy_unmet agrees with strategyAvailability for e
     { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP' },
     { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'VISIBLE_TOP_N', compareLanded: true, atBound: 'HOLD' },
     { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'MARKET', compareLanded: false, atBound: 'CAP' },
+    // Шаг 97 [Р-219, Р-221]: держатель Buy Box и доставка
+    { type: 'WIN_BUYBOX', undercutMinor: 5, fulfillmentHandicapMinor: 0, creepUp: true, creepStepBp: 100, atBound: 'CAP' },
   ] as StrategyParams[];
   for (const d of DESCRIPTORS) {
     for (const params of shapes) {

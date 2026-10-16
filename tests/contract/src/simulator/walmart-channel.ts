@@ -1,3 +1,4 @@
+import { LANDED_CHANNEL_BONUS, rankForBuyBox, sellersFor, type BuyBoxRuleSpec } from './buybox-rule.ts';
 import { NEXT_REPLENISHMENT_HEADER, TOKEN_COUNT_HEADER, WALMART_PATHS, type WalmartFetch } from '@repracer/walmart-adapter';
 
 /**
@@ -61,6 +62,8 @@ export type WalmartCompetitorBehaviour = 'DRIFT' | 'UNDERCUT' | 'WAVE';
 
 export interface WalmartItemSpec {
   sku: string;
+  /** Шаг 97 [H]: наша доставка (в режиме NAMED_WAVES она в ответе Buy Box) */
+  shippingMinor?: number;
   gtin?: string;
   productName: string;
   priceMinor: number;
@@ -79,6 +82,13 @@ export interface WalmartModelSpec {
   params?: Partial<WalmartModelParams>;
   /** Часы мира: модель живёт на них (виртуальные в тестах, настоящие в демо) */
   nowMs: () => number;
+  /**
+   * Шаг 97 [H]: рынок товара. LEGACY (по умолчанию) — три безымянных конкурента шага 89 (дрейф, подрезчик, волна), победитель — минимальная
+   * цена; NAMED_WAVES — синтетические продавцы пула (buybox-rule.ts) с волнами разной фазы и размаха и доставкой, победитель — формула
+   * `buyBox` (landed; исполнение каналом модель Walmart не называет — W-05), продавец Buy Box назван в ответе
+   */
+  market?: 'LEGACY' | 'NAMED_WAVES';
+  buyBox?: BuyBoxRuleSpec;
 }
 
 interface ItemState extends WalmartItemSpec { published: boolean; reason: string | null }
@@ -177,6 +187,39 @@ export class SimulatedWalmartChannel {
     ];
   }
 
+  /** Шаг 97 [H]: продавцы товара в режиме NAMED_WAVES — волны с фазой и размахом своими у каждого товара и продавца */
+  namedCompetitorsOf(sku: string): Array<{ sellerRef: string; priceMinor: number; shippingMinor: number; order: number }> {
+    const s = this.items.get(sku);
+    if (!s) return [];
+    const index = this.spec.items.findIndex((i) => i.sku === sku);
+    const t = (this.spec.nowMs() - this.startMs) / MINUTE;
+    const phase = [...sku].reduce((a, c) => a + c.charCodeAt(0), this.spec.seed);
+    const shipping = [0, 399, 0];
+    return sellersFor(Math.max(0, index)).map((seller, k) => {
+      const amp = [0.04, 0.07, 0.1][k]!;
+      const period = [70, 110, 170][k]!;
+      const priceMinor = Math.round(s.competitorBaseMinor * (1 + amp * Math.sin((2 * Math.PI * t) / period + phase * (k + 1))) - shipping[k]! * 0.5);
+      return { sellerRef: seller.name, priceMinor, shippingMinor: shipping[k]!, order: k };
+    });
+  }
+
+  private readonly buyBoxHolders = new Map<string, string>();
+
+  private namedWavesBuyBox(s: ItemState) {
+    const rule = this.spec.buyBox ?? LANDED_CHANNEL_BONUS;
+    const offers = [...this.namedCompetitorsOf(s.sku).map((c) => ({ key: c.sellerRef, self: false, priceMinor: c.priceMinor, shippingMinor: c.shippingMinor, order: c.order })),
+      ...(s.published ? [{ key: '$self', self: true, priceMinor: s.priceMinor, shippingMinor: s.shippingMinor ?? 0, order: Number.MAX_SAFE_INTEGER }] : [])]
+      .map((o) => ({ ...o, landedMinor: o.priceMinor + o.shippingMinor, channelFulfilled: false }));
+    const ranked = rankForBuyBox(offers, this.buyBoxHolders.get(s.sku) ?? null, rule);
+    const winner = ranked[0]!;
+    this.buyBoxHolders.set(s.sku, winner.key);
+    return {
+      sku: s.sku, observedAt: new Date(this.spec.nowMs()).toISOString(),
+      buyBox: { price: money(winner.priceMinor), isSelf: winner.self, ...(winner.self ? {} : { sellerRef: winner.key }) },
+      offers: ranked.map((o) => ({ sellerRef: o.self ? undefined : o.key, isSelf: o.self, price: money(o.priceMinor), shipping: money(o.shippingMinor) })),
+    };
+  }
+
   private itemBody(s: ItemState) {
     return {
       sku: s.sku, ...(s.gtin ? { gtin: s.gtin } : {}), productName: s.productName, price: money(s.priceMinor),
@@ -249,6 +292,7 @@ export class SimulatedWalmartChannel {
     if (path === WALMART_PATHS.buybox && init.method === 'GET') {
       const s = this.items.get(u.searchParams.get('sku') ?? '');
       if (!s) return json(404, { errors: [{ code: 'SYN_NOT_FOUND' }] }, h);
+      if (this.spec.market === 'NAMED_WAVES') return json(200, this.namedWavesBuyBox(s), h);
       const offers = [...this.competitorsOf(s.sku).map((c) => ({ sellerRef: c.sellerRef, isSelf: false, priceMinor: c.priceMinor })),
         ...(s.published ? [{ sellerRef: 'self', isSelf: true, priceMinor: s.priceMinor }] : [])].sort((a, b) => a.priceMinor - b.priceMinor);
       const winner = offers[0]!;

@@ -6,7 +6,7 @@ import { DEFAULT_RETRY_POLICY, retryPolicyFor } from '@repracer/write-dispatcher
 import {
   type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
 } from '@repracer/pricing-pipeline';
-import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, offerIdentityOf, type CompetitorOffer, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { OmnibusPriorPrice } from '@repracer/pricing-model';
@@ -47,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow } from '@repracer/pricing-pipeline';
 import { DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -88,7 +88,8 @@ const UUID_FORM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const portCondition = (c: string) => c.toLowerCase();
 const iso = (v: string) => new Date(v).toISOString();
 
-const COMPETITOR_RULES = ['MATCH_BUYBOX', 'BEAT_LOWEST', 'POSITION'];
+/** Шаг 97: правила цены из данных конкурентов — единственный список кода (`COMPETITOR_DERIVED_RULES`), а не своя копия */
+const COMPETITOR_RULES = [...COMPETITOR_DERIVED_RULES];
 
 /**
  * Строки единицы записи цены: предложение, единица, товар, версии записи, стратегия.
@@ -106,7 +107,9 @@ const EU_STOREFRONTS_SQL = (tenant: string) => `EXISTS (SELECT 1 FROM tenant_dat
 const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.external_offer_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, p.sku AS label_sku, CASE WHEN p.title_channel_read_at IS NULL THEN p.title END AS label_title, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
-  CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor) END AS strategy_params,
+  CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor)
+       -- Шаг 97 [Р-91]: гандикап «Win the Buy Box» — там же, где подрез
+       || CASE WHEN ud.fulfillment_handicap_minor IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('fulfillmentHandicapMinor', ud.fulfillment_handicap_minor) END END AS strategy_params,
   ss.latest_version_accepted, ss.last_sent_amount_minor,
   -- Шаг 64 (живой прогон продавца из США): предложение тени — только у аккаунта В ТЕНИ. После перевода в бой оно в строке остаётся, и
   -- движок считал цену «уже предложенной тенью» — фиксированная цена eBay в бою не уходила никогда
@@ -120,7 +123,30 @@ const SCOPE_COLUMNS = `
     WHERE ld.tenant_id = s.tenant_id AND ld.write_scope_id = s.write_scope_id AND ld.ladder_from_minor IS NOT NULL AND NOT ld.shadow
       AND ld.decided_at > $2::timestamptz - interval '1 day' AND ld.decided_at <= $2::timestamptz
       AND ld.intent_created_at > $2::timestamptz - interval '2 days'
-    ORDER BY ld.decided_at DESC LIMIT 1) AS last_ladder_step`;
+    ORDER BY ld.decided_at DESC LIMIT 1) AS last_ladder_step,
+  -- Шаг 97 [Р-219]: подъём «Win the Buy Box» — последний одобренный подъём и последний возврат после потери за сутки, по горячим намерениям
+  -- (3 суток) и их решениям; индекс price_intent_scope_idx. У прочих стратегий не читается
+  CASE WHEN ps.type = 'WIN_BUYBOX' THEN json_build_object(
+    'up', (SELECT json_build_object('at', d.decided_at, 'from', (x -> 'params' ->> 'fromMinor')::bigint, 'to', d.final_amount_minor)
+             FROM channel_data.price_intent i CROSS JOIN LATERAL jsonb_array_elements(i.rationale -> 'explanation') x
+             JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
+            WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX' AND x ->> 'code' = 'CREEP_UP'
+              AND d.outcome = 'APPROVED' AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
+            ORDER BY i.created_at DESC LIMIT 1),
+    'back', (SELECT json_build_object('at', d.decided_at, 'lost', (x -> 'params' ->> 'lostAtMinor')::bigint)
+               FROM channel_data.price_intent i CROSS JOIN LATERAL jsonb_array_elements(i.rationale -> 'explanation') x
+               JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
+              WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX' AND x ->> 'code' = 'CREEP_STEP_BACK'
+                AND d.outcome = 'APPROVED' AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
+              ORDER BY i.created_at DESC LIMIT 1),
+    -- последнее одобренное взятие Buy Box: ступень подъёма не раньше периода и после него (живой прогон I3)
+    'take', (SELECT json_build_object('at', d.decided_at)
+               FROM channel_data.price_intent i
+               JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
+              WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX'
+                AND EXISTS (SELECT 1 FROM jsonb_array_elements(i.rationale -> 'explanation') x WHERE x ->> 'code' = 'BUYBOX_WIN_TARGET')
+                AND d.outcome = 'APPROVED' AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
+              ORDER BY i.created_at DESC LIMIT 1)) END AS creep`;
 
 const SCOPE_FROM = `
     FROM tenant_data.offer_mapping m
@@ -221,6 +247,9 @@ const ACTIVE_STOP_JSON = `SELECT json_build_object('stopId', st.price_stop_id, '
  */
 const INTENT_COLUMNS = `price_intent_id, created_at, write_scope_id, pricing_strategy_id, pricing_strategy_version, trigger_type, source_event_id,
   proposed_amount_minor, currency, price_basis, inputs, rationale, expires_at, rule_code, reference_amount_minor`;
+/** Шаг 97 [Р-220]: горизонт отрезка держателя Buy Box — дыра между снимками длиннее — «нет данных»; самый редкий ярус опроса — сутки (Р-47) */
+export const BUYBOX_SPAN_HORIZON_HOURS = 24;
+
 const DECISION_COLUMNS = `d.*, ref.competitor_snapshot_id, ref.source AS ref_source, ref.observed_at AS ref_observed_at`;
 const DECISION_FROM = `FROM channel_data.price_decision d
   LEFT JOIN channel_data.price_decision_snapshot_ref ref ON ref.tenant_id = d.tenant_id AND ref.price_decision_id = d.price_decision_id`;
@@ -255,6 +284,7 @@ function decisionRow(r: Row): ConsoleDecisionRow {
     strategyId: r.pricing_strategy_id ?? null, strategyVersion: r.pricing_strategy_version ?? null, ruleCode: r.rule_code, trigger: r.trigger_type,
     proposedMinor: r.proposed_amount_minor,
     snapshotRef: r.competitor_snapshot_id ? { competitorSnapshotId: r.competitor_snapshot_id, source: r.ref_source, observedAt: iso(r.ref_observed_at) } : null,
+    competitorView: r.competitor_view ?? null,
   };
 }
 
@@ -432,7 +462,7 @@ SELECT
   (SELECT json_build_object('currency', mk.currency, 'basis', mk.price_basis)
      FROM tenant_data.channel_account a JOIN platform.marketplace mk ON mk.channel = a.channel AND mk.marketplace = $4
     WHERE a.tenant_id = $1 AND a.channel_account_id = $3) AS storefront,
-  (SELECT json_build_object('observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor, 'buyboxIsSelf', cs.buybox_is_self,
+  (SELECT json_build_object('observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor, 'buyboxIsSelf', cs.buybox_is_self, 'offers', cs.offers,
             'lowestMinor', (SELECT min((o->'price'->>'amountMinor')::bigint) FROM jsonb_array_elements(cs.offers) o
                              WHERE NOT coalesce((o->>'isSelf')::boolean, false)))
      FROM channel_data.competitor_state cs
@@ -563,6 +593,11 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     shadowLastProposedMinor: r.last_shadow_amount_minor === null || r.last_shadow_amount_minor === undefined ? null : Number(r.last_shadow_amount_minor),
     lastLadderStepAt: r.last_ladder_step ? iso((r.last_ladder_step as Row).at) : null,
     lastLadderStepFinalMinor: r.last_ladder_step ? Number((r.last_ladder_step as Row).final) : null,
+    creep: r.creep ? {
+      lastUp: (r.creep as Row).up ? { at: iso((r.creep as Row).up.at), fromMinor: Number((r.creep as Row).up.from), toMinor: Number((r.creep as Row).up.to) } : null,
+      lastBack: (r.creep as Row).back ? { at: iso((r.creep as Row).back.at), lostAtMinor: Number((r.creep as Row).back.lost) } : null,
+      lastTake: (r.creep as Row).take ? { at: iso((r.creep as Row).take.at) } : null,
+    } : null,
     productTitle: r.label_title ?? null, productSku: r.label_sku ?? null,
     knownPricesMinor: [...known],
   };
@@ -649,7 +684,8 @@ function toSnapshot(key: ProductKey, s: Row): AcceptedSnapshot {
     ...(s.sourceEventId ? { sourceEventId: s.sourceEventId } : {}),
     observedAt: iso(s.observedAt),
     completeness: s.completeness === 'TOP_N' ? { kind: 'TOP_N', n: s.completenessN } : { kind: s.completeness },
-    ...(s.buyboxMinor !== null ? { buybox: { price: money(Number(s.buyboxMinor)), isSelf: Boolean(s.buyboxIsSelf) } } : {}),
+    // Шаг 97: держатель Buy Box не назван каналом — null, а не «не наш»
+    ...(s.buyboxMinor !== null ? { buybox: { price: money(Number(s.buyboxMinor)), isSelf: s.buyboxIsSelf ?? null } } : {}),
     ...(s.suggestedMinor !== null ? { channelSuggestedPrice: money(Number(s.suggestedMinor)) } : {}),
     offers: s.offers,
     sanityRuleset: 'stored',
@@ -808,6 +844,8 @@ export class PgPricingStore implements PricingStore {
             windowProducts: Number(window.products),
           },
         },
+        // Шаг 97 [Р-218]: предложения предыдущего принятого снимка — дифф «кто подвинул цену»
+        previousAccepted: last ? { offers: (last.offers ?? []) as CompetitorOffer[] } : null,
       };
     });
   }
@@ -898,7 +936,8 @@ export class PgPricingStore implements PricingStore {
       : null;
     const buybox = snapshot?.buybox?.price.amountMinor ?? null;
     // История — цены конкурентов: наш собственный Buy Box в якорь не попадает [Р-49]
-    const competitorBuybox = snapshot?.buybox && !snapshot.buybox.isSelf ? buybox : null;
+    // Шаг 97: держатель не назван — цена Buy Box может быть нашей и в историю конкурентов не идёт
+    const competitorBuybox = snapshot?.buybox && snapshot.buybox.isSelf === false ? buybox : null;
     const money = snapshot?.buybox?.price ?? snapshot?.offers[0]?.price ?? snapshot?.channelSuggestedPrice ?? null;
     const gtin = s.accepted?.gtin && /^[0-9]{8,14}$/.test(s.accepted.gtin) ? s.accepted.gtin : null;
 
@@ -963,6 +1002,27 @@ export class PgPricingStore implements PricingStore {
        s.accepted?.competitorSnapshotId ?? null, s.accepted ? JSON.stringify(s.accepted.sanity) : null],
     );
 
+    // Шаг 97 [Р-220]: отрезок держателя Buy Box — продлевается тем же держателем и продавцом без дыры длиннее горизонта, иначе открывается
+    // новый; более старый снимок отрезков не трогает (как проекцию снимка). Горизонт — самый редкий ярус опроса раз в сутки (Р-47)
+    if (s.buyboxHolder && s.accepted) {
+      await tx.query(
+        `WITH last AS (
+           SELECT b.buybox_span_id, b.holder, b.winner_seller_ref, b.last_seen_at FROM channel_data.buybox_span b
+            WHERE b.tenant_id = $1 AND b.channel_account_id = $2 AND b.marketplace = $3 AND b.channel_product_ref = $4 AND b.condition = $5
+            ORDER BY b.started_at DESC LIMIT 1 FOR UPDATE),
+         ext AS (
+           UPDATE channel_data.buybox_span b SET last_seen_at = $6, snapshots = b.snapshots + 1 FROM last
+            WHERE b.tenant_id = $1 AND b.buybox_span_id = last.buybox_span_id AND last.holder = $7 AND last.winner_seller_ref IS NOT DISTINCT FROM $8
+              AND $6::timestamptz >= last.last_seen_at AND $6::timestamptz - last.last_seen_at <= interval '${BUYBOX_SPAN_HORIZON_HOURS} hours'
+            RETURNING 1)
+         INSERT INTO channel_data.buybox_span (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, holder, winner_seller_ref, started_at, last_seen_at)
+         SELECT $1, $2, $3, $4, $5, $7, $8, $6, $6
+          WHERE NOT EXISTS (SELECT 1 FROM ext) AND NOT EXISTS (SELECT 1 FROM last WHERE $6::timestamptz < last.last_seen_at)`,
+        [tenantId, key.channelAccountId, key.marketplace, key.channelProductRef, condition, s.observedAt, s.buyboxHolder.holder,
+         s.buyboxHolder.holder === 'OTHER' ? s.buyboxHolder.sellerRef?.slice(0, 200) ?? null : null],
+      );
+    }
+
     let rejectedSnapshotId: string | null = null;
     if (s.rejected) {
       const { rows } = await tx.query(
@@ -1024,8 +1084,8 @@ export class PgPricingStore implements PricingStore {
       `INSERT INTO channel_data.price_decision
          (tenant_id, intent_created_at, price_intent_id, write_scope_id, decided_at, outcome, final_amount_minor, currency, price_basis,
           effective_floor_minor, effective_ceiling_minor, min_price_ids, max_price_ids, guardrail_ids, cost_profile_id, fee_inputs, violations,
-          rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile, ladder_from_minor)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+          rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile, ladder_from_minor, competitor_view)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
        RETURNING price_decision_id`,
       [tenantId, intent.createdAt, intentId, scope.writeScopeId, decision.decidedAt, decision.outcome, decision.finalMinor, decision.currency, decision.basis,
        decision.effectiveFloorMinor, decision.effectiveCeilingMinor, decision.minPriceIds, decision.maxPriceIds, decision.guardrailIds,
@@ -1038,7 +1098,9 @@ export class PgPricingStore implements PricingStore {
        // Р-80: столбцы intent в решении заполняет триггер из price_intent — приложение их не передаёт
        decision.explanation ? JSON.stringify(decision.explanation) : null, decision.boundDeviationBp, decision.noChangeReason ?? null,
        // Р-208: ступень лестницы к полу — запись ниже пола база пропустит только как ступень выше нынешней цены (0180)
-       decision.sanityRuleset ?? null, decision.gateProfile ?? null, decision.ladderFromMinor ?? null],
+       decision.sanityRuleset ?? null, decision.gateProfile ?? null, decision.ladderFromMinor ?? null,
+       // Шаг 97 [Р-218]: картина рынка — данные канала, живёт с решением 30 суток; форму и место (только цена из данных конкурентов) держит база (0187)
+       d.competitorView ? JSON.stringify(d.competitorView) : null],
     );
     const decisionId: string = decisionRow!.price_decision_id;
     // Ссылка на полный снимок — данные канала, 18 месяцев [Р-38, Р-68]; та же транзакция
@@ -1925,7 +1987,7 @@ export class PgPricingStore implements PricingStore {
       return await inTenant(this.admin('assignStrategyVersion'), tenantId, async (tx) => {
         await PgPricingStore.assertExpected(tx, tenantId, input.expected);
         const { rows: [v] } = await tx.query(
-          `SELECT ps.version, ps.type, ps.params, u.undercut_minor FROM tenant_data.pricing_strategy ps
+          `SELECT ps.version, ps.type, ps.params, u.undercut_minor, u.fulfillment_handicap_minor FROM tenant_data.pricing_strategy ps
              LEFT JOIN channel_data.pricing_strategy_undercut u ON u.tenant_id = ps.tenant_id AND u.pricing_strategy_id = ps.pricing_strategy_id AND u.version = ps.version
             WHERE ps.tenant_id = $1 AND ps.pricing_strategy_id = $2 AND ps.version = $3`, [tenantId, input.strategyId, input.version]);
         if (!v) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' });
@@ -1939,7 +2001,8 @@ export class PgPricingStore implements PricingStore {
           status: 'SAVED', assigned: [...input.assignTo],
           strategy: {
             strategyId: input.strategyId, version: input.version, deadbandMinor: Number(deadbandMinor ?? 0),
-            params: { ...params, type: v.type, ...(v.undercut_minor !== null ? { undercutMinor: Number(v.undercut_minor) } : {}) } as unknown as StrategyDefinition['params'],
+            params: { ...params, type: v.type, ...(v.undercut_minor !== null ? { undercutMinor: Number(v.undercut_minor) } : {}),
+              ...(v.fulfillment_handicap_minor !== null ? { fulfillmentHandicapMinor: Number(v.fulfillment_handicap_minor) } : {}) } as unknown as StrategyDefinition['params'],
           },
         } satisfies StrategySaveResult;
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
@@ -1987,15 +2050,16 @@ export class PgPricingStore implements PricingStore {
           strategyId = randomUUID();
         }
         // Р-91: версия стратегии (вечная, архивируется с ядром) — без подреза; подрез — в таблице с 18-месячным сроком
-        const { undercutMinor, ...stored } = input.params as Record<string, unknown>;
+        // Шаг 97: гандикап «Win the Buy Box» — там же, где подрез: вместе с ценой решения он раскрывал бы цену конкурента
+        const { undercutMinor, fulfillmentHandicapMinor, ...stored } = input.params as Record<string, unknown>;
         await tx.query(
           `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
           [tenantId, strategyId, version, input.name.trim(), input.params.type, JSON.stringify({ ...stored, deadbandMinor: input.deadbandMinor }),
            ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], actor.membershipId]);
         if (undercutMinor !== undefined) {
-          await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor) VALUES ($1, $2, $3, $4)`,
-            [tenantId, strategyId, version, undercutMinor]);
+          await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor) VALUES ($1, $2, $3, $4, $5)`,
+            [tenantId, strategyId, version, undercutMinor, fulfillmentHandicapMinor ?? null]);
         }
         if (input.assignTo.length > 0) {
           const { rowCount } = await tx.query(
@@ -2216,7 +2280,7 @@ export class PgPricingStore implements PricingStore {
        * Шаг 68 (K11): подрез версии — из своей таблицы, пока он там есть (18 месяцев после замены версии [Р-91]). Без него строка
        * стратегии «почему эта цена» говорила «подрез не хранится (18 месяцев после замены версии)» о ДЕЙСТВУЮЩЕЙ версии
        */
-      const strategies = (await q(`SELECT ps.pricing_strategy_id, ps.version, ps.params, u.undercut_minor FROM tenant_data.pricing_strategy ps
+      const strategies = (await q(`SELECT ps.pricing_strategy_id, ps.version, ps.params, u.undercut_minor, u.fulfillment_handicap_minor FROM tenant_data.pricing_strategy ps
                                      LEFT JOIN channel_data.pricing_strategy_undercut u
                                        ON u.tenant_id = ps.tenant_id AND u.pricing_strategy_id = ps.pricing_strategy_id AND u.version = ps.version
                                     WHERE ps.tenant_id = $1 ORDER BY ps.pricing_strategy_id, ps.version`))
@@ -2224,7 +2288,8 @@ export class PgPricingStore implements PricingStore {
           const { deadbandMinor, ...params } = r.params as Record<string, unknown>;
           return {
             strategyId: r.pricing_strategy_id, version: r.version, deadbandMinor: Number(deadbandMinor ?? 0),
-            params: { ...params, ...(r.undercut_minor === null ? {} : { undercutMinor: Number(r.undercut_minor) }) } as unknown as StrategyDefinition['params'],
+            params: { ...params, ...(r.undercut_minor === null ? {} : { undercutMinor: Number(r.undercut_minor) }),
+              ...(r.fulfillment_handicap_minor === null || r.fulfillment_handicap_minor === undefined ? {} : { fulfillmentHandicapMinor: Number(r.fulfillment_handicap_minor) }) } as unknown as StrategyDefinition['params'],
           };
         });
       const strategyVersions = (await q(`SELECT pricing_strategy_id, version, name, status, created_at, created_by_membership_id
@@ -2439,6 +2504,38 @@ export class PgPricingStore implements PricingStore {
         tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${counted.sql}`, [tenantId, ...counted.values]),
       ]);
       return { items: rows.map(decisionRow), total: Number(count!.n) };
+    });
+  }
+
+  /** Шаг 97 [Р-220]: отрезки держателя Buy Box единицы за период — и последний отрезок до него (его состояние действует с начала периода) */
+  async buyboxSpans(tenantId: string, writeScopeId: string, from: Instant, to: Instant): Promise<BuyboxSpanRow[]> {
+    if (!UUID_FORM.test(writeScopeId)) return [];
+    return inTenant(this.admin('buyboxSpans'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `WITH m AS (SELECT o.channel_account_id, o.marketplace, o.channel_product_ref, o.condition FROM tenant_data.offer_mapping o
+                     WHERE o.tenant_id = $1 AND o.price_write_scope_id = $2 AND o.status <> 'ENDED' LIMIT 1)
+         SELECT b.holder, b.winner_seller_ref, b.started_at, b.last_seen_at, b.snapshots FROM channel_data.buybox_span b JOIN m
+             ON b.channel_account_id = m.channel_account_id AND b.marketplace = m.marketplace AND b.channel_product_ref = m.channel_product_ref AND b.condition = m.condition
+          WHERE b.tenant_id = $1 AND b.started_at < $4::timestamptz
+            AND (b.last_seen_at >= $3::timestamptz - interval '${BUYBOX_SPAN_HORIZON_HOURS} hours')
+          ORDER BY b.started_at`, [tenantId, writeScopeId, from, to]);
+      return rows.map((r) => ({ holder: r.holder, sellerRef: r.winner_seller_ref ?? null, startedAt: iso(r.started_at), lastSeenAt: iso(r.last_seen_at), snapshots: Number(r.snapshots) }));
+    });
+  }
+
+  /** Шаг 97 [Р-218]: последний принятый снимок товара единицы — нынешняя картина рынка страницы Competition */
+  async competitionSnapshot(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {
+    if (!UUID_FORM.test(writeScopeId)) return null;
+    return inTenant(this.admin('competitionSnapshot'), tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(
+        `SELECT m.channel_account_id, m.marketplace, m.channel_product_ref, m.condition, ${STATE_JSON} AS state
+           FROM tenant_data.offer_mapping m JOIN channel_data.competitor_state cs
+             ON cs.tenant_id = m.tenant_id AND cs.channel_account_id = m.channel_account_id AND cs.marketplace = m.marketplace
+            AND cs.channel_product_ref = m.channel_product_ref AND cs.condition = m.condition
+          WHERE m.tenant_id = $1 AND m.price_write_scope_id = $2 AND m.status <> 'ENDED' LIMIT 1`, [tenantId, writeScopeId]);
+      if (!r) return null;
+      const snapshot = toSnapshot({ channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: r.condition }, r.state);
+      return { snapshot, source: r.state.source, observedAt: iso(r.state.observedAt) };
     });
   }
 
@@ -2850,7 +2947,7 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number): Promise<string[]> {
+  async listScheduledScopes(tenantId: string, channelAccountId: string, now: Instant, limit: number, creepPaceSeconds = DEFAULT_SCHEDULED_RECOMPUTE_SECONDS): Promise<string[]> {
     return this.tx(tenantId, async (tx) => {
       // Стратегии без данных конкурентов — как strategy_unmet без требований (0082): фиксированная и маржинальная. Должна единица без
       // решения за 24 часа; последнее решение — по индексу price_decision_scope_time_idx (tenant, write_scope, decided_at DESC), новый не нужен
@@ -2862,7 +2959,18 @@ export class PgPricingStore implements PricingStore {
                                WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
                                ORDER BY d.decided_at DESC LIMIT 1) last ON true
           WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE'
-            AND ps.type IN ('FIXED', 'TARGET_MARGIN')
+            AND (
+            /**
+             * Шаг 97 [Р-219]: подъём «Win the Buy Box» — таймер ступени: единица с включённым подъёмом, у которой Buy Box наш по последнему
+             * принятому снимку и решения не было дольше периода планового пересчёта. Без таймера ступень ждала бы нового снимка
+             */
+            (ps.type = 'WIN_BUYBOX' AND coalesce((ps.params ->> 'creepUp')::boolean, false)
+             AND (last.decided_at IS NULL OR last.decided_at <= $3::timestamptz - make_interval(secs => $5))
+             AND EXISTS (SELECT 1 FROM tenant_data.offer_mapping om JOIN channel_data.competitor_state cs
+                           ON cs.tenant_id = om.tenant_id AND cs.channel_account_id = om.channel_account_id AND cs.marketplace = om.marketplace
+                          AND cs.channel_product_ref = om.channel_product_ref AND cs.condition = om.condition
+                          WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id AND om.status <> 'ENDED' AND cs.buybox_is_self))
+            OR ps.type IN ('FIXED', 'TARGET_MARGIN')
             AND (last.decided_at IS NULL OR last.decided_at < $3::timestamptz - interval '24 hours'
                  -- Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу, а не через сутки от прошлого решения
                  OR EXISTS (${priceBudgetExhaustedSql({ tenant: 's.tenant_id', scope: 's.write_scope_id', now: '$3::timestamptz',
@@ -2881,9 +2989,9 @@ export class PgPricingStore implements PricingStore {
                  OR (EXISTS (SELECT 1 FROM tenant_data.channel_account ca
                               WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'LIVE')
                      AND EXISTS (SELECT 1 FROM tenant_data.channel_write_history sh
-                                  WHERE sh.tenant_id = s.tenant_id AND sh.price_decision_id = last.price_decision_id AND sh.final_status = 'SHADOW_HELD')))
+                                  WHERE sh.tenant_id = s.tenant_id AND sh.price_decision_id = last.price_decision_id AND sh.final_status = 'SHADOW_HELD'))))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
-          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit)]);
+          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit), creepPaceSeconds]);
       return rows.map((r) => r.write_scope_id as string);
     });
   }

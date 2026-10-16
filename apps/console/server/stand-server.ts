@@ -10,6 +10,7 @@ import {
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor,
 } from '@repracer/console-model';
 import { DECISION_OUTCOME_GROUPS, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
 import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
@@ -21,6 +22,7 @@ import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Auth
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { connectableInMarket, connectionsView, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
+import { descriptorOf } from './channel-descriptors.ts';
 import {
   NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
 } from '../src/api-types.ts';
@@ -874,6 +876,29 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }
         case 'stop': return ok(await stopScreen());
+        /**
+         * Шаг 97 [Р-219…Р-221]: страница Competition одного предложения — последний принятый снимок, отрезки держателя Buy Box за период
+         * (не глубже 45 суток — столько живут отрезки, 0188) и пол продавца для диагностики. Консоль в ClickHouse не ходит [Р-22]
+         */
+        case 'competition': {
+          if (param === null) return fail(404, 'NOT_FOUND', s.notFound);
+          const period = periodOf(url.searchParams, {});
+          if (period === null) return fail(400, 'BAD_PERIOD', s.badRequest);
+          const world = await load([param]);
+          const scope = scopeById(world, param);
+          if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+          const range = periodRange(period, live.clock.iso(), display?.timeZone ?? null, BUYBOX_SHARE_KEEP_DAYS);
+          const [snapshot, spans] = await Promise.all([
+            live.store.competitionSnapshot(world.tenantId, param),
+            live.store.buyboxSpans(world.tenantId, param, range.since as never, range.until as never),
+          ]);
+          const sources = (descriptorOf(channelOf(world, scope.channelAccountId)).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE');
+          const view = competitionView(world, param, {
+            snapshot, spans, range, sources, floorMinor: effectiveFloor(scope, world).minor, period,
+            sourceText: (source) => (m.ui.sources as Record<string, string | undefined>)[source] ?? m.ui.trace.sourceUnnamed,
+          }, m);
+          return view ? ok(view) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+        }
         /**
          * Р-136 (ревью шага 29, находка 4): поиск предложения. Выпадающий список показывает первые OFFER_CHOICES, и без поиска
          * предложения 201…10 000 были недостижимы: по ним нельзя было ни объявить скидку, ни выгрузить доказательство [Р-123].

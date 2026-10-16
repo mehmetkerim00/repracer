@@ -104,7 +104,10 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       // «Any of the top 20 offers» — страница notification-type-values (ANY_OFFER_CHANGED); схема maxItems не задаёт
       completeness: { kind: 'TOP_N', n: 20 },
       conditions: ['new', 'used', 'collectible', 'refurbished', 'club'],
-      hasBuyboxWinner: true,
+      // Шаг 97 (A-29): схема уведомления снимка (schemas/notifications/AnyOfferChangedNotification.json) держателя Buy Box не называет —
+      // признака IsBuyBoxWinner в ней нет; цена Buy Box есть (Summary.BuyBoxPrices). Держатель — «неизвестен», а не «не наш»
+      hasBuyboxWinner: false,
+      hasBuyboxPrice: true,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,
@@ -119,6 +122,7 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       conditions: ['new'],
       // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет [AMZ_C11]
       hasBuyboxWinner: false,
+      hasBuyboxPrice: false,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,
