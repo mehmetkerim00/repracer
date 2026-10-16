@@ -10,7 +10,7 @@ const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
-import { strategyAvailability, type CreepState } from '@repracer/strategy-engine';
+import { CREEP_PAUSE_PERIODS, STRATEGY_STALENESS_SECONDS, strategyAvailability, type CreepState } from '@repracer/strategy-engine';
 import {
   BOUND_CAUSES,
   can,
@@ -424,7 +424,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       // Р-212: последняя боевая ступень лестницы единицы за сутки — как last_ladder_step в PostgreSQL. Признака тени у решения стенд в
       // памяти не хранит: ступени аккаунта, который сейчас в тени, не считаются
       ...this.lastLadderStep(row),
-      creep: row.strategy?.params.type === 'WIN_BUYBOX' ? this.creepState(row) : null,
+      // как PostgreSQL (`withCreep`): состояние подъёма — только у стратегии с подъёмом
+      creep: row.strategy?.params.type === 'WIN_BUYBOX' && row.strategy.params.creepUp ? this.creepState(row) : null,
       productTitle: row.title ?? null, productSku: seedSkuOf(row),
     };
   }
@@ -2005,9 +2006,20 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const last = new Map<string, number>();
     for (const d of this.decisions) last.set(d.writeScopeId, Math.max(last.get(d.writeScopeId) ?? 0, Date.parse(d.decidedAt)));
     // Шаг 97 [Р-219]: как PostgreSQL — «Win the Buy Box» с подъёмом, Buy Box наш по последнему снимку, решения не было дольше периода
+    // Ревью шага 97, находка (в1): как PostgreSQL — аккаунт в бою, последнее решение — изменение или ожидание темпа и паузы, не внутри паузы
+    const lastOf = (id: string) => (this.decisions as Array<{ writeScopeId: string; decidedAt: Instant; outcome: string; noChangeReason?: string | null }>)
+      .filter((d) => d.writeScopeId === id).sort((x, y) => Date.parse(y.decidedAt) - Date.parse(x.decidedAt))[0];
+    const stepPossible = (s: ScopeRow) => {
+      if (this.seedAccounts.find((a) => a.channelAccountId === s.channelAccountId)?.writeMode === 'SHADOW') return false;
+      const d = lastOf(s.writeScopeId);
+      if (d && !(d.outcome === 'APPROVED' || (d.outcome === 'NO_CHANGE' && ['CREEP_PACED', 'CREEP_PAUSED'].includes(d.noChangeReason ?? '')))) return false;
+      const back = this.creepState(s).lastBack;
+      return !back || Date.parse(back.at) <= Date.parse(now) - CREEP_PAUSE_PERIODS * creepPaceSeconds * 1000;
+    };
     const creeping = (s: ScopeRow) => s.strategy?.params.type === 'WIN_BUYBOX' && s.strategy.params.creepUp
-      && (last.get(s.writeScopeId) ?? 0) <= Date.parse(now) - creepPaceSeconds * 1000
-      && this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }))?.buyboxIsSelf === true;
+      && (last.get(s.writeScopeId) ?? 0) <= Date.parse(now) - creepPaceSeconds * 1000 && stepPossible(s)
+      && ((st) => st?.buyboxIsSelf === true && Date.parse(st.observedAt) >= Date.parse(now) - STRATEGY_STALENESS_SECONDS * 1000)(
+        this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition })));
     return [...this.scopes.values()]
       .filter((s) => s.channelAccountId === channelAccountId && s.pricingMode === 'ENGINE' && s.status === 'ACTIVE' && s.strategy
         && (!COMPETITOR_STRATEGIES.has(s.strategy.params.type) || creeping(s)))

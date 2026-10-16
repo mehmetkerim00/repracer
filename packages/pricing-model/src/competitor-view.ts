@@ -72,6 +72,9 @@ function rowOf(o: CompetitorOffer): CompetitorViewRow {
 }
 
 export function buildCompetitorView(current: CompetitorSnapshot, previous: PreviousOffers | null): CompetitorView | null {
+  // Ревью шага 97, находка (г2): снимок без предложений — картины нет (null), а не пустой список: база требует от 1 до 21 строки, и пустая
+  // картина откатила бы фиксацию снимка и всех решений товара; «все ушли» по снимку без предложений — сбой канала, а не рынок
+  if (current.offers.length === 0) return null;
   const currency = current.buybox?.price.currency ?? current.offers[0]?.price.currency;
   if (!currency) return null;
   const sorted = [...current.offers].sort(order);

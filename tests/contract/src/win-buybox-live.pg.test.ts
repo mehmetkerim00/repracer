@@ -133,3 +133,58 @@ test('I3: Win the Buy Box on the live simulator world — take, hold, creep once
     `SELECT holder FROM channel_data.buybox_span WHERE tenant_id = $1 ORDER BY started_at`, [w.seeded.tenantId]);
   assert.deepEqual(spans.map((s) => s.holder).slice(0, 4), ['OTHER', 'SELF', 'OTHER', 'SELF'], `holder spans: ${spans.map((s) => s.holder).join(' → ')}`);
 });
+
+/**
+ * Ревью шага 97, находка (в1): таймер ступени подъёма берёт единицу, только когда ступень возможна. Иначе — решение «без изменения» раз в
+ * период без конца (96 в сутки на единицу): у максимума (CREEP_AT_MAX), в паузе после шага назад, в тени (предложение удержано и повторяется).
+ * Состояния создают снимки; таймер вызывается там, где без исправления он взял бы единицу: решения не было период, снимок ещё свежий
+ */
+test('step 97 (review): the creep timer picks an offer only when a step is possible — not at the maximum, not in the pause, not in shadow mode', async () => {
+  const clock = new VirtualClock(new Date(Date.now() - 6 * 3_600_000).toISOString());
+  const pools = { appPool: db.pool('svc_app', 2), adminPool: db.pool('svc_admin', 1), provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 1) };
+  const params = { faults: { writeTimeoutShare: 0, timeoutAppliedShare: 0, bulkItemMissingShare: 0, bulkItemServerErrorShare: 0 }, applyDelayMs: 0 };
+  const worldOf = async (tag: number, id: number, writeMode: 'LIVE' | 'SHADOW', over: Partial<LiveProduct>) => {
+    const w = await kauflandLiveWorld({ tag, clock, seed: tag, writeMode, buyBox: LANDED_CHANNEL_BONUS, params, ...pools,
+      products: [{ ...product, idProduct: id, behaviour: { kind: 'STATIC' }, ...over }] });
+    const c = (): AdapterCallContext => ({ tenantId: w.world.tenantId as never, channelAccountId: w.world.channelAccountId as never, correlationId: 'step97-review', deadline: w.clock.iso(60_000) as never });
+    return {
+      snap: async () => {
+        w.simulator.advanceTo(w.clock.nowMs());
+        for (const s of (await w.adapter.readCompetitors(c(), [{ marketplace: 'de', channelProductRef: String(id), condition: 'new' }])).snapshots) await w.pipeline.processSnapshot(c(), s);
+        await w.betweenTicks();
+      },
+      timer: async () => { w.simulator.advanceTo(w.clock.nowMs()); const r = await w.pipeline.recomputeScheduled(c(), { limit: 10 }); await w.betweenTicks(); return r.scopes; },
+      ours: () => w.simulator.market('de', id).offers.find((o) => o.self)!.priceMinor,
+    };
+  };
+  const minutes = (m: number) => clock.advance(m * 60_000);
+
+  // У максимума: взятие 17,49 и есть максимум — следующая оценка «на максимуме», и таймер её не повторяет
+  const atMax = await worldOf(3971, 397_100_002, 'LIVE', { maxPriceMinor: 1749 });
+  await atMax.snap();
+  assert.equal(atMax.ours(), 1749);
+  minutes(5); await atMax.snap();
+  minutes(15); assert.equal(await atMax.timer(), 0, 'at the maximum the timer does not pick the offer again');
+
+  // Пауза: ступень → потеря → шаг назад → Buy Box снова наш; внутри паузы таймер молчит
+  const pause = await worldOf(3972, 397_100_003, 'LIVE', {});
+  await pause.snap();                                   // взятие 17,49
+  minutes(5); await pause.snap();                       // темп от взятия
+  minutes(10); await pause.snap();                      // ступень 17,66 — Buy Box уходит (17,66 > 18,00 − 0,50)
+  assert.equal(pause.ours(), 1766);
+  minutes(5); await pause.snap();                       // шаг назад
+  assert.equal(pause.ours(), 1749, 'stepped back');
+  minutes(5); await pause.snap();                       // Buy Box снова наш — пауза
+  minutes(15); assert.equal(await pause.timer(), 0, 'inside the pause the timer does not pick the offer');
+
+  // Тень: Buy Box наш с начала (конкурент дороже), предложение подъёма удержано и повторялось бы таймером без пользы
+  const shadow = await worldOf(3973, 397_100_004, 'SHADOW', { competitorChannelFulfilled: false, competitorStartMinor: 1900 });
+  await shadow.snap();
+  minutes(15); assert.equal(await shadow.timer(), 0, 'in shadow mode the creep timer stays silent');
+
+  // Положительный контроль: свежий снимок, Buy Box наш, ступень возможна — таймер берёт единицу и делает ступень
+  const ok = await worldOf(3974, 397_100_005, 'LIVE', { competitorChannelFulfilled: false, competitorStartMinor: 1900 });
+  await ok.snap();                                      // Buy Box наш с начала: ступень 18,50 → 18,68
+  minutes(15); assert.equal(await ok.timer(), 1, 'a possible step: the timer picks the offer');
+  assert.equal(ok.ours(), 1886, 'and steps up');
+});

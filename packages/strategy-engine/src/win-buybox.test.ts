@@ -137,6 +137,26 @@ test('step 97 (I3): Win the Buy Box — take, hold, creep until lost, step back,
   assert.equal(takeFloor.reason.code, 'CAPPED_AT_MIN_PRICE');
 });
 
+/**
+ * Ревью шага 97, находка (в2): шаг назад — только сразу после подъёма (не дольше двух периодов) и только если прежняя выигрышная цена в
+ * рамках. Иначе потеря через сутки откатывала цену к давней цене, а при «держать на границе» и поднявшемся поле — застревала до суток
+ */
+test('step 97 (review): a step back only right after the raise and only within the bounds; otherwise the winner target', () => {
+  const params = win({ creepUp: true });
+  const raised: CreepState = { lastUp: { at: at(0), fromMinor: 1795, toMinor: 1812 }, lastBack: null };
+  // Buy Box потерян через 20 часов после подъёма — не «назад к 17.95», а обычная цель от победителя
+  const late = intentOf(runStrategy(input(params, { holder: 'OTHER', winnerMinor: 1600, selfMinor: 1812 }, 20 * 60, { creep: raised })));
+  assert.equal(late.reason.code, 'BUYBOX_WIN_TARGET', 'a loss long after the raise is a new take, not a step back');
+  assert.equal(late.proposedMinor, 1595);
+  // Сразу после подъёма, но прежняя цена ниже поднявшегося пола, а на границе — «держать»: не застревать, а брать от победителя
+  const hold = win({ creepUp: true, atBound: 'HOLD' });
+  const stuck = intentOf(runStrategy(input(hold, { holder: 'OTHER', winnerMinor: 1830, selfMinor: 1848 }, 5, {
+    creep: { lastUp: { at: at(0), fromMinor: 1795, toMinor: 1848 }, lastBack: null }, bounds: { minMinor: 1800, maxMinor: 2400 } })));
+  assert.equal(stuck.intentClass, 'CHANGED', 'the step back below the floor does not hold the price for a day');
+  assert.equal(stuck.proposedMinor, 1825);
+  assert.equal(stuck.reason.code, 'BUYBOX_WIN_TARGET');
+});
+
 test('step 97: the fulfilment handicap applies only when the channel named both fulfilments', () => {
   const params = win({ fulfillmentHandicapMinor: 20 });
   const fba = intentOf(runStrategy(input(params, { holder: 'OTHER', winnerMinor: 1800, winnerFulfillment: 'AFN', selfMinor: 1900, selfFulfillment: 'MFN' }, 0)));

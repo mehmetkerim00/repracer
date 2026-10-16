@@ -333,8 +333,9 @@ export async function startDemoUsMarket(input: {
       virtualMs = t;
       try {
         await deliver();
-        // Шаг 97: плановый пересчёт walmart.com (ступень подъёма) в прожатой неделе — раз в час, как у eBay: подготовка демо не растёт вдвое
-        if ((t - begin) % HOUR_MS === 0) { await recomputeEbay(); await recomputeWalmart(); }
+        // Шаг 97: таймер подъёма walmart.com в прожатой неделе не зовётся — аккаунт в тени, а таймер тень не берёт (ревью шага 97, в1); ступени
+        // подъёма в тени видны по снимкам Buy Box
+        if ((t - begin) % HOUR_MS === 0) await recomputeEbay();
         if (t === begin) await syncWalmartStatuses();
         // Шаг 89: Buy Box Walmart — товар раз в два часа, товары со сдвигом в 10 минут
         await pollWalmart(walmartScopes.filter((_sc, i) => (t - begin - i * 10 * MINUTE_MS) >= 0 && (t - begin - i * 10 * MINUTE_MS) % WALMART_PRESS_POLL_MS === 0).map((sc) => sc.sku));

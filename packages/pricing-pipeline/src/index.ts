@@ -94,3 +94,6 @@ export { ONBOARDING_STEPS, CHANNEL_ACCESS_BLOCKERS } from './store.ts';
 export { DECISION_OUTCOME_GROUPS, type DecisionOutcomeGroup } from './store.ts';
 export type { DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedStatusGroup, FeedPageQuery, FeedPageItem, FeedPage, WorldCounters } from './store.ts';
 export { feedGroupOf, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT } from './store.ts';
+
+/** Шаг 97 (ревью, в1): пауза подъёма «Win the Buy Box» — одно число у движка, хранилища в памяти и PostgreSQL */
+export { CREEP_PAUSE_PERIODS, STRATEGY_STALENESS_SECONDS } from '@repracer/strategy-engine';

@@ -49,3 +49,13 @@ test('step 97 (I1): the view keeps only what the channel named, and no more rows
   assert.ok(big.offers.length <= COMPETITOR_VIEW_MAX_ROWS);
   assert.ok(big.offers.some((r) => r.self), 'our offer is always in the view');
 });
+
+/**
+ * Ревью шага 97, находка (г2): снимок с ценой Buy Box, но без предложений (возможен у buy_box_changed с winner_offer без offers) — картины нет
+ * (null), а не пустой список: база требует от 1 до 21 строки, и пустая картина откатила бы фиксацию снимка и всех решений товара
+ */
+test('step 97 (review): a snapshot with a Buy Box price but no offers gives no view rather than an empty one', () => {
+  assert.equal(buildCompetitorView(snap([], { buybox: { price: usd(1800), isSelf: false } }), null), null);
+  assert.equal(buildCompetitorView(snap([], { buybox: { price: usd(1800), isSelf: false } }), snap([offer('Harbor Goods', 1800)])), null,
+    'even when the previous reading had offers: what is gone is named only next to what is there');
+});

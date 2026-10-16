@@ -126,6 +126,19 @@ test('step 97 [Р-218, Р-220]: the database refuses a malformed competitor view
     key: { channelAccountId: ctxWin.scope.channelAccountId, marketplace: 'de', channelProductRef: ctxWin.scope.channelProductRef, condition: 'new' }, now: now(), decisions: [d] });
   const bad = { ...explained(draft, ref), competitorView: { currency: 'EUR', trigger: null, offers: [{ seller: 'A', self: false, priceMinor: '17.30', note: 'free text' }] } } as never;
   await assert.rejects(commit(bad), /price_decision_competitor_view_shape/, 'a competitor view with a field outside the list is refused');
+  // Ревью шага 97, находка (г1): проверка формы не возвращает NULL (CHECK пропустил бы его) и проверяет поля повода; (г3) — валюта картины = валюта решения
+  const offer = { seller: 'A', self: false, priceMinor: 1800 };
+  const shaped = (view: unknown) => ({ ...explained(draft, ref), competitorView: view }) as never;
+  for (const [view, label] of [
+    [{}, 'an empty object is refused'],
+    [{ currency: 'EUR' }, 'a view without offers is refused'],
+    [{ currency: 'EUR', trigger: { seller: 'A' }, offers: [offer] }, 'a trigger without a move is refused'],
+    [{ currency: 'EUR', trigger: { seller: 'A', move: 'DOWN', wasMinor: 'abc' }, offers: [offer] }, 'a trigger amount as text is refused'],
+    [{ currency: 'EUR', trigger: { seller: { deep: 1 }, move: 'DOWN' }, offers: [offer] }, 'a trigger seller as an object is refused'],
+    [{ currency: 'EUR', trigger: null, offers: [{ ...offer, seller: 'x'.repeat(1000) }] }, 'a seller name longer than 200 characters is refused'],
+    [{ currency: 'EUR', trigger: null, offers: [{ ...offer, priceMinor: 1e15 }] }, 'an amount above a trillion cents is refused'],
+  ] as const) await assert.rejects(commit(shaped(view)), /price_decision_competitor_view_shape/, label);
+  await assert.rejects(commit(shaped({ currency: 'USD', trigger: null, offers: [offer] })), /price_decision_competitor_view_scope/, 'the view is in the currency of the decision');
   const ctxFixed = await contextOf(store, world.tenantId, world.ids.dbId('ws-2'));
   const fixed = { ...explained(approved(ctxFixed, 1910)), competitorView: { currency: 'EUR', trigger: null, offers: [{ seller: 'A', self: false, priceMinor: 1800 }] } };
   await assert.rejects(store.commitEvaluation(world.tenantId, {

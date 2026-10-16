@@ -51,6 +51,8 @@ export interface LiveProduct {
   competitorChannelFulfilled?: boolean;
   /** Шаг 97 [H]: имя основного конкурента (по умолчанию «Synthetic Competitor <id>») */
   competitorName?: string;
+  /** Ревью шага 97: свой max_price предложения (по умолчанию 30,00) */
+  maxPriceMinor?: number;
 }
 
 export interface KauflandLiveWorld {
@@ -103,7 +105,7 @@ function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
     // Шаг 78: человеку — имя, а не идентификатор сценария «st-buybox»
     ...(p.pricingMode === 'ENGINE' ? { strategyName: p.strategy?.name ?? 'Buy Box' } : {}),
     ...(p.costMinor ? { cost: { currency: 'EUR', costProfileId: `cp-${id}`, unitCostMinor: p.costMinor, fixedFeeMinor: 0, feeRateBp: 1500, tax: { regime: 'VAT_INCLUDED', vatRateBp: p.marketplace === 'at' ? 2000 : 1900 } } } : {}),
-    currentPriceMinor: 1850, minPrice: { amountMinor: 1200, id: `min-${p.marketplace}-${id}` }, maxPrice: { amountMinor: 3000, id: `max-${p.marketplace}-${id}` },
+    currentPriceMinor: 1850, minPrice: { amountMinor: 1200, id: `min-${p.marketplace}-${id}` }, maxPrice: { amountMinor: p.maxPriceMinor ?? 3000, id: `max-${p.marketplace}-${id}` },
   } as MemorySeedScope;
 }
 

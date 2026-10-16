@@ -70,6 +70,8 @@ export interface CreepState {
 
 /** Шаг 97 [Р-219]: пауза подъёма после потери Buy Box — столько периодов планового пересчёта (решение владельца: 4, при 15 минутах — час) */
 export const CREEP_PAUSE_PERIODS = 4;
+/** Ревью шага 97: шаг назад — только если Buy Box потерян не позже стольких периодов после подъёма */
+export const CREEP_STEP_BACK_WINDOW_PERIODS = 2;
 
 export type EngineResult =
   | { kind: 'INTENT'; intent: PriceIntentDraft }
@@ -79,7 +81,8 @@ export type EngineResult =
 // Требуемая полнота данных [Р-39]
 // ---------------------------------------------------------------------------
 
-const STRATEGY_STALENESS_SECONDS = 900;
+/** Свежесть снимка для стратегий из данных конкурентов; шаг 97 (ревью): таймер подъёма берёт единицу только со снимком не старше этого */
+export const STRATEGY_STALENESS_SECONDS = 900;
 
 export function requirementOf(params: StrategyParams): CompetitorRequirement {
   switch (params.type) {
@@ -406,8 +409,12 @@ export function runStrategy(input: EngineInput): EngineResult {
        * Buy Box чужой. Потерян сразу после нашего подъёма (цена — та, к которой мы поднялись, возврата после него не было) — назад к
        * последней выигрышной цене и пауза подъёма; цена потери — потолок на время паузы
        */
+      // Ревью шага 97, находка (в2): «сразу» — не дольше двух периодов после подъёма; прежняя цена вне рамок (пол поднялся) — обычная цель
+      // от победителя, иначе потеря через сутки откатывала к давней цене, а «держать на границе» застревало до суток
       const up = creep?.lastUp ?? null;
-      if (up && current !== null && current === up.toMinor && up.fromMinor < up.toMinor
+      const rightAfter = up !== null && period !== null && Date.parse(now) - Date.parse(up.at) <= CREEP_STEP_BACK_WINDOW_PERIODS * period * 1000;
+      if (up && rightAfter && current !== null && current === up.toMinor && up.fromMinor < up.toMinor
+          && up.fromMinor >= floorMinor && up.fromMinor <= bounds.maxMinor
           && (!creep!.lastBack || Date.parse(creep!.lastBack.at) < Date.parse(up.at))) {
         const until = new Date(Date.parse(now) + CREEP_PAUSE_PERIODS * (period ?? 0) * 1000).toISOString();
         // Возврат проходит те же рамки: пол, потолок, Gate — прежняя выигрышная цена могла оказаться ниже поднявшегося с тех пор пола

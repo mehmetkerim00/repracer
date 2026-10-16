@@ -48,7 +48,7 @@ import type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow } from '@repracer/pricing-pipeline';
-import { DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
+import { CREEP_PAUSE_PERIODS, DECISION_OUTCOME_GROUPS, STRATEGY_STALENESS_SECONDS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -123,30 +123,48 @@ const SCOPE_COLUMNS = `
     WHERE ld.tenant_id = s.tenant_id AND ld.write_scope_id = s.write_scope_id AND ld.ladder_from_minor IS NOT NULL AND NOT ld.shadow
       AND ld.decided_at > $2::timestamptz - interval '1 day' AND ld.decided_at <= $2::timestamptz
       AND ld.intent_created_at > $2::timestamptz - interval '2 days'
-    ORDER BY ld.decided_at DESC LIMIT 1) AS last_ladder_step,
-  -- Шаг 97 [Р-219]: подъём «Win the Buy Box» — последний одобренный подъём и последний возврат после потери за сутки, по горячим намерениям
-  -- (3 суток) и их решениям; индекс price_intent_scope_idx. У прочих стратегий не читается
-  CASE WHEN ps.type = 'WIN_BUYBOX' THEN json_build_object(
-    'up', (SELECT json_build_object('at', d.decided_at, 'from', (x -> 'params' ->> 'fromMinor')::bigint, 'to', d.final_amount_minor)
-             FROM channel_data.price_intent i CROSS JOIN LATERAL jsonb_array_elements(i.rationale -> 'explanation') x
-             JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
-            WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX' AND x ->> 'code' = 'CREEP_UP'
-              AND d.outcome = 'APPROVED' AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
-            ORDER BY i.created_at DESC LIMIT 1),
-    'back', (SELECT json_build_object('at', d.decided_at, 'lost', (x -> 'params' ->> 'lostAtMinor')::bigint)
-               FROM channel_data.price_intent i CROSS JOIN LATERAL jsonb_array_elements(i.rationale -> 'explanation') x
-               JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
-              WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX' AND x ->> 'code' = 'CREEP_STEP_BACK'
-                AND d.outcome = 'APPROVED' AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
-              ORDER BY i.created_at DESC LIMIT 1),
-    -- последнее одобренное взятие Buy Box: ступень подъёма не раньше периода и после него (живой прогон I3)
-    'take', (SELECT json_build_object('at', d.decided_at)
-               FROM channel_data.price_intent i
-               JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
-              WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX'
-                AND EXISTS (SELECT 1 FROM jsonb_array_elements(i.rationale -> 'explanation') x WHERE x ->> 'code' = 'BUYBOX_WIN_TARGET')
-                AND d.outcome = 'APPROVED' AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
-              ORDER BY i.created_at DESC LIMIT 1)) END AS creep`;
+    ORDER BY ld.decided_at DESC LIMIT 1) AS last_ladder_step`;
+
+/**
+ * Шаг 97 [Р-219]: состояние подъёма «Win the Buy Box» — последний одобренный подъём, последний возврат после потери и последнее взятие
+ * Buy Box за сутки, по горячим намерениям (3 суток) и их решениям; индекс price_intent_scope_idx. Отдельный запрос, а не колонка общего
+ * списка единицы: три коррелированных подзапроса в общем списке удваивали ПЛАНИРОВАНИЕ каждого запроса контекста (10 → 20 мс на снимок, замер
+ * поручения 2 по шагу 97) и раздували выражение, которое JIT компилирует в CI. Выполняется только когда среди единиц есть «Win the Buy Box»
+ */
+const CREEP_SQL = `
+SELECT i.write_scope_id, i.created_at, d.decided_at, d.final_amount_minor, x ->> 'code' AS code, x -> 'params' AS params
+  FROM channel_data.price_intent i
+  JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
+ CROSS JOIN LATERAL jsonb_array_elements(i.rationale -> 'explanation') x
+ WHERE i.tenant_id = $1 AND i.write_scope_id = ANY ($3::uuid[]) AND i.rule_code = 'WIN_BUYBOX' AND d.outcome = 'APPROVED'
+   AND i.created_at > $2::timestamptz - interval '1 day' AND i.created_at <= $2::timestamptz
+   AND x ->> 'code' IN ('CREEP_UP', 'CREEP_STEP_BACK', 'BUYBOX_WIN_TARGET')`;
+
+/** Подставляет состояние подъёма единицам «Win the Buy Box»; у прочих стратегий — без запроса */
+async function withCreep(tx: Tx, tenantId: string, now: Instant, contexts: ScopeEvaluationContext[]): Promise<void> {
+  // Состояние подъёма нужно только стратегии с подъёмом: шаг назад и пауза бывают только после ступени подъёма
+  const win = contexts.filter((c) => c.scope.strategy?.params.type === 'WIN_BUYBOX' && c.scope.strategy.params.creepUp);
+  if (win.length === 0) return;
+  // Один простой проход по одобренным решениям «Win the Buy Box» за сутки; последнее по времени намерения каждого вида — в коде (замер
+  // поручения 2 по шагу 97: три коррелированных подзапроса стоили ~11 мс планирования на каждую оценку)
+  const { rows } = await tx.query(CREEP_SQL, [tenantId, now, win.map((c) => c.scope.writeScopeId)]);
+  const latest = new Map<string, Row>();
+  for (const r of rows as Row[]) {
+    const k = `${r.write_scope_id}|${r.code}`;
+    const prev = latest.get(k);
+    if (!prev || Date.parse(iso(r.created_at)) > Date.parse(iso(prev.created_at))) latest.set(k, r);
+  }
+  for (const c of win) {
+    const up = latest.get(`${c.scope.writeScopeId}|CREEP_UP`);
+    const back = latest.get(`${c.scope.writeScopeId}|CREEP_STEP_BACK`);
+    const take = latest.get(`${c.scope.writeScopeId}|BUYBOX_WIN_TARGET`);
+    (c.scope as { creep: unknown }).creep = {
+      lastUp: up ? { at: iso(up.decided_at), fromMinor: Number(up.params?.fromMinor), toMinor: Number(up.final_amount_minor) } : null,
+      lastBack: back ? { at: iso(back.decided_at), lostAtMinor: Number(back.params?.lostAtMinor) } : null,
+      lastTake: take ? { at: iso(take.decided_at) } : null,
+    };
+  }
+}
 
 const SCOPE_FROM = `
     FROM tenant_data.offer_mapping m
@@ -593,11 +611,8 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     shadowLastProposedMinor: r.last_shadow_amount_minor === null || r.last_shadow_amount_minor === undefined ? null : Number(r.last_shadow_amount_minor),
     lastLadderStepAt: r.last_ladder_step ? iso((r.last_ladder_step as Row).at) : null,
     lastLadderStepFinalMinor: r.last_ladder_step ? Number((r.last_ladder_step as Row).final) : null,
-    creep: r.creep ? {
-      lastUp: (r.creep as Row).up ? { at: iso((r.creep as Row).up.at), fromMinor: Number((r.creep as Row).up.from), toMinor: Number((r.creep as Row).up.to) } : null,
-      lastBack: (r.creep as Row).back ? { at: iso((r.creep as Row).back.at), lostAtMinor: Number((r.creep as Row).back.lost) } : null,
-      lastTake: (r.creep as Row).take ? { at: iso((r.creep as Row).take.at) } : null,
-    } : null,
+    // Шаг 97: состояние подъёма «Win the Buy Box» подставляет `withCreep` отдельным запросом
+    creep: null,
     productTitle: r.label_title ?? null, productSku: r.label_sku ?? null,
     knownPricesMinor: [...known],
   };
@@ -817,6 +832,7 @@ export class PgPricingStore implements PricingStore {
       ]);
       const r = rows[0]!;
       const scopes = (r.scopes as Row[]).map((j) => toScopeContext(j, now));
+      await withCreep(tx, tenantId, now, scopes);
       const primary = scopes.find((s) => s.scope.pricingMode === 'ENGINE') ?? scopes[0] ?? null;
       const storefront = r.storefront as Row | null;
       const last = r.last_accepted as Row | null;
@@ -856,6 +872,7 @@ export class PgPricingStore implements PricingStore {
       const r = rows[0];
       if (!r?.scope) return null;
       const context = toScopeContext(r.scope, now);
+      await withCreep(tx, tenantId, now, [context]);
       const s = context.scope;
       const snapshot = r.state ? toSnapshot({ channelAccountId: s.channelAccountId, marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }, r.state) : null;
       const snapshotRef: StoredSnapshotRef | null = r.state?.competitorSnapshotId
@@ -2955,7 +2972,7 @@ export class PgPricingStore implements PricingStore {
         `SELECT s.write_scope_id FROM tenant_data.write_scope s
            JOIN tenant_data.pricing_strategy ps
              ON ps.tenant_id = s.tenant_id AND ps.pricing_strategy_id = s.pricing_strategy_id AND ps.version = s.pricing_strategy_version
-           LEFT JOIN LATERAL (SELECT d.decided_at, d.price_decision_id FROM channel_data.price_decision d
+           LEFT JOIN LATERAL (SELECT d.decided_at, d.price_decision_id, d.outcome, d.no_change_reason FROM channel_data.price_decision d
                                WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
                                ORDER BY d.decided_at DESC LIMIT 1) last ON true
           WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE'
@@ -2966,10 +2983,25 @@ export class PgPricingStore implements PricingStore {
              */
             (ps.type = 'WIN_BUYBOX' AND coalesce((ps.params ->> 'creepUp')::boolean, false)
              AND (last.decided_at IS NULL OR last.decided_at <= $3::timestamptz - make_interval(secs => $5))
+             /**
+              * Ревью шага 97, находка (в1): только когда ступень возможна — иначе решение «без изменения» раз в период без конца. Аккаунт в
+              * бою (в тени предложение удерживается и повторяется, как у лестницы); последнее решение — изменение цены или ожидание темпа и
+              * паузы, а не максимум, отказ или удержание; не внутри паузы после шага назад (CREEP_PAUSE_PERIODS периодов)
+              */
+             AND EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                          WHERE ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id AND ca.write_mode = 'LIVE')
+             AND (last.outcome IS NULL OR last.outcome = 'APPROVED' OR (last.outcome = 'NO_CHANGE' AND last.no_change_reason IN ('CREEP_PACED', 'CREEP_PAUSED')))
+             AND NOT EXISTS (SELECT 1 FROM channel_data.price_intent i
+                               JOIN channel_data.price_decision d ON d.tenant_id = i.tenant_id AND d.intent_created_at = i.created_at AND d.price_intent_id = i.price_intent_id
+                              WHERE i.tenant_id = s.tenant_id AND i.write_scope_id = s.write_scope_id AND i.rule_code = 'WIN_BUYBOX' AND d.outcome = 'APPROVED'
+                                AND i.created_at > $3::timestamptz - make_interval(secs => $5 * $6) AND i.created_at <= $3::timestamptz
+                                AND EXISTS (SELECT 1 FROM jsonb_array_elements(i.rationale -> 'explanation') x WHERE x ->> 'code' = 'CREEP_STEP_BACK'))
              AND EXISTS (SELECT 1 FROM tenant_data.offer_mapping om JOIN channel_data.competitor_state cs
                            ON cs.tenant_id = om.tenant_id AND cs.channel_account_id = om.channel_account_id AND cs.marketplace = om.marketplace
                           AND cs.channel_product_ref = om.channel_product_ref AND cs.condition = om.condition
-                          WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id AND om.status <> 'ENDED' AND cs.buybox_is_self))
+                          WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id AND om.status <> 'ENDED' AND cs.buybox_is_self
+                            -- ревью шага 97: снимок ещё свежий для стратегии — со старым движок не оценивает, и заход был бы впустую
+                            AND cs.observed_at >= $3::timestamptz - make_interval(secs => $7)))
             OR ps.type IN ('FIXED', 'TARGET_MARGIN')
             AND (last.decided_at IS NULL OR last.decided_at < $3::timestamptz - interval '24 hours'
                  -- Шаг 53: запись цены упёрлась в бюджет, и он обновился — единица должна сразу, а не через сутки от прошлого решения
@@ -2991,7 +3023,7 @@ export class PgPricingStore implements PricingStore {
                      AND EXISTS (SELECT 1 FROM tenant_data.channel_write_history sh
                                   WHERE sh.tenant_id = s.tenant_id AND sh.price_decision_id = last.price_decision_id AND sh.final_status = 'SHADOW_HELD'))))
           ORDER BY last.decided_at ASC NULLS FIRST, s.write_scope_id
-          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit), creepPaceSeconds]);
+          LIMIT $4`, [tenantId, channelAccountId, now, Math.max(0, limit), creepPaceSeconds, CREEP_PAUSE_PERIODS, STRATEGY_STALENESS_SECONDS]);
       return rows.map((r) => r.write_scope_id as string);
     });
   }

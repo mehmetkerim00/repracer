@@ -2455,11 +2455,13 @@ const CDR = T('competitor-derived-rules.pg.test.ts');
 export const STEP97_ROWS = [
   {
     row: 'шаг 97 (Р-218)', critical: false,
-    invariant: 'картина рынка — только у цены из данных конкурентов и решения не «без изменения», и только полями списка',
+    invariant: 'картина рынка — только у цены из данных конкурентов, решения не «без изменения» и в валюте решения, и только полями списка (ответ проверки формы — никогда не NULL)',
     mutations: [
       m(dropConstraint('price_decision_competitor_view_shape', 'channel_data.price_decision'),
         node(CP, 'the database refuses a malformed competitor view', 'a competitor view with a field outside the list is refused', 'resolved')),
+      // Ревью шага 97 (г3): валюта картины сверяется тем же CHECK области — первым краснеет утверждение о валюте
       m(dropConstraint('price_decision_competitor_view_scope', 'channel_data.price_decision'),
+        node(CP, 'the database refuses a malformed competitor view', 'the view is in the currency of the decision', 'resolved'),
         node(CP, 'the database refuses a malformed competitor view', 'a fixed price carries no competitor view', 'resolved')),
     ],
   },
