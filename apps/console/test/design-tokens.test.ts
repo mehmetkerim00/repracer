@@ -260,3 +260,50 @@ test('step 85: media queries break only at GitHub Primer breakpoints', () => {
   assert.match(mediaProblems('@media (width >= 50rem) { .a { display: none; } }', primer).join(), /50rem is not a primer breakpoint/);
   assert.deepEqual(mediaProblems('@media (width < 63.25rem) { .a { display: none; } } @media (34rem <= width < 48rem) { .b { color: var(--text); } }', primer), []);
 });
+
+/**
+ * Шаг 96 (аудит, I) [Р-146]: иконки меню — Octicons, родной набор Primer (@primer/octicons, MIT). Путь каждой иконки в icons.tsx —
+ * дословно путь размера 24 из пакета (ничего не нарисовано руками); у каждого пункта меню — своя иконка, и она есть в наборе.
+ * Контроли: подменённый путь и повтор иконки — ловятся
+ */
+const octiconsData = join(consoleDir, '..', '..', 'node_modules', '@primer', 'octicons', 'build', 'data.json');
+
+/** Пути Octicons из icons.tsx и иконки пунктов меню из App.tsx — текстом исходников */
+function consoleIcons(icons = readFileSync(join(consoleDir, 'src', 'icons.tsx'), 'utf8'), app = readFileSync(join(consoleDir, 'src', 'App.tsx'), 'utf8')) {
+  const block = /export const OCTICONS[^=]*= \{\n([\s\S]*?)\n\};/.exec(icons)?.[1] ?? '';
+  const octicons = new Map([...block.matchAll(/^ {2}'([a-z-]+)': (\[.*\]),$/gm)].map((x) => [x[1]!, JSON.parse(x[2]!) as string[]]));
+  const nav = /export const NAV_ICONS[^=]*= \{([\s\S]*?)\};/.exec(app)?.[1] ?? '';
+  const menu = new Map([...nav.matchAll(/(['\w-]+):\s*'([a-z-]+)'/g)].map((x) => [x[1]!.replace(/'/g, ''), x[2]!]));
+  return { octicons, menu };
+}
+
+function iconProblems(found: ReturnType<typeof consoleIcons>, data: Record<string, { heights: Record<string, { path: string }> }>): string[] {
+  const problems: string[] = [];
+  for (const [name, paths] of found.octicons) {
+    const source = data[name]?.heights['24']?.path;
+    if (!source) { problems.push(`${name}: no such Octicon (24)`); continue; }
+    const expected = [...source.matchAll(/ d="([^"]+)"/g)].map((x) => x[1]);
+    if (JSON.stringify(expected) !== JSON.stringify(paths)) problems.push(`${name}: the path differs from @primer/octicons`);
+  }
+  const seen = new Map<string, string>();
+  for (const [item, icon] of found.menu) {
+    if (!found.octicons.has(icon)) problems.push(`${item}: ${icon} is not an Octicon of icons.tsx`);
+    if (seen.has(icon)) problems.push(`${item} and ${seen.get(icon)} share the icon ${icon}`);
+    seen.set(icon, item);
+  }
+  return problems;
+}
+
+test('step 96: menu icons are Octicons, verbatim from @primer/octicons, and every menu item has its own', () => {
+  const data = JSON.parse(readFileSync(octiconsData, 'utf8')) as Record<string, { heights: Record<string, { path: string }> }>;
+  const found = consoleIcons();
+  assert.ok(found.octicons.size >= 10 && found.menu.size >= 9, `icons ${found.octicons.size}, menu items ${found.menu.size}`);
+  assert.deepEqual(iconProblems(found, data), []);
+  // Положительные контроли [Р-94]: путь, нарисованный руками, и повтор иконки у двух пунктов — краснеют
+  const forged = new Map(found.octicons);
+  forged.set('eye', ['M0 0h24v24H0z']);
+  assert.match(iconProblems({ ...found, octicons: forged }, data).join(' | '), /eye: the path differs/);
+  const twice = new Map(found.menu);
+  twice.set('stop', 'eye');
+  assert.match(iconProblems({ ...found, menu: twice }, data).join(' | '), /share the icon eye/);
+});

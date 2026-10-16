@@ -42,7 +42,11 @@ export interface ProductRow {
 }
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
-export type ChannelNote = StatusCell & { code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED' };
+export type ChannelNote = StatusCell & {
+  code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED';
+  /** Шаг 96 (аудит А6): короткое «что делать» у пилюли — раскрывается по ссылке */
+  whatToDo?: { label: string; text: string };
+};
 
 export interface ProductListView {
   worldId: string;
@@ -167,6 +171,7 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
       code: 'WALMART_UNPUBLISHED', tone: 'stop', label: n.unpublished,
       detail: n.unpublishedDetail(m.when(health.occurredAt), elsewhere),
       short: n.unpublishedShort(m.when(health.occurredAt), elsewhere),
+      whatToDo: { label: m.ui.products.whatToDo, text: m.ui.products.unpublishedWhatToDo(elsewhere) },
     });
   } else if (health && health.issueType !== WALMART_PUBLISHED) {
     notes.push({

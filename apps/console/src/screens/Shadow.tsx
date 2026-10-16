@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { ListQuery, ShadowView } from '@repracer/console-model';
+import { periodSearch, type ListQuery, type Period, type ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, PeriodPicker, useMessages, When, WhenHead } from '../components.tsx';
 import { Field, FormActions } from '../forms.tsx';
+import { NextStepCard } from './Onboarding.tsx';
 import { ShadowHero } from './ShadowHero.tsx';
 
 /**
@@ -15,8 +16,12 @@ import { ShadowHero } from './ShadowHero.tsx';
 export function ShadowScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
-  const [days, setDays] = useState(7);
-  const [view, retry] = useResource<ShadowView>(`${worldPath(worldId, 'shadow')}?offset=${query.offset}&limit=${query.limit}&days=${days}`, m.locale);
+  // Шаг 96 (II): период — пресет или свой диапазон дат в поясе пространства
+  const [period, setPeriod] = useState<Period>({ preset: '7d' });
+  const [view, retry] = useResource<ShadowView>(`${worldPath(worldId, 'shadow')}?offset=${query.offset}&limit=${query.limit}&${periodSearch(period)}`, m.locale);
+  // Шаг 96 (Б13): имя аккаунта копируется кнопкой, а не перепечатывается
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = (id: string) => void navigator.clipboard?.writeText(id).then(() => setCopied(id)).catch(() => setCopied(null));
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState<Record<string, string>>({});
   const switchMode = (channelAccountId: string, toMode: 'SHADOW' | 'LIVE') =>
@@ -34,6 +39,8 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           <h2>{m.ui.shadow.title}{v.demo ? <Badge tone="warn">{m.ui.app.demoBadge}</Badge> : null}</h2>
           {/* Вступление говорит «канал подключён» — без аккаунта оно было бы неправдой; пустое состояние ниже объясняет экран само */}
           {v.accounts.length === 0 ? <p className="subtitle">{m.ui.app.subtitles.shadow}</p> : <Intro text={v.intro} />}
+          {/* Шаг 96 (В22): следующий шаг — из того же вида пути, что Channels */}
+          <NextStepCard worldId={worldId} />
           {/* Шаг 79: без аккаунта канала тени нечего показать — пустое состояние с путём, а не таблица без строк */}
           {v.accounts.length === 0 ? (
             <section className="card"><p className="muted empty">{m.ui.shadow.noAccounts} <a href={href(worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p></section>
@@ -41,30 +48,13 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           {/* Шаг 82: окно отчёта — переключатель над сводкой; шаг 83: сводка — белые плитки и график, строки сводки — карточкой под ними */}
           {(() => {
             const periods = (
-              <div className="periods">{v.periods.map((p) => (
-                <button key={p.days} type="button" disabled={p.active}
-                  onClick={() => { setDays(p.days); setQuery({ ...query, offset: 0 }); }}>{p.label}</button>
-              ))}</div>
+              <div className="toolbar field-toolbar period-bar">
+                <PeriodPicker value={period} onChange={(p) => { setPeriod(p); setQuery({ ...query, offset: 0 }); }} />
+                {v.clipped ? <span className="filters-count">{m.ui.period.clipped(30)}</span> : null}
+              </div>
             );
-            return v.anyShadow ? (
-              <>
-                <ShadowHero view={v} periods={periods} />
-                {/* Шаг 84: сводка — списком «показатель — значение» с разделителями; оговорки — сноской под списком */}
-                <section className="card summary-list-card">
-                  <dl className="summary-list">
-                    {v.summaryList.map((row) => (
-                      <div key={row.label} className="summary-row">
-                        <dt>{row.label}{row.hint ? <span className="hint">{row.hint}</span> : null}</dt>
-                        <dd>{row.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  {v.summaryNotes.length > 0 ? <div className="summary-notes">{v.summaryNotes.map((note) => <p key={note}>{note}</p>)}</div> : null}
-                  {/* «Не прогноз выручки» уже сказано сноской о деньгах — второй раз не повторяем */}
-                  {v.summary.floorSavings.length > 0 ? null : <p className="summary-notes">{v.cannot}</p>}
-                </section>
-              </>
-            ) : (
+            // Шаг 96 (В21): на виду — плитки, график и карточки каналов с действием; остальное — сворачиваемыми блоками ниже
+            return v.anyShadow ? <ShadowHero view={v} periods={periods} /> : (
               <section className="card">
                 {periods}
                 <p>{v.none}</p>
@@ -73,7 +63,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
             );
           })()}
 
-          {/* Шаг 81: аккаунты — карточками; подписи бывших колонок («Channel account», «Write mode», «Live writes») — у полей карточки */}
+          {/* Шаг 81: аккаунты — карточками; подписи бывших колонок — у полей карточки (шаг 96: «Channel account», «Mode», «Sending prices») */}
           <section className="account-modes">
                 {v.accounts.map((a) => (
                   <article key={a.channelAccountId} className="account-mode">
@@ -107,6 +97,8 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                             {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
                             <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}
                               onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
+                            {/* Шаг 96 (Б13): имя копируется кнопкой; подтверждение и журнал прежние [Р-170] — имя по-прежнему вставляет человек */}
+                            <button type="button" title={m.ui.shadow.copyHint} onClick={() => copy(a.externalAccountId)}>{copied === a.externalAccountId ? m.ui.shadow.copied : m.ui.shadow.copy}</button>
                           </FormActions>
                         </div>
                       ) : null}
@@ -120,41 +112,52 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
             {error === null ? null : <ErrorBox message={error} />}
           </section>
 
-          {/* Р-172: что мы про эти витрины НЕ знаем — рядом с кнопкой, которую это знание держит */}
-          {v.properties.length === 0 ? null : (
-            <section className="card">
-              <h3>{v.propertiesTitle}</h3>
-              <table className="cardify">
-                <tbody>
-                  {v.properties.map((p) => (
-                    <tr key={`${p.marketplace}/${p.propertyText}`}>
-                      <td className="card-title">{p.storefrontText}</td>
-                      <td>{p.propertyText}<div className="note">{p.valueText}</div></td>
-                      <td className="card-status">
-                        <Badge tone={p.blocksLive ? 'warn' : 'ok'}>{p.statusText}</Badge>
-                        <div className="note">{p.closesByText}</div>
-                      </td>
-                    </tr>
+          {/* Шаг 96 (В21): «полезно знать» — сводка чисел, что мы ещё проверяем о магазинах и оговорки экрана; данные те же, блок свёрнут */}
+          <details className="card more-block">
+            <summary>{m.ui.shadow.moreTitle}</summary>
+            {v.anyShadow ? (
+              <div className="summary-list-card">
+                <dl className="summary-list">
+                  {v.summaryList.map((row) => (
+                    <div key={row.label} className="summary-row">
+                      <dt>{row.label}{row.hint ? <span className="hint">{row.hint}</span> : null}</dt>
+                      <dd>{row.value}</dd>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+                </dl>
+                {v.summaryNotes.length > 0 ? <div className="summary-notes">{v.summaryNotes.map((note) => <p key={note}>{note}</p>)}</div> : null}
+                {v.summary.floorSavings.length > 0 ? null : <p className="summary-notes">{v.cannot}</p>}
+              </div>
+            ) : null}
+            {/* Р-172, шаг 96 (А4): что мы про магазины ещё проверяем — людскими словами; первой строкой — что от продавца ничего не нужно */}
+            {v.properties.length === 0 ? null : (
+              <div className="store-checks">
+                <h3>{v.propertiesTitle}</h3>
+                {v.nothingNeeded ? <p><strong>{v.nothingNeeded}</strong></p> : null}
+                <ul className="plain-list">
+                  {v.properties.map((p) => (
+                    <li key={`${p.marketplace}/${p.propertyText}`}><strong>{p.storefrontText}</strong> — {p.humanText}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <Gaps gaps={v.gaps} />
+          </details>
 
           {/* Шаг 68 (K7): у демо — то самое недельное письмо, собранное за последние семь суток, с честной пометкой синтетики */}
           {v.digestPreview === null ? null : (
-            <section className="card">
-              <h3>{v.digestPreview.title} <Badge tone="warn">{m.ui.app.demoBadge}</Badge></h3>
+            <details className="card more-block">
+              <summary>{v.digestPreview.title} <Badge tone="warn">{m.ui.app.demoBadge}</Badge></summary>
               <p className="note">{v.digestPreview.synthetic}</p>
               <p><strong>{v.digestPreview.subject}</strong></p>
               <pre className="letter">{v.digestPreview.text}</pre>
-            </section>
+            </details>
           )}
 
           {/* Р-174: отчёт, который никто не получил, — не отчёт */}
           {v.digests.length === 0 ? null : (
-            <section className="card">
-              <h3>{v.digestsTitle}</h3>
+            <details className="card more-block">
+              <summary>{v.digestsTitle}</summary>
               <table className="cardify">
                 <tbody>
                   {v.digests.map((d) => (
@@ -166,17 +169,19 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                   ))}
                 </tbody>
               </table>
-            </section>
+            </details>
           )}
 
-          <section className="card">
+          {/* Шаг 96 (В21, Б16): удержанное — свёрнутым блоком; у строки — пилюля «цена» или «остаток» */}
+          <details className="card more-block held-block">
+            <summary>{m.ui.shadow.heldTableTitle(v.page.total)}</summary>
             {v.rows.length === 0 ? <p>{v.none}</p> : (
               <table className="cardify">
                 <thead><tr><th>{c.offer}</th><th className="num">{c.value}</th><th><WhenHead label={c.when} zone={commonZone(v.rows.map((r) => r.whenText))} /></th><th /></tr></thead>
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
-                      <td className="card-title">{r.label}</td>
+                      <td className="card-title">{r.label} <Badge tone="off">{m.ui.shadow.kinds[r.field === 'QUANTITY' ? 'QUANTITY' : 'PRICE']}</Badge></td>
                       <td className={r.field === 'QUANTITY' ? 'money' : 'money cur'} data-label={c.value}>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
                       <td data-label={`${c.when}${commonZone(v.rows.map((x) => x.whenText)) ? ` · ${commonZone(v.rows.map((x) => x.whenText))}` : ''}`}><When value={r.whenText} zone={!commonZone(v.rows.map((x) => x.whenText))} /></td>
                       <td className="num card-action">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>
@@ -186,8 +191,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
               </table>
             )}
             <Pager page={v.page} query={query} onQuery={setQuery} />
-            <Gaps gaps={v.gaps} />
-          </section>
+          </details>
           </>}
         </>
       )}

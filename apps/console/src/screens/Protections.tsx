@@ -1,4 +1,6 @@
-import { href, useMessages } from '../components.tsx';
+import { useState } from 'react';
+import { periodSearch, type Period } from '@repracer/console-model';
+import { href, PeriodPicker, useMessages } from '../components.tsx';
 import { DangerousScreen } from './Dangerous.tsx';
 import { RejectedScreen } from './Rejected.tsx';
 
@@ -14,6 +16,8 @@ export type ProtectionsTab = 'people' | 'rules';
 export function ProtectionsScreen({ worldId, tab, days }: { worldId: string; tab: ProtectionsTab; days: number }) {
   const m = useMessages();
   const p = m.ui.protections;
+  // Шаг 96 (II): период — общий на обе вкладки; прежний адрес `protections/rules/<1|7|30>` задаёт начальный пресет
+  const [period, setPeriod] = useState<Period>({ preset: days === 1 ? '24h' : days === 30 ? '30d' : '7d' });
   return (
     <section className="protections">
       <h2>{m.ui.app.screens.protections}</h2>
@@ -22,10 +26,12 @@ export function ProtectionsScreen({ worldId, tab, days }: { worldId: string; tab
         <a href={href(worldId, 'protections', 'people')} className={tab === 'people' ? 'active' : ''} aria-current={tab === 'people' ? 'page' : undefined}>{p.people}</a>
         <a href={href(worldId, 'protections', 'rules')} className={tab === 'rules' ? 'active' : ''} aria-current={tab === 'rules' ? 'page' : undefined}>{p.rules}</a>
       </nav>
-      {tab === 'people' ? <RejectedScreen worldId={worldId} only="STOP" /> : (
+      <div className="toolbar field-toolbar period-bar"><PeriodPicker value={period} onChange={setPeriod} /></div>
+      {/* ключ — период: смена периода начинает списки с первой страницы */}
+      {tab === 'people' ? <RejectedScreen key={periodSearch(period)} worldId={worldId} only="STOP" period={period} /> : (
         <>
-          <DangerousScreen worldId={worldId} days={days} />
-          <RejectedScreen worldId={worldId} only="RULES" />
+          <DangerousScreen key={`d-${periodSearch(period)}`} worldId={worldId} period={period} />
+          <RejectedScreen key={`r-${periodSearch(period)}`} worldId={worldId} only="RULES" period={period} />
         </>
       )}
     </section>

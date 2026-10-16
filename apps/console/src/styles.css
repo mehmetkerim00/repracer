@@ -456,6 +456,43 @@ a.button-link:hover { background: var(--control-bg-hover); text-decoration: none
 .setup-section { margin-bottom: var(--space-5); }
 /* шаг 95: строка о виде журнала под рядом фильтров — не вплотную к нему и к таблице */
 .toolbar + p.section-sub { margin: var(--space-2) 0 var(--space-3); }
+/* ---------- шаг 96: аудит понятности ---------- */
+/* Б17: строка журнала ведёт на квитанцию целиком — курсор и подсветка наведения, как у ссылки */
+table.clickable-rows tr.row-clickable { cursor: pointer; }
+table.clickable-rows tr.row-clickable:hover > td { background: var(--nav-hover); }
+/* Б12: повтор одной строки — «×N за период» рядом с причиной, приглушённо */
+.repeat-count { color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; }
+/* А6: «что делать» у пилюли — раскрывается на месте, текст не шире колонки */
+details.what-to-do { margin-top: var(--space-1); font-size: var(--font-size-sm); }
+details.what-to-do > summary { cursor: pointer; color: var(--accent); }
+details.what-to-do > p { margin: var(--space-1) 0 0; color: var(--text-2); }
+/* В22: «следующий шаг» наверху Shadow mode; путь, ждущий решения владельца, — тоном внимания */
+.next-step { margin-bottom: var(--space-3); }
+.next-step.waits { border-color: var(--warning-border); background: var(--warning-soft); }
+.next-step > p { margin: var(--space-1) 0; }
+/* III: путь подключения, ждущий только решения владельца, — одной строкой с раскрытием */
+.setup-collapsed { margin-bottom: var(--space-4); }
+.setup-collapsed > p { margin: 0 0 var(--space-1); }
+.channels-page > .onboarding.setup-section:last-child { margin-top: var(--space-5); margin-bottom: 0; }
+/* В21: сворачиваемые блоки Shadow mode — заголовком строки, данные внутри те же */
+details.more-block { padding: 0; }
+details.more-block > summary { cursor: pointer; padding: var(--space-3) var(--space-4); font-weight: var(--weight-heading); list-style-position: inside; }
+details.more-block[open] > summary { border-bottom: var(--border-width) solid var(--divider); }
+details.more-block > :not(summary) { margin-left: var(--space-4); margin-right: var(--space-4); }
+details.more-block > :last-child { margin-bottom: var(--space-4); }
+.store-checks ul.plain-list { margin: 0; padding-left: var(--space-4); }
+.store-checks ul.plain-list > li { margin: var(--space-1) 0; }
+/* II: ряд периода — над отчётом, отдельной панелью */
+/* сегменты в поле стандарта — без своих внешних отступов: низ ряда на линии остальных полей */
+.field > .segmented { margin: 0; }
+/* ряд пресетов периода — по своему содержимому: немецкие подписи длиннее («24 Std.», «Eigener»), ряд не переносится */
+.field-toolbar > .field:has(> .segmented) { flex-basis: auto; min-width: 0; }
+.period-presets { flex-wrap: nowrap; }
+/* пилюля режима аккаунта переносится внутри своей колонки, а не наезжает на соседнюю (немецкий текст длиннее) */
+.account-mode .badge { white-space: normal; text-align: left; }
+.period-bar { margin-bottom: var(--space-3); }
+/* Б18: причина недоступности — в ряду кнопки, сразу за ней */
+.form-actions-row > .inline-hint { align-self: center; }
 a.row-link { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--font-size); color: var(--accent); white-space: nowrap; }
 a.row-link::after { content: '→'; }
 
@@ -853,6 +890,8 @@ p.notice.live-blocked { margin: 0; }
   button.role-row { min-height: var(--touch-target); }
   .theme-button { min-width: var(--touch-target); min-height: var(--touch-target); }
   .periods button, .segmented button, .lang button { min-height: var(--touch-target); }
+  /* шаг 96: «что делать» у пилюли — цель касания телефона */
+  details.what-to-do > summary { min-height: var(--touch-target); display: flex; align-items: center; }
   /* шаг 94: галочка стандарта — цель касания не ниже 44px */
   /* галочка остаётся на линии ПЕРВОЙ строки подписи: по середине блока встаёт вся строка, а не галочка против двух строк */
   .check-field { min-height: var(--touch-target); align-content: center; }

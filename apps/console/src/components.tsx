@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { LOCALES, messagesFor, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type StatusCell, type UnitRef } from '@repracer/console-model';
+import { LOCALES, messagesFor, PERIOD_PRESETS, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
 
@@ -344,15 +344,17 @@ export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQue
  * поиска предложения за их пределами были недостижимы — а доказательство Omnibus [Р-123] и объявление скидки нужны по
  * КОНКРЕТНОМУ предложению.
  */
-export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '', onCounter, id, 'aria-describedby': describedBy }: {
+export function OfferPicker({ worldId, value, onChange, allowEmpty = false, emptyLabel = '', onCounter, id, 'aria-describedby': describedBy, search = '', onSearch }: {
   worldId: string; value: string; onChange: (writeScopeId: string) => void; allowEmpty?: boolean; emptyLabel?: string;
+  /** Шаг 96 (Б11): текст поиска с экрана и обратный вызов — экран фильтрует свою таблицу по мере ввода (после той же паузы, что у списка) */
+  search?: string; onSearch?: (text: string) => void;
   /** Шаг 94: подпись поля стандарта ведёт на поле поиска; список — его продолжение */
   id?: string; 'aria-describedby'?: string;
   /** Шаг 84: счётчик найденного — экрану, который ставит его в конец ряда фильтров; без него счётчик — под полем, как прежде */
   onCounter?: (text: string | null) => void;
 }) {
   const m = useMessages();
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(search);
   const [found, setFound] = useState<{ items: UnitRef[]; total: number; shown: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -361,6 +363,7 @@ export function OfferPicker({ worldId, value, onChange, allowEmpty = false, empt
       requestJson<{ items: UnitRef[]; total: number; shown: number }>(`${worldPath(worldId, 'offers')}?q=${encodeURIComponent(query)}`,
         { signal: cancel.signal, locale: m.locale })
         .then((r) => { setFound(r); setError(null); }, (e: unknown) => { if (!cancel.signal.aborted) setError(errorText(e, m)); });
+      if (query.trim() !== search) onSearch?.(query.trim());
     }, 200);
     return () => { clearTimeout(id); cancel.abort(); };
   }, [worldId, query, m.locale]);
@@ -393,4 +396,77 @@ export function SectionAnchor({ id, focus }: { id: string; focus: boolean }) {
     return () => { for (const t of timers) clearTimeout(t); };
   }, [focus]);
   return <span id={id} ref={ref} className="section-anchor" aria-hidden="true" />;
+}
+
+/** Сегодняшняя дата и дата `back` дней назад по часам браузера — начальные значения своего диапазона (сервер считает их в поясе пространства) */
+function localDate(back = 0): string {
+  const d = new Date(Date.now() - back * 86_400_000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Шаг 96 (аудит, II): период экрана — одно правило на Shadow mode, Protections и Price changes. Пресеты 24h / 7d / 30d — кнопками
+ * одного ряда (выбранный нажат), Custom открывает два поля дат по стандарту Field и кнопку «Show»; даты — дни пространства (сервер
+ * переводит их в его поясе). Ряд стоит в панели фильтров: подписи над полями, низ полей на одной линии
+ */
+export function PeriodPicker({ value, onChange }: { value: Period; onChange: (period: Period) => void }) {
+  const m = useMessages();
+  const t = m.ui.period;
+  const isCustom = !('preset' in value);
+  const [custom, setCustom] = useState(isCustom);
+  const [from, setFrom] = useState(isCustom ? value.from : localDate(6));
+  const [to, setTo] = useState(isCustom ? value.to : localDate(0));
+  const bad = from === '' || to === '' || from > to;
+  return (
+    <>
+      <Field group label={t.label}>
+        <div className="segmented period-presets">
+          {PERIOD_PRESETS.map((p) => {
+            const on = !custom && 'preset' in value && value.preset === p;
+            return <button key={p} type="button" aria-pressed={on} disabled={on} onClick={() => { setCustom(false); onChange({ preset: p }); }}>{t.presets[p]}</button>;
+          })}
+          <button type="button" aria-pressed={custom} disabled={custom} onClick={() => setCustom(true)}>{t.custom}</button>
+        </div>
+      </Field>
+      {custom ? (
+        <>
+          <Field label={t.from}><input type="date" value={from} max={to || localDate(0)} onChange={(e) => setFrom(e.currentTarget.value)} /></Field>
+          <Field label={t.to}><input type="date" value={to} min={from || undefined} max={localDate(0)} onChange={(e) => setTo(e.currentTarget.value)} /></Field>
+          <div className="form-actions-row">
+            <button type="button" className="primary" disabled={bad} title={bad ? t.badRange : undefined} onClick={() => onChange({ from, to })}>{t.apply}</button>
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Шаг 96 (аудит Б12): одинаковые строки отчёта (то же предложение, тот же вид и та же причина) — одной строкой «×N»; строки идут
+ * новыми сверху, поэтому в группе остаётся самая свежая
+ */
+export function collapseRepeats<T>(items: readonly T[], keyOf: (item: T) => string): Array<{ item: T; count: number }> {
+  const groups = new Map<string, { item: T; count: number }>();
+  for (const item of items) {
+    const key = keyOf(item);
+    const g = groups.get(key);
+    if (g) g.count += 1;
+    else groups.set(key, { item, count: 1 });
+  }
+  return [...groups.values()];
+}
+
+/** Шаг 96 (Б12): страница длинного отчёта на экране — по 50 строк, переключатель «новее / старее» под таблицей */
+export const REPORT_PAGE_SIZE = 50;
+export function LocalPager({ total, offset, onOffset }: { total: number; offset: number; onOffset: (offset: number) => void }) {
+  const m = useMessages();
+  if (total <= REPORT_PAGE_SIZE) return null;
+  const to = Math.min(total, offset + REPORT_PAGE_SIZE);
+  return (
+    <div className="buttons local-pager">
+      <span className="small muted">{m.ui.protections.pageOf(offset + 1, to, total)}</span>
+      <button type="button" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - REPORT_PAGE_SIZE))}>{m.ui.feed.previous}</button>
+      <button type="button" disabled={to >= total} onClick={() => onOffset(offset + REPORT_PAGE_SIZE)}>{m.ui.feed.next}</button>
+    </div>
+  );
 }

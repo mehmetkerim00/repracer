@@ -1061,10 +1061,23 @@ export interface ConsoleState {
 
 // --- Р-154: потоки консоли — страницами, окнами и агрегатами ---------------------------------------------------------
 
+/**
+ * Шаг 96: группы исхода решения для фильтра журнала — словами продавца: цена изменилась (одобрено, в том числе на границе), без
+ * изменения, отказ или удержание (Gate отказал, остановка удержала)
+ */
+export const DECISION_OUTCOME_GROUPS = { CHANGED: ['APPROVED', 'CLAMPED_FLOOR', 'CLAMPED_CEILING'], NO_CHANGE: ['NO_CHANGE'], REJECTED: ['REJECTED', 'HELD'] } as const;
+export type DecisionOutcomeGroup = keyof typeof DECISION_OUTCOME_GROUPS;
+
 export interface DecisionPageQuery {
   offset: number;
   limit: number;
   writeScopeId?: string;
+  /** Шаг 96 (Б11): набор предложений — найденные поиском экрана по мере ввода; пустой набор — ни одной строки */
+  writeScopeIds?: readonly string[];
+  /** Шаг 96: окно [since, until) по времени решения и группа исхода */
+  since?: Instant;
+  until?: Instant;
+  outcome?: DecisionOutcomeGroup;
 }
 
 export interface DecisionPage {
@@ -1184,6 +1197,11 @@ export interface FeedPageQuery {
   status?: FeedStatusGroup;
   /** Окно от `now` назад; без него — вся лента */
   sinceDays?: number;
+  /** Шаг 96 (Б11): набор предложений — найденные поиском экрана; пустой набор — ни одной строки */
+  writeScopeIds?: readonly string[];
+  /** Шаг 96: окно [since, until) по времени записи — период экрана; перекрывает `sinceDays` */
+  since?: Instant;
+  until?: Instant;
   offset: number;
   limit: number;
   /**

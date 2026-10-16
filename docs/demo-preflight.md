@@ -30,10 +30,10 @@
 
 | Что | Когда после «Демо готово» | Где видно |
 |---|---|---|
-| Неделя тени США: ~1000 решений, деньги «Without the floor…», недельное письмо | сразу | Shadow mode |
+| Неделя тени США: ~1000 решений, деньги «Your floor saved you from selling cheaper by…», недельное письмо | сразу | Shadow mode |
 | «Why this price» строки amazon.com с подрезом и полом | сразу | Shadow mode → Why this price |
-| Первая резервация amazon.com | ~2 минуты (замер шага 87) | Stock → «Only products with reservations» |
-| Резерваций несколько, первая отгрузка | ~60 минут | Stock |
+| Первая резервация amazon.com | ~2 минуты (замер шага 87) | Inventory → «Only products with reservations» |
+| Резерваций несколько, первая отгрузка | ~60 минут | Inventory |
 
 ## 3. За 10 минут до начала
 
@@ -42,15 +42,16 @@
 
 | Проверка | Ожидаемое | Если нет |
 |---|---|---|
-| Экран входа | по-английски: по центру знак PriceTrail (линия цены, удержанная в конце) и строчное имя «pricetrail», под ними «Repricing you can audit», под ними карточка входа: ровно три роли строками (шаг 88) — цветной кружок, «Owner — everything, plus people, channel accounts and live writes», «Manager — prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing», «Viewer — read-only» | пустая белая страница — раздел 5, «Пустая страница» |
+| Экран входа | по-английски: по центру знак PriceTrail (линия цены, удержанная в конце) и строчное имя «pricetrail», под ними «Repricing you can audit», под ними карточка входа: ровно три роли строками (шаг 88) — цветной кружок, «Owner — everything, plus people, channel accounts and starting to send prices», «Manager — prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing», «Viewer — read-only» | пустая белая страница — раздел 5, «Пустая страница» |
 | Строка «Owner» | «Your workspaces», три карточки (шаг 91): **Demo store (simulator)** — «Synthetic American seller on the channel simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.», пометка Demo, показатели Offers 36 / Decisions 24h / Interventions 7d, роль «Owner»; **Blue Ridge Trading** — Offers 12, роль «Manager»; **Lakeside Home Goods** — Offers 10, роль «Viewer»; у обоих Decisions 24h и Interventions 7d не нули | десятки карточек с русским текстом — подготовка запущена без `REPRACER_DEMO_ONLY`: перезапустить подготовку |
 | Нажать карточку | сразу **Shadow mode**, баннер «Demo workspace: synthetic data, real path» | — |
-| Сводка тени | белые плитки: «Decisions» — больше 1000; «Without the floor» в долларах; график «Decisions per day» — семь столбиков с числами, неделя не нулевая, сегодняшний столбик через 15 минут после запуска — выше недели; под графиком — список «показатель — значение» со сноской; строка «Without the floor you would have sold $… cheaper in total» | «Price would change» — 0: мир младше ~20 минут; столбики на нуле все дни, кроме сегодняшнего, — неделя США не прожата: перезапустить подготовку |
-| Таблица удержанных записей | строки «… · amazon.com», «… · ebay.com» и «… · walmart.com», «Why this price» в каждой строке с ценой (у строк остатка «… pieces» ссылки нет) | — |
+| Сводка тени | сверху карточка «Next step» — «Waiting for your decision», кнопка «Open Channels» (шаг 96); ряд «Period» — 24h / 7d / 30d / Custom, выбран 7d; белые плитки с подписями: «Decisions» — больше 1000, «times the engine checked prices»; «Held back» — «price changes we did NOT send to your store»; «Your floor saved you from selling cheaper by» — в долларах, «protection, not profit»; график «Decisions per day» — восемь столбиков (первый — неполные сутки), неделя не нулевая, сегодняшний через 15 минут после запуска — выше недели; ниже карточки аккаунтов с кнопками «Start sending prices» и «Copy», затем свёрнутые блоки «Good to know», «Weekly email — preview», «Every held change, one by one (N)» | «Price would change» — 0: мир младше ~20 минут; столбики на нуле все дни, кроме сегодняшнего, — неделя США не прожата: перезапустить подготовку |
+| Блок «Every held change, one by one» (раскрыть) | строки «… · amazon.com», «… · ebay.com» и «… · walmart.com», у каждой пилюля «price» или «stock»; «Why this price» в каждой строке с ценой (у строк остатка «… pieces» ссылки нет) | — |
 | Доказательство из базы (команду печатает подготовка) | одна строка `SHADOW_HELD | N | 0` | любая другая строка — не показывать шаг «а», разобрать после |
-| Stock | «Warehouse Newark, DE — File import (internal pool)»; флажок «Only products with reservations» — «N of 36 products match.», хотя бы одна строка «… · SYN-DEMO-US-AMZ-…» с 1 в колонке «Reserved» | мир младше ~2 минут |
-| Offers (шаг 89) | «Total 36»; у двух предложений walmart.com («Wall clock, small», «Yoga mat, small») пилюля «Unpublished (uncompetitive price)» и строка «Cheaper elsewhere: $19.99. Since …»; в Stop pricing — две строки «Offer unpublished: uncompetitive price» | пилюль нет — мир младше ~1 минуты или неделя не прожата: перезапустить подготовку |
-| Шапка и меню | переключателя языка нет; в меню девять пунктов (шаг 95): Shadow mode, Price changes, Strategies, Costs & floors, Protections, Offers, Stock, Channels, Stop pricing — «Omnibus» нет; нигде нет Kaufland, витрин ЕС и евро | есть — подготовка запущена в профиле eu или global: перезапустить без `REPRACER_MARKET_PROFILE` |
+| Inventory | сводка «… updates being sent now 0; our number differs from the store’s 0; …»; «Warehouse Newark, DE — File import (internal pool)»; флажок «Only products with reservations» — «N of 36 products match.», хотя бы одна строка «… · SYN-DEMO-US-AMZ-…» с 1 в колонке «Reserved» | мир младше ~2 минут |
+| Offers (шаг 89) | «Total 36», кнопка «Bulk operations»; у двух предложений walmart.com («Wall clock, small», «Yoga mat, small») в колонке «Issues from the channel» пилюля «Unpublished (uncompetitive price)», строка «Cheaper elsewhere: $19.99. Since …» и ссылка «What to do»; в Stop pricing — две строки «Offer unpublished: uncompetitive price» | пилюль нет — мир младше ~1 минуты или неделя не прожата: перезапустить подготовку |
+| Channels | одна строка «Setup: step 4 of 8 — Stock synchronization enabled (12 of 36) waits for your decision below.» и «Show the checklist», сразу под ней аккаунты; у eBay и Walmart вопрос «Does another tool…» с пилюлей «Answer this to finish setup» — «Not answered yet.» | чеклист восьмью шагами над аккаунтами — путь ждёт не только владельца: разобрать после показа |
+| Шапка и меню | переключателя языка нет; в меню девять пунктов (шаги 95–96): Overview — Shadow mode; Pricing — Price changes, Strategies, Costs & floors, Protections, Offers; Inventory — Inventory; Workspace — Channels, Stop pricing; у каждого пункта своя иконка — «Omnibus» нет; нигде нет Kaufland, витрин ЕС и евро | есть — подготовка запущена в профиле eu или global: перезапустить без `REPRACER_MARKET_PROFILE` |
 
 Терминал подготовки не закрывать: Ctrl+C в нём останавливает стенд и интерфейс.
 
@@ -70,8 +71,8 @@
   ключей Walmart у платформы пока нет, и подключить его продавец ещё не может; снятие с публикации движок не чинит — только показывает.
 - **Ни одна запись не ушла в канал**, и каналы здесь — симулятор: ключей настоящих аккаунтов в демо нет.
 - **Бой на amazon.com, ebay.com и walmart.com закрыт**, и это не недоработка демо: граница суток витрин США каналом не подтверждена. Отказ кнопки
-  «Switch on live writes» объясняет это словами; у продавца это закрывает неделя тени и проверка командой платформы [Р-204].
-- **«Without the floor you would have sold … cheaper» — не прогноз выручки.** Экран и письмо говорят это сами.
+  «Start sending prices» объясняет это словами; у продавца это закрывает неделя тени и проверка командой платформы [Р-204].
+- **«Your floor saved you from selling cheaper by …» — защита, не прогноз выручки.** Плитка подписана «protection, not profit», письмо говорит это само.
 - Не обещать сроков, которых нет в документах: подключение Amazon и eBay в бою ждёт внешних ходов ([pilot-readiness.md](pilot-readiness.md)).
 
 ## 5. Если завис экран или упал процесс
@@ -119,10 +120,10 @@
 
 | Вопрос | Ответ и где он |
 |---|---|
-| «Чем докажете, что вы не тронете мои цены?» | Поле «Write mode» — «shadow (nothing is written)» на карточке каждого аккаунта; таблица удержанных записей; доказательство из базы `SHADOW_HELD | N | 0`. Режим — свойство аккаунта в базе, удержанная запись рождается завершённой, и база отклоняет у неё любой след отправки |
-| «Когда и как я включу бой?» | Таблица «What we still do not know about these storefronts» и отказ кнопки «Switch on live writes»: после недели тени команда платформы проверяет данные тени, затем бой открывает только владелец со вторым фактором и набранным именем аккаунта; назад в тень — одно нажатие |
+| «Чем докажете, что вы не тронете мои цены?» | Поле «Mode» — «shadow (nothing is sent to your store)» на карточке каждого аккаунта; плитка «Held back» — «price changes we did NOT send to your store»; блок «Every held change, one by one»; доказательство из базы `SHADOW_HELD | N | 0`. Режим — свойство аккаунта в базе, удержанная запись рождается завершённой, и база отклоняет у неё любой след отправки |
+| «Когда и как я включу бой?» | Блок «Good to know» → «What we are still checking about your stores» (первой строкой «Nothing is needed from you.») и отказ кнопки «Start sending prices»: после недели тени команда платформы проверяет данные тени, затем отправку цен включает только владелец со вторым фактором и именем аккаунта в поле (кнопка «Copy» копирует его); назад в тень — одно нажатие |
 | «Что это за график?» | карточка «Decisions per day» под плитками: решения тени по суткам в поясе магазина за выбранный период; считает база по тем же решениям, что число «Decisions»; последний столбик — сегодня, сутки ещё не кончились. У демо неделя США прожата заранее, поэтому она ровная; сегодняшний столбик растёт тем же темпом — тень живёт настоящим временем |
-| «Сколько я на этом заработаю?» | Сводка «Without the floor you would have sold $… cheaper» — это защита от продажи ниже пола, а не прогноз выручки (экран говорит это сам); недельное письмо — блок «Weekly email — preview», такое приходит в тени каждый понедельник |
+| «Сколько я на этом заработаю?» | Плитка «Your floor saved you from selling cheaper by $…» — это защита от продажи ниже пола, а не прогноз выручки (подпись «protection, not profit»); недельное письмо — блок «Weekly email — preview», такое приходит в тени каждый понедельник |
 
 ### б. Why this price
 
@@ -136,7 +137,7 @@
 
 | Вопрос | Ответ и где он |
 |---|---|
-| «Что будет с записью, которая уже ушла?» | Блок «Not stopped»: «A write already sent to the channel: its outcome is accepted» — остановка не отзывает отправленное, а новых записей не создаёт |
+| «Что будет с записью, которая уже ушла?» | Блок «Not stopped»: «An update already sent to the channel: its outcome is accepted» — остановка не отзывает отправленное, а новых не создаёт; первая строка экрана — «Pause is safe: current prices stay as they are, and you can resume anytime with a note.» |
 | «Остановка цен останавливает и остатки?» | Нет — «Not stopped: Stock synchronization»: продажи продолжают уменьшать остаток в каналах |
 | «Кто может остановить и снять, и видно ли это потом?» | Таблица «Three kinds of stop»: колонки «Who sets it» и «How it ends»; останавливают владелец или менеджер с заметкой; снятие — с заметкой, а снятие остановки всего магазина — со вторым фактором; «Audit log: stops, roles and channel events» хранит кто, когда и с какой заметкой. Недоверие каналу снимает только владелец со вторым фактором (шаг 89) |
 | «Кто у вас что может? Можно дать человеку две роли?» | Вход: три роли — Owner, Manager, Viewer, у каждой строка «что может». Одна роль на человека в магазине (база не даст вторую); нужны права двух — назначается одна старшая. Менеджер — ежедневная работа и стоп-кран; люди, аккаунты каналов и включение записи в канал — только владелец. Смена роли видна в «Audit log: stops, roles and channel events»: «Role changed · …: Viewer → Manager», кто и когда. Вернуть аккаунт в тень может и менеджер — это безопасная сторона (шаг 89) |
@@ -145,11 +146,11 @@
 
 | Вопрос | Ответ и где он |
 |---|---|
-| «Остатки у нас ведёт другая программа — вы не подерётесь?» | Вопрос «Does another tool update stock or prices in this channel?»: ответ «Yes — stock» держит запись остатков выключенной, и подтвердить её база не даст; по умолчанию остатки не пишутся вовсе, пока владелец не подтвердит, что другой программы нет |
+| «Остатки у нас ведёт другая программа — вы не подерётесь?» | Вопрос «Does another tool update stock or prices in this channel?»: ответ «Yes — stock» держит отправку остатков выключенной, и подтвердить её база не даст; по умолчанию остатки не отправляются вовсе, пока владелец не подтвердит, что другой программы нет |
 | «Как подключить мой аккаунт и какие доступы нужны?» | Вступление экрана: кнопка ведёт на страницу согласия канала, доступ продавец даёт там сам; новое подключение начинается в тени. Какие доступы ещё нужны — у аккаунта Amazon ЕС «Missing: …» |
 | «Вы храните мои ключи?» | Пояснение в рамке внизу экрана: «We keep the access of the channel encrypted and never show it — not here, not in emails, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.» |
 
-### д. Stock
+### д. Inventory
 
 | Вопрос | Ответ и где он |
 |---|---|
@@ -161,7 +162,7 @@
 
 | Вопрос | Ответ и где он |
 |---|---|
-| «Почему Walmart снял мой товар?» | Offers, колонка «Channel says»: «Unpublished (uncompetitive price)» и фраза — тот же товар дешевле в другом месте ($19.99), на другой площадке или у самого Walmart. Событие с временем — в журнале Stop pricing |
+| «Почему Walmart снял мой товар?» | Offers, колонка «Issues from the channel»: «Unpublished (uncompetitive price)», ссылка «What to do» и фраза — тот же товар дешевле в другом месте ($19.99), на другой площадке или у самого Walmart. Событие с временем — в журнале Stop pricing |
 | «А PriceTrail это сам исправит?» | Нет — фраза так и говорит: «PriceTrail does not change the price for you here». Что делать с ценой — решает продавец; автоматический ответ на снятие — отдельное решение. Наша ценность здесь — видеть все каналы сразу и узнать о снятии, а не по провалу продаж |
 | «Вы уже работаете с настоящим Walmart?» | Нет: Walmart в демо — модель канала по правилам настоящего Walmart (OAuth, корзина токенов, правило неконкурентной цены); ключей Walmart у платформы пока нет — экран Channel accounts говорит это словами; живое подключение — отдельным шагом. Порог 10 % — параметр модели |
 

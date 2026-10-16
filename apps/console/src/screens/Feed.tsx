@@ -1,16 +1,19 @@
 import { useState } from 'react';
-import { FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, type DecisionListView, type FeedQuery, type ListQuery, type PriceFeedView } from '@repracer/console-model';
+import { FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodSearch, type DecisionListView, type FeedQuery, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
 import { JobProgress } from './Jobs.tsx';
 import { DecisionsView } from './Decisions.tsx';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, Pager, PeriodPicker, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Field } from '../forms.tsx';
 
 /**
  * Шаг 95 [Р-217]: Price changes — единственный журнал цен. «Kind» выбирает, что в нём: записи в канал (как было) или все решения —
- * с записью и без (прежний список «Why this price»). Фильтры двух видов не совмещаются без потери смысла: статус записи и период есть
- * только у записей, у решений — только предложение; поэтому у вида решений из фильтров остаётся предложение, и экран говорит это строкой
+ * с записью и без (прежний список «Why this price»).
+ *
+ * Шаг 96: у обоих видов — период (пресет или свой диапазон дат в поясе пространства) и поиск, который фильтрует саму таблицу по мере
+ * ввода (аудит Б11); у решений — ещё исход (вариант шага 95 принят). Статус — только у записей: у решения статуса записи нет, и экран
+ * говорит это строкой. Ряд фильтров стоит ВНЕ перезагружаемой части: поле поиска не теряет ввод и фокус, пока таблица обновляется
  */
 export type FeedKind = 'writes' | 'decisions';
 
@@ -26,51 +29,45 @@ function KindField({ kind, onKind }: { kind: FeedKind; onKind: (kind: FeedKind) 
   );
 }
 
-/**
- * Лента изменений цен (шаги 21, 23): запись в канал от решения до итога, новые сверху. Фильтры по статусу, офферу и периоду и
- * страницы считает сервер по всему окну ленты — экран не фильтрует уже отданную страницу.
- */
-
+/** Параметры адреса ленты — та же форма, что разбирает сервер (`parseFeedQuery`) */
 export function feedPath(worldId: string, q: FeedQuery): string {
   const params = new URLSearchParams();
   if (q.writeScopeId) params.set('writeScopeId', q.writeScopeId);
   if (q.status) params.set('status', q.status);
+  if (q.q) params.set('q', q.q);
   if (q.days) params.set('days', String(q.days));
   if (q.offset) params.set('offset', String(q.offset));
   if (q.limit) params.set('limit', String(q.limit));
-  const query = params.toString();
+  const query = [params.toString(), q.period ? periodSearch(q.period) : ''].filter(Boolean).join('&');
   return `${worldPath(worldId, 'feed')}${query ? `?${query}` : ''}`;
 }
 
-export function FeedScreenView({ view, onQuery, onKind }: { view: PriceFeedView; onQuery?: (q: FeedQuery) => void; onKind?: (kind: FeedKind) => void }) {
+/** Таблица ленты, выгрузка и страницы. Шаг 96 (Б17): строка ведёт на квитанцию решения целиком, а не только ссылкой в конце */
+export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedView; onQuery?: (q: FeedQuery) => void; query?: FeedQuery }) {
   const m = useMessages();
   const f = m.ui.feed;
   const c = f.columns;
   const q = view.query;
-  const current: FeedQuery = {
-    ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}),
-    ...(q.days ? { days: q.days as FeedQuery['days'] & number } : {}), limit: q.limit,
-  };
+  const current: FeedQuery = { ...query, ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}), limit: q.limit };
   /**
-   * Р-142 (шаг 31): всю ленту за период продавец уносит ФАЙЛОМ — экран отдаёт страницу не больше 200 записей, а за 30 суток
-   * по каталогу их сотни тысяч. Готовит файл фоновое задание [Р-139] по тому же фильтру, что сейчас на экране.
+   * Р-142 (шаг 31): всю ленту за период продавец уносит ФАЙЛОМ — экран отдаёт страницу не больше 200 записей. Готовит файл фоновое
+   * задание [Р-139] по тому же фильтру, что сейчас на экране; шаг 96 — и за тот же период и тот же поиск
    */
   const [exportJobId, setExportJobId] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const exportFeed = async () => {
     setExportError(null);
+    const period = query.period ? Object.fromEntries(new URLSearchParams(periodSearch(query.period))) : {};
     try {
       const created = await requestJson<JobCreatedResponse>(`${worldPath(view.worldId, 'feed', 'export')}`, {
         method: 'POST',
-        body: { query: { ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}), ...(q.days ? { days: String(q.days) } : {}) } },
+        body: { query: { ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}), ...(query.q ? { q: query.q } : {}), ...period } },
         locale: m.locale,
       });
       setExportJobId(created.jobId);
     } catch (e) { setExportError(errorText(e, m)); }
   };
-
   const zone = commonZone(view.items.map((i) => i.at));
-  const [pickerCount, setPickerCount] = useState<string | null>(null);
   /**
    * Шаг 84: одинаковая причина у многих строк (у тени — «Not sent: this channel account is in shadow mode…») — один раз строкой при полосе
    * итогов; в строке остаётся основание решения («Buy Box»). Причина, своя у строки, остаётся в строке; полный текст — в «Decision path»
@@ -78,47 +75,29 @@ export function FeedScreenView({ view, onQuery, onKind }: { view: PriceFeedView;
   const reasonCount = new Map<string, number>();
   for (const i of view.items) if (i.reason) reasonCount.set(i.reason.text, (reasonCount.get(i.reason.text) ?? 0) + 1);
   const shared = [...reasonCount].filter(([, n]) => n > 1).map(([text]) => text);
-  const change = (patch: Partial<FeedQuery>) => {
-    const next: FeedQuery = { ...current, ...patch, offset: 0 };
-    for (const key of Object.keys(patch) as Array<keyof FeedQuery>) if (patch[key] === undefined) delete next[key];
-    onQuery?.(next);
-  };
+  // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней — цены посчитаны, в магазины не ушло ничего
+  const counts = view.counts;
+  const trialWeek = counts.shadowHeld > 0 && counts.applied + counts.inFlight + counts.notSent + counts.superseded === 0;
+  const open = (decisionId: string | null) => { if (decisionId) window.location.hash = href(view.worldId, 'decisions', decisionId); };
   return (
-    <section>
-      <h2>{f.pageTitle}</h2>
-      <p className="subtitle">{m.ui.app.subtitles.feed}</p>
-      {/* Шаг 79: фильтры и выгрузка — карточкой-панелью; счётчики групп — в шапке таблицы */}
-      {onQuery ? (
-        <div className="filters toolbar field-toolbar">
-          {onKind ? <KindField kind="writes" onKind={onKind} /> : null}
-          {/* Шаг 94: фильтры — поля стандарта: подпись над выбором */}
-          <Field label={f.filters.status}><select value={q.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
-            <option value="">{f.filters.all}</option>
-            {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
-          </select></Field>
-          {/* Р-136 (ревью шага 29, находка 4): предложение выбирается поиском — список показывает первые несколько сотен из каталога */}
-          <Field label={f.filters.offer}><OfferPicker worldId={view.worldId} value={q.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
-            onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} onCounter={setPickerCount} /></Field>
-          <Field label={f.filters.period}><select value={q.days ?? ''} onChange={(e) => change({ days: (e.target.value ? Number(e.target.value) : undefined) as FeedQuery['days'] })}>
-            <option value="">{f.filters.all}</option>
-            {FEED_PERIODS_DAYS.map((d) => <option key={d} value={d}>{f.periodDays(d)}</option>)}
-          </select></Field>
-          {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
-        </div>
-      ) : null}
+    <section className="journal-table">
+      {onQuery ? null : <><h2>{f.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.feed}</p></>}
       {exportError ? <ErrorBox message={exportError} /> : null}
       {exportJobId ? <JobProgress worldId={view.worldId} jobId={exportJobId} /> : null}
+      {view.clipped ? <p className="notice">{m.ui.period.clipped(90)}</p> : null}
+      {view.search && view.search.total > view.search.shown ? <p className="notice">{f.searchLimited(view.search.shown, view.search.total)}</p> : null}
+      {trialWeek ? <p className="notice trial-week">{f.trialWeek}</p> : null}
       {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
         <div className="table-wrap">
           {/* Шаг 84: выгрузка — действие над таблицей, в её полосе итогов; ряд фильтров остаётся одним рядом */}
           <div className="table-head"><span>{f.counts(view.counts)}</span>
             {onQuery ? <button type="button" disabled={view.page.total === 0} onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button> : null}
             {shared.map((text) => <span key={text} className="head-note">{text}</span>)}</div>
-          <table className="feed dense sticky-end cardify">
+          <table className="feed dense sticky-end cardify clickable-rows">
             <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
-                <tr key={n}>
+                <tr key={n} className={i.decisionId ? 'row-clickable' : undefined} onClick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) open(i.decisionId); }}>
                   <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={i.at} zone={!zone} /></td>
                   <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
                   <td className="num cur" data-label={c.from}>{i.from ?? '–'}</td>
@@ -150,39 +129,105 @@ export function FeedScreenView({ view, onQuery, onKind }: { view: PriceFeedView;
 }
 
 export function FeedScreen({ worldId, kind }: { worldId: string; kind: FeedKind }) {
-  const onKind = (next: FeedKind) => { window.location.hash = next === 'decisions' ? href(worldId, 'feed', 'decisions') : href(worldId, 'feed'); };
-  return kind === 'decisions' ? <DecisionJournal worldId={worldId} onKind={onKind} /> : <WriteJournal worldId={worldId} onKind={onKind} />;
-}
-
-function WriteJournal({ worldId, onKind }: { worldId: string; onKind: (kind: FeedKind) => void }) {
-  const m = useMessages();
-  const [query, setQuery] = useState<FeedQuery>({});
-  const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, query), m.locale);
-  return <Load shape="table" resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} onKind={onKind} />}</Load>;
-}
-
-/** Все решения журнала — страницами базы [Р-154]; строка ведёт на квитанцию решения «Why this price» */
-function DecisionJournal({ worldId, onKind }: { worldId: string; onKind: (kind: FeedKind) => void }) {
   const m = useMessages();
   const f = m.ui.feed;
-  const [query, setQuery] = useState<ListQuery & { writeScopeId?: string }>({ offset: 0, limit: LIST_PAGE_DEFAULT });
-  const [pickerCount, setPickerCount] = useState<string | null>(null);
-  const path = `${worldPath(worldId, 'decisions')}?offset=${query.offset}&limit=${query.limit}${query.writeScopeId ? `&writeScopeId=${encodeURIComponent(query.writeScopeId)}` : ''}`;
-  const [resource, retry] = useResource<DecisionListView>(path, m.locale);
+  // Шаг 96: период и поиск — общие для обоих видов журнала: переключение вида их не сбрасывает
+  const [period, setPeriod] = useState<Period>({ preset: '7d' });
+  const [search, setSearch] = useState('');
+  const onKind = (next: FeedKind) => { window.location.hash = next === 'decisions' ? href(worldId, 'feed', 'decisions') : href(worldId, 'feed'); };
   return (
     <section>
       <h2>{f.pageTitle}</h2>
       <p className="subtitle">{m.ui.app.subtitles.feed}</p>
+      {kind === 'decisions'
+        ? <DecisionJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} />
+        : <WriteJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} />}
+    </section>
+  );
+}
+
+interface JournalProps {
+  worldId: string;
+  onKind: (kind: FeedKind) => void;
+  period: Period;
+  onPeriod: (period: Period) => void;
+  search: string;
+  onSearch: (text: string) => void;
+}
+
+function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch }: JournalProps) {
+  const m = useMessages();
+  const f = m.ui.feed;
+  const [query, setQuery] = useState<FeedQuery>({});
+  const [pickerCount, setPickerCount] = useState<string | null>(null);
+  const full: FeedQuery = { ...query, period, ...(search ? { q: search } : {}) };
+  const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, full), m.locale);
+  const change = (patch: Partial<FeedQuery>) => {
+    const next: FeedQuery = { ...query, ...patch, offset: 0 };
+    for (const key of Object.keys(patch) as Array<keyof FeedQuery>) if (patch[key] === undefined) delete next[key];
+    setQuery(next);
+  };
+  return (
+    <>
+      <div className="filters toolbar field-toolbar">
+        <KindField kind="writes" onKind={onKind} />
+        <PeriodPicker value={period} onChange={(p) => { onPeriod(p); change({}); }} />
+        {/* Р-136: предложение выбирается поиском; шаг 96 (Б11) — поиск по мере ввода фильтрует и саму таблицу */}
+        <Field label={f.filters.offer}><OfferPicker worldId={worldId} value={query.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all} search={search}
+          onSearch={(text) => { onSearch(text); change({}); }} onChange={(writeScopeId) => change({ writeScopeId: writeScopeId || undefined })} onCounter={setPickerCount} /></Field>
+        <Field label={f.filters.status}><select value={query.status ?? ''} onChange={(e) => change({ status: (e.target.value || undefined) as FeedQuery['status'] })}>
+          <option value="">{f.filters.all}</option>
+          {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
+        </select></Field>
+        {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
+      </div>
+      <Load shape="table" resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} query={full} />}</Load>
+    </>
+  );
+}
+
+type DecisionQuery = ListQuery & { writeScopeId?: string; outcome?: 'CHANGED' | 'NO_CHANGE' | 'REJECTED' };
+
+/** Все решения журнала — страницами базы [Р-154]; строка ведёт на квитанцию решения «Why this price» */
+function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch }: JournalProps) {
+  const m = useMessages();
+  const f = m.ui.feed;
+  const [query, setQuery] = useState<DecisionQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [pickerCount, setPickerCount] = useState<string | null>(null);
+  const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit) });
+  if (query.writeScopeId) params.set('writeScopeId', query.writeScopeId);
+  if (query.outcome) params.set('outcome', query.outcome);
+  if (search) params.set('q', search);
+  const [resource, retry] = useResource<DecisionListView>(`${worldPath(worldId, 'decisions')}?${params.toString()}&${periodSearch(period)}`, m.locale);
+  const reset = (patch: Partial<DecisionQuery>) => setQuery({ ...query, ...patch, offset: 0 });
+  return (
+    <>
       <div className="filters toolbar field-toolbar">
         <KindField kind="decisions" onKind={onKind} />
-        <Field label={f.filters.offer}><OfferPicker worldId={worldId} value={query.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all}
-          onChange={(writeScopeId) => setQuery({ offset: 0, limit: query.limit, ...(writeScopeId ? { writeScopeId } : {}) })} onCounter={setPickerCount} /></Field>
+        <PeriodPicker value={period} onChange={(p) => { onPeriod(p); reset({}); }} />
+        <Field label={f.filters.offer}><OfferPicker worldId={worldId} value={query.writeScopeId ?? ''} allowEmpty emptyLabel={f.filters.all} search={search}
+          onSearch={(text) => { onSearch(text); reset({}); }}
+          onChange={(writeScopeId) => setQuery({ offset: 0, limit: query.limit, ...(query.outcome ? { outcome: query.outcome } : {}), ...(writeScopeId ? { writeScopeId } : {}) })} onCounter={setPickerCount} /></Field>
+        <Field label={f.outcome.label}><select value={query.outcome ?? ''} onChange={(e) => {
+          const outcome = (e.target.value || undefined) as DecisionQuery['outcome'];
+          setQuery({ offset: 0, limit: query.limit, ...(query.writeScopeId ? { writeScopeId: query.writeScopeId } : {}), ...(outcome ? { outcome } : {}) });
+        }}>
+          <option value="">{f.outcome.all}</option>
+          {(['CHANGED', 'NO_CHANGE', 'REJECTED'] as const).map((o) => <option key={o} value={o}>{f.outcome[o]}</option>)}
+        </select></Field>
         {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
       </div>
       <p className="section-sub">{f.kind.decisionsCaption}</p>
       <Load shape="table" resource={resource} retry={retry}>
-        {(view) => (<><DecisionsView worldId={worldId} items={view.items} /><Pager page={view.page} query={query} onQuery={(q) => setQuery({ ...query, ...q })} /></>)}
+        {(view) => (
+          <>
+            {view.clipped ? <p className="notice">{m.ui.period.clipped(30)}</p> : null}
+            {view.search && view.search.total > view.search.shown ? <p className="notice">{f.searchLimited(view.search.shown, view.search.total)}</p> : null}
+            <DecisionsView worldId={worldId} items={view.items} />
+            <Pager page={view.page} query={query} onQuery={(q) => setQuery({ ...query, ...q })} />
+          </>
+        )}
       </Load>
-    </section>
+    </>
   );
 }

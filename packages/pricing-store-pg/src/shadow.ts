@@ -163,13 +163,28 @@ export class PgShadowStore {
   /**
    * Сводка и страница удержанных записей. `sinceDays` — окно отчёта; по умолчанию неделя, как у дайджеста [Р-171].
    */
-  async shadowPage(tenantId: string, now: Instant, query: { offset: number; limit: number; sinceDays?: number }): Promise<ShadowPage> {
+  async shadowPage(tenantId: string, now: Instant, query: { offset: number; limit: number; sinceDays?: number; since?: Instant; until?: Instant }): Promise<ShadowPage> {
     const sinceDays = query.sinceDays ?? 7;
     // Окно отчёта ограничено и здесь, а не только маршрутом: хранилище зовут и прогоны, и исполнитель дайджеста
     if (!Number.isInteger(sinceDays) || sinceDays < 1 || sinceDays > SHADOW_WINDOW_MAX_DAYS) {
       throw new Error(`shadow window must be 1..${SHADOW_WINDOW_MAX_DAYS} days, got ${sinceDays}`);
     }
-    const since = new Date(Date.parse(now) - sinceDays * 86_400_000).toISOString();
+    /**
+     * Шаг 96: период экрана — окно «с — по» (свой диапазон дат продавца); без него — прежнее «от `sinceDays` назад до сейчас».
+     * Окно не глубже предела и не позже «сейчас» — правило то же, что у `sinceDays`
+     */
+    const since = query.since ?? new Date(Date.parse(now) - sinceDays * 86_400_000).toISOString();
+    const until = query.until ?? now;
+    if (Number.isNaN(Date.parse(since)) || Number.isNaN(Date.parse(until)) || Date.parse(since) > Date.parse(until) || Date.parse(until) > Date.parse(now)
+      || Date.parse(since) < Date.parse(now) - SHADOW_WINDOW_MAX_DAYS * 86_400_000) {
+      throw new Error(`shadow window must lie within the last ${SHADOW_WINDOW_MAX_DAYS} days, got ${since} .. ${until}`);
+    }
+    /**
+     * Верхняя граница запросов — только у своего диапазона дат. У пресета окно открыто сверху, как до шага 96: в живых прогонах
+     * часы консоли виртуальные [Р-128], а момент завершения удержанной записи ставят часы базы — граница «сейчас консоли»
+     * отрезала их все (kill-test: 0 удержанных из 683)
+     */
+    const upper = query.until ?? 'infinity';
     return inTenant(this.pools.adminPool, tenantId, async (tx) => {
       const [decisions, held, list, accounts, savings, properties, digests, unconfirmed, byHour] = await Promise.all([
         // Решения тени: считает база, и только по окну отчёта [Р-154]
@@ -184,14 +199,14 @@ export class PgShadowStore {
                   count(*) FILTER (WHERE d.final_amount_minor IS NOT NULL AND d.final_amount_minor = d.effective_floor_minor)::int AS floor_held,
                   count(*) FILTER (WHERE d.final_amount_minor IS NOT NULL AND d.final_amount_minor = d.effective_ceiling_minor)::int AS ceiling_held
              FROM channel_data.price_decision d
-            WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2`, [tenantId, since]),
+            WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2 AND d.decided_at < $3`, [tenantId, since, upper]),
         tx.query(
           `SELECT count(*)::int AS held,
                   count(*) FILTER (WHERE h.field <> 'QUANTITY')::int AS held_price,
                   count(*) FILTER (WHERE h.field = 'QUANTITY')::int AS held_quantity,
                   count(*) FILTER (WHERE h.would_spend_budget)::int AS would_spend
              FROM tenant_data.channel_write_history h
-            WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2`, [tenantId, since]),
+            WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2 AND h.finished_at < $3`, [tenantId, since, upper]),
         tx.query(
           /**
            * Шаг 68: сперва страница удержанных записей, затем подписи (товар, витрина) только её строк — подзапрос витрины не
@@ -200,7 +215,7 @@ export class PgShadowStore {
           `WITH page AS (SELECT h.channel_write_id, h.write_scope_id, h.field, h.amount_minor, h.currency, h.quantity, h.price_decision_id,
                                 h.would_spend_budget, h.finished_at
                            FROM tenant_data.channel_write_history h
-                          WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2
+                          WHERE h.tenant_id = $1 AND h.final_status = 'SHADOW_HELD' AND h.finished_at >= $2 AND h.finished_at < $5
                           ORDER BY h.finished_at DESC, h.channel_write_id
                           LIMIT $3 OFFSET $4)
            SELECT page.channel_write_id, page.write_scope_id, ws.channel, ws.channel_account_id, p.sku, p.title, page.field,
@@ -210,7 +225,7 @@ export class PgShadowStore {
              FROM page
              JOIN tenant_data.write_scope ws ON ws.tenant_id = $1 AND ws.write_scope_id = page.write_scope_id
              LEFT JOIN tenant_data.product p ON p.tenant_id = ws.tenant_id AND p.product_id = ws.product_id
-            ORDER BY page.finished_at DESC, page.channel_write_id`, [tenantId, since, query.limit, query.offset]),
+            ORDER BY page.finished_at DESC, page.channel_write_id`, [tenantId, since, query.limit, query.offset, upper]),
         // Режим каждого аккаунта и последнее переключение [Р-170]
         tx.query(
           `SELECT ca.channel_account_id, ca.channel, ca.display_name, ca.external_account_id, ca.write_mode, ca.auth_status,
@@ -233,7 +248,10 @@ export class PgShadowStore {
          * письмо показывают одни и те же числа], и по каждой валюте отдельно [Р-71].
          */
         // Окно — ТО ЖЕ, что у остальных счётчиков экрана, и от часов консоли: у живых прогонов они виртуальные [Р-128]
-        tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings($1, $2::timestamptz)`, [tenantId, since]),
+        // Шаг 96: свой диапазон — та же сумма с верхней границей (функция окна дайджеста, 0132); у пресета — прежняя, до часов базы
+        query.until === undefined
+          ? tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings($1, $2::timestamptz)`, [tenantId, since])
+          : tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings_between($1, $2::timestamptz, $3::timestamptz)`, [tenantId, since, until]),
         /**
          * Р-172: свойства витрин аккаунтов тенанта — значение, статус и чем закрывается. Экран показывает их рядом с
          * кнопкой «включить бой», потому что именно они её и держат.
@@ -249,19 +267,19 @@ export class PgShadowStore {
           `SELECT period_start, period_end, decisions, held_writes, floor_savings, delivered_at, delivery_kind
              FROM tenant_data.shadow_digest WHERE tenant_id = $1 ORDER BY period_start DESC LIMIT 8`, [tenantId]),
         // Р-188: «потратило бы» при неподтверждённой границе суток — приблизительно; окно — то же, что у счётчиков экрана
-        tx.query(`SELECT platform.shadow_would_spend_unconfirmed($1, $2::timestamptz, $3::timestamptz) AS n`, [tenantId, since, now]),
+        tx.query(`SELECT platform.shadow_would_spend_unconfirmed($1, $2::timestamptz, $3::timestamptz) AS n`, [tenantId, since, until]),
         // Шаг 82: те же решения, что у счётчика выше (то же условие и окно), — по часам UTC для графика экрана
         tx.query(
           `SELECT to_char(date_trunc('hour', d.decided_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, count(*)::int AS decisions
              FROM channel_data.price_decision d
-            WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2
-            GROUP BY 1 ORDER BY 1`, [tenantId, since]),
+            WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2 AND d.decided_at < $3
+            GROUP BY 1 ORDER BY 1`, [tenantId, since, upper]),
       ]);
       const d = decisions.rows[0] ?? {};
       const h = held.rows[0] ?? {};
       return {
         summary: {
-          since, until: now,
+          since: since as Instant, until: until as Instant,
           decisions: num(d.decisions), changes: num(d.changes), floorHeld: num(d.floor_held), ceilingHeld: num(d.ceiling_held),
           heldWrites: num(h.held), heldPriceWrites: num(h.held_price), heldQuantityWrites: num(h.held_quantity),
           wouldSpendBudget: num(h.would_spend), wouldSpendUnconfirmed: num(unconfirmed.rows[0]?.n),

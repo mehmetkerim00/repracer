@@ -214,7 +214,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const decisions = (await get<DecisionListView>(auth, api(id, 'decisions'))).items;
   const approved = decisions.find((d) => d.outcome === 'Approved')!;
   const trace = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: await get<DecisionTrace>(auth, api(id, 'decisions', approved.decisionId)) });
-  for (const text of ['Why this price', 'Competitor snapshot', 'Input check', 'Plausibility anchors', 'Strategy', 'Price Gate', 'Write to the channel', 'Channel confirmation']) {
+  for (const text of ['Why this price', 'Competitor snapshot', 'Input check', 'Plausibility anchors', 'Strategy', 'Price Gate', 'Sending to your store', 'Channel confirmation']) {
     assert.ok(trace.includes(text), text);
   }
   const noChange = decisions.find((d) => d.outcome === 'No change')!;
@@ -607,10 +607,12 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [400, 'CHANNEL_PRICING_ACTIVE']);
 
   const screen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: list, worldId: id, initialPreview: preview.view });
-  for (const text of ['Offers the channel prices itself', 'cannot be assigned', 'New version', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
+  // Шаг 96 (аудит А9): заголовок — «Offers priced by the channel itself»
+  for (const text of ['Offers priced by the channel itself', 'cannot be assigned', 'New version', 'Cannot be saved: the channel prices these offers itself']) assert.ok(screen.includes(text), text);
   // Шаг 79: сохранение — основной кнопкой (не красной: это не остановка), и по-прежнему недоступно при заблокированном предпросмотре
   // Шаг 94: недоступная кнопка говорит почему — подсказкой при наведении и строкой под рядом кнопок
-  assert.match(screen, /<button type="button" class="primary" disabled="" title="Cannot be saved: the channel prices these offers itself[^"]*">Save and assign<\/button>/, 'the save button is disabled while the preview is blocked and says why');
+  // Шаг 96 (аудит Б14): главная кнопка — превью; «Save and assign» — вторая и недоступна, пока превью не разрешает сохранение
+  assert.match(screen, /<button type="button" class="primary">Preview on these offers<\/button><button type="button" disabled="" title="Cannot be saved: the channel prices these offers itself[^"]*">Save and assign<\/button>/, 'preview first and primary; save second, disabled, and it says why');
   assert.match(screen, /<p class="field-caption form-hint" role="status">Cannot be saved: the channel prices these offers itself/, 'the reason stands under the buttons');
   const deScreen = await html('/src/screens/Strategies.tsx', 'StrategiesScreenView', { view: await get<StrategyListView>(await login('OWNER', 'de'), api(id, 'strategies')), worldId: id }, 'de');
   assert.ok(deScreen.includes('Angebote, die der Kanal selbst bepreist'));
@@ -625,8 +627,11 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
   const viewerIndex = await get<BoundsIndexView>(viewer, api(id, 'bounds'));
   assert.equal(viewerIndex.canEdit, false);
   const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: viewerIndex.items, total: viewerIndex.page.total, canEdit: false });
-  assert.ok(noRight.includes('Your role may view bounds but not change them.') && !noRight.includes('Show the differences'));
+  // Шаг 96 (Б18): кнопка экрана различий — «Preview changes»; проверка «без права её нет» сверяется с текстом словаря и с панелью,
+  // где она есть, — иначе переименование делает её тавтологией (прежняя строка «Show the differences» зеленела бы всегда)
+  assert.ok(noRight.includes('Your role may view bounds but not change them.') && !noRight.includes(messagesFor('en').ui.boundsEdit.plan));
   const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: index.items, total: index.page.total, canEdit: true });
+  assert.ok(panel.includes(messagesFor('en').ui.boundsEdit.plan), `control: with the right the panel offers «${messagesFor('en').ui.boundsEdit.plan}»`);
   for (const text of ['set to (amount)', 'change by (%)']) assert.ok(panel.includes(text), text);
   /**
    * Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; выбор названного числа виден всегда, а листание его
@@ -650,7 +655,8 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
     assert.equal((await call(viewer, 'GET', `${api(feedId, 'feed')}?${bad}`)).status, 400, bad);
   }
   const markup = await html('/src/screens/Feed.tsx', 'FeedScreenView', { view: one, onQuery: () => {} });
-  for (const text of ['Status', 'last 7 days', 'Older →', `1–1 of ${all.page.total}`]) assert.ok(markup.includes(text), text);
+  // Шаг 96: фильтры (вид, период, поиск, статус) стоят над перезагружаемой таблицей — у таблицы остаются страницы и выгрузка
+  for (const text of ['Older →', `1–1 of ${all.page.total}`, 'entries as a file']) assert.ok(markup.includes(text), text);
 });
 
 test('step 24, OQ-169/170: an existing strategy version is assigned without a new version after its preview; a strategy is removed only with repricing off; versions show author and status', async () => {
@@ -1125,4 +1131,25 @@ test('step 76: a world opens on the screen it declares — shadow for a demo in 
   } finally {
     delete first.landing;
   }
+});
+
+/**
+ * Шаг 96 (аудит, II): «All N entries as a file» уважает выбранный период и поиск экрана — задание несёт окно и найденные предложения
+ * готовыми (посчитанными в момент нажатия), и в файле ровно столько записей, сколько показывал экран. Неверный период — 400
+ */
+test('step 96: the feed export takes the period and the search of the screen; the feed filters by both', async () => {
+  const owner = await login('OWNER');
+  const id = 'kaufland/pipeline/happy-path';
+  const feed = async (q: string) => (await get<PriceFeedView>(owner, `${api(id, 'feed')}?${q}`)).page.total;
+  const [day, all, nothing, found, past] = [await feed('period=24h'), await feed(''), await feed('period=7d&q=zzz-no-such'), await feed('period=7d&q=4101'), await feed('from=2026-10-01&to=2026-10-02')];
+  assert.ok(day >= 1 && day <= all, JSON.stringify({ day, all }));
+  assert.deepEqual([nothing, past], [0, 0], 'a search with no match and a range before the first write give empty journals');
+  assert.ok(found >= 1, `search «4101» finds the offer — ${found}`);
+  for (const [query, expected] of [[{ period: '24h' }, day], [{ period: '7d', q: 'zzz-no-such' }, 0], [{ period: '7d', q: '4101' }, found], [{ from: '2026-10-01', to: '2026-10-02' }, 0]] as const) {
+    const created = await call(owner, 'POST', api(id, 'feed', 'export'), { query });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    const job = await get<{ total: number | null }>(owner, api(id, 'jobs', (created.body as { jobId: string }).jobId));
+    assert.equal(job.total, expected, `export of ${JSON.stringify(query)}: ${job.total} rows, the screen showed ${expected}`);
+  }
+  assert.equal((await call(owner, 'POST', api(id, 'feed', 'export'), { query: { period: '5d' } })).status, 400);
 });

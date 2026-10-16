@@ -79,6 +79,8 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
     <section>
       <h2>{s.pageTitle}</h2>
       <p className="subtitle">{m.ui.app.subtitles.stop}</p>
+      {/* Шаг 96 (аудит А10): первой строкой — что пауза безопасна */}
+      <p className="notice pause-safe">{s.pauseSafe}</p>
 
       <section className="stop-kinds">
         <h3>{s.kindsTitle}</h3>

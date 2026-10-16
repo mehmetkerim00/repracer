@@ -49,6 +49,8 @@ export interface StockTrap {
   summary: string;
   text: string;
   requiresAck: boolean;
+  /** Шаг 96 (аудит А8): подпись галочки называет саму нагрузку канала («ONE stock number … North America»), а не «нагрузку» */
+  acknowledgeLabel: string;
 }
 
 export interface StockView {
@@ -90,6 +92,7 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
     text: a.channel === 'AMAZON' ? (a.marketplaces.includes('ATVPDKIKX0DER') ? t.AMAZON_NA : t.AMAZON) : a.channel === 'KAUFLAND' ? t.KAUFLAND
       : a.channel === 'WALMART' ? t.WALMART : t.generic((m.values as Record<string, string | undefined>)[a.channel] ?? a.channel),
     requiresAck: a.channel === 'AMAZON',
+    acknowledgeLabel: (a.channel === 'AMAZON' ? m.ui.stock.enable.acknowledgeOf[a.marketplaces.includes('ATVPDKIKX0DER') ? 'AMAZON_NA' : 'AMAZON'] : undefined) ?? m.ui.stock.enable.acknowledge,
   }));
 }
 

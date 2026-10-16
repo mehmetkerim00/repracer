@@ -83,16 +83,21 @@ export interface OnboardingView {
   canEnable: boolean;
   /** Сколько предложений набора включит последний шаг */
   enableCount: number;
+  /** Шаг 96: путь ждёт только решения владельца (запись количества на Channels) — экран сворачивает его в строку */
+  waitsForOwner: boolean;
+  collapsedText: string | null;
+  /** Шаг 96 (В22): следующий шаг — карточка на Shadow mode; null — путь пройден */
+  nextStep: { title: string; hint: string; progress: string | null; goTo: OnboardingStepView['goTo']; waitsForOwner: boolean } | null;
 }
 
 /** Шаг 95 [Р-217]: экраны меню из 9 пунктов — канал на Channels, себестоимость разделом и границы на Costs & floors */
 const GO_TO: Record<Exclude<OnboardingStep, 'TENANT'>, readonly [string, string | null]> = {
-  CHANNEL: ['channels', 'accounts'], STOCK_SOURCE: ['stock', null], STOCK_SYNC: ['stock', null], COSTS: ['costs', 'import'], BOUNDS: ['costs', null], STRATEGY: ['strategies', null], ENABLE: ['products', null],
+  CHANNEL: ['channels', 'accounts'], STOCK_SOURCE: ['inventory', null], STOCK_SYNC: ['inventory', null], COSTS: ['costs', 'import'], BOUNDS: ['costs', null], STRATEGY: ['strategies', null], ENABLE: ['products', null],
 };
 
 /** От мира экрану пути нужны три поля — не состояние консоли целиком: оно читает все решения тенанта (OQ-214) */
 export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>, progress: OnboardingProgressRow | null, status: OnboardingStepStatus[],
-  accounts: ChannelAccountRow[], m: Messages): OnboardingView {
+  accounts: ChannelAccountRow[], m: Messages, ownerPending = 0): OnboardingView {
   const t = m.ui.onboarding;
   const byStep = new Map(status.map((s) => [s.step, s]));
   // Р-152: шаги — по выбранному пути; без выбора путь стоит на выборе после тенанта и канала
@@ -139,5 +144,27 @@ export function onboardingView(world: Pick<StandWorld, 'id' | 'demo' | 'viewer'>
     canLead: path === 'STOCK' ? can(world.viewer.role, 'MANAGE_CATALOG') : can(world.viewer.role, 'MANAGE_PRICING'),
     canEnable: can(world.viewer.role, 'ENABLE_REPRICING'),
     enableCount: enable ? enable.totalCount - enable.doneCount : 0,
+    ...ownerDecision(steps, path === null ? 'CHANNEL' : resumeAt, ownerPending, m),
+  };
+}
+
+/**
+ * Шаг 96 (решение по варианту шага 95, В22): путь, который ждёт только решения владельца, — одной строкой; следующий шаг — одним
+ * источником для Channels и карточки «Next step» на Shadow mode. «Только решение владельца» — открыт один шаг синхронизации
+ * остатков, и у аккаунта есть неподтверждённая запись количества [Р-202]: её подтверждает владелец на Channels, больше ничего не нужно
+ */
+function ownerDecision(steps: readonly OnboardingStepView[], resumeAt: OnboardingStep | 'DONE', ownerPending: number, m: Messages): Pick<OnboardingView, 'waitsForOwner' | 'collapsedText' | 'nextStep'> {
+  const t = m.ui.onboarding;
+  const open = steps.filter((s) => !s.done);
+  const waitsForOwner = ownerPending > 0 && open.length > 0 && open.every((s) => s.step === 'STOCK_SYNC');
+  const current = steps.find((s) => s.step === resumeAt) ?? null;
+  const index = current ? steps.indexOf(current) + 1 : 0;
+  return {
+    waitsForOwner,
+    collapsedText: waitsForOwner && current ? t.collapsed(index, steps.length, current.title, current.progress) : null,
+    nextStep: resumeAt === 'DONE' || current === null ? null : {
+      title: current.title, hint: waitsForOwner ? t.next.yourDecision : current.hint, progress: current.totalCount > 0 ? current.progress : null,
+      goTo: waitsForOwner ? { screen: 'channels', param: 'accounts', label: t.next.open } : current.goTo, waitsForOwner,
+    },
   };
 }

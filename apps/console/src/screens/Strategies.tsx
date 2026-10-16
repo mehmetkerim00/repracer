@@ -319,10 +319,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         const hint = nothing ? m.ui.forms.why.selectOffers : view.canEdit && !busy && saveWhy && !confirming ? saveWhy : null;
         return (
           <FormActions hint={hint}>
+            {/* Шаг 96 (аудит Б14): главное действие — превью; «Save and assign» — второе и недоступно, пока превью нет */}
+            <button type="button" className="primary" disabled={busy || nothing} title={nothing ? m.ui.forms.why.selectOffers : undefined} onClick={() => void run()}>{t.preview}</button>
             {view.canEdit
-              ? <button type="button" className="primary" disabled={busy || !preview || preview.saveBlocked !== null || confirming} title={saveWhy ?? undefined} onClick={() => setConfirming(true)}>{t.save}</button>
+              ? <button type="button" disabled={busy || !preview || preview.saveBlocked !== null || confirming} title={saveWhy ?? undefined} onClick={() => setConfirming(true)}>{t.save}</button>
               : null}
-            <button type="button" disabled={busy || nothing} title={nothing ? m.ui.forms.why.selectOffers : undefined} onClick={() => void run()}>{t.preview}</button>
           </FormActions>
         );
       })()}

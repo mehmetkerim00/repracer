@@ -31,8 +31,8 @@ const titles: Record<AnyReasonCode, string> = {
   WRITE_NOT_ACCEPTED_BY_CHANNEL: 'Refused by the channel', BOUNDS_VERSION_CHANGED: 'Bounds changed during decision', DIVERGENCE_CASE_OPENED: 'Channel divergence',
   HALT_AUTO_RELEASED: 'Halt released automatically', HALT_REVIEW_FAILED: 'Halt extended', HALT_MANUALLY_RELEASED: 'Halt released manually',
   MARGIN_WITHOUT_COST: 'Margin without cost', STRATEGY_MISSING: 'No strategy', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Replaced by a newer price', WRITE_RETRIES_EXHAUSTED: 'Retries exhausted',
-  WRITE_PRICING_MODE_CHANGED: 'Pricing mode changed', WRITE_EDIT_BUDGET_EXHAUSTED: 'Edit budget used up', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Queued behind previous write',
-  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed', QUANTITY_WRITES_REVOKED: 'Quantity writes revoked', WRITE_HELD_IN_SHADOW: 'Held by shadow mode',
+  WRITE_PRICING_MODE_CHANGED: 'Pricing mode changed', WRITE_EDIT_BUDGET_EXHAUSTED: 'Edit budget used up', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Waiting for the previous update',
+  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed', QUANTITY_WRITES_REVOKED: 'Stock updates revoked', WRITE_HELD_IN_SHADOW: 'Held by shadow mode',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Wrong price basis — channel distrusted',
   CHANNEL_DISTRUSTED: 'Channel distrusted — all prices held',
 };
@@ -109,7 +109,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WITHIN_DEADBAND: (f) => `The difference ${f.money('deltaMinor')} is below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
   LADDER_PACED: (f) => `Your price ${f.money('currentMinor')} is below the floor ${f.money('floorMinor')}; the next step toward it comes at ${f.when('nextStepAt')} at the earliest — one step per scheduled recompute, competitor moves do not speed it up.`,
-  SHADOW_ALREADY_PROPOSED: (f) => `Nothing sent: the shadow mode already holds this very price (${f.money('heldMinor')}), so the engine does not propose it again. Prices reach the channel only after live writes are switched on.`,
+  SHADOW_ALREADY_PROPOSED: (f) => `Nothing sent: the shadow mode already holds this very price (${f.money('heldMinor')}), so the engine does not propose it again. Prices reach your store only after sending prices is switched on.`,
   ALREADY_WINNING_BUYBOX: () => 'We already win the Buy Box — the price stays.',
   NO_COMPETITOR_OFFERS: () => 'No competitor offers — nothing to follow.',
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `Target ${f.money('targetMinor')} is outside ${f.money('minMinor')}–${f.money('maxMinor')}; the strategy is set to keep the price.`,
@@ -171,12 +171,12 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_PRICING_MODE_CHANGED: (f) => `Not sent: the pricing mode changed to ${f.value('mode')}.`,
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Not sent: the daily edit budget is used up${f.has('used') && f.has('limit') ? ` (${f.count('used')} of ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` for ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; it renews at ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
-  WRITE_HELD_IN_SHADOW: (f) => `Not sent: this channel account is in shadow mode, so nothing is written to the channel. The engine keeps computing prices; switch live writes on in the console to send them.`,
-  QUANTITY_WRITES_REVOKED: (f) => `Not sent: the owner revoked quantity writes for the channel account ${f.raw('channelAccountId')}, so no quantity is written to the channel. Quantity sync switches on again only after a new confirmation that no other tool manages stock there.`,
-  WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. The write ended; a new price decision is possible once the storefront time zone is confirmed.`,
+  WRITE_HELD_IN_SHADOW: (f) => `Not sent: this channel account is in shadow mode, so nothing is sent to your store. The engine keeps computing prices; to send them, start sending prices on the Shadow mode screen.`,
+  QUANTITY_WRITES_REVOKED: (f) => `Not sent: the owner revoked stock updates for the channel account ${f.raw('channelAccountId')}, so no stock is sent to your store. Stock sync switches on again only after a new confirmation that no other tool manages stock there.`,
+  WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. This update was dropped; a new price decision is possible once the storefront time zone is confirmed.`,
   CHANNEL_DISTRUSTED: (f) => `All prices held (${f.value('stage')}): we do not trust how the channel applies our prices${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` since ${f.when('detectedAt')}`)}. A fixed or margin price would take the same broken path. Only a person can release this.`,
   CHANNEL_PRICE_BASIS_MISMATCH: (f) => `All prices on storefront ${f.raw('marketplace')} halted: we sent ${f.money('sentMinor')}, buyers see ${f.money('observedMinor')} — exactly the VAT rate ${f.bp('vatRateBp')} ${f.value('basisError')}. The channel uses a different price basis than ours; every further price would be wrong by the same share. Check the price settings of the channel account and release the distrust manually.`,
-  WRITE_QUEUED_BEHIND_IN_FLIGHT: () => 'Queued: the channel has not answered the previous write yet; the dispatcher sends this one next.',
+  WRITE_QUEUED_BEHIND_IN_FLIGHT: () => 'Queued: the channel has not answered the previous update yet; this one is sent next.',
   WRITE_RETRY_SCHEDULED: (f) => `Temporary channel error (${f.value('code')}); attempt ${f.count('attempt')} after ${f.when('at')}.`,
   WRITE_OUTCOME_RECONCILED: (f) => `The outcome was unknown; reading back showed the price was ${f.value('result')}.`,
   WRITE_SCOPE_BLOCKED: (f) => `The offer is blocked: ${f.value('code')}. ${f.value('action')}.`,
@@ -294,9 +294,9 @@ const values: Record<ValueKey, string> = {
   OFF: 'off', ENGINE: 'automatic', KAUFLAND_SMART_PRICING: 'Kaufland Smart Pricing',
   TENANT: 'the whole workspace', CHANNEL_ACCOUNT: 'a channel account', STOREFRONT: 'a storefront',
   CURRENT_WITHIN_BOUNDS: 'the current-price check', FINAL_RECHECK: 'the final recheck', FLOOR: 'floor', FLOOR_UNRESOLVABLE: 'floor not computable', CEILING: 'ceiling',
-  OUTCOME_UNRESOLVED: 'outcome of the write could not be read back', RATE_LIMITED: 'rate limit of the channel', CHANNEL_UNAVAILABLE: 'channel unavailable', TIMEOUT: 'channel timeout', NETWORK: 'network error',
+  OUTCOME_UNRESOLVED: 'outcome of the update could not be read back', RATE_LIMITED: 'rate limit of the channel', CHANNEL_UNAVAILABLE: 'channel unavailable', TIMEOUT: 'channel timeout', NETWORK: 'network error',
   AUTH_INVALID: 'invalid credentials', AUTH_EXPIRED: 'expired credentials', ACCOUNT_INACTIVE: 'inactive channel account', FORBIDDEN: 'action forbidden by the channel',
-  VALIDATION: 'value refused by the channel', NOT_FOUND: 'offer not found in the channel', DUPLICATE_ACTION: 'duplicate action', STALE_VERSION: 'outdated write version',
+  VALIDATION: 'value refused by the channel', NOT_FOUND: 'offer not found in the channel', DUPLICATE_ACTION: 'duplicate action', STALE_VERSION: 'outdated version of the update',
   CHANNEL_REPRICER_ACTIVE: 'the channel\'s own automated pricing is active for this offer', CHANNEL_BOUNDS_PRESENT: 'the offer has price bounds set in the channel',
   RESPONSE_MISMATCH: 'the channel answered about a different offer or storefront than we asked for: the answer was not used',
   TELL_PLATFORM_TEAM: 'Tell us: the channel answered about a different offer than we asked for — the cause is on the channel side or in our check, and the support of the channel cannot fix it',
@@ -340,7 +340,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   IMPORT_NO_FX: { what: 'The import does not convert currencies', why: 'A row whose currency is not the currency of the offer is listed as unmatched instead of being converted.' },
   IMPORT_OFFER_KEYS: { what: 'How a row finds its offer', why: 'By your SKU, the channel’s offer ID, the channel product reference or the EAN. A key that matches two offers is listed as unmatched: only you know which one the row is about.' },
   INTERVENTIONS_TRUNCATED: { what: 'Older interventions of this period', why: 'The report shows the most recent 5000 interventions of the period. Narrow the period to see older ones.' },
-  STOCK_CHANNEL_NOT_READ: { what: 'What the channel shows right now', why: 'We read the channel’s stock when it confirms a write; between writes the channel is not polled. An order the channel subtracts by itself becomes visible with the next write. The screen shows what the channel confirmed.' },
+  STOCK_CHANNEL_NOT_READ: { what: 'What the channel shows right now', why: 'We read the channel’s stock when it confirms a stock update we sent; between updates the channel is not polled. An order the channel subtracts by itself becomes visible with the next update. The screen shows what the channel confirmed.' },
   FEED_WINDOW: { what: 'Older price changes', why: 'The feed covers the last 30 days.' },
   DANGEROUS_REPORT_WINDOW: { what: 'Dangerous changes older than 30 days', why: 'The report covers the last 30 days.' },
   FLOOR_HOLD_TARGET_WINDOW: { what: 'How much cheaper, older than 3 days', why: 'What the strategy wanted comes from a competitor price and is kept for 3 days. An older floor hold is counted, but its amount is unknown — not zero.' },
@@ -408,14 +408,14 @@ export const en = {
         signInFirst: 'Sign in to accept the invitation.',
       },
       signIn: 'Sign in',
-      navGroups: { overview: 'Overview', pricing: 'Pricing', stock: 'Stock', account: 'Workspace' },
+      navGroups: { overview: 'Overview', pricing: 'Pricing', stock: 'Inventory', account: 'Workspace' },
       // Шаг 79: подзаголовок страницы — одно предложение у экранов без своего вступления
       subtitles: {
-        shadow: 'What the engine would do on your channels — before anything is written.',
+        shadow: 'What the engine would do on your channels — before anything is sent to your stores.',
         compliance: 'Evidence of your prior prices for discounts on EU storefronts (Omnibus).',
         products: 'Every offer with its price, bounds and strategy — one row per offer.',
         decisions: 'Every price decision, newest first; open one to see why the price is what it is.',
-        trace: 'One decision, step by step: the competitor snapshot, the checks, the strategy, the Price Gate and the write.',
+        trace: 'One decision, step by step: the competitor snapshot, the checks, the strategy, the Price Gate and the update sent to your store.',
         strategies: 'How prices are computed: your strategies, where they apply and a preview before anything is saved.',
         feed: 'Every price sent to a channel or held, and every decision behind it — open one to see why the price is what it is.',
         rejected: 'Changes your bounds stopped or corrected — dangerous ones are shown separately.',
@@ -427,12 +427,14 @@ export const en = {
         stop: 'Stop price changes of the whole workspace, a channel account or a storefront — and see who stopped what.',
         costs: 'Minimum and maximum price of every offer and the unit costs behind its floor; open an offer to see where its floor comes from.',
         protections: 'What stopped or prevented a price change: people who stopped prices, and the rules — your floor, your bounds and the input check.',
-        channels: 'Your channel accounts — connection, stock writes, language and time zone — and the setup checklist until it is done.',
+        channels: 'Your channel accounts — connection, stock updates, language and time zone — and the setup checklist until it is done.',
       },
       brand: 'pricetrail',
       screens: { connections: 'Channel accounts', onboarding: 'Setup', shadow: 'Shadow mode', stock: 'Stock', products: 'Offers', decisions: 'Why this price', rejected: 'Stopped changes', bounds: 'Bounds', 'cost-import': 'Unit cost import', stop: 'Stop pricing', strategies: 'Strategies', feed: 'Price changes', dangerous: 'Dangerous changes', compliance: 'Omnibus', jobs: 'Bulk operations',
         // Шаг 95 [Р-217]: слитые экраны меню — 9 пунктов вместо 14; прежние имена остаются заголовками разделов и ссылок
-        costs: 'Costs & floors', protections: 'Protections', channels: 'Channels' },
+        costs: 'Costs & floors', protections: 'Protections', channels: 'Channels',
+        // Шаг 96 (В19): страница и пункт остатков — Inventory; Offers — в разделе Pricing
+        inventory: 'Inventory' },
       loading: (seconds: number) => `Loading… If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The service did not answer within ${seconds} s. Try again in a minute.`,
       unavailable: (detail: string) => `The server is unavailable: ${detail}`,
@@ -459,7 +461,7 @@ export const en = {
         noSimulator: 'Sign-in goes through the identity provider, which is not connected yet.',
         /** Шаг 84: что может роль — строкой рядом с именем роли на входе (по матрице прав, policy.ts) */
         roleCan: {
-          OWNER: 'everything, plus people, channel accounts and live writes',
+          OWNER: 'everything, plus people, channel accounts and starting to send prices',
           MANAGER: 'prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing', ADMIN: 'manages the workspace, prices and stock, can stop pricing',
           OPERATOR: 'can stop pricing and switch repricing on, does not edit prices', PRICING_MANAGER: 'edits prices, bounds and strategies, can stop pricing',
           INVENTORY_MANAGER: 'manages products and stock, sees prices read-only', VIEWER: 'read-only',
@@ -555,7 +557,7 @@ export const en = {
       automatedPricing: 'Channel repricer active',
       automatedPricingDetail: (when: string) => `Automate Pricing is attached to this offer (seen ${when}): our engine cannot price it — switch it off in the channel first`,
       channelBounds: 'Channel price bounds set',
-      channelBoundsDetail: (when: string) => `The offer has minimum/maximum seller allowed prices in the channel (seen ${when}): a second set of bounds we do not write`,
+      channelBoundsDetail: (when: string) => `The offer has minimum/maximum seller allowed prices in the channel (seen ${when}): a second set of bounds that we never set`,
       pricingHealth: (issue: string) => `Channel: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `The offer lost the Featured Offer because of its price (${when})${threshold ? `; competitive price threshold of the channel ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -566,14 +568,14 @@ export const en = {
     },
     applying: {
       idle: 'Nothing in progress', idleDetail: 'Every decided price reached the channel or ended with a reason',
-      queued: (amount: string) => `Queued: ${amount}`, queuedDetail: (when: string) => `Waits for the previous write since ${when}`,
+      queued: (amount: string) => `Queued: ${amount}`, queuedDetail: (when: string) => `Waits for the previous update since ${when}`,
       dispatching: (amount: string) => `Sending: ${amount}`, dispatchingDetail: (when: string) => `Sent ${when}, no channel answer yet`,
       accepted: (amount: string) => `Accepted: ${amount}`, acceptedDetail: (when: string) => `The channel accepted it ${when}; application not confirmed`,
       retry: (amount: string) => `Retry: ${amount}`, retryDetail: (error: string, attempt: number, when: string) => `Temporary error (${error}); attempt ${attempt} after ${when}`,
       blocked: (amount: string) => `Blocked: ${amount}`, blockedDetail: (error: string) => `The channel needs a person (${error})`, noErrorCode: 'no error code',
     },
     /** Шаг 49 [Р-190], находка 9 ревью: запись подтверждена только нашей записью у канала (eBay в бою без Browse) */
-    ownRecordConfirmation: 'confirmed by our own write, not by reading the live price',
+    ownRecordConfirmation: 'confirmed by the update we sent, not by reading the live price',
     writeStatus: {
       // Шаг 64 (проход консоли): удержанное тенью — словами, а не кодом SHADOW_HELD
       SHADOW_HELD: 'held by shadow mode (not sent)',
@@ -587,6 +589,10 @@ export const en = {
     nextCheck: { label: 'No data', detail: 'The check schedule is not stored' },
     onboarding: {
       title: 'Setup',
+      // Шаг 96 (решение по варианту шага 95, В22): путь, который ждёт только решения владельца, — одной строкой; следующий шаг — карточкой на Shadow mode
+      collapsed: (n: number, total: number, step: string, progress: string) => `Setup: step ${n} of ${total} — ${step} (${progress}) waits for your decision below.`,
+      showChecklist: 'Show the checklist', hideChecklist: 'Hide the checklist',
+      next: { title: 'Next step', yourDecision: 'Waiting for your decision', open: 'Open Channels' },
       intro: 'A guided path rather than a set of screens: channel → costs → bounds → strategy → enable. Every step ends in a verifiable state; progress lives in the database, and the path resumes where it stopped.',
       demoIntro: 'Demo workspace: the data is synthetic, the path is real — the same screens, the same engine, the same decisions with explanations.',
       introStock: 'A guided path: channel → stock source → synchronization. Every step ends in a verifiable state; progress lives in the database, and the path resumes where you stopped.',
@@ -608,7 +614,7 @@ export const en = {
         TENANT: 'The workspace exists; members join by invitation.',
         STOCK_SOURCE: 'Where the stock comes from: a file you upload, or your warehouse system pushing to the Inbound API. The source is connected once it has delivered at least one stock figure.',
         // Шаг 87 [Р-214]: подсказка верна в любом профиле рынка — ловушки называет экран остатков по аккаунтам, а не перечень каналов здесь
-        STOCK_SYNC: 'The published quantity is the shared stock minus a per-channel buffer. Where a channel writes stock wider than one storefront — for example one value for a whole Amazon region — this is shown before anything is written.',
+        STOCK_SYNC: 'The published quantity is the shared stock minus a per-channel buffer. Where one stock value of a channel covers more than one storefront — for example one value for a whole Amazon region — this is shown before any stock is sent.',
         CHANNEL: 'A channel counts as connected when an account with access exists. An account without access shows what is missing.',
         COSTS: 'Repricing does not start without declared unit costs AND the channel commission (rate and fixed part): without the commission the margin floor cannot be computed. This step cannot be skipped — only the set of offers can be narrowed.',
         BOUNDS: 'Every offer needs a floor and a ceiling.',
@@ -641,7 +647,7 @@ export const en = {
           ACTIVE: 'connected', REAUTH_REQUIRED: 'needs reauthorization', REVOKED: 'access revoked', DISCONNECTED: 'disconnected',
           AWAITING_ACCESS: 'awaiting access',
         },
-        awaitingHint: 'The account exists, but what is listed below is missing. Until then the channel reads and writes nothing — that is not an error and not emptiness, it is the state of things.',
+        awaitingHint: 'The account exists, but what is listed below is missing. Until then nothing is read from the channel and nothing is sent to it — that is not an error and not emptiness, it is the state of things.',
         blockers: {
           PARTNER_REGISTRATION: 'Registration as a technology partner with the channel',
           DEVELOPER_KEYS: 'Developer keys of the channel',
@@ -658,10 +664,10 @@ export const en = {
       },
     },
     stock: {
-      title: 'Stock',
+      title: 'Inventory',
       intro: 'We are not the owner of the stock: it comes from your source, and every channel gets the shared stock minus its buffer. The figures below are per product; what was sent to each channel and what the channel confirmed are shown side by side.',
       summary: (s: { products: number; withStock: number; synced: number; pendingWrites: number; diverged: number; openReservations: number }) =>
-        `Products ${s.products}: with stock ${s.withStock}; offers in sync ${s.synced}; writes in flight ${s.pendingWrites}; divergences ${s.diverged}; open reservations ${s.openReservations}.`,
+        `Products ${s.products}: with stock ${s.withStock}; offers in sync ${s.synced}; updates being sent now ${s.pendingWrites}; our number differs from the store’s ${s.diverged}; open reservations ${s.openReservations}.`,
       columns: { product: 'Product', onHand: 'On hand', reserved: 'Reserved', available: 'Available', channels: 'Channels' },
       // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями»
       filter: {
@@ -680,27 +686,27 @@ export const en = {
         off: 'synchronization off',
         awaitingAck: 'waiting for your confirmation of the side effect',
         shared: (marketplaces: string) => `one value for: ${marketplaces}`,
-        managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `managed by ${channel} · ${marketplace}: ${n} (${when}) — shown only, we never write it`,
-        diverged: (status: string, when: string) => `The last write ended ${status} (${when}) — the channel shows something else`,
+        managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `managed by ${channel} · ${marketplace}: ${n} (${when}) — shown only, we never change it`,
+        diverged: (status: string, when: string) => `The last stock update ended ${status} (${when}) — the channel shows something else`,
       },
       // Р-153: the traps are named BEFORE the first write, from the channel capability, not discovered afterwards
       traps: {
-        title: 'Before anything is written',
+        title: 'Before any stock is sent',
         // шаг 94: суть ловушки в одну-две строки — плашка; полный текст ниже — по раскрытию
         summary: {
           AMAZON: 'One stock value per SKU for the whole Amazon region — not only this storefront. Enabling needs your confirmation.',
           AMAZON_NA: 'One stock value per SKU for the whole North American region of Amazon. Enabling needs your confirmation.',
           KAUFLAND: 'One stock value for all storefronts of the same Kaufland offer ID.',
           WALMART: 'One stock value per SKU, sent to the default ship node of the account.',
-          generic: 'On this channel stock is written wider than price — check it before enabling.',
+          generic: 'On this channel a stock update reaches wider than a price update — check it before enabling.',
         },
-        AMAZON: 'Amazon: the MFN stock is ONE value per SKU for the whole region. Writing it for amazon.de changes amazon.fr, .it, .es too — even if you only work with one storefront. Enabling requires your confirmation.',
+        AMAZON: 'Amazon: the MFN stock is ONE value per SKU for the whole region. Setting it for amazon.de changes amazon.fr, .it, .es too — even if you only work with one storefront. Enabling requires your confirmation.',
         KAUFLAND: 'Kaufland: the stock is shared by all storefronts of the same Kaufland offer ID. One value for de and at; the order in which storefronts apply it is not guaranteed.',
         // Шаг 64: у amazon.com регион — Северная Америка; текст про amazon.fr, .it, .es продавцу из США неверен (A-16 открыт)
-        AMAZON_NA: 'Amazon: we treat the MFN stock as ONE value per SKU for the whole Amazon region of the account — for amazon.com that is North America. A write for amazon.com may change the stock of your other North American storefronts too: Amazon has not confirmed the scope yet, so we assume the wider one. Enabling requires your confirmation.',
+        AMAZON_NA: 'Amazon: we treat the MFN stock as ONE value per SKU for the whole Amazon region of the account — for amazon.com that is North America. A stock update for amazon.com may change the stock of your other North American storefronts too: Amazon has not confirmed the scope yet, so we assume the wider one. Enabling requires your confirmation.',
         // Шаг 89: у Walmart область цены и остатка одна (аккаунт + витрина + SKU); неизвестное — склады продавца (W-04)
-        WALMART: 'Walmart: we write ONE stock value per SKU on walmart.com — to the default ship node of the account. If you ship from several Walmart ship nodes, Walmart has not confirmed how that value applies to them — check it before enabling.',
-        generic: (channel: string) => `${channel}: the write scope of stock is wider than the write scope of price — check it before enabling.`,
+        WALMART: 'Walmart: we send ONE stock value per SKU to walmart.com — to the default ship node of the account. If you ship from several Walmart ship nodes, Walmart has not confirmed how that value applies to them — check it before enabling.',
+        generic: (channel: string) => `${channel}: a stock update reaches wider than a price update — check it before enabling.`,
       },
       sources: {
         title: 'Sources',
@@ -724,7 +730,7 @@ export const en = {
         submit: 'Import stock',
         created: 'The stock file is being applied in the background. You can leave this page.',
         enableCreated: 'Synchronization is being enabled in the background: offers are prepared and the first quantities computed. You can leave this page.',
-        result: (r: { matched: number; changed: number; unmatched: number; writes: number }) => `Rows matched: ${r.matched}; products changed: ${r.changed}; rows not matched: ${r.unmatched}; channel writes created: ${r.writes}.`,
+        result: (r: { matched: number; changed: number; unmatched: number; writes: number }) => `Rows matched: ${r.matched}; products changed: ${r.changed}; rows not matched: ${r.unmatched}; stock updates to send: ${r.writes}.`,
         unmatched: { UNKNOWN_SKU: 'SKU unknown', BAD_QUANTITY: 'quantity is not a whole non-negative number', DUPLICATE_SKU: 'SKU listed twice', EMPTY_SKU: 'empty SKU', AMBIGUOUS_SKU: 'the SKU matches two products — it is not guessed' },
       },
       enable: {
@@ -735,22 +741,27 @@ export const en = {
         minToList: 'Minimum to list', minToListCaption: 'Below this number the offer is listed as 0.',
         acknowledgeCaption: 'Without your confirmation synchronization of this account does not start.',
         acknowledge: 'I understand the side effect of this channel and confirm it',
+        // Шаг 96 (А8): галочка называет саму нагрузку канала, а не «нагрузку»
+        acknowledgeOf: {
+          AMAZON: 'I understand: ONE stock number will cover all Amazon storefronts in Europe',
+          AMAZON_NA: 'I understand: ONE stock number will cover all of Amazon North America',
+        } as Record<string, string | undefined>,
         submit: 'Enable synchronization',
         // Находка шага 44: при ждущем подтверждении заголовок не говорит «включено» — синхронизация этих единиц ещё не идёт
         done: (r: { scopes: number; created: number; awaitingAck: number; writes: number }) => r.awaitingAck > 0
-          ? `Synchronization is NOT running yet for ${r.awaitingAck} of ${r.scopes} offers: they wait for your confirmation of the side effect (${r.created} new, writes created: ${r.writes}).`
-          : `Synchronization enabled for ${r.scopes} offers (${r.created} new). Writes created: ${r.writes}.`,
+          ? `Synchronization is NOT running yet for ${r.awaitingAck} of ${r.scopes} offers: they wait for your confirmation of the side effect (${r.created} new, stock updates to send: ${r.writes}).`
+          : `Synchronization enabled for ${r.scopes} offers (${r.created} new). Stock updates to send: ${r.writes}.`,
         noOffers: 'This account has no offers whose stock we manage.',
         // Шаг 60 [Р-202]: запись количества выключена до подтверждения владельца на экране подключений
         notConfirmed: (otherToolManagesStock: boolean): string => otherToolManagesStock
-          ? 'Stock writes to this channel are off: you told us on the Channel accounts screen that another tool updates stock here, and two tools writing stock overwrite each other. Switch that tool off and change the answer there first.'
-          : 'Stock writes to this channel are off: the owner has not yet confirmed on the Channel accounts screen that no other tool manages stock here. Answer the question there and confirm; then enable the synchronization.',
+          ? 'Stock updates to this channel are off: you told us on the Channel accounts screen that another tool updates stock here, and two tools sending stock overwrite each other. Switch that tool off and change the answer there first.'
+          : 'Stock updates to this channel are off: the owner has not yet confirmed on the Channel accounts screen that no other tool manages stock here. Answer the question there and confirm; then enable the synchronization.',
       },
       divergences: {
         title: 'Divergences: ours vs channel',
-        none: 'No divergences: every last write was confirmed by its channel.',
-        row: (sent: number, confirmed: string, status: string, when: string) => `sent ${sent}, channel confirmed ${confirmed}; last write ${status} (${when})`,
-        cannot: 'Between writes the channel is not read: an order decrement on the channel side becomes visible only with the next write. This screen shows what the channel confirmed, not what it shows right now.',
+        none: 'No divergences: every last stock update was confirmed by its channel.',
+        row: (sent: number, confirmed: string, status: string, when: string) => `sent ${sent}, channel confirmed ${confirmed}; last update ${status} (${when})`,
+        cannot: 'Between stock updates the channel is not read: an order decrement on the channel side becomes visible only with the next update. This screen shows what the channel confirmed, not what it shows right now.',
       },
       // Шаг 59 [Р-199]: возвраты — на полку ставит человек; у источника Inbound API — только сведения [Р-6]
       returns: {
@@ -796,12 +807,14 @@ export const en = {
     connections: {
       noChannels: 'No channel account yet, and connecting channels is not set up on this server yet — the platform team enables it.', 
       title: 'Channel accounts',
-      intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and writes nothing.',
+      intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and sends nothing to your store.',
       noRight: 'Only the workspace owner connects channel accounts.',
       tokenNote: 'We keep the access of the channel encrypted and never show it — not here, not in emails, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.',
       /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
       /** Шаг 60 [Р-202]: внешние писатели канала — вопрос при подключении, запись количества по подтверждению владельца, внешние правки */
       otherTools: {
+        // Шаг 96 (Б15): неотвеченный вопрос держит путь подключения
+        answerToFinish: 'Answer this to finish setup',
         question: 'Does another tool update stock or prices in this channel?',
         unanswered: 'Not answered yet.',
         current: (answer: string) => `Your answer: ${answer}.`,
@@ -811,25 +824,25 @@ export const en = {
         answered: 'Answer saved.',
       },
       quantityWrites: {
-        off: 'Stock writes to this channel: off — the owner has to confirm that no other tool manages stock here.',
-        on: 'Stock writes to this channel: on — confirmed by the owner.',
+        off: 'Stock updates to this channel: off — the owner has to confirm that no other tool manages stock here.',
+        on: 'Stock updates to this channel: on — confirmed by the owner.',
         answerFirst: 'Answer the question above first.',
-        otherToolManagesStock: 'Another tool updates stock in this channel: if we wrote stock too, the two would overwrite each other. Stock writes stay off until that tool is switched off and the answer is changed.',
-        ownerOnly: 'Only the owner confirms stock writes.',
+        otherToolManagesStock: 'Another tool updates stock in this channel: if we sent stock too, the two would overwrite each other. Stock updates stay off until that tool is switched off and the answer is changed.',
+        ownerOnly: 'Only the owner confirms stock updates.',
         hint: (id: string) => `To confirm that no other tool manages stock in this channel, type the channel account ID: ${id}`,
-        submit: 'Confirm and allow stock writes',
-        confirmed: 'Confirmed: stock writes to this channel are allowed. Enable the synchronization on the Stock screen.',
+        submit: 'Confirm and allow stock updates',
+        confirmed: 'Confirmed: stock updates to this channel are allowed. Enable the synchronization on the Stock screen.',
         revokeHint: (id: string) => `To revoke, type the channel account ID: ${id}`,
         // Шаг 94: пояснение под полем отзыва — что будет, а не подпись в три предложения
-        revokeCaption: 'Another tool starts managing stock here? Stock writes stop at once, unsent stock updates are dropped, and switching them on again needs a new confirmation.',
-        revoke: 'Revoke stock writes',
-        revoked: (scopes: number, writes: number, inFlight: number) => `Revoked: stock writes to this channel are off. Synchronization switched off for ${scopes} ${scopes === 1 ? 'offer' : 'offers'}, ${writes} unsent stock ${writes === 1 ? 'update' : 'updates'} dropped.${inFlight > 0 ? ` ${inFlight} ${inFlight === 1 ? 'update' : 'updates'} had already been sent to the channel before the revocation and cannot be recalled; they are not retried.` : ''}`,
+        revokeCaption: 'Another tool starts managing stock here? Stock updates stop at once, unsent ones are dropped, and switching them on again needs a new confirmation.',
+        revoke: 'Revoke stock updates',
+        revoked: (scopes: number, writes: number, inFlight: number) => `Revoked: stock updates to this channel are off. Synchronization switched off for ${scopes} ${scopes === 1 ? 'offer' : 'offers'}, ${writes} unsent stock ${writes === 1 ? 'update' : 'updates'} dropped.${inFlight > 0 ? ` ${inFlight} ${inFlight === 1 ? 'update' : 'updates'} had already been sent to the channel before the revocation and cannot be recalled; they are not retried.` : ''}`,
       },
       externalEdits: {
         count: (n: number) => `External edits in the last 24 hours: ${n}`,
-        note: 'An external edit is a price or a stock quantity in the channel that we did not write and that differs from our target: someone else — another tool or a manual edit — changes this channel.',
+        note: 'An external edit is a price or a stock quantity in the channel that we did not send and that differs from our target: someone else — another tool or a manual edit — changes this channel.',
       },
-      ebayLiveLimits: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited.',
+      ebayLiveLimits: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our updates are confirmed by the offer record, and the price-basis check is limited.',
       connect: (channel: string) => `Connect ${channel}`,
       connectAnother: (channel: string) => `Connect another ${channel} account`,
       reconnect: 'Renew the access',
@@ -843,8 +856,8 @@ export const en = {
         AWAITING_CONSENT: 'waiting for your consent',
         AWAITING_PLATFORM: 'waiting for access of the platform',
         AWAITING_ACCESS: 'waiting for access',
-        SHADOW: 'shadow: connected, nothing is written',
-        LIVE: 'live: prices are written',
+        SHADOW: 'shadow: connected, nothing is sent to your store',
+        LIVE: 'live: prices are sent to your store',
         REVOKED: 'access withdrawn in the channel',
       } as Record<string, string>,
       progress: {
@@ -852,7 +865,7 @@ export const en = {
         shadow: (offers: number, decisions: number) => `Found ${offers} offers; the shadow made ${decisions} decisions in the last 24 hours.`,
         shadowWaiting: (offers: number) => `Found ${offers} offers. The shadow starts counting once the offers have costs, bounds and a strategy — continue in Setup: without a declared cost the engine does not start, not even in the shadow.`,
         live: (offers: number) => `${offers} offers found in the channel.`,
-        unmanaged: (unmanaged: number, writable: number) => `Of them we can write to ${writable}; ${unmanaged === 1 ? '1 is' : `${unmanaged} are`} not open for our writes (for eBay: listings not under the Inventory API, which only the owner can migrate, or auctions, which are never managed).`,
+        unmanaged: (unmanaged: number, writable: number) => `Of them we can update ${writable}; ${unmanaged === 1 ? '1 is' : `${unmanaged} are`} not open to our updates (for eBay: listings not under the Inventory API, which only the owner can migrate, or auctions, which are never managed).`,
         awaitingAccess: (what: string) => `Missing: ${what}.`,
       },
       discovery: {
@@ -906,13 +919,13 @@ export const en = {
         // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
         badAnswer: 'Choose one of the answers.',
         accountNotFound: 'This channel account is not connected in this PriceTrail workspace.',
-        answerConflictConfirmed: 'Stock writes to this channel are already confirmed by the owner: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
-        notOwner: 'Only the owner confirms or revokes stock writes to a channel.',
-        alreadyConfirmed: 'Stock writes to this channel are already confirmed.',
-        notConfirmedToRevoke: 'Stock writes to this channel are not confirmed: there is nothing to revoke.',
+        answerConflictConfirmed: 'Stock updates to this channel are already confirmed by the owner: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
+        notOwner: 'Only the owner confirms or revokes stock updates to a channel.',
+        alreadyConfirmed: 'Stock updates to this channel are already confirmed.',
+        notConfirmedToRevoke: 'Stock updates to this channel are not confirmed: there is nothing to revoke.',
         confirmationMismatch: 'The typed text does not match the channel account ID. Type it exactly as shown.',
         answerFirst: 'Answer first whether another tool updates stock or prices in this channel.',
-        otherToolManagesStock: 'You told us another tool updates stock in this channel: our stock writes would overwrite it and it would overwrite ours. Stock writes stay off; switch that tool off and change your answer first.',
+        otherToolManagesStock: 'You told us another tool updates stock in this channel: our stock updates would overwrite it and it would overwrite ours. Stock updates stay off; switch that tool off and change your answer first.',
       },
     },
     shadow: {
@@ -921,47 +934,70 @@ export const en = {
       /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
       list: {
         period: 'Period', floorHeld: 'Price landed exactly on the floor', floorHeldHint: 'the floor decided it, and without the floor it would have gone lower',
-        ceilingHeld: 'Price landed exactly on the ceiling', times: (n: number) => `${n} times`, held: 'Writes held by the shadow',
+        ceilingHeld: 'Price landed exactly on the ceiling', times: (n: number) => `${n} times`, held: 'Updates held back by the shadow',
         heldSplit: (all: number, prices: number, stock: number) => `${all} — prices ${prices}, stock ${stock}`,
         budget: 'Would have used the external edit budget of the channel', about: (n: number) => `about ${n}`,
         budgetNote: 'Approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day.',
         savings: 'Without the floor you would have sold cheaper by', savingsHolds: (holds: number) => `counted on the ${holds} holds where we still keep what the strategy wanted`,
       },
-      stats: { decisions: 'Decisions', changes: 'Price would change', held: 'Writes held', savings: 'Without the floor', notForecast: 'not a forecast' },
+      // Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили в магазин
+      stats: { decisions: 'Decisions', decisionsSub: 'times the engine checked prices', changes: 'Price would change', changesSub: 'times the price would have moved', held: 'Held back', heldSub: 'price changes we did NOT send to your store', savings: 'Your floor saved you from selling cheaper by', notForecast: 'protection, not profit' },
+      // Шаг 96 (Б13, Б16, В21): копирование имени аккаунта, вид удержанного, сворачиваемые блоки
+      copy: 'Copy', copied: 'Copied', copyHint: 'Copy the account name, then paste it into the field.',
+      kinds: { PRICE: 'price', QUANTITY: 'stock' } as Record<string, string | undefined>,
+      heldTableTitle: (n: number) => `Every held change, one by one (${n})`,
+      moreTitle: 'Good to know',
       title: 'Shadow mode',
-      intro: 'The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation. Nothing is written to the channel: every change below was held.',
-      modes: { SHADOW: 'shadow (nothing is written)', LIVE: 'live (prices are written)' },
+      intro: 'The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation. Nothing is sent to your store: every change below was held back.',
+      modes: { SHADOW: 'shadow (nothing is sent to your store)', LIVE: 'live (prices are sent to your store)' },
       changed: (from: string, when: string) => `switched from ${from} at ${when}`,
-      confirmationHint: (account: string) => `To switch on live writes, type the account name exactly: ${account}`,
+      confirmationHint: (account: string) => `To start sending prices to your store, type the account name exactly: ${account}`,
       period: (days: number) => `Last ${days} days`,
-      liveButton: 'Switch on live writes',
+      liveButton: 'Start sending prices',
       shadowButton: 'Back to shadow',
-      mfaHint: 'Switching on live writes needs your second factor, and only the owner can do it. Going back to shadow needs neither.',
+      mfaHint: 'Once switched on, prices are really sent to your store. Only the owner can switch it on, and it needs your second factor; going back to shadow needs neither.',
       none: 'Nothing was held in this period: either the engine found no reason to change a price, or the offers are not switched on yet.',
       quantity: (n: number) => `${n} pieces`,
-      columns: { offer: 'Offer', value: 'Would have been written', when: 'Held at', why: 'Why this price', account: 'Channel account', mode: 'Write mode', action: 'Live writes' },
+      columns: { offer: 'Offer', value: 'Would have been sent', when: 'Held at', why: 'Why this price', account: 'Channel account', mode: 'Mode', action: 'Sending prices' },
       errors: {
-        live: 'Live writes are switched on: the next decisions go to the channel.',
-        shadow: 'Back in the shadow: nothing is written to the channel any more.',
-        mfa: 'Switching on live writes needs your second factor. Sign in again with it and repeat.',
-        notOwner: 'Only the owner of the account switches on live writes.',
+        live: 'Sending prices is switched on: the next price decisions are sent to your store.',
+        shadow: 'Back in the shadow: nothing is sent to your store any more.',
+        mfa: 'Starting to send prices needs your second factor. Sign in again with it and repeat.',
+        notOwner: 'Only the owner of the account can start sending prices.',
         /** Шаг 89: обратно в тень — право владельца и менеджера */
         noShadowRight: 'Only the owner or a manager switches an account back to shadow mode.',
         confirmation: 'The typed text does not match the account name. Type it exactly as shown.',
-        marketplacesInvisible: (list: string) => `Live writes stay closed: this account names no storefront we know (${list || 'none named'}). Connect its storefronts, or it stays in the shadow.`,
+        marketplacesInvisible: (list: string) => `Sending prices cannot be switched on: this account names no storefront we know (${list || 'none named'}). Connect its storefronts, or it stays in the shadow.`,
         /** Шаг 68 (K2): отказ перевода в бой — витрина словами, что не подтверждено и кто подтверждает */
-        liveClosed: (storefront: string, property: string, where: string) => `Live writes on ${storefront} stay closed: the ${property.toLowerCase()} of this storefront is not confirmed yet. ${where} Until then the shadow keeps working — you keep seeing what the engine would do, and nothing is written.`,
-        liveClosedUnknown: 'Live writes stay closed: we cannot confirm what we need to know about the storefronts of this account — one of them may not be a storefront we support yet. The shadow keeps working meanwhile.',
+        liveClosed: (storefront: string, property: string, where: string) => `Sending prices to ${storefront} cannot be switched on: the ${property.toLowerCase()} of this storefront is not confirmed yet. ${where} Until then the shadow keeps working — you keep seeing what the engine would do, and nothing is sent to your store.`,
+        liveClosedUnknown: 'Sending prices cannot be switched on: we cannot confirm what we need to know about the storefronts of this account — one of them may not be a storefront we support yet. The shadow keeps working meanwhile.',
         modeMismatch: 'The account is already in that mode — someone switched it while this screen was open.',
       },
-      noAccounts: 'No channel account is connected yet. Every new channel account starts here, in shadow mode: you see what the engine would do before anything is written.', 
+      noAccounts: 'No channel account is connected yet. Every new channel account starts here, in shadow mode: you see what the engine would do before anything is sent to your store.', 
       noAccess: {
         AWAITING_ACCESS: 'Nothing to switch on yet: this account is still waiting for access. What is missing is listed under Channel accounts.',
-        REVOKED: 'Access was withdrawn in the channel. Connect again under Channel accounts before switching on live writes.',
+        REVOKED: 'Access was withdrawn in the channel. Connect again under Channel accounts before you start sending prices.',
       },
       volume: (offers: number, scopes: number) => `${offers} offers, ${scopes} of them with the engine on`,
       properties: {
-        title: 'What we still do not know about these storefronts',
+        title: 'What we are still checking about your stores',
+        // Шаг 96 (А4): каждая строка — людскими словами; первой строкой — что от продавца ничего не нужно, если это так
+        nothingNeeded: 'Nothing is needed from you.',
+        human: {
+          DAY_BOUNDARY: 'When the store’s day starts — it decides which day a price belongs to and when the daily edit limit resets.',
+          PRICE_TAX_BASIS: 'Whether the store’s price includes tax.',
+          QUANTITY_SCOPE: 'Whether one stock number covers one store or a whole region.',
+        } as Record<string, string | undefined>,
+        humanStatus: {
+          CONFIRMED: 'Confirmed.',
+          CONSERVATIVE: 'Not confirmed yet — until then we use the safe assumption.',
+          UNKNOWN: 'Not known yet — prices are not sent to this store until it is.',
+        } as Record<string, string | undefined>,
+        humanCloses: {
+          SHADOW_READ: 'Our team confirms it from the trial week.',
+          FIRST_LIVE_WRITE: 'The first price really sent to the store confirms it.',
+          CHANNEL_SUPPORT: 'Only the channel can confirm it; the question is with them.',
+        } as Record<string, string | undefined>,
         unknownValue: 'not known',
         someProperty: 'a property',
         /** Шаг 68 (K2): значения ревизии витрин словами */
@@ -976,34 +1012,34 @@ export const en = {
         confirmWhere: {
           // Ревью шага 68, находка 2: ни автоматики, ни срока — подтверждение ставит команда платформы руками, и текст это говорит
           SHADOW_READ: 'It can be confirmed from what the channel shows while you are in the shadow; our team does that by hand, and there is no date for it yet. Nothing is needed from you — the Shadow mode screen shows it once it is confirmed.',
-          FIRST_LIVE_WRITE: 'It can only be confirmed by real writes to the channel, so it is not something the shadow can settle; there is no date for it yet.',
+          FIRST_LIVE_WRITE: 'It can only be confirmed by prices really sent to your store, so it is not something the shadow can settle; there is no date for it yet.',
           CHANNEL_SUPPORT: 'Only the channel can confirm it — through its support or its documentation; the question is open and there is no date for an answer. Nothing is needed from you — the Shadow mode screen shows it once it is confirmed.',
         } as Record<string, string | undefined>,
         confirmWhereUnknown: 'The Shadow mode screen lists how it gets confirmed.',
         /** Шаг 69 [Р-204]: граница суток — процесс недели тени, а не ожидание ответа канала */
-        dayBoundaryProcess: 'This is usually settled within a week of shadow mode: after seven days of shadow decisions our team checks your shadow data — for a channel with a daily edit budget, that the budget would hold in any 24 hours whatever the day boundary of the channel is — and then live writes open. Nothing is needed from you.',
+        dayBoundaryProcess: 'This is usually settled within a week of shadow mode: after seven days of shadow decisions our team checks your shadow data — for a channel with a daily edit budget, that the budget would hold in any 24 hours whatever the day boundary of the channel is — and then sending prices to your store can be switched on. Nothing is needed from you.',
         names: {
           DAY_BOUNDARY: 'Day boundary of the price history',
           PRICE_TAX_BASIS: 'Tax basis of the price',
-          QUANTITY_SCOPE: 'Scope of a stock write',
+          QUANTITY_SCOPE: 'Scope of a stock update',
         } as Record<string, string | undefined>,
         statuses: {
           CONFIRMED: 'confirmed',
           CONSERVATIVE: 'conservative value, question open',
-          UNKNOWN: 'not known — live writes stay closed',
+          UNKNOWN: 'not known — prices are not sent to this store until it is',
         } as Record<string, string | undefined>,
         closesBy: {
-          SHADOW_READ: 'the shadow closes it: we read the channel for real and write nothing',
-          FIRST_LIVE_WRITE: 'only the first live write closes it: in the shadow there is no sent price to compare with',
+          SHADOW_READ: 'the shadow closes it: we read the channel for real and send nothing',
+          FIRST_LIVE_WRITE: 'only the first price really sent to the store closes it: in the shadow there is no sent price to compare with',
           CHANNEL_SUPPORT: 'only the channel can answer it — support or its documentation',
         } as Record<string, string | undefined>,
-        blocksLive: (list: string) => `Live writes stay closed: we do not know ${list}. The shadow keeps working, and you keep seeing what the engine would do.`,
+        blocksLive: (list: string) => `Sending prices cannot be switched on yet: we do not know ${list}. The shadow keeps working, and you keep seeing what the engine would do.`,
       },
       digest: {
         subject: (tenant: string) => `PriceTrail: what the engine would have done this week (${tenant})`,
-        intro: (tenant: string, accounts: number, zone: string) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done last week (Monday to Sunday, ${zone}). The Shadow mode screen counts the last seven days up to now, so its numbers differ from this email.`,
-        cta: 'If these numbers look right, switch live writes on for the channel in the console — Shadow mode screen. Only you as the owner can do it, and it needs your second factor.',
-        previewIntro: (tenant: string, accounts: number) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and writes nothing to the channel. Here is what it would have done in the last seven days.`,
+        intro: (tenant: string, accounts: number, zone: string) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and sends nothing to your store. Here is what it would have done last week (Monday to Sunday, ${zone}). The Shadow mode screen counts the last seven days up to now, so its numbers differ from this email.`,
+        cta: 'If these numbers look right, start sending prices to your store in the console — Shadow mode screen. Only you as the owner can do it, and it needs your second factor.',
+        previewIntro: (tenant: string, accounts: number) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and sends nothing to your store. Here is what it would have done in the last seven days.`,
         previewTitle: 'Weekly email — preview',
         previewSynthetic: 'Demo: synthetic data. This is the email a seller in shadow mode receives every Monday; the real one covers the previous week, Monday to Sunday in your time zone.',
         historyTitle: 'Weekly reports we sent you',
@@ -1017,7 +1053,7 @@ export const en = {
         decisions: (all: number, changes: number) => `Decisions made: ${all}; of them the price would have changed ${changes} times`,
         floorHeld: (n: number) => `The price landed exactly on the floor ${n} times — the floor decided it, and without the floor it would have gone lower`,
         ceilingHeld: (n: number) => `The price landed exactly on the ceiling ${n} times`,
-        held: (all: number, prices: number, quantities: number) => `Writes held by the shadow: ${all} (prices ${prices}, stock ${quantities})`,
+        held: (all: number, prices: number, quantities: number) => `Updates held back by the shadow: ${all} (prices ${prices}, stock ${quantities})`,
         budget: (n: number, approximate = false) => approximate
           ? `Of them about ${n} would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day`
           : `Of them ${n} would have used the external edit budget of the channel`,
@@ -1053,7 +1089,7 @@ export const en = {
         PRICE_REJECTED_BY_BOUND: { what: 'a computed price was rejected by a bound', step: 'Open “Why this price” in the console: it says which bound held. Widen the bound if it is set too tight; otherwise nothing is to be done.' },
         PRICE_GATE_INTERNAL_VIOLATION: { what: 'an internal check stopped a price right before sending', step: 'The price was NOT sent and nothing is to be done by you. Contact us with the event code: we see the event as well.' },
         CURRENT_PRICE_OUTSIDE_BOUNDS: { what: 'the current price of an offer lies outside your bounds', step: 'Open the offer in the console: either the price was changed by hand in the channel back office, or the bounds no longer match the unit cost.' },
-        PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is written there. Most refusals need an action in the channel back office.' },
+        PRICE_WRITE_SCOPE_BLOCKED: { what: 'an offer is blocked: its price change did not go through', step: 'Open the offer in the console: the reason of the refusal is shown there. Most refusals need an action in the channel back office.' },
         // Р-212 (шаг 74): старт лестницы к полу — один раз на лестницу; суммы и число ступеней — из события
         PRICE_LADDER_STARTED: {
           what: 'a price below your floor is being raised to it step by step',
@@ -1061,8 +1097,8 @@ export const en = {
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, about ${Number(d.steps)} steps of at most ${n.percentBp(Number(d.stepLimitBp))} each, one step every ${Number(d.paceMinutes)} minutes at most.`,
         },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
-        QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'stock updates of an offer are blocked: the channel refused a stock write and the offer waits for a person', step: 'Open the Stock screen in the console, check the offer and the answer of the channel, then release the block.' },
-        QUANTITY_WRITE_NOT_SENT: { what: 'a stock update was not sent to the channel, so the channel may show a stock we did not intend', step: 'Open the Stock screen in the console and check this offer: the reason is shown next to the update. If stock writes were revoked on purpose, nothing else is needed.' },
+        QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'stock updates of an offer are blocked: the channel refused a stock update and the offer waits for a person', step: 'Open the Stock screen in the console, check the offer and the answer of the channel, then release the block.' },
+        QUANTITY_WRITE_NOT_SENT: { what: 'a stock update was not sent to the channel, so the channel may show a stock we did not intend', step: 'Open the Stock screen in the console and check this offer: the reason is shown next to the update. If stock updates were revoked on purpose, nothing else is needed.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'offer discovery reached its page limit before the channel had returned every offer', step: 'Offers beyond the limit are not in the catalog yet. Contact us with the event code — the limit will be adjusted for your catalog.' },
         INBOUND_SOURCE_SILENT: { what: 'your stock system has not sent a stock figure for a day after confirming a shipped order — we keep subtracting the shipped pieces so the channels do not show what has left', step: 'Check that your system still sends stock through the Inbound API. Once it sends a figure newer than the order confirmation, the subtraction ends by itself.' },
         ORDER_LINES_FIRST_WINDOW_CAPPED: { what: 'the first reading of orders for a newly connected account did not go back to the moment of connection — only the last day was read', step: 'Orders placed earlier are expected to be in your stock source already. If an older order changed your stock, correct the stock in the source; contact us with the event code if this repeats.' },
@@ -1082,20 +1118,20 @@ export const en = {
         KAUFLAND_SMART_PRICING_ACTIVE: { what: 'Smart Pricing is active for an offer at Kaufland', step: 'While Smart Pricing runs, Kaufland sets the price, not we. Switch it off in the Kaufland cabinet if we are to run the prices.' },
         KAUFLAND_SUBSCRIPTION_EVENT_REJECTED: { what: 'Kaufland rejected an event notification', step: 'Competitor data is polled until notifications arrive again. If the message repeats daily, contact us.' },
         KAUFLAND_WEBHOOK_SIGNATURE_INVALID: { what: 'a message with a wrong signature pretended to be Kaufland', step: 'The message was discarded. Tell us if you have just re-configured the webhook yourself.' },
-        KAUFLAND_TENANT_MISMATCH: { what: 'a Kaufland account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is written for this account until the assignment is right.' },
+        KAUFLAND_TENANT_MISMATCH: { what: 'a Kaufland account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is sent for this account until the assignment is right.' },
         KAUFLAND_ACCOUNT_UNAVAILABLE: { what: 'the Kaufland account cannot be used at the moment', step: 'Check the credentials of the account in the console: expired keys are the most common cause.' },
-        AMAZON_RESPONSE_MISMATCH: { what: 'Amazon answered a price or stock write about a different offer than the one we sent: the answer was not used, and the write is being checked by reading the offer back', step: 'No action is needed right away. If the offer turns out unchanged, the write is sent again; if Amazon keeps answering about another offer, writes to this offer stop and it is shown as blocked — then tell us, the cause is on the Amazon side or in our check.' },
-        AMAZON_TENANT_MISMATCH: { what: 'an Amazon account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is written for this account until the assignment is right.' },
-        WALMART_TENANT_MISMATCH: { what: 'a Walmart account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is written for this account until the assignment is right.' },
-        EBAY_TENANT_MISMATCH: { what: 'an eBay account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is written for this account until the assignment is right.' },
-        EBAY_ACCOUNT_UNAVAILABLE: { what: 'the eBay account is not available for writing (disconnected or not found)', step: 'Open Channel accounts in the console and connect eBay again if the account should stay active.' },
+        AMAZON_RESPONSE_MISMATCH: { what: 'Amazon answered a price or stock update about a different offer than the one we sent: the answer was not used, and the update is being checked by reading the offer back', step: 'No action is needed right away. If the offer turns out unchanged, the update is sent again; if Amazon keeps answering about another offer, updates to this offer stop and it is shown as blocked — then tell us, the cause is on the Amazon side or in our check.' },
+        AMAZON_TENANT_MISMATCH: { what: 'an Amazon account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is sent for this account until the assignment is right.' },
+        WALMART_TENANT_MISMATCH: { what: 'a Walmart account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is sent for this account until the assignment is right.' },
+        EBAY_TENANT_MISMATCH: { what: 'an eBay account does not belong to the workspace it was used for', step: 'Open Channel accounts in the console: nothing is sent for this account until the assignment is right.' },
+        EBAY_ACCOUNT_UNAVAILABLE: { what: 'the eBay account cannot receive our updates (disconnected or not found)', step: 'Open Channel accounts in the console and connect eBay again if the account should stay active.' },
         SCHEDULED_RECOMPUTE_FAILURES: { what: 'the daily recalculation of fixed and margin prices failed for some offers', step: 'The other offers were calculated; the failed ones are retried on the next run. Contact us if this keeps repeating.' },
         EBAY_BUYER_PRICE_VAT_ON_TOP: { what: 'eBay shows buyers your price plus VAT: buyers pay the tax rate more than the price we send (also reported in shadow mode)', step: 'Check in your eBay account whether your prices count as gross prices (business account, VAT). Until that is settled this storefront is not treated as a wrong price basis — review your prices before going live.' },
         EBAY_OFFER_LISTING_DIVERGENCE: { what: 'the live eBay listing price differs from the price we recorded for the offer: another program edits this listing', step: 'Check which tools still edit this listing through the Trading API; their changes override ours and are not visible to repricing.' },
         // Шаг 49 [Р-189, E-22]: режим пакетов eBay; [Р-192]: удаление данных пользователем eBay — оба поднимает функция базы (0142)
         EBAY_MULTI_SKU_REFUSED: { what: 'eBay refused to update several products in one call for this account: from now on we send your eBay price and stock changes one product per call', step: 'Nothing is to be done by you: the changes still arrive, only with more calls. We have asked eBay whether several products per call are allowed and switch back only after an answer.' },
         EBAY_BATCH_OUTCOME_NOT_RECORDED: { what: 'we could not store whether eBay accepts several products in one call for this account', step: 'Your changes were sent and their results recorded; only the batch mode stays as it was and is checked again with the next batch. Contact us if this repeats.' },
-        EBAY_ACCOUNT_DELETED_BY_USER: { what: 'the eBay user of this account asked eBay to delete their data: we deleted the access tokens and disconnected the account', step: 'Nothing is written to this eBay account any more. It can be connected again only with a new consent on eBay — open Channel accounts in the console if this account should keep working.' },
+        EBAY_ACCOUNT_DELETED_BY_USER: { what: 'the eBay user of this account asked eBay to delete their data: we deleted the access tokens and disconnected the account', step: 'Nothing is sent to this eBay account any more. It can be connected again only with a new consent on eBay — open Channel accounts in the console if this account should keep working.' },
         C10_OTHER_TOOLS: { what: 'before migrating an eBay listing: other programs that edit it through the Trading API must be named', step: 'Declare every tool that edits this eBay listing; after migration their edits and ours diverge.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'before migrating an eBay listing: out-of-stock control is off', step: 'Turn on out-of-stock control in your eBay settings so that quantity 0 does not end the listing.' },
         C13_SITE_UNCONFIRMED: { what: 'before migrating an eBay listing: its eBay site could not be matched to a storefront of this account — the listing was placed by its currency', step: 'Check on eBay which site the listing is on; migrate it only if it belongs to the storefront shown here.' },
@@ -1103,7 +1139,7 @@ export const en = {
         AMAZON_ACCOUNT_UNAVAILABLE: { what: 'the Amazon account cannot be used at the moment', step: 'Check the credentials of the account in the console: an expired application access is the most common cause.' },
         AMAZON_NOTIFICATION_SELLER_MISMATCH: { what: 'an Amazon notification names a seller other than the account it came through', step: 'Open Channel accounts in the console: the notification was not used.' },
         // Шаг 43 [Р-177]: отзыв авторизации продавцом на стороне канала — не тихая ошибка, а письмо владельцу
-        CHANNEL_AUTHORIZATION_REVOKED: { what: 'the channel no longer accepts our access to this account: most likely the authorization was withdrawn in the channel', step: 'Open Channel accounts in the console and connect the account again: until then nothing is written to this channel, and the shadow stops counting.' },
+        CHANNEL_AUTHORIZATION_REVOKED: { what: 'the channel no longer accepts our access to this account: most likely the authorization was withdrawn in the channel', step: 'Open Channel accounts in the console and connect the account again: until then nothing is sent to this channel, and the shadow stops counting.' },
         CHANNEL_AUTHORIZATION_CHECK_FAILING: { what: 'the access to a channel account could not be checked several times in a row', step: 'Open Channel accounts in the console: if the channel is reachable and this repeats, connect the account again.' },
         /**
          * --- События ПЛАТФОРМЫ: получатель — ОПЕРАТОР, а не продавец [находка 3 ревью шага 36].
@@ -1140,10 +1176,13 @@ export const en = {
     products: {
       title: 'Offers',
       /** Шаг 95 [Р-217]: массовые операции — кнопкой с Offers, пункта меню у них нет */
-      bulkEdit: 'Bulk edit',
+      bulkEdit: 'Bulk operations',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,
       clock: (now: string) => `Simulated time: ${now}.`,
-      columns: { unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Channel says', status: 'Status' },
+      columns: { unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status' },
+      // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
+      whatToDo: 'What to do',
+      unpublishedWhatToDo: (elsewhere: string | null) => `Walmart hides this offer because the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''}. To show it again, bring the walmart.com price close to that price — only if your floor allows. PriceTrail never changes the price for this on its own.`,
       conditions: { used: 'used', refurbished: 'refurbished', collectible: 'collectible' }, viewOptions: { columns: 'Columns', compact: 'Compact rows' },
       productRef: (ref: string, condition: string, gtin: string | null) => `product ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
       productId: (ref: string, gtin: string | null) => `product ${ref}${gtin ? ` · EAN ${gtin}` : ''}`,
@@ -1183,7 +1222,7 @@ export const en = {
       dangerousBadge: 'dangerous change', limitNote: (text: string) => `Cannot be explained further: ${text}`,
       status: { OK: 'passed', STOP: 'stopped', WARN: 'with remarks', SKIPPED: 'not needed', UNKNOWN: 'no data' },
       marks: { PASS: '✓ passed', FAIL: '✗ failed', SKIPPED: '– skipped', NOT_RUN: '· not checked', INFO: '•' },
-      titles: { SNAPSHOT: 'Competitor snapshot', SANITY: 'Input check', ANCHORS: 'Plausibility anchors', STRATEGY: 'Strategy', GATE: 'Price Gate', WRITE: 'Write to the channel', CHANNEL: 'Channel confirmation' },
+      titles: { SNAPSHOT: 'Competitor snapshot', SANITY: 'Input check', ANCHORS: 'Plausibility anchors', STRATEGY: 'Strategy', GATE: 'Price Gate', WRITE: 'Sending to your store', CHANNEL: 'Channel confirmation' },
       noOpNotExplained: 'Not kept for decisions that did not change the price',
       noExplanation: 'No explanation is stored for this decision',
       snapshotNotUsed: 'The strategy does not use competitor data',
@@ -1206,18 +1245,18 @@ export const en = {
       priceStop: 'Pricing stop', priceStopValue: (scope: string, when: string) => `${scope} since ${when}`,
       channelHalt: 'Storefront halt', channelHaltValue: (when: string) => `since ${when}`,
       headlineApplied: (price: string) => `The price ${price} was set and applied by the channel`,
-      headlineApproved: (price: string, status: string) => `The price ${price} was approved; write: ${status}`,
-      headlineNoWrite: (price: string) => `The price ${price} was approved, but no write was created`,
+      headlineApproved: (price: string, status: string) => `The price ${price} was approved; sending to your store: ${status}`,
+      headlineNoWrite: (price: string) => `The price ${price} was approved, but no update for your store was created`,
       headlineNoChange: (text: string) => `The price stayed: ${text}`,
-      nothingSent: 'Nothing was sent to the channel', writeMissing: 'The price was approved; its write is no longer shown here — finished writes stay on this screen for about a day',
+      nothingSent: 'Nothing was sent to the channel', writeMissing: 'The price was approved; its update is no longer shown here — finished updates stay on this screen for about a day',
       writeVersion: (version: number, price: string) => `Version ${version}: ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status}; attempts ${attempts}${sent ? `; sent ${sent}` : ''}`,
       endReason: 'Ended because', divergence: 'Divergence',
       channelApplied: (price: string, when: string) => `The channel applied ${price} (accepted ${when})`,
       channelAccepted: (price: string, when: string) => `The channel accepted ${price} ${when}; application not confirmed yet`,
       channelWaiting: (when: string) => `No channel answer since ${when}`,
-      channelNotApplied: 'The channel accepted the write, but the price was not applied',
-      channelNotConfirmed: (status: string) => `No channel confirmation: the write is ${status}`,
+      channelNotApplied: 'The channel accepted the update, but the price was not applied',
+      channelNotConfirmed: (status: string) => `No channel confirmation: the update is ${status}`,
     },
     rejected: {
       pageTitle: 'Stopped changes',
@@ -1246,7 +1285,7 @@ export const en = {
         storefront: 'Choose at least one storefront first.',
         typeName: 'Type the identifier shown above exactly first.',
         period: 'Enter both dates first.',
-        note: (min: number) => `Write a note of at least ${min} characters first.`,
+        note: (min: number) => `Enter a note of at least ${min} characters first.`,
       },
     },
     offerPicker: {
@@ -1256,6 +1295,8 @@ export const en = {
       narrow: (shown: number, total: number) => `${shown} of ${total} offers in the list — narrow the search`,
     },
     bounds: {
+      /** Шаг 96 (В20): со страницы предложения — в правку границ с этим предложением */
+      changeFloor: 'Change this floor',
       feeUsed: 'the floor is computed from this one (the higher estimate)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
       indexColumns: { offer: 'Offer', min: 'Minimum price', max: 'Maximum price', floor: 'Floor' }, missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace. The list shows the bounds of every offer.', pageTitle: 'Bounds and price floor', back: '← Costs & floors',
@@ -1324,7 +1365,7 @@ export const en = {
       selectionWhole: (total: number) => `Selected: all ${total} offers of the catalog`,
       selectionNone: 'Nothing selected',
       selectionReset: 'Paging or changing the filter clears the selection of individual rows.',
-      channelPricingTitle: 'Offers the channel prices itself',
+      channelPricingTitle: 'Offers priced by the channel itself',
       channelPricingIntro: 'Found when reading the offers of the account, before any strategy is assigned. Switch the channel repricer or the channel bounds off first; until then the database refuses a strategy.',
       noOffers: 'No offers yet: a strategy is assigned to offers once a channel account is connected and its offers are found.', channelPricingNone: 'No offer is priced by the channel itself — every offer can get a strategy.',
       channelPricingMore: (n: number) => `…and ${n} more.`,
@@ -1345,6 +1386,8 @@ export const en = {
       unassigned: 'Strategy removed.',
     },
     jobs: {
+      // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
+      links: { title: 'Start a bulk change', bounds: 'Set minimum & maximum price for many offers', strategies: 'Assign a strategy to many offers', costs: 'Import unit costs' },
       pageTitle: 'Bulk operations', back: '← Offers', historyTitle: 'Past operations', none: 'No bulk operations yet. They appear here when you import unit costs, change the bounds of many offers or assign a strategy to many offers.',
       kinds: {
         COST_IMPORT: 'Import unit costs', REPRICING_ENABLE: 'Enable repricing', STOCK_IMPORT: 'Import stock', STOCK_SYNC_ENABLE: 'Enable stock synchronization', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
@@ -1402,11 +1445,21 @@ export const en = {
     /** Шаг 95 [Р-217]: Protections — два вида защиты одной страницей */
     protections: {
       people: 'Stopped by people', rules: 'Prevented by rules',
-      peopleHeadline: (n: number) => n === 0 ? 'No price change was stopped by a person in the last 7 days' : `People stopped ${n} price ${n === 1 ? 'change' : 'changes'} in the last 7 days`,
+      peopleHeadline: (n: number, phrase: string) => n === 0 ? `No price change was stopped by a person ${phrase}` : `People stopped ${n} price ${n === 1 ? 'change' : 'changes'} ${phrase}`,
       peopleNone: 'Nothing here: a change appears when someone stops prices on Stop pricing while a price was on its way.',
       whoStopped: 'Who stopped what — Stop pricing',
-      otherTitle: 'Also stopped or corrected in the last 7 days',
-      rulesNone: 'Nothing else was stopped or corrected in the last 7 days. Every time a bound, the input check or a storefront halt stops or corrects a price, it appears here with the reason.',
+      otherTitle: (phrase: string) => `Also stopped or corrected ${phrase}`,
+      pageOf: (from: number, to: number, total: number) => `${from}–${to} of ${total}`,
+      rulesNone: (phrase: string) => `Nothing else was stopped or corrected ${phrase}. Every time a bound, the input check or a storefront halt stops or corrects a price, it appears here with the reason.`,
+    },
+    /** Шаг 96: период экранов — 24 часа, 7 и 30 дней или свой диапазон дат в поясе пространства */
+    period: {
+      label: 'Period', presets: { '24h': '24h', '7d': '7d', '30d': '30d' }, custom: 'Custom', from: 'From', to: 'To', apply: 'Show',
+      phrase: { '24h': 'in the last 24 hours', '7d': 'in the last 7 days', '30d': 'in the last 30 days' },
+      between: (from: string, to: string) => `from ${from} to ${to}`,
+      clipped: (days: number) => `Only the last ${days} days are kept here: earlier days are not shown.`,
+      zone: (zone: string) => `Days in ${zone}.`,
+      badRange: 'The start date is after the end date.',
     },
     costImport: {
       requiredCaption: 'Required.', fileLabel: 'Export file', fileCaption: 'CSV or XLSX. Nothing changes until you apply the preview.',
@@ -1448,7 +1501,7 @@ export const en = {
     },
     boundsEdit: {
       amountLabel: 'New amount', percentLabel: 'Change, %',
-      pageTitle: 'Change bounds', select: 'Offers', minPrice: 'Minimum price', maxPrice: 'Maximum price', keep: 'unchanged', set: 'set to (amount)', percent: 'change by (%)',
+      pageTitle: 'Set minimum & maximum price', select: 'Offers', minPrice: 'Minimum price', maxPrice: 'Maximum price', keep: 'unchanged', set: 'set to (amount)', percent: 'change by (%)',
       shownRows: (shown: number, of: number) => `Showing ${shown} of ${of} rows — the flagged ones first`,
       selectPage: (n: number) => `Select the ${n} on this page`,
       selectAllCatalog: (n: number) => `All ${n} offers of the catalog — including those on other pages`,
@@ -1457,7 +1510,7 @@ export const en = {
       selectionNone: 'Nothing selected',
       selectionReset: 'Paging or changing the filter clears the selection of individual rows.',
       selectNone: 'Select none', badInput: (text: string) => `“${text}” is not an amount or a percentage`,
-      plan: 'Show the differences', apply: 'Apply', back: 'Change the request',
+      plan: 'Preview changes', apply: 'Apply', back: 'Change the request',
       columns: { offer: 'Offer', minBefore: 'min before', minAfter: 'min after', maxBefore: 'max before', maxAfter: 'max after', price: 'Current price', notes: 'Attention' },
       headline: (s: { scopes: number; flagged: number; pricesOutside: number }) => `${s.scopes} ${s.scopes === 1 ? 'offer' : 'offers'} · need attention ${s.flagged} · current price outside the new bounds ${s.pricesOutside}`,
       mfa: 'More than one offer: applying requires a sign-in with a second factor.',
@@ -1474,7 +1527,13 @@ export const en = {
     },
     feed: {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
-      kind: { label: 'Kind', writes: 'Price writes', decisions: 'All decisions', writesCaption: 'Prices sent to a channel or held.', decisionsCaption: 'Every decision, with or without a write. Only the offer filter applies here.' },
+      kind: { label: 'Kind', writes: 'Prices sent', decisions: 'All decisions', writesCaption: 'Prices sent to a store or held back.', decisionsCaption: 'Every decision, with or without a price sent. Status belongs to sent prices only.' },
+      // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
+      outcome: { label: 'Outcome', all: 'all', CHANGED: 'price changed', NO_CHANGE: 'no change', REJECTED: 'rejected or held' },
+      // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
+      trialWeek: 'Trial week: prices were computed but nothing was sent to your stores.',
+      // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит
+      searchLimited: (shown: number, total: number) => `${total} offers match — the list shows the first ${shown} of them.`,
       pageTitle: 'Price changes', empty: 'No price changes yet. They appear once repricing is on and a price is sent to a channel.',
       exportAll: (n: number) => `All ${n} entries as a file`,
       columns: { when: 'When', offer: 'Offer', from: 'From', to: 'To', change: 'Change', status: 'Status', source: 'Source', reason: 'Reason' },
@@ -1488,13 +1547,15 @@ export const en = {
       previous: '← Newer', next: 'Older →',
     },
     dangerous: {
-      floorHeadline: (n: number, days: number, amounts: string[], unknown: number) => n === 0
-        ? `The floor did not have to hold a price in the last ${days} ${days === 1 ? 'day' : 'days'}`
-        : `The floor held the price ${n} ${n === 1 ? 'time' : 'times'} in the last ${days} ${days === 1 ? 'day' : 'days'}${amounts.length ? `; without it you would have sold ${amounts.join(' + ')} cheaper` : ''}${unknown ? ` (amount unknown for ${unknown})` : ''}`,
+      floorHeadline: (n: number, phrase: string, amounts: string[], unknown: number) => n === 0
+        ? `The floor did not have to hold a price ${phrase}`
+        : `The floor held the price ${n} ${n === 1 ? 'time' : 'times'} ${phrase}${amounts.length ? `; without it you would have sold ${amounts.join(' + ')} cheaper` : ''}${unknown ? ` (amount unknown for ${unknown})` : ''}`,
+      // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»
+      repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
       floorTitle: 'Floor holds', floorKinds: { CAPPED: 'set to the floor', HELD: 'kept unchanged' },
       floorColumns: { when: 'When', offer: 'Offer', kind: 'Held how', target: 'Strategy wanted', floor: 'Floor', below: 'Cheaper by', reason: 'Reason' },
       gateTitle: 'Rejected by the Price Gate (normally none)',
-      headline: (n: number, days: number) => `Your bounds stopped ${n} dangerous ${n === 1 ? 'change' : 'changes'} in the last ${days} ${days === 1 ? 'day' : 'days'}`,
+      headline: (n: number, phrase: string) => `Your bounds stopped ${n} dangerous ${n === 1 ? 'change' : 'changes'} ${phrase}`,
       period: (days: number) => `${days} ${days === 1 ? 'day' : 'days'}`,
       prevented: 'Distance to the bound, in total', worst: 'Furthest beyond a bound', byUnit: 'By offer', byBound: 'By bound', none: 'None in this period.',
       truncated: 'The period is longer than the 30 days decisions are kept: the report is incomplete.',
@@ -1571,6 +1632,8 @@ export const en = {
     },
     stop: {
       pageTitle: 'Stop pricing',
+      // Шаг 96 (А10): первой строкой — что пауза безопасна
+      pauseSafe: 'Pause is safe: current prices stay as they are, and you can resume anytime with a note.',
       humanTitle: 'Stop by a person',
       humanIntro: 'Stops ALL price changes without exceptions — fixed and margin prices too. A stop of the whole workspace also covers channel accounts connected later. Only a person with a note can resume it.',
       systemTitle: 'Storefront halts by the system',
@@ -1593,12 +1656,12 @@ export const en = {
       by: (who: string) => `By: ${who}`, noteLabel: (note: string) => `Note: “${note}”`, notStoppedTitle: 'Not stopped:',
       noRight: 'Your role may view this screen but not stop or resume pricing.',
       tenantTitle: 'Whole workspace', accountsTitle: 'Channel accounts', storefrontsTitle: 'Storefronts',
-      impact: (prices: number, pending: number) => `All prices of ${prices} ${prices === 1 ? 'offer' : 'offers'} stop changing${pending ? `; ${pending} queued ${pending === 1 ? 'write is' : 'writes are'} not sent` : ''}`,
+      impact: (prices: number, pending: number) => `All prices of ${prices} ${prices === 1 ? 'offer' : 'offers'} stop changing${pending ? `; ${pending} queued price ${pending === 1 ? 'update is' : 'updates are'} not sent` : ''}`,
       wholeTenant: 'the whole workspace', account: (channel: string) => `${channel} account`, storefront: (_channel: string, storefront: string) => storefront,
       unknownMember: 'unknown member', you: (role: string) => `${role} (you)`,
       releasedBy: (when: string, who: string, note: string) => `${when} by ${who}${note ? `: “${note}”` : ''}`,
       haltReview: (when: string) => `Fresh sample check after ${when}`, haltReleasedAuto: (when: string) => `automatically by a fresh sample ${when}`,
-      notStopped: ['Stock synchronization', 'A write already sent to the channel: its outcome is accepted'],
+      notStopped: ['Stock synchronization', 'An update already sent to the channel: its outcome is accepted'],
       auditTitle: 'Audit log: stops, roles and channel events',
       auditEmpty: 'No stops, role changes or channel events yet. Every stop, resume and role change is listed here with its author, and every offer a channel took off sale with the reason.',
       auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released', 'membership.role_changed': 'Role changed', 'channel.offer_unpublished': 'Offer unpublished: uncompetitive price' },

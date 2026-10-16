@@ -44,7 +44,8 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
 сон macOS остановил подготовку шага 79 на 34 минуты — машина спала, а не считала. Шаг 89 добавил прожатую неделю walmart.com (опрос
 Buy Box раз в два часа на товар): подготовка дольше примерно на 20 с — замер — в [отчёте шага](evidence/step89-walmart.md). Шаг 91 — с двумя
 лёгкими продавцами (неделя тени прожата и у них): **102 с** (база 18 с, стенд 83 с, из них неделя главного демо 54,8 с и продавцы 27,5 с,
-интерфейс 1 с) — [отчёт шага](evidence/step91-agency.md).
+интерфейс 1 с) — [отчёт шага](evidence/step91-agency.md). Шаг 96 — **106 с** (база 18 с, стенд 87 с, из них неделя главного демо
+57,2 с и продавцы 28,4 с, интерфейс 1 с) — [отчёт шага](evidence/step96-ux.md).
 
 Ключей каналов не нужно: аккаунты eBay US и Amazon US записаны функцией обнаружения каталога; конкуренты amazon.com —
 модель порта Amazon (уведомления о смене цены конкурента — на экране «Amazon, notification of a competitor price change»; конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
@@ -62,7 +63,7 @@ $24.99, а тот же товар «в другом месте» — $19.99, и 
 
 В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 92: по центру знак PriceTrail — линия цены, удержанная в конце, — и строчное имя **pricetrail**, под ними строка
 «Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
-ровно три роли: **Owner** «everything, plus people, channel accounts and live writes», **Manager** «prices, bounds, strategies, stock,
+ровно три роли: **Owner** «everything, plus people, channel accounts and starting to send prices» (шаг 96), **Manager** «prices, bounds, strategies, stock,
 unit cost import, bulk operations, stop pricing», **Viewer** «read-only») → строка **Owner** (переключателя языка в шапке нет —
 профиль us; шаг 94: справа в шапке — кнопка темы иконкой (солнце, луна, монитор): нажатие ведёт по кругу Light → Dark → System, выбор хранится в этом браузере, «System» следует теме системы; после входа там имя
 человека **Alex Porter**, адрес — подсказкой при наведении) → три карточки (шаг 91): **Demo store (simulator)** — «Owner», **Blue Ridge Trading** — «Manager», **Lakeside Home Goods** —
@@ -97,10 +98,13 @@ channel simulator: offers on amazon.com and ebay.com, in shadow mode.»; их п
 
 Что сказать: это тот же продукт, что у вас будет, — только канал симулирован и цифры выдуманы.
 
-**Меню слева** (шаг 95 [Р-217] — девять пунктов вместо четырнадцати): **Overview** — Shadow mode; **Pricing** — Price changes,
-Strategies, Costs & floors, Protections; **Stock** — Offers, Stock; **Workspace** — Channels, Stop pricing. Что сказать: «функции те же —
-меньше дверей»: журнал цен один (решения — фильтром Kind), границы и себестоимость — на одном экране, защиты — на одном, путь подключения
-и аккаунты каналов — на одном, массовые операции — кнопкой «Bulk edit» на Offers.
+**Меню слева** (шаг 95 [Р-217] — девять пунктов вместо четырнадцати; шаг 96 — Offers в разделе Pricing, остатки — **Inventory**):
+**Overview** — Shadow mode; **Pricing** — Price changes, Strategies, Costs & floors, Protections, Offers; **Inventory** — Inventory;
+**Workspace** — Channels, Stop pricing. У каждого пункта своя иконка Primer Octicons, смысл читается без подписи (шаг 96: глаз — тень,
+история — журнал цен, мишень — стратегии, ценник — себестоимость и пол, щит с галкой — защиты, список — предложения, коробка — остатки,
+вилка — каналы, знак «стоп» — остановка). Что сказать: «функции те же — меньше дверей»: журнал цен один (решения — фильтром Kind),
+границы и себестоимость — на одном экране, защиты — на одном, путь подключения и аккаунты каналов — на одном, массовые операции —
+кнопкой «Bulk operations» на Offers. Прежний адрес остатков `…/stock` ведёт на `…/inventory`.
 Над меню — имя магазина и ссылка **«← All workspaces»** (к списку магазинов).
 
 Вкладки **Omnibus** нет: это правило ЕС о прежней цене скидки, а профиль us его не предлагает (шаг 87) — у продавца только с витринами
@@ -110,42 +114,50 @@ Strategies, Costs & floors, Protections; **Stock** — Offers, Stock; **Workspac
 
 **Экран «Shadow mode».** Ожидаемое:
 
-- **Подзаголовок:** «The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation.» и ссылка
-  **«Learn more»** — раскрывает: «Nothing is written to the channel: every change below was held.»
-- **Сводка за «Last 7 days»** (переключатель «Last 7 days» / «Last 30 days» над сводкой) — четыре белые плитки с крупным числом
-  (шаг 83): **Decisions**, **Price would change**, **Writes held**, **Without the floor** с подписью «not a forecast». Под ними — карточка
-  с графиком **«Decisions per day»** (шаги 82, 84): зелёные столбики решений тени по суткам в поясе магазина, ось значений слева, число
-  над каждым столбиком, подписи дней снизу, последний столбик — сегодня. Ниже — карточка-список «показатель — значение» (шаг 84):
-  - **Period** — «… — …»;
-  - **Price landed exactly on the floor** — «K times», под подписью «the floor decided it, and without the floor it would have gone lower»;
-  - **Price landed exactly on the ceiling** — «0 times»;
-  - **Writes held by the shadow** — «X — prices P, stock S»;
-  - **Would have used the external edit budget of the channel** — «about N»: бюджет правок есть у eBay, а граница его суток не
-    подтверждена, поэтому «примерно» [Р-188];
-  - **Without the floor you would have sold cheaper by** — «$…», под подписью «counted on the N holds where we still keep what the
-    strategy wanted».
+Шаг 96 [аудит понятности, пункты В21, В22]: на виду — следующий шаг, период, плитки, график и карточки каналов с действием; всё
+остальное — свёрнутыми блоками ниже (данные те же, ничего не удалено).
 
-  Под списком сноской — «Approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day.» и «That
-  number is the difference between your floor and what the strategy wanted — not a forecast of revenue…».
+- **Подзаголовок:** «The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation.» и ссылка
+  **«Learn more»** — раскрывает: «Nothing is sent to your store: every change below was held back.»
+- **Карточка «Next step»** (шаг 96, В22) — та же логика, что у пути подключения на Channels, один источник: «Next step: Stock
+  synchronization enabled (12 of 36)», пилюля **«Waiting for your decision»** и кнопка **«Open Channels»**. У демо путь не пройдётся сам:
+  запись количества eBay и Walmart ждёт подтверждения владельца [Р-202] — об этом раздел «г».
+- **Period** (шаг 96, II) — пресеты **24h / 7d / 30d / Custom**; «Custom» открывает два поля дат «From» и «To» и кнопку «Show», дни
+  считаются в поясе магазина. По умолчанию — 7d. Тот же выбор периода — на Protections и Price changes.
+- **Четыре плитки** (шаг 96, А1–А3 — у каждой подпись, что значит число): **Decisions** — «times the engine checked prices»; **Price would
+  change** — «times the price would have moved»; **Held back** — «price changes we did NOT send to your store» (плитка считает только цены,
+  остатки — в блоке «Good to know»); **Your floor saved you from selling cheaper by** — «$…», подпись «protection, not profit».
+  Под ними — карточка с графиком **«Decisions per day»**: зелёные столбики решений тени по суткам в поясе магазина, ось значений слева,
+  подписи дней снизу, последний — сегодня. У пресета 7d на графике восемь календарных суток: окно «последние 7 дней» начинается внутри
+  первых суток, поэтому первый столбик ниже остальных.
 
   Сразу после подъёма — неделя США: около тысячи решений в числе **Decisions** (замер шага 87 — 1 068), на графике — ровная неделя
   (≈ 156 решений в сутки) и сегодняшний столбик; сегодняшний растёт тем же темпом — тень США живёт настоящим временем.
-- **Блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
+- **Карточки аккаунтов** (поля «Channel account», «Mode», «Sending prices»): **Amazon · A1SYNDEMOUS…**, **eBay · syn_demo_ebay_us_…** и
+  **Walmart · syn-demo-walmart-…** (шаг 89) — «12 offers, 12 of them with the engine on», у каждого «shadow (nothing is sent to your
+  store)», «To start sending prices to your store, type the account name exactly: …», поле, кнопка **«Start sending prices»** и рядом
+  **«Copy»** (шаг 96, Б13): копирует имя аккаунта, его остаётся вставить в поле — подтверждение и журнал прежние [Р-170].
+- **Под карточками:** «Sending prices cannot be switched on yet: we do not know amazon.com · Day boundary of the price history, ebay.com · …,
+  walmart.com · …. The shadow keeps working, and you keep seeing what the engine would do.» Что мы не знаем про витрину, держит боевой режим
+  закрытым [Р-172] — у всех трёх витрин граница суток не подтверждена каналом. Если владелец всё же нажмёт «Start sending prices» на
+  amazon.com, отказ скажет: «Sending prices to amazon.com cannot be switched on: the day boundary of the price history of this storefront is
+  not confirmed yet. This is usually settled within a week of shadow mode: after seven days of shadow decisions our team checks your shadow
+  data… and then sending prices to your store can be switched on. Nothing is needed from you.» (шаг 69, Р-204). Обещание — ровно это:
+  неделя тени, затем проверка командой платформы. Процедура — [runbook-day-boundary.md](runbook-day-boundary.md); подтверждением канала её
+  не называть, вопрос каналу остаётся открытым.
+- **Свёрнутый блок «Good to know»** (шаг 96, А4): сводка «показатель — значение» (Period; Price landed exactly on the floor — «K times»;
+  Price landed exactly on the ceiling — «0 times»; **Updates held back by the shadow** — «X — prices P, stock S»; Would have used the
+  external edit budget of the channel — «about N»: бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно»
+  [Р-188]; Without the floor you would have sold cheaper by — «$…»), сноски и раздел **«What we are still checking about your stores»**:
+  первой строкой **«Nothing is needed from you.»**, затем по строке на витрину и свойство людскими словами — например «amazon.com — When
+  the store’s day starts — it decides which day a price belongs to and when the daily edit limit resets. Not known yet — prices are not sent
+  to this store until it is. Our team confirms it from the trial week.»
+- **Свёрнутый блок «Weekly email — preview»** (шаг 68, K7): то самое недельное письмо тени, собранное той же функцией, что у доставки, за
   последние семь суток, с пометкой «Demo: synthetic data. This is the email a seller in shadow mode receives every Monday…». Демо-тенанту
-  письмо не отправляется (0167) — поэтому оно на экране.
-- **Карточки аккаунтов** (поля карточки «Channel account», «Write mode», «Live writes»): **Amazon · A1SYNDEMOUS… · amazon.com**,
-  **eBay · syn_demo_ebay_us_… · ebay.com** и **Walmart · syn-demo-walmart-…** (шаг 89) — «12 offers, 12 of them with the engine on», у каждого «shadow (nothing is written)», «To
-  switch on live writes, type the account name exactly: …», поле и кнопка «Switch on live writes».
-- **Под таблицей:** «Live writes stay closed: we do not know amazon.com · Day boundary of the price history, ebay.com · …, walmart.com · …».
-  Что мы не знаем про витрину, держит боевой режим закрытым [Р-172] — у всех трёх витрин граница суток не подтверждена каналом. Таблица
-  «What we still do not know about these storefronts» — словами: витрина, свойство, значение («net, sales tax added at checkout»), кто
-  подтверждает. Если владелец всё же нажмёт «Switch on live writes» на amazon.com, отказ скажет: «Live writes on amazon.com stay closed:
-  the day boundary of the price history of this storefront is not confirmed yet. This is usually settled within a week of shadow mode: after
-  seven days of shadow decisions our team checks your shadow data… and then live writes open. Nothing is needed from you.» (шаг 69, Р-204).
-  Обещание — ровно это: неделя тени, затем проверка командой платформы. Процедура — [runbook-day-boundary.md](runbook-day-boundary.md);
-  подтверждением канала её не называть, вопрос каналу остаётся открытым.
-- **Строки** (колонки «Offer», «Would have been written», «Held at»): удержанные записи, новые сверху; у цены — ссылка **«Why this price»**,
-  у остатка («… pieces») ссылки нет.
+  письмо не отправляется (0167) — поэтому оно на экране. Блок есть только у периода 7d: письмо — недельное.
+- **Свёрнутый блок «Every held change, one by one (N)»** (шаг 96, Б16; колонки «Offer», «Would have been sent», «Held at»): удержанные
+  записи, новые сверху; у каждой строки пилюля **price** или **stock**; у цены — ссылка **«Why this price»**, у остатка («… pieces»)
+  ссылки нет.
 
 **Доказательство из базы** (в терминале; команду печатает подготовка):
 
@@ -163,25 +175,28 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
   `channel_write_history_shadow_never_left`);
 - переход записи в отправку база проверяет перед КАЖДОЙ отправкой заново. Отправить её нечем ни диспетчеру, ни повтору после отказа.
 
-Кнопка «Switch on live writes»:
+Кнопка «Start sending prices»:
 
 - только владелец;
 - второй фактор;
-- имя аккаунта нужно набрать руками.
+- имя аккаунта нужно ввести в поле (кнопка «Copy» копирует его, вставляет человек).
 
 «Back to shadow» — одно нажатие [Р-170].
 
 ## б. «Почему эта цена» (2 мин)
 
-На экране тени — **Why this price** в строке таблицы удержанных записей (строки amazon.com прожатой недели есть сразу). Пункта меню
-«Why this price» больше нет (шаг 95): все решения — в **Price changes** с фильтром **Kind → All decisions**; там вперемешку решения
-пересчёта eBay и amazon.com, многие — «No change», фильтра по исходу нет; поэтому показывайте из экрана тени. Квитанция решения
-остаётся своей страницей «Why this price», пункт меню над ней — Price changes.
+Пункта меню «Why this price» нет (шаг 95): квитанция решения — своя страница, пункт меню над ней — Price changes. Короче всего —
+**Price changes** → **Kind: All decisions** → **Outcome: price changed** (шаг 96: у решений есть период и фильтр исхода) → поле **Offer**:
+начните набирать «plant pot» — таблица фильтруется по мере ввода (шаг 96, Б11) → нажмите на строку amazon.com: строка кликабельна
+целиком (Б17) и ведёт на квитанцию. Второй путь — на экране тени раскрыть «Every held change, one by one» и нажать «Why this price».
+
+Над таблицей Price changes в тени — фраза «Trial week: prices were computed but nothing was sent to your stores.» (шаг 96, А5): нули в
+сводке «applied 0 · in progress 0 · …» объясняет она, а не догадка зрителя.
 
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
-- **Итог** (шаг 83 — плашка янтарного фона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; write: held by shadow
-  mode (not sent)». У отказа — плашка красного фона, без цены, причина крупно одной фразой. Шаги расчёта — номера в цветных кружках
+- **Итог** (шаг 83 — плашка янтарного фона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; sending to your store:
+  held by shadow mode (not sent)». У отказа — плашка красного фона, без цены, причина крупно одной фразой. Шаги расчёта — номера в цветных кружках
   (зелёный — пройден, красный — остановлен, серый — не нужен) на тонкой линии.
 - **Competitor snapshot:** «Amazon, notification of a competitor price change», время наблюдения.
 - **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below your minimum price — capped at $14.00.»; шаги расчёта («Calculation
@@ -190,7 +205,8 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 - **Price Gate:** «Price $14.00 approved within $14.00–$50.00.», «Floor: $14.00», «Minimum margin: 12%».
 - **Input check:** «Snapshot accepted: 9 rules checked»; «Anchor 2: consistency of the snapshot» — «skipped», «fewer competitor offers
   than the 3 needed» — правило и порог, без чисел канала.
-- **Write to the channel:** «$14.00: held by shadow mode (not sent)», «Not sent: this channel account is in shadow mode…».
+- **Sending to your store:** «$14.00: held by shadow mode (not sent)», «Not sent: this channel account is in shadow mode, so nothing is
+  sent to your store…».
 
 Что сказать:
 
@@ -200,13 +216,15 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 - решение без изменения цены хранит только код причины [Р-74], поэтому для показа берите строку с исходом **Approved**.
 
 **Границы.** Рядом с подписью предложения на экране решения — ссылка **«Bounds and floor»** (шаг 76): разбивка пола до цента (экран
-«Bounds and price floor»). У товара amazon.com она отвечает на вопрос «что помешает продать ниже себестоимости»: «Unit cost: $5.00 (as you
+«Bounds and price floor»); на нём кнопка **«Change this floor»** (шаг 96, В20) ведёт в правку границ «Set minimum & maximum price» с этим
+предложением уже выбранным. У товара amazon.com она отвечает на вопрос «что помешает продать ниже себестоимости»: «Unit cost: $5.00 (as you
 declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective floor $14.00 — from your minimum price», в разбивке пола
 «Margin $6.90»; комиссия — «fee schedule: 15% + $0.00 (2026-10) — the floor is computed from this one» (версия тарифа — месяц действия).
 
 ## в. Три стоп-крана (2 мин)
 
-**Экран «Stop pricing».** Таблица трёх видов остановки:
+**Экран «Stop pricing».** Первой строкой под подзаголовком (шаг 96, А10): «Pause is safe: current prices stay as they are, and you can
+resume anytime with a note.» Ниже — таблица трёх видов остановки:
 
 | Kind | What it holds | Who sets it | How it ends |
 |---|---|---|---|
@@ -218,7 +236,7 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
 
 1. Блок **Storefronts** → карточка **amazon.com** («Running», «All prices of 12 offers stop changing») → кнопка **«Stop»**. Окно
    подтверждения открывается поверх страницы, по центру (страница затемнена): «Stop all price changes: amazon.com?», «All prices of 12
-   offers stop changing. The owner or a manager can resume it with a note.» и «Not stopped: Stock synchronization; A write already sent
+   offers stop changing. The owner or a manager can resume it with a note.» и «Not stopped: Stock synchronization; An update already sent
    to the channel: its outcome is accepted».
 2. Поле «Note — why (at least 10 characters)» — заметка **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например
    «Demo: checking the stop crane», → **«Yes, stop»**. Ответ: «Stopped. All prices of 12 offers stop changing.»
@@ -235,54 +253,58 @@ declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective fl
 том же списке, снимает их только человек, а недоверие каналу — только владелец со вторым фактором (шаг 89: снова поверить каналу — не
 повседневная остановка, менеджеру это право не дано).
 
-Внизу экрана: «Stock synchronization» и «A write already sent to the channel: its outcome is accepted» — чего остановка НЕ касается.
+Внизу экрана: «Stock synchronization» и «An update already sent to the channel: its outcome is accepted» — чего остановка НЕ касается.
 
 ## г. Внешние писатели: «мы не подерёмся с вашим PrepShipHub» (1,5 мин)
 
-**Экран «Channels»** (шаг 95). Сверху — раздел **Setup**: у демо путь не пройден и не пройдётся сам — «Resume at: Stock synchronization
-enabled», 12 of 36 (запись количества eBay и Walmart ждёт подтверждения владельца [Р-202], об этом и рассказ ниже). Прокрутите к разделу
-**«Channel accounts»** (или откройте адрес `…/channels/accounts`), карточка **eBay · syn_demo_ebay_us_… · ebay.com**:
+**Экран «Channels»** (шаг 95; шаг 96 — В15 и решение по варианту шага 95). У демо путь подключения не пройдётся сам: запись количества
+eBay и Walmart ждёт решения владельца [Р-202], об этом и рассказ ниже. Пока путь ждёт только решения владельца, чеклист свёрнут в одну
+строку над аккаунтами: «Setup: step 4 of 8 — Stock synchronization enabled (12 of 36) waits for your decision below.» и ссылка «Show the
+checklist» (раскрывает прежние восемь шагов). Сразу под ней — раздел **«Channel accounts»**, карточка **eBay · syn_demo_ebay_us_… ·
+ebay.com**:
 
-- «shadow: connected, nothing is written»;
+- «shadow: connected, nothing is sent to your store»;
 - «Found 12 offers; the shadow made N decisions in the last 24 hours.» (шаг 68: тень США считает);
-- **вопрос:** «Does another tool update stock or prices in this channel?» — «Not answered yet.»;
-- **запись остатка:** «Stock writes to this channel: off — the owner has to confirm that no other tool manages stock here.» и «Answer the
-  question above first.»
+- **вопрос:** «Does another tool update stock or prices in this channel?» с пилюлей **«Answer this to finish setup»** (шаг 96) —
+  «Not answered yet.»;
+- **отправка остатков:** «Stock updates to this channel: off — the owner has to confirm that no other tool manages stock here.» и «Answer
+  the question above first.»
 
 **Живое действие:** нажать **«Yes — stock»** у аккаунта eBay (ответ сохраняется сразу, отдельной кнопки нет; пусть это PrepShipHub
 клиента). Ожидаемое:
 
 - «Answer saved.» и в строке вопроса — «Your answer: another tool updates stock.»;
-- «Another tool updates stock in this channel: if we wrote stock too, the two would overwrite each other. Stock writes stay off until that
+- «Another tool updates stock in this channel: if we sent stock too, the two would overwrite each other. Stock updates stay off until that
   tool is switched off and the answer is changed.»;
-- кнопки подтверждения записи остатка нет.
+- кнопки подтверждения отправки остатков нет.
 
 Даже прямой запрос на подтверждение (мимо экрана) база отклоняет: «You told us another tool updates stock in this channel: our stock
-writes would overwrite it and it would overwrite ours. Stock writes stay off; switch that tool off and change your answer first.»
+updates would overwrite it and it would overwrite ours. Stock updates stay off; switch that tool off and change your answer first.»
 (409 `OTHER_TOOL_MANAGES_STOCK`) [Р-202].
 
 Ответ **«Yes — prices»** показывает предупреждение: «Two repricers on one channel are not allowed: each would react to the prices of the
 other…».
 
-Ниже — «External edits in the last 24 hours: 0». Если в канале появится цена или остаток, которых мы не писали, счётчик это покажет.
+Ниже — «External edits in the last 24 hours: 0». Если в канале появится цена или остаток, которых мы не отправляли, счётчик это покажет.
 
-Рядом — карточка **Amazon · A1SYNDEMOUS… · amazon.com**: «Your answer: no other tool.» и «Stock writes to this channel: on — confirmed by
+Рядом — карточка **Amazon · A1SYNDEMOUS… · amazon.com**: «Your answer: no other tool.» и «Stock updates to this channel: on — confirmed by
 the owner.» — так выглядит канал, остатки которого ведёт склад демо.
 
-Что сказать: по умолчанию мы остатки в канал не пишем вовсе, пока владелец не подтвердил, что другой инструмент их не ведёт. Подтверждение
-отзывается тем же экраном и выключает запись остатка сразу.
+Что сказать: по умолчанию мы остатки в канал не отправляем вовсе, пока владелец не подтвердил, что другой инструмент их не ведёт.
+Подтверждение отзывается тем же экраном («Revoke stock updates») и выключает отправку остатков сразу.
 
 ## д. Продажа: резервация и остатки (2 мин)
 
-**Экран «Stock».** Сводка сверху:
+**Экран «Inventory»** (шаг 96, В19: пункт и страница остатков — Inventory, прежний адрес `…/stock` перенаправляется). Сводка сверху
+(шаг 96, А7 — людскими словами):
 
-> «Products 36: with stock 36; offers in sync 12; writes in flight 0; divergences 0; open reservations R.»
+> «Products 36: with stock 36; offers in sync 12; updates being sent now 0; our number differs from the store’s 0; open reservations R.»
 >
 > «Warehouse Newark, DE — File import (internal pool); 36 products with figures»
 
 Заказ amazon.com приходит раз в 10 минут (первый — через 2 минуты после запуска), отгрузка — через час, поэтому R — от одного до шести.
 «offers in sync 12» — синхронизацию количества ведёт amazon.com; у ebay.com и walmart.com она выключена (вопрос о других инструментах —
-шаг «г», запись количества по Р-202 выключена до подтверждения владельца).
+шаг «г», отправка остатков по Р-202 выключена до подтверждения владельца).
 
 Сверху таблицы — товары с остатком по убыванию «Available», при равенстве выше — с резервами (шаг 84.1). Поставьте флажок **«Only products
 with reservations»** — список фильтруется сразу, над таблицей «N of 36 products match.» и
@@ -300,25 +322,30 @@ with reservations»** — список фильтруется сразу, над
 - **в тени и это количество удержано**, в канал ничего не ушло;
 - через час заказ отгружается: резервация закрывается, и на складе остаётся 59 — списание движением базы, а не правкой числа.
 
-Под таблицей — «Before anything is written». Там названы ловушки каналов ДО первой записи [Р-153]:
+Под таблицей — «Before any stock is sent». Там названы ловушки каналов ДО первой отправки [Р-153]:
 
 - у Amazon остаток MFN — одно значение на весь регион аккаунта; для amazon.com это Северная Америка (владелец подтвердил это при
-  включении синхронизации);
+  включении синхронизации галочкой, которая называет само следствие (шаг 96, А8): «I understand: ONE stock number will cover all of
+  Amazon North America»);
 - у Walmart — одно значение на SKU на складе аккаунта по умолчанию; как оно ложится на несколько складов (ship nodes), Walmart не
   подтвердил (шаг 89, W-04).
 
 ## е. Walmart: паритет цен — «мы видим все каналы сразу» (1 мин)
 
-**Экран «Offers»** (меню Stock → Offers; справа в шапке таблицы — кнопка **«Bulk edit»** к массовым операциям): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com
-в колонке **«Channel says»** — красная пилюля **«Unpublished (uncompetitive price)»** и под ней коротко: «Cheaper elsewhere: $19.99.
-Since Oct 7, 2026, 15:31 UTC−4; PriceTrail does not change the price here.» Наведите курсор на ячейку — подсказка с полным объяснением:
+**Экран «Offers»** (меню Pricing → Offers, шаг 96; справа в шапке таблицы — кнопка **«Bulk operations»**: на её странице три ссылки на
+массовые правки — «Set minimum & maximum price for many offers», «Assign a strategy to many offers», «Import unit costs» — и история
+операций): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com в колонке **«Issues from the
+channel»** (шаг 96, А6) — красная пилюля **«Unpublished (uncompetitive price)»**, под ней коротко: «Cheaper elsewhere: $19.99. Since Oct
+7, 2026, 15:31 UTC−4; PriceTrail does not change the price here.» и раскрывающаяся ссылка **«What to do»**: «Walmart hides this offer
+because the same product is cheaper elsewhere ($19.99). To show it again, bring the walmart.com price close to that price — only if your
+floor allows. PriceTrail never changes the price for this on its own.» Наведите курсор на ячейку — подсказка с полным объяснением:
 
 > «Walmart took this offer off walmart.com on Oct 7, 2026, 15:31 UTC−4: the same product is cheaper elsewhere ($19.99) — on another channel
 > or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart
 > publishes the offer again; PriceTrail does not change the price for you here.»
 
 Время — момент подготовки демо минус неделя: Walmart снял их в первом же опросе прожатой недели. На телефоне таблица Offers листается
-в своей рамке — колонка «Channel says» правее.
+в своей рамке — колонка «Issues from the channel» правее.
 
 Это **Wall clock, small · walmart.com** и **Yoga mat, small · walmart.com**: «Current price» у них $24.99.
 
@@ -336,7 +363,7 @@ does not change the price for you here.» — событие канала ряд
   параметры модели (W-10, W-11 в [docs/channels/walmart.md](channels/walmart.md)).
 
 Если спросят «а тень?» — на экране тени у этих предложений уже есть удержанные записи ниже $19.99 по стратегии «Beat the lowest»: движок
-считает цену как обычно, но в тени ничего не пишется, поэтому листинг остаётся снятым.
+считает цену как обычно, но в тени в магазин ничего не уходит, поэтому листинг остаётся снятым.
 
 ## ж. Для преп-центра: три продавца одним списком (1 мин)
 
@@ -347,8 +374,9 @@ does not change the price for you here.» — событие канала ряд
    «Demo store (simulator)» · Owner, «Blue Ridge Trading» · Manager, «Lakeside Home Goods» · Viewer (числа — прожатая неделя, порядок
    замера шага 91: Offers 12, Decisions 24h ~80, Interventions 7d ~260 у Blue Ridge; 10, ~65, ~220 у Lakeside).
 2. Нажать **Blue Ridge Trading** → сразу **Shadow mode** этого продавца: в шапке меню «Blue Ridge Trading», аккаунты
-   **Amazon · A1SYNSELLER…** и **eBay · syn_demo_ebay_us_…** в тени, плитки недели (Decisions, Price would change, Writes held, Without the
-   floor) и график «Decisions per day». Кнопки «Switch on live writes» нет — бой включает владелец пространства, а здесь вы менеджер.
+   **Amazon · A1SYNSELLER…** и **eBay · syn_demo_ebay_us_…** в тени, плитки недели (Decisions, Price would change, Held back, Your floor
+   saved you from selling cheaper by) и график «Decisions per day». Кнопки «Start sending prices» нет — отправку цен включает владелец
+   пространства, а здесь вы менеджер.
 3. **«← All workspaces»** → снова три карточки.
 
 Что сказать:

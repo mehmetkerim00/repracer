@@ -48,7 +48,7 @@ import type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate } from '@repracer/pricing-pipeline';
-import { FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
+import { DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 
@@ -2416,12 +2416,27 @@ export class PgPricingStore implements PricingStore {
        * определить тип $2»), и страница решений по одному предложению отвечала 500 всегда (ревью шага 35, находка 2).
        * Индексы 0117: (tenant_id, decided_at DESC) и (tenant_id, write_scope_id, decided_at DESC).
        */
-      const scoped = (n: number) => `d.tenant_id = $1${query.writeScopeId ? ` AND d.write_scope_id = $${n}` : ''}`;
+      /**
+       * Шаг 96: условия фильтров собираются списком — у страницы и счёта свои номера подстановок (находка 2 ревью шага 35).
+       * Окно по времени решения и группа исхода идут тем же индексом (tenant_id, decided_at DESC): исход — фильтр внутри окна
+       */
+      const conditions = (first: number) => {
+        const where: string[] = ['d.tenant_id = $1'];
+        const values: unknown[] = [];
+        const add = (sql: (n: number) => string, value: unknown) => { values.push(value); where.push(sql(first + values.length - 1)); };
+        if (query.writeScopeId) add((n) => `d.write_scope_id = $${n}`, query.writeScopeId);
+        if (query.writeScopeIds) add((n) => `d.write_scope_id = ANY($${n}::uuid[])`, [...query.writeScopeIds]);
+        if (query.since) add((n) => `d.decided_at >= $${n}::timestamptz`, query.since);
+        if (query.until) add((n) => `d.decided_at < $${n}::timestamptz`, query.until);
+        if (query.outcome) add((n) => `d.outcome = ANY($${n}::text[])`, [...DECISION_OUTCOME_GROUPS[query.outcome]]);
+        return { sql: where.join(' AND '), values };
+      };
+      const page = conditions(4);
+      const counted = conditions(2);
       const [{ rows }, { rows: [count] }] = await Promise.all([
-        tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE ${scoped(4)} ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT $2 OFFSET $3`,
-          [tenantId, query.limit, query.offset, ...(query.writeScopeId ? [query.writeScopeId] : [])]),
-        tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${scoped(2)}`,
-          [tenantId, ...(query.writeScopeId ? [query.writeScopeId] : [])]),
+        tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM} WHERE ${page.sql} ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT $2 OFFSET $3`,
+          [tenantId, query.limit, query.offset, ...page.values]),
+        tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${counted.sql}`, [tenantId, ...counted.values]),
       ]);
       return { items: rows.map(decisionRow), total: Number(count!.n) };
     });
@@ -2517,20 +2532,24 @@ export class PgPricingStore implements PricingStore {
       const groupSql = `CASE WHEN u.status = 'APPLIED' THEN 'APPLIED' WHEN u.status = 'SHADOW_HELD' THEN 'SHADOW_HELD'
                              WHEN u.status IN (${FEED_IN_FLIGHT_STATUSES.map((x) => `'${x}'`).join(', ')}) THEN 'IN_FLIGHT'
                              WHEN u.status IN (${FEED_NOT_SENT_STATUSES.map((x) => `'${x}'`).join(', ')}) THEN 'NOT_SENT' ELSE 'SUPERSEDED' END`;
-      const since = query.sinceDays ? new Date(Date.parse(now) - query.sinceDays * 86_400_000).toISOString() : null;
+      const since = query.since ?? (query.sinceDays ? new Date(Date.parse(now) - query.sinceDays * 86_400_000).toISOString() : null);
+      // Шаг 96: верхняя граница окна — конец своего диапазона дат продавца; без неё — до конца ленты
+      const until = query.until ?? null;
       const scoped = `WITH u AS (
           SELECT ${WRITE_HOT_COLUMNS}, ${WRITE_AT('w')} AS at FROM tenant_data.channel_write w
             LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
            WHERE w.tenant_id = $1 AND w.field = 'PRICE' AND ($2::uuid IS NULL OR w.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('w')} >= $3)
+             AND ($4::timestamptz IS NULL OR ${WRITE_AT('w')} < $4) AND ($5::uuid[] IS NULL OR w.write_scope_id = ANY($5))
           UNION ALL
           SELECT ${WRITE_HISTORY_COLUMNS}, ${WRITE_AT('h')} FROM tenant_data.channel_write_history h
             LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
-           WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('h')} >= $3))`;
-      const base: unknown[] = [tenantId, query.writeScopeId ?? null, since];
+           WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('h')} >= $3)
+             AND ($4::timestamptz IS NULL OR ${WRITE_AT('h')} < $4) AND ($5::uuid[] IS NULL OR h.write_scope_id = ANY($5)))`;
+      const base: unknown[] = [tenantId, query.writeScopeId ?? null, since, until, query.writeScopeIds ? [...query.writeScopeIds] : null];
       const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0, SHADOW_HELD: 0 };
       const [counted, { rows }] = await Promise.all([
         query.counts === false ? null : tx.query(`${scoped} SELECT ${groupSql} AS g, count(*)::int AS n FROM u GROUP BY 1`, base),
-        tx.query(`${scoped} SELECT u.* FROM u WHERE ($4::text IS NULL OR ${groupSql} = $4) ORDER BY u.at DESC, u.version DESC LIMIT $5 OFFSET $6`,
+        tx.query(`${scoped} SELECT u.* FROM u WHERE ($6::text IS NULL OR ${groupSql} = $6) ORDER BY u.at DESC, u.version DESC LIMIT $7 OFFSET $8`,
           [...base, query.status ?? null, query.limit, query.offset]),
       ]);
       for (const c of counted?.rows ?? []) groups[c.g as FeedStatusGroup] = Number(c.n);

@@ -1,8 +1,7 @@
-import type { DangerousReportView } from '@repracer/console-model';
+import { useState } from 'react';
+import { periodSearch, type DangerousReportView, type Period } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, Gaps, href, Load, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
-
-const PERIODS = [1, 7, 30] as const;
+import { Badge, collapseRepeats, commonZone, Gaps, href, Load, LocalPager, ReasonLine, REPORT_PAGE_SIZE, useMessages, When, WhenHead } from '../components.tsx';
 /** Шаг 84: причины удержания полом, которые говорят только то, что уже видно в колонках «Strategy wanted», «Floor», «Cheaper by» */
 const STANDARD_FLOOR_HOLDS = new Set(['CAPPED_AT_MIN_PRICE', 'CAPPED_AT_MARGIN_FLOOR']);
 
@@ -12,20 +11,22 @@ export function DangerousScreenView({ view, embedded = false }: { view: Dangerou
   const m = useMessages();
   const d = m.ui.dangerous;
   const c = d.columns;
-  const holdZone = commonZone(view.floorHolds.items.map((i) => i.at));
+  // Шаг 96 (Б12): повторы одного удержания — строкой «×N», страницы по 50
+  const holds = collapseRepeats(view.floorHolds.items, (i) => `${i.unit?.writeScopeId ?? ''}|${i.kind}|${i.reason.code}|${i.floor}`);
+  const [holdOffset, setHoldOffset] = useState(0);
+  const shownHolds = holds.slice(holdOffset, holdOffset + REPORT_PAGE_SIZE);
+  const holdZone = commonZone(shownHolds.map((g) => g.item.at));
   const gateZone = commonZone(view.items.map((i) => i.at));
   return (
     <section>
       {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню; «что предотвратили границы» говорит подзаголовок */}
       {embedded ? null : <><h2>{m.ui.app.screens.dangerous}</h2><p className="subtitle">{m.ui.app.subtitles.dangerous}</p></>}
-      <nav className="tabs small">
-        {PERIODS.map((p) => <a key={p} href={href(view.worldId, 'protections', 'rules', String(p))} className={p === view.days ? 'active' : ''}>{d.period(p)}</a>)}
-      </nav>
       {/* Шаг 79: итог периода — карточкой-сводкой */}
       <section className="card summary-card">
         <p className="headline">{view.headline}</p>
         <p className="muted small">{view.from} – {view.to}</p>
       </section>
+      {view.clipped ? <p className="notice">{m.ui.period.clipped(30)}</p> : null}
       {view.truncated ? <p className="notice">{d.truncated}</p> : null}
       <h3>{d.floorTitle}</h3>
       {view.floorHolds.count === 0 ? <p className="muted empty">{d.none}</p> : (
@@ -33,7 +34,7 @@ export function DangerousScreenView({ view, embedded = false }: { view: Dangerou
           <table className="dense sticky-end cardify">
             <thead><tr><th><WhenHead label={d.floorColumns.when} zone={holdZone} /></th><th>{d.floorColumns.offer}</th><th>{d.floorColumns.kind}</th><th className="num">{d.floorColumns.target}</th><th className="num">{d.floorColumns.floor}</th><th className="num">{d.floorColumns.below}</th><th>{d.floorColumns.reason}</th><th /></tr></thead>
             <tbody>
-              {view.floorHolds.items.map((i, n) => (
+              {shownHolds.map(({ item: i, count }, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
                   <td className="nowrap" data-label={`${d.floorColumns.when}${holdZone ? ` · ${holdZone}` : ''}`}><When value={i.at} zone={!holdZone} /></td>
                   <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
@@ -42,7 +43,8 @@ export function DangerousScreenView({ view, embedded = false }: { view: Dangerou
                   <td className="num money cur" data-label={d.floorColumns.floor}>{i.floor}</td>
                   <td className="num cur" data-label={d.floorColumns.below}>{i.below ?? m.ui.common.noValue}</td>
                   {/* Шаг 84: стандартная причина пересказывала бы колонки цели, пола и разницы — короткой формой; полный текст — подсказкой */}
-                  <td data-label={d.floorColumns.reason}>{STANDARD_FLOOR_HOLDS.has(i.reason.code) ? <span className="reason" title={i.reason.text}>{i.reason.title}</span> : <ReasonLine reason={i.reason} />}</td>
+                  <td data-label={d.floorColumns.reason}>{STANDARD_FLOOR_HOLDS.has(i.reason.code) ? <span className="reason" title={i.reason.text}>{i.reason.title}</span> : <ReasonLine reason={i.reason} />}
+                    {count > 1 ? <span className="repeat-count"> — {d.repeated(count, view.phrase)}</span> : null}</td>
                   <td className="nowrap card-action">{i.decisionId ? <a className="row-link" href={href(view.worldId, 'decisions', i.decisionId)}>{m.ui.rejected.path}</a> : null}</td>
                 </tr>
               ))}
@@ -50,6 +52,7 @@ export function DangerousScreenView({ view, embedded = false }: { view: Dangerou
           </table>
         </div>
       )}
+      <LocalPager total={holds.length} offset={holdOffset} onOffset={setHoldOffset} />
       <h3>{d.gateTitle}</h3>
       <p className="section-sub">{view.gateHeadline}</p>
       {view.count === 0 ? <p className="muted empty">{d.none}</p> : (
@@ -84,8 +87,8 @@ export function DangerousScreenView({ view, embedded = false }: { view: Dangerou
   );
 }
 
-export function DangerousScreen({ worldId, days }: { worldId: string; days: number }) {
+export function DangerousScreen({ worldId, period }: { worldId: string; period: Period }) {
   const m = useMessages();
-  const [resource, retry] = useResource<DangerousReportView>(`${worldPath(worldId, 'dangerous')}?days=${days}`, m.locale);
+  const [resource, retry] = useResource<DangerousReportView>(`${worldPath(worldId, 'dangerous')}?${periodSearch(period)}`, m.locale);
   return <Load shape="table" resource={resource} retry={retry}>{(view) => <DangerousScreenView view={view} embedded />}</Load>;
 }

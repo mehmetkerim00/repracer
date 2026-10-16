@@ -4,6 +4,7 @@ import type { Messages } from './i18n/index.ts';
 import { explanationOf, isDangerous } from './trace.ts';
 import { describe, type HumanReason } from './explain.ts';
 import { gap, scopeById, unitOf, type Gap, type StandWorld, type UnitRef } from './world.ts';
+import type { PeriodRange } from './period.ts';
 
 /**
  * Отчёт о работе границ за период.
@@ -22,7 +23,8 @@ import { gap, scopeById, unitOf, type Gap, type StandWorld, type UnitRef } from 
  */
 
 export const REPORT_PERIODS_DAYS = [1, 7, 30] as const;
-const HOT_DECISIONS_DAYS = 30;
+/** Шаг 96: глубже горячего буфера решений [Р-28] окно отчёта не уходит — период отрезается (`PeriodRange.clipped`) */
+export const HOT_DECISIONS_DAYS = 30;
 
 export interface DangerousItem {
   at: string;
@@ -59,9 +61,12 @@ export interface FloorHoldsView {
 
 export interface DangerousReportView {
   worldId: string;
-  days: number;
+  /** Шаг 96: фраза периода для заголовков («in the last 7 days», «from … to …») */
+  phrase: string;
   from: string;
   to: string;
+  /** Начало периода отрезано глубиной буфера решений */
+  clipped: boolean;
   /** Р-117: «пол удержал цену N раз, без него вы продали бы на X дешевле» */
   headline: string;
   floorHolds: FloorHoldsView;
@@ -158,10 +163,10 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
 }
 
 /** Р-154: отчёт строится по срезу вмешательств окна — «без изменения» в него не попадают ещё в базе */
-export function dangerousReport(world: StandWorld, slice: InterventionSlice, days: number, m: Messages): DangerousReportView {
+export function dangerousReport(world: StandWorld, slice: InterventionSlice, range: PeriodRange, phrase: string, m: Messages): DangerousReportView {
   const r = m.ui.dangerous;
-  const to = Date.parse(world.now);
-  const from = to - days * 86_400_000;
+  const to = Date.parse(range.until);
+  const from = Date.parse(range.since);
   const floor = floorHolds(world, slice, from, to, m);
   const decisions = slice.decisions
     .filter((d) => isDangerous(d) && Date.parse(d.decidedAt) > from && Date.parse(d.decidedAt) <= to)
@@ -185,15 +190,15 @@ export function dangerousReport(world: StandWorld, slice: InterventionSlice, day
     };
   });
   return {
-    worldId: world.id, days, from: m.when(new Date(from).toISOString()), to: m.when(world.now),
-    headline: r.floorHeadline(floor.count, days, floor.withoutFloor.map((x) => x.amount), floor.unknownAmount), floorHolds: floor,
-    gateHeadline: r.headline(items.length, days), count: items.length,
+    worldId: world.id, phrase, from: m.when(range.since), to: m.when(range.until), clipped: range.clipped,
+    headline: r.floorHeadline(floor.count, phrase, floor.withoutFloor.map((x) => x.amount), floor.unknownAmount), floorHolds: floor,
+    gateHeadline: r.headline(items.length, phrase), count: items.length,
     prevented: [...prevented].map(([currency, minor]) => ({ currency, minor, amount: m.money(minor, currency) })),
     worst: items[0] ?? null,
     byUnit: [...units.values()].sort((a, b) => b.count - a.count),
     byBound: [...bounds].map(([code, count]) => ({ code, title: (m.titles as Record<string, string | undefined>)[code] ?? code, count })),
     // `truncated` был про глубину буфера решений; теперь ещё и про предел среза — обе причины неполноты названы
-    items, truncated: days > HOT_DECISIONS_DAYS || slice.truncated,
+    items, truncated: slice.truncated,
     gaps: [gap(m, 'FLOOR_HOLD_TARGET_WINDOW'), gap(m, 'DANGEROUS_REPORT_WINDOW'), gap(m, 'DANGEROUS_THRESHOLD'), ...(slice.truncated ? [gap(m, 'INTERVENTIONS_TRUNCATED')] : [])],
   };
 }

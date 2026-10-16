@@ -3,7 +3,7 @@ import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages } from './components.tsx';
-import { BrandMark, Icon } from './icons.tsx';
+import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, THEME_CHOICES, type ThemeChoice } from './theme.ts';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
@@ -55,6 +55,8 @@ export function redirectOf(route: Pick<Route, 'screen' | 'param'>): string[] | n
     case 'connections': return ['channels', 'accounts'];
     case 'onboarding': return ['channels'];
     case 'jobs': return ['products', 'bulk'];
+    // Шаг 96 (В19): страница остатков — Inventory
+    case 'stock': return ['inventory'];
     default: return null;
   }
 }
@@ -70,10 +72,11 @@ const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: '
 /** Р-149 (шаг 34): путь онбординга — первый экран: с него продавец начинает и к нему возвращается, пока путь не пройден */
 /** Шаг 77: экраны мира — группами боковой панели (порядок групп и экранов — порядок показа продукта) */
 /** Шаг 95 [Р-217]: 9 пунктов вместо 14 — функции те же, лишних дверей нет; Omnibus — только где действует правило ЕС */
+// Шаг 96 (аудит В19): Offers — в разделе Pricing; раздел и страница остатков — Inventory
 const NAV_GROUPS = [
   ['overview', ['shadow']],
-  ['pricing', ['feed', 'strategies', 'costs', 'protections']],
-  ['stock', ['products', 'stock']],
+  ['pricing', ['feed', 'strategies', 'costs', 'protections', 'products']],
+  ['stock', ['inventory']],
   ['account', ['channels', 'compliance', 'stop']],
 ] as const;
 
@@ -85,9 +88,13 @@ interface NavState { open: boolean; setOpen: (open: boolean) => void; extras: Re
 const NavContext = createContext<NavState>({ open: false, setOpen: () => undefined, extras: null });
 
 /** Шаг 81: знак у каждого пункта боковой панели — подпись та же, иконка только помогает глазу найти пункт */
-const NAV_ICONS: Record<string, string> = {
-  shadow: 'shadow', feed: 'arrows', strategies: 'strategy', costs: 'bounds', protections: 'shield',
-  products: 'list', stock: 'box', channels: 'accounts', compliance: 'scales', stop: 'stop',
+/**
+ * Шаг 96 (аудит, I): у каждого пункта своя иконка Octicons, смысл читается без подписи — таблица «пункт → иконка → почему» в
+ * docs/evidence/step96-ux.md; смоук утверждает, что иконки не повторяются
+ */
+export const NAV_ICONS: Readonly<Record<string, string>> = {
+  shadow: 'eye', feed: 'history', strategies: 'goal', costs: 'tag', protections: 'shield-check',
+  products: 'list-unordered', inventory: 'package', channels: 'plug', compliance: 'law', stop: 'stop',
 };
 
 /** Вход [Р-78]: у поставщика identity; на стенде — имитатор с синтетическими пользователями. Паролей у нас нет */
@@ -246,7 +253,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
               {/* Шаг 68 (K3): Omnibus — правило ЕС; продавцу только с витринами США пункта нет [Р-123] */}
               {/* Шаг 87 [Р-214]: Omnibus — правило ЕС; в профиле без правила ЕС пункта меню нет вовсе */}
               {keys.filter((key) => key !== 'compliance' || (world.euStorefronts && market.omnibus)).map((key) => (
-                <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Icon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
+                <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Octicon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
               ))}
             </div>
           ))}
@@ -262,13 +269,23 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         : route.screen === 'feed' ? <FeedScreen worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'} />
         : route.screen === 'decisions' && route.param ? <TraceScreen worldId={world.id} decisionId={route.param} />
         : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
-        : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} />
+        : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} target={route.param2 ?? null} />
         : route.screen === 'bounds' && route.param ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
         : route.screen === 'protections' ? <ProtectionsScreen worldId={world.id} tab={route.param === 'people' ? 'people' : 'rules'} days={[1, 7, 30].includes(Number(route.param2)) ? Number(route.param2) : 7} />
         : route.screen === 'products' && route.param === 'bulk'
-          ? <><p className="back"><a href={href(world.id, 'products')}>{m.ui.jobs.back}</a></p><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p><JobHistory worldId={world.id} /></>
+          ? <><p className="back"><a href={href(world.id, 'products')}>{m.ui.jobs.back}</a></p><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p>
+            {/* Шаг 96 (решение по варианту шага 95): кнопка с Offers — «Bulk operations»; отсюда — к трём массовым правкам */}
+            <section className="card bulk-links">
+              <h3>{m.ui.jobs.links.title}</h3>
+              <ul className="index link-list">
+                <li><a className="row-link" href={href(world.id, 'costs', 'edit')}>{m.ui.jobs.links.bounds}</a></li>
+                <li><a className="row-link" href={href(world.id, 'strategies')}>{m.ui.jobs.links.strategies}</a></li>
+                <li><a className="row-link" href={href(world.id, 'costs', 'import')}>{m.ui.jobs.links.costs}</a></li>
+              </ul>
+            </section>
+            <JobHistory worldId={world.id} /></>
         : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
-        : route.screen === 'stock' ? <StockScreen worldId={world.id} />
+        : route.screen === 'inventory' ? <StockScreen worldId={world.id} />
         : route.screen === 'channels' ? <ChannelsScreen worldId={world.id} section={route.param} />
         : route.screen === 'compliance' ? (world.euStorefronts && market.omnibus ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)
         : route.screen === 'stop' ? <StopScreen worldId={world.id} />
@@ -415,7 +432,7 @@ export function App() {
   const themeSwitch = (
     <button type="button" className="ghost theme-button" aria-label={themeLabel} title={themeLabel} data-theme-choice={theme}
       onClick={() => { setTheme(nextTheme); applyTheme(nextTheme); }}>
-      <Icon name={theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'monitor'} size={20} />
+      <Octicon name={theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'device-desktop'} size={20} />
     </button>
   );
   // Шаг 85: на узких экранах внутри рабочего пространства язык, адрес и выход — в выдвижной панели; разметка та же, что в шапке

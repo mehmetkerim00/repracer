@@ -9,7 +9,7 @@ import { CostImportPanel } from './CostImport.tsx';
  * правкой), ниже — импорт себестоимости разделом. Страница предложения «Bounds and price floor» остаётся своим адресом (`bounds/<id>`).
  * `section="import"` — прежний адрес `cost-import` и шаг онбординга ведут сразу к разделу импорта
  */
-export function CostsScreen({ worldId, section }: { worldId: string; section: string | null }) {
+export function CostsScreen({ worldId, section, target = null }: { worldId: string; section: string | null; target?: string | null }) {
   const m = useMessages();
   const [rights, retry] = useResource<BoundsIndexView>(`${worldPath(worldId, 'bounds')}?offset=0&limit=1`, m.locale);
   return (
@@ -19,7 +19,8 @@ export function CostsScreen({ worldId, section }: { worldId: string; section: st
       <p className="page-actions">
         <button type="button" onClick={() => document.getElementById('cost-import')?.scrollIntoView({ block: 'start' })}>{m.ui.costs.importAction}</button>
       </p>
-      <BoundsIndex worldId={worldId} />
+      {/* Шаг 96 (В20): `costs/edit/<предложение>` — правка границ с этим предложением выбранным, прокручена к ней */}
+      <BoundsIndex worldId={worldId} preselect={section === 'edit' ? target : null} focusEdit={section === 'edit'} />
       <SectionAnchor id="cost-import" focus={section === 'import'} />
       <Load shape="cards" resource={rights} retry={retry}>{(view) => <CostImportPanel worldId={worldId} canEdit={view.canEdit} />}</Load>
     </section>

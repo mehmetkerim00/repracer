@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ALL_REASON_CODES, COMPETITOR_RULE_DERIVED_KEYS, ENGINE_REASON_CODES, GATE_REASON_CODES, REASON_PARAMS, SANITY_NOTE_CODES, SANITY_NOTE_PARAMS, SANITY_WARNING_CODES, type ParamSchema, type ParamSpec } from '@repracer/pricing-model';
-import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, REASON_LIMITS, shadowChart, shadowSummaryList } from './index.ts';
+import { describe, explainabilityCatalogue, FEED_PAGE_MAX, LOCALES, messagesFor, parseAmountInput, parseFeedQuery, parsePercentInput, periodRange, REASON_LIMITS, shadowChart, shadowSummaryList, type PeriodPreset } from './index.ts';
 
 /** Р-71, Р-72: словарь DE/EN полон, суммы — только с валютой, значения канала вне слепка помечаются */
 
@@ -160,17 +160,20 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
   // суток, поэтому i-1 (17.09) — начало эпизода в этом окне; в окне семи суток оно продолжает удержание 15.09
   const episodeStartOf = async (days: number) => ((await sliceOf(intents, days)) as unknown as { intents: Array<{ intentId: string; episodeStart: boolean }> }).intents.find((i) => i.intentId === 'i-1')!.episodeStart;
   assert.deepEqual([await episodeStartOf(1), await episodeStartOf(7)], [true, false]);
-  const day = dangerousReport(world, await sliceOf(intents, 1), 1, en);
-  assert.equal(day.headline, 'The floor held the price 2 times in the last 1 day; without it you would have sold €7.55 cheaper');
+  // Шаг 96: период — пресетом 24h / 7d от того же «сейчас», фраза периода — словарём
+  const rangeOf = (preset: PeriodPreset) => periodRange({ preset }, '2026-09-17T12:00:00.000Z', 'UTC', 30);
+  const day = dangerousReport(world, await sliceOf(intents, 1), rangeOf('24h'), en.ui.period.phrase['24h'], en);
+  assert.equal(day.headline, 'The floor held the price 2 times in the last 24 hours; without it you would have sold €7.55 cheaper');
   assert.deepEqual(day.floorHolds.items.map((i) => [i.kind, i.target, i.floor, i.below]), [['HELD', '€14.00', '€15.00', '€4.50'], ['CAPPED', '€11.95', '€15.00', '€3.05']]);
-  assert.equal(day.gateHeadline, 'Your bounds stopped 0 dangerous changes in the last 1 day');
+  assert.equal(day.gateHeadline, 'Your bounds stopped 0 dangerous changes in the last 24 hours');
   // За 7 дней оценка 15.09 и 17.09 10:00 идут подряд без оценки вне пола — одно удержание; вместе с удержанием после 10:30 — два
-  assert.equal(dangerousReport(world, await sliceOf(intents, 7), 7, en).floorHolds.count, 2);
+  assert.equal(dangerousReport(world, await sliceOf(intents, 7), rangeOf('7d'), en.ui.period.phrase['7d'], en).floorHolds.count, 2);
   // Ревью шага 22, находка 4: цена стоит на полу, стратегия оценивается 12 раз подряд — одно удержание, а не двенадцать
   const repeated = Array.from({ length: 12 }, (_, n) =>
     intent(`r-${n}`, `2026-09-17T11:${String(n * 5).padStart(2, '0')}:00.000Z`, { code: 'ALREADY_AT_TARGET', params: {} }, [{ code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1195, minMinor: 1500, currency: 'EUR' } }], 1500));
-  assert.equal(dangerousReport(world, await sliceOf(repeated, 1), 1, en).headline, 'The floor held the price 1 time in the last 1 day; without it you would have sold €3.05 cheaper');
-  assert.equal(dangerousReport(world, await sliceOf(intents, 1), 1, messagesFor('de')).headline, 'Die Untergrenze hat den Preis in den letzten 1 Tag 2-mal gehalten; ohne sie hätten Sie 7,55 € billiger verkauft');
+  assert.equal(dangerousReport(world, await sliceOf(repeated, 1), rangeOf('24h'), en.ui.period.phrase['24h'], en).headline, 'The floor held the price 1 time in the last 24 hours; without it you would have sold €3.05 cheaper');
+  const de = messagesFor('de');
+  assert.equal(dangerousReport(world, await sliceOf(intents, 1), rangeOf('24h'), de.ui.period.phrase['24h'], de).headline, 'Die Untergrenze hat den Preis in den letzten 24 Stunden 2-mal gehalten; ohne sie hätten Sie 7,55 € billiger verkauft');
 });
 
 test('step 23: a person enters amounts and percentages, not cents and basis points; anything else is refused, not guessed', () => {
@@ -506,7 +509,7 @@ test('step 84: the shadow summary as «metric — value» says what the sentence
     ['Period', `${en.when(base.since)} — ${en.when(base.until)}`],
     ['Price landed exactly on the floor', '131 times'],
     ['Price landed exactly on the ceiling', '0 times'],
-    ['Writes held by the shadow', '722 — prices 517, stock 205'],
+    ['Updates held back by the shadow', '722 — prices 517, stock 205'],
     ['Would have used the external edit budget of the channel', 'about 10'],
     ['Without the floor you would have sold cheaper by', '$1,883.25'],
   ]);

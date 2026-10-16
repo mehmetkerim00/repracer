@@ -1,4 +1,5 @@
 import type { FeedPage, FeedPageItem, FeedPageQuery } from '@repracer/pricing-pipeline';
+import { parsePeriod, type Period } from './period.ts';
 import type { Messages } from './i18n/index.ts';
 import { OFFER_CHOICES } from './compliance.ts';
 import { strategyLabel } from './products.ts';
@@ -30,6 +31,14 @@ export interface FeedItem {
 export const FEED_STATUS_GROUPS = ['APPLIED', 'IN_FLIGHT', 'NOT_SENT', 'SUPERSEDED', 'SHADOW_HELD'] as const;
 export type FeedStatusGroup = (typeof FEED_STATUS_GROUPS)[number];
 export const FEED_PERIODS_DAYS = [1, 7, 30] as const;
+/** Шаг 96: сырьё цен хранится 90 дней [Р-21] — глубже этого период ленты не уходит */
+export const FEED_MAX_DAYS = 90;
+/** Момент времени порта — тип окна хранилища, без зависимости модели от порта канала */
+type Instant = NonNullable<FeedPageQuery['since']>;
+/** Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — не больше этого числа; больше — экран это говорит */
+export const SEARCH_FILTER_LIMIT = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
 /** Страница ленты — не больше 200 записей за запрос */
 export const FEED_PAGE_MAX = 200;
 
@@ -38,6 +47,15 @@ export interface FeedQuery {
   writeScopeId?: string;
   status?: FeedStatusGroup;
   days?: (typeof FEED_PERIODS_DAYS)[number];
+  /** Шаг 96: период экрана (пресет или свой диапазон дат) — окно считает сервер в поясе пространства */
+  period?: Period;
+  /** Шаг 96 (Б11): поиск по названию, SKU или EAN — таблица фильтруется по мере ввода */
+  q?: string;
+  /** Предложения, найденные поиском (их считает сервер; задание выгрузки несёт их готовыми) */
+  scopes?: string[];
+  /** Шаг 96: окно, уже посчитанное сервером, — так его несёт задание выгрузки: файл ровно за тот диапазон, что был на экране */
+  since?: string;
+  until?: string;
   offset?: number;
   limit?: number;
 }
@@ -47,6 +65,10 @@ export interface PriceFeedView {
   items: FeedItem[];
   counts: { applied: number; inFlight: number; notSent: number; superseded: number; shadowHeld: number };
   query: { writeScopeId: string | null; status: FeedStatusGroup | null; days: number | null; offset: number; limit: number };
+  /** Шаг 96: начало периода отрезано глубиной хранения ленты */
+  clipped: boolean;
+  /** Шаг 96 (Б11): поиск по мере ввода — сколько предложений нашлось и по скольким отфильтрована таблица */
+  search: { total: number; shown: number } | null;
   page: { from: number; to: number; total: number; text: string; hasPrevious: boolean; hasNext: boolean };
   /** Офферы для фильтра: первые OFFER_CHOICES [Р-136] */
   offers: UnitRef[];
@@ -63,6 +85,27 @@ export function parseFeedQuery(params: URLSearchParams): FeedQuery | null {
   if (status) {
     if (!(FEED_STATUS_GROUPS as readonly string[]).includes(status)) return null;
     q.status = status as FeedStatusGroup;
+  }
+  const search = params.get('q');
+  if (search !== null) {
+    if (search.trim().length > 100) return null;
+    if (search.trim() !== '') q.q = search.trim();
+  }
+  const period = parsePeriod(params);
+  if (period === null) return null;
+  if (period) q.period = period;
+  for (const key of ['since', 'until'] as const) {
+    const v = params.get(key);
+    if (v === null) continue;
+    if (!INSTANT.test(v) || Number.isNaN(Date.parse(v))) return null;
+    q[key] = new Date(Date.parse(v)).toISOString();
+  }
+  if (q.since && q.until && q.since > q.until) return null;
+  const scopes = params.get('scopes');
+  if (scopes !== null) {
+    const ids = scopes === '' ? [] : scopes.split(',');
+    if (ids.length > SEARCH_FILTER_LIMIT || ids.some((id) => !UUID.test(id))) return null;
+    q.scopes = ids;
   }
   const days = params.get('days');
   if (days) {
@@ -91,7 +134,8 @@ export function feedPageQuery(filter: FeedQuery, total?: number): FeedPageQuery 
   const raw = filter.offset ?? 0;
   const offset = total === undefined ? raw : Math.min(raw, Math.max(0, total - 1));
   return { offset, limit, ...(filter.writeScopeId ? { writeScopeId: filter.writeScopeId } : {}), ...(filter.status ? { status: filter.status } : {}),
-    ...(filter.days ? { sinceDays: filter.days } : {}) };
+    ...(filter.since ? { since: filter.since as Instant } : filter.days ? { sinceDays: filter.days } : {}), ...(filter.until ? { until: filter.until as Instant } : {}),
+    ...(filter.scopes ? { writeScopeIds: filter.scopes } : {}) };
 }
 
 /** Одна строка ленты из записи и того, что база нашла к ней: решение и «было» из горячего намерения */
@@ -119,7 +163,7 @@ export function feedItemOf(world: StandWorld, m: Messages, item: FeedPageItem): 
  * Р-154: страницу, итог и счётчики групп отдаёт база (`feedPage`); здесь — только строки показанного. До шага 35 лента
  * фильтровала и сортировала все записи тенанта в памяти на каждый запрос.
  */
-export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, page: FeedPage, query: FeedPageQuery): PriceFeedView {
+export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, page: FeedPage, query: FeedPageQuery, clipped = false, search: { total: number; shown: number } | null = null): PriceFeedView {
   const f = m.ui.feed;
   const items = page.items.map((i) => feedItemOf(world, m, i));
   const from = page.total === 0 ? 0 : query.offset + 1;
@@ -129,6 +173,7 @@ export function priceFeed(world: StandWorld, m: Messages, filter: FeedQuery, pag
     // Счётчики — по офферу и периоду без фильтра статуса: сколько в каждой группе
     counts: { applied: page.counts.APPLIED, inFlight: page.counts.IN_FLIGHT, notSent: page.counts.NOT_SENT, superseded: page.counts.SUPERSEDED, shadowHeld: page.counts.SHADOW_HELD },
     query: { writeScopeId: filter.writeScopeId ?? null, status: filter.status ?? null, days: filter.days ?? null, offset: query.offset, limit: query.limit },
+    clipped, search,
     page: { from, to, total: page.total, text: f.page(from, to, page.total), hasPrevious: query.offset > 0, hasNext: to < page.total },
     // Р-136: фильтр по офферу показывает первые N — на каталоге целевого клиента список фильтра сам весил мегабайты
     offers: catalogFirst(world, OFFER_CHOICES).map((s) => unitOf(world, s, m)),

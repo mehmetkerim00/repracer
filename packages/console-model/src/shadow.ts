@@ -5,6 +5,7 @@ import type { Messages } from './i18n/index.ts';
 import { zoneName } from './i18n/shape.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, storefrontName, type Gap, type StandWorld } from './world.ts';
+import { periodDays, periodPhrase, type Period, type PeriodRange } from './period.ts';
 
 /**
  * Р-169…Р-171 (шаг 41): экран «Теневой режим». Показывает то, чего продавец иначе не увидит: что движок СДЕЛАЛ БЫ, будь
@@ -51,6 +52,8 @@ export interface MarketplacePropertyView {
   question: string | null;
   /** Держит ли это свойство боевой режим: у UNKNOWN — да, и продавец видит это словами */
   blocksLive: boolean;
+  /** Шаг 96 (аудит А4): строка людскими словами — что это, в каком состоянии и кто подтверждает */
+  humanText: string;
 }
 
 export interface ShadowDigestView {
@@ -76,7 +79,9 @@ export interface ShadowView {
    * Находка 3 ревью шага 41: окно отчёта было параметром хранилища, которого не передавал никто, и ничем не ограниченным.
    * Теперь его выбирает продавец из НАЗВАННЫХ вариантов, и число дней не приходит из запроса свободным.
    */
-  periods: ShadowPeriodChoice[];
+  /** Шаг 96: фраза периода и признак отрезанного начала */
+  phrase: string;
+  clipped: boolean;
   /** Есть ли вообще теневой аккаунт: без него экран честно говорит, что показывать нечего */
   anyShadow: boolean;
   summary: ShadowSummary;
@@ -94,6 +99,8 @@ export interface ShadowView {
   digests: ShadowDigestView[];
   digestsTitle: string;
   propertiesTitle: string;
+  /** Шаг 96 (А4): первой строкой блока — что от продавца ничего не нужно (свойства закрывают команда, первая запись или канал) */
+  nothingNeeded: string | null;
   /**
    * Шаг 68 (K7): у демо — предпросмотр недельного письма за последние семь суток. Демо-тенанту письмо не отправляется (0167), а
    * показать его клиенту надо за десять минут; данные синтетические, и блок говорит это прямо
@@ -280,6 +287,7 @@ const propertyView = (p: MarketplaceProperty, m: Messages, now: string): Marketp
     closesByText: p.property === 'DAY_BOUNDARY' && p.status === 'UNKNOWN' ? t.dayBoundaryProcess : t.closesBy[p.closesBy] ?? p.closesBy,
     question: p.question,
     blocksLive: p.status === 'UNKNOWN',
+    humanText: [t.human[p.property] ?? t.names[p.property] ?? p.property, t.humanStatus[p.status] ?? '', t.humanCloses[p.closesBy] ?? ''].filter(Boolean).join(' '),
   };
 };
 
@@ -320,12 +328,13 @@ function digestPreview(world: StandWorld, page: ShadowPage, accounts: readonly S
   return { title: m.ui.shadow.digest.previewTitle, synthetic: m.ui.shadow.digest.previewSynthetic, subject: letter.subject, text: letter.lines.join('\n') };
 }
 
-export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery, m: Messages, days: number, timeZone?: string | null): ShadowView {
+export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery, m: Messages, period: Period, range: PeriodRange, timeZone?: string | null): ShadowView {
   const t = m.ui.shadow;
   const accounts = page.accounts.map((a) => accountView(a, world, m));
   return {
     worldId: world.id, demo: world.demo === true, intro: t.intro,
-    periods: SHADOW_PERIOD_DAYS.map((d) => ({ days: d, label: t.period(d), active: d === days })),
+    // Шаг 96: период — пресетом или своим диапазоном дат (общее правило экранов); фраза — для заголовков, `clipped` — что отрезано
+    phrase: periodPhrase(period, m), clipped: range.clipped,
     properties: page.properties.map((p) => propertyView(p, m, world.now)),
     /**
      * Р-172: если бой закрыт неизвестным свойством, экран говорит это ДО нажатия кнопки. Иначе продавец нажимает,
@@ -336,6 +345,8 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
           .map((p) => `${storefrontName(p.channel, p.marketplace, m)} · ${t.properties.names[p.property] ?? p.property}`).join(', '))
       : null,
     propertiesTitle: t.properties.title,
+    // Ни одно свойство не закрывает продавец: подтверждают команда платформы, первая настоящая отправка или сам канал
+    nothingNeeded: page.properties.length > 0 ? t.properties.nothingNeeded : null,
     digestsTitle: t.digest.historyTitle,
     digests: page.digests.map((d) => ({
       periodText: `${m.when(d.periodStart)} — ${m.when(d.periodEnd)}`,
@@ -351,8 +362,9 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
     anyShadow: accounts.some((a) => a.writeMode === 'SHADOW' && a.authStatus === 'ACTIVE'),
     summary: page.summary, summaryLines: shadowSummaryLines(page.summary, m),
     ...(() => { const l = shadowSummaryList(page.summary, m); return { summaryList: l.rows, summaryNotes: l.notes }; })(),
-    chart: shadowChart(page.decisionsByHour, page.summary.until, days, m, timeZone),
-    digestPreview: world.demo === true && days === 7 ? digestPreview(world, page, accounts, m) : null,
+    chart: shadowChart(page.decisionsByHour, page.summary.until, periodDays(range, timeZone), m, timeZone),
+    // Превью недельного письма — у недели: письмо считает семь суток
+    digestPreview: world.demo === true && 'preset' in period && period.preset === '7d' ? digestPreview(world, page, accounts, m) : null,
     accounts,
     rows: page.rows.map((r): ShadowWriteView => ({
       ...r,

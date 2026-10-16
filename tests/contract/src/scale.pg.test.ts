@@ -222,7 +222,7 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
     const slice = await store.interventions(tenant, new Date(Date.parse(to) - 7 * 86_400_000).toISOString() as never, to as never);
     const f = await store.consoleCatalogFacts(tenant, { keys: slice.rejectedSnapshots.map((x) => x.key) });
     const w = await worldOf([...[...slice.decisions, ...slice.intents, ...slice.endedWrites].map((x) => x.writeScopeId), ...(f.keyed ?? []).map((k) => k.writeScopeId)], { catalogFacts: f });
-    return { rejected: rejectedView(w, slice, m), dangerous: dangerousReport(w, slice, 7, m) };
+    return { rejected: rejectedView(w, slice, m), dangerous: dangerousReport(w, slice, { since: new Date(Date.parse(to) - 7 * 86_400_000).toISOString(), until: to, clipped: false, maxDays: 30 }, m.ui.period.phrase['7d'], m) };
   }, bytesOf);
   await timed('screen: world counters (list of worlds)', SCREEN_SECONDS, () => store.worldCounters(tenant, now()), bytesOf);
   await timed('screen: onboarding status', SCREEN_SECONDS, () => store.onboardingStatus(tenant), bytesOf);

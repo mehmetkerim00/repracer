@@ -32,6 +32,24 @@ let usApi: ReturnType<typeof createStandApi>;
 /** Шаг 88 [Р-213]: профиль us с флагом расширенных ролей — вход предлагает пять ролей */
 let extendedApi: ReturnType<typeof createStandApi>;
 let currentApi: ReturnType<typeof createStandApi>;
+/** Шаг 96: подменённый ответ отчёта о поле (страницы по 50 и схлопывание повторов); null — настоящий ответ стенда */
+let syntheticDangerous: unknown = null;
+
+/** Синтетический отчёт о поле: 24 одинаковых удержания одного предложения и 106 разных — 107 строк после схлопывания, три страницы */
+function syntheticFloorReport(worldId: string) {
+  const reason = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'Target capped at your minimum price.', problems: [], limit: null, withheld: [] };
+  const unit = (i: number) => ({ writeScopeId: `smoke-hold-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `u-${i}`, channelProductRef: `p-${i}`, condition: 'NEW', gtin: null, label: `Synthetic lamp ${i} · kaufland.de` });
+  const at = (i: number) => new Date(Date.UTC(2026, 9, 15, 12) - i * 600_000).toISOString();
+  const items = [
+    ...Array.from({ length: 24 }, (_, i) => ({ at: at(i), unit: unit(0), kind: 'CAPPED', target: '€9.99', floor: '€14.00', below: '€4.01', reason, decisionId: null })),
+    ...Array.from({ length: 106 }, (_, i) => ({ at: at(24 + i), unit: unit(i + 1), kind: 'CAPPED', target: '€9.99', floor: '€14.00', below: '€4.01', reason, decisionId: null })),
+  ];
+  return {
+    worldId, phrase: 'in the last 7 days', from: at(130), to: at(0), clipped: false,
+    headline: 'The floor held the price 107 times in the last 7 days', floorHolds: { count: 130, withoutFloor: [], unknownAmount: 0, items },
+    gateHeadline: 'Your bounds stopped 0 dangerous changes in the last 7 days', count: 0, prevented: [], worst: null, byUnit: [], byBound: [], items: [], truncated: false, gaps: [],
+  };
+}
 
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
 function syntheticShadow() {
@@ -101,7 +119,8 @@ before(async () => {
   usApi = createStandApi(all, identity, { market: 'us', connect, people: STAND_PEOPLE });
   extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true, people: STAND_PEOPLE });
   currentApi = euApi;
-  stand = createStandServer((req) => currentApi(req));
+  // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
+  stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous }) : currentApi(req)));
   await new Promise<void>((resolve) => stand!.listen(0, '127.0.0.1', resolve));
   const standPort = (stand.address() as { port: number }).port;
   vite = await createServer({
@@ -176,7 +195,7 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   for (const scheme of ['light', 'dark'] as const) {
     await b.setColorScheme(scheme);
     // Шаг 95 [Р-217]: экраны нового меню и их вкладки — журнал решений, люди и правила защиты, массовые операции
-    for (const screen of ['products', 'feed', 'feed/decisions', 'strategies', 'costs', 'protections', 'protections/people', 'stop', 'stock', 'products/bulk']) {
+    for (const screen of ['products', 'feed', 'feed/decisions', 'strategies', 'costs', 'protections', 'protections/people', 'stop', 'inventory', 'products/bulk']) {
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${screen}`)}, true)`);
       await settled(b, `${scheme} ${screen}`);
       for (const t of await stickyTables()) assert.ok(t.table <= t.wrap + 1, `${scheme} ${screen}: the table is ${t.table}px wide in a ${t.wrap}px frame — columns hide under the pinned action column`);
@@ -210,9 +229,9 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
  * выдвижной панелью, которую закрывают выбор пункта, крестик, клик мимо и Esc; при 1012 и шире — прежняя боковая панель без кнопки меню
  */
 /** Шаг 95 [Р-217]: меню из 9 пунктов в профиле us (в eu у пространства с витриной ЕС перед «Stop pricing» — Omnibus) */
-const MENU_US = ['shadow', 'feed', 'strategies', 'costs', 'protections', 'products', 'stock', 'channels', 'stop'];
+const MENU_US = ['shadow', 'feed', 'strategies', 'costs', 'protections', 'products', 'inventory', 'channels', 'stop'];
 /** Шаг 95 [Р-217]: экраны меню из 9 пунктов и их вкладки; последним — Costs & floors (на нём проверяется навигация ниже) */
-const SCREENS = ['shadow', 'products', 'products/bulk', 'stock', 'feed', 'feed/decisions', 'protections', 'protections/people', 'stop', 'channels', 'strategies', 'compliance', 'costs'];
+const SCREENS = ['shadow', 'products', 'products/bulk', 'inventory', 'feed', 'feed/decisions', 'protections', 'protections/people', 'stop', 'channels', 'strategies', 'compliance', 'costs'];
 const WIDTHS: ReadonlyArray<readonly [number, number]> = [[375, 812], [768, 1024], [1012, 800], [1440, 900]];
 
 /** Ширина прокрутки документа против ширины окна (без полосы прокрутки) и элементы, которые торчат за окно не внутри своей рамки прокрутки */
@@ -329,7 +348,7 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       await b.evaluate(`(document.getElementById('row-control').remove(), true)`);
       assert.ok(bad.length > 0, 'control: a card pushed down inside a row is caught');
       // положительный контроль стандарта формы: подпись сбоку от поля и галочка высотой поля ввода (так было до шага 94) — правило краснеет
-      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stock`)}, true)`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/inventory`)}, true)`);
       await settled(b, `${width}px stock, form control`);
       for (const css of ['.field { flex-direction: row !important; }', ".check-field > input { min-height: var(--control-h) !important; }"]) {
         await b.evaluate(`(() => { const st = document.createElement('style'); st.id = 'form-control'; st.textContent = ${JSON.stringify(css)}; document.head.append(st); return true; })()`);
@@ -352,8 +371,8 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
     await open();
     // пункты меню, «← All workspaces», язык и выход видны только в открытой панели — и проверяются в ней
     assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${width}px, open drawer: touch targets lower than 44px`);
-    await b.click(en.ui.app.screens.stock, '.nav-group a');
-    assert.deepEqual(await nav(), { menu: true, sidebar: false, screen: 'stock' }, `${width}px: choosing an item navigates and closes the drawer`);
+    await b.click(en.ui.app.screens.inventory, '.nav-group a');
+    assert.deepEqual(await nav(), { menu: true, sidebar: false, screen: 'inventory' }, `${width}px: choosing an item navigates and closes the drawer`);
     await settled(b, `${width}px stock after the drawer`);
     await open();
     await b.click(en.ui.app.closeMenu);
@@ -450,6 +469,8 @@ const OLD_ROUTES: ReadonlyArray<readonly [string, string, string]> = [
   ['decisions', 'feed/decisions', 'feed'], ['rejected', 'protections/rules', 'protections'], ['dangerous', 'protections/rules', 'protections'],
   ['dangerous/30', 'protections/rules/30', 'protections'], ['bounds', 'costs', 'costs'], ['cost-import', 'costs/import', 'costs'],
   ['connections', 'channels/accounts', 'channels'], ['onboarding', 'channels', 'channels'], ['jobs', 'products/bulk', 'products'],
+  // Шаг 96 (аудит В19): страница остатков — Inventory
+  ['stock', 'inventory', 'inventory'],
 ];
 
 test('step 95 (Р-217): nine menu items; every old address leads to its new place and section; a decision receipt and an offer page keep their addresses', async () => {
@@ -469,10 +490,10 @@ test('step 95 (Р-217): nine menu items; every old address leads to its new plac
   const waitAt = async (want: string) => { for (let i = 0; i < 50 && (await at()) !== want; i++) await new Promise((r) => setTimeout(r, 100)); return at(); };
   const page = () => b.evaluate<{ heading: string; active: string | null }>(`({ heading: document.querySelector('.world-content h2')?.textContent.trim() ?? '',
     active: document.querySelector('.nav-group a.active')?.getAttribute('href').split('/')[3] ?? null })`);
-  const headingOf: Record<string, string> = { feed: en.ui.app.screens.feed, protections: en.ui.app.screens.protections, costs: en.ui.app.screens.costs, channels: en.ui.app.screens.channels, products: en.ui.jobs.pageTitle };
+  const headingOf: Record<string, string> = { feed: en.ui.app.screens.feed, protections: en.ui.app.screens.protections, costs: en.ui.app.screens.costs, channels: en.ui.app.screens.channels, products: en.ui.jobs.pageTitle, inventory: en.ui.app.screens.inventory };
   for (const [old, to, menu] of OLD_ROUTES) {
-    await go('stock');
-    await settled(b, 'stock');
+    await go('inventory');
+    await settled(b, 'inventory');
     await go(old);
     assert.equal(await waitAt(to), to, `«${old}» leads to «${to}»`);
     await settled(b, to);
@@ -489,7 +510,7 @@ test('step 95 (Р-217): nine menu items; every old address leads to its new plac
     }
     // «Назад» ведёт туда, откуда пришли, а не на прежний адрес (он перенаправил бы снова)
     await b.evaluate('(history.back(), true)');
-    assert.equal(await waitAt('stock'), 'stock', `«${old}»: back returns to the page before, not to the redirect`);
+    assert.equal(await waitAt('inventory'), 'inventory', `«${old}»: back returns to the page before, not to the redirect`);
   }
   // Положительный контроль: без раздела в адресе страница остаётся наверху — условие «раздел в окне» выше само собой не выполняется
   await go('costs');
@@ -508,7 +529,8 @@ test('step 95 (Р-217): nine menu items; every old address leads to its new plac
   assert.equal(await waitAt('feed/decisions'), 'feed/decisions', 'Kind «All decisions» switches the journal');
   await settled(b, 'feed/decisions');
   const fields = await b.evaluate<string[]>(`[...document.querySelectorAll('.toolbar .field-label')].map((l) => l.textContent.trim())`);
-  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.feed.filters.offer], 'decisions are filtered by offer only — status and period belong to price writes');
+  // Шаг 96: у решений — период и исход (вариант шага 95 принят); статус — только у записей
+  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.period.label, en.ui.feed.filters.offer, en.ui.feed.outcome.label], 'decisions: kind, period, offer and outcome — status belongs to price writes');
   const receipt = await b.evaluate<string>(`document.querySelector('.world-content table a.row-link').getAttribute('href')`);
   await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`);
   await settled(b, 'receipt');
@@ -531,18 +553,80 @@ test('step 95 (Р-217): nine menu items; every old address leads to its new plac
   await b.click(en.ui.protections.people, '.protections > nav.tabs a');
   assert.equal(await waitAt('protections/people'), 'protections/people');
   await settled(b, 'protections/people');
-  // Offers: «Bulk edit» открывает массовые операции, пункт меню — Offers
+  // Offers: «Bulk operations» (шаг 96, было «Bulk edit») открывает массовые операции, пункт меню — Offers
   await go('products');
   await settled(b, 'products');
   await b.click(en.ui.products.bulkEdit, 'a.button-link');
   assert.equal(await waitAt('products/bulk'), 'products/bulk');
   await settled(b, 'bulk');
   assert.deepEqual(await page(), { heading: en.ui.jobs.pageTitle, active: 'products' });
-  // Channels: путь подключения — верхним разделом, пока не пройден (у смоук-мира путь не выбран)
+  // Channels: шаг 96 (аудит Б15) — аккаунты первыми; путь подключения, который ещё идёт (у смоук-мира путь не выбран), — чеклистом под ними
   await go('channels');
   await settled(b, 'channels');
   assert.ok(await b.evaluate<boolean>(`(() => { const s = document.querySelector('.setup-section'), a = document.getElementById('channel-accounts');
-    return !!s && !!a && s.getBoundingClientRect().top < a.getBoundingClientRect().top; })()`), 'the unfinished setup checklist stands above the channel accounts');
+    return !!s && !!a && s.getBoundingClientRect().top > a.getBoundingClientRect().top; })()`), 'the channel accounts come first, the unfinished setup checklist below them');
+  assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors');
+});
+
+/**
+ * Шаг 96 (аудит): иконки меню — разные (Octicons, сверку с пакетом держит design-tokens.test.ts); поиск журнала цен фильтрует саму
+ * таблицу по мере ввода (Б11); вкладка «Prevented by rules» — страницы по 50 и одинаковые удержания одной строкой «×N» (Б12)
+ */
+test('step 96: menu icons differ; the price journal search filters the table as you type; Prevented by rules pages by 50 and collapses repeats', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme(null);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  // Иконки: у каждого пункта своя (первый путь иконки различает их), всего пунктов с иконкой — столько же, сколько пунктов
+  const icons = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.querySelector('svg.octicon path')?.getAttribute('d') ?? '')`);
+  assert.ok(icons.length >= 9 && icons.every((d) => d.length > 10), `every menu item has an Octicon — ${icons.length}`);
+  assert.equal(new Set(icons).size, icons.length, 'menu icons are unique');
+  // Поиск фильтрует таблицу по мере ввода: несуществующее слово — пустая таблица, часть SKU — только её строки
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed`)}, true)`);
+  await settled(b, 'feed');
+  const rows = () => b.evaluate<string[]>(`[...document.querySelectorAll('.journal-table table.feed tbody tr')].map((r) => r.querySelector('.offer').textContent.trim())`);
+  const all = await rows();
+  assert.ok(all.length >= 1, `the journal of the smoke world has rows — ${all.length}`);
+  const type = (text: string) => b.evaluate(`(() => { const i = document.querySelector('.filters .offer-picker input[type=search]'); i.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(text)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const waitRows = async (ok: (r: string[]) => boolean) => { let r = await rows(); for (let i = 0; i < 50 && !ok(r); i++) { await new Promise((x) => setTimeout(x, 100)); r = await rows(); } return r; };
+  await type('zzz-no-such-offer');
+  assert.deepEqual(await waitRows((r) => r.length === 0), [], 'a search that matches nothing empties the table');
+  assert.equal(await b.evaluate<string>(`document.activeElement?.getAttribute('type') ?? ''`), 'search', 'the search field keeps the focus while the table reloads');
+  const fragment = all[0]!.split(' · ')[0]!.slice(-4);
+  await type(fragment);
+  const found = await waitRows((r) => r.length > 0);
+  assert.ok(found.length > 0 && found.every((r) => r.toLowerCase().includes(fragment.toLowerCase())), `rows of «${fragment}» — ${JSON.stringify(found)}`);
+  // Строка журнала ведёт на квитанцию целиком (Б17)
+  await b.evaluate(`(document.querySelector('.journal-table table.feed tbody tr.row-clickable td.offer').click(), true)`);
+  for (let i = 0; i < 30 && !(await b.evaluate<string>('location.hash')).includes('/decisions/'); i++) await new Promise((x) => setTimeout(x, 100));
+  assert.match(await b.evaluate<string>('location.hash'), /\/decisions\/[^/]+$/, 'a click on the row opens the decision receipt');
+  // Prevented by rules: 130 удержаний → 107 строк (24 одинаковых — одной строкой «×24»), по 50 на странице
+  syntheticDangerous = syntheticFloorReport(world);
+  try {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/protections/rules`)}, true)`);
+    await settled(b, 'protections');
+    const holdRows = () => b.evaluate<number>(`document.querySelector('.protections table.sticky-end tbody')?.querySelectorAll('tr').length ?? 0`);
+    for (let i = 0; i < 50 && (await holdRows()) === 0; i++) await new Promise((x) => setTimeout(x, 100));
+    assert.equal(await holdRows(), 50, 'the first page shows 50 rows');
+    const first = await b.evaluate<string>(`document.querySelector('.protections table.sticky-end tbody tr').innerText`);
+    assert.match(first, /×24 in the last 7 days/, `repeats collapse into one row — ${first}`);
+    const pager = () => b.evaluate<string>(`document.querySelector('.protections .local-pager span')?.textContent ?? ''`);
+    assert.equal(await pager(), en.ui.protections.pageOf(1, 50, 107));
+    await b.click(en.ui.feed.next, '.protections .local-pager button');
+    assert.equal(await pager(), en.ui.protections.pageOf(51, 100, 107));
+    await b.click(en.ui.feed.next, '.protections .local-pager button');
+    assert.equal(await holdRows(), 7, 'the last page shows the 7 rows left');
+  } finally {
+    syntheticDangerous = null;
+  }
   assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors');
 });
 

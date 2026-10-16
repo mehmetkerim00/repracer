@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { useResource, worldPath } from '../api.ts';
-import { Gaps, href, Load, NotFound, Pager, useMessages } from '../components.tsx';
+import { Gaps, href, Load, NotFound, Pager, SectionAnchor, useMessages } from '../components.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 
 export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakdown; currency: string }) {
@@ -39,6 +39,8 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
       <p className="back"><a href={href(view.worldId, 'costs')}>{b.back}</a></p>
       <h2>{b.pageTitle}</h2>
       <p className="subtitle">{view.unit.label} · {view.currency}, {view.priceBasis} · {view.taxRegime}</p>
+      {/* Шаг 96 (аудит В20): из разбивки пола — сразу в правку границ с этим предложением */}
+      <p className="page-actions"><a className="button-link" href={href(view.worldId, 'costs', 'edit', view.unit.writeScopeId)}>{b.changeFloor}</a></p>
       <div className="cards">
         <div className="card emphasis"><h3>{b.effectiveFloor}</h3><p className="big">{view.effectiveFloor.amount}</p><p className="small muted">{view.effectiveFloor.source}</p></div>
         <div className="card"><h3>{b.minPrice}</h3><p className="big">{view.minPrice.amount}</p><p className="small muted">{view.minPrice.source}</p></div>
@@ -118,7 +120,7 @@ export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; write
   return <BoundsDetail worldId={worldId} writeScopeId={writeScopeId} />;
 }
 
-export function BoundsIndex({ worldId }: { worldId: string }) {
+export function BoundsIndex({ worldId, preselect = null, focusEdit = false }: { worldId: string; preselect?: string | null; focusEdit?: boolean }) {
   const m = useMessages();
   // Р-136: страница списка; массовая правка применяется к показанной странице — выбор продавца всегда виден на экране
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
@@ -130,7 +132,7 @@ export function BoundsIndex({ worldId }: { worldId: string }) {
           <BoundsIndexView worldId={worldId} items={view.items} embedded />
           <Pager page={view.page} query={query} onQuery={setQuery} />
           {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
-          {view.page.total === 0 ? null : <BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} />}
+          {view.page.total === 0 ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} preselect={preselect} /></>}
         </>
       )}
     </Load>

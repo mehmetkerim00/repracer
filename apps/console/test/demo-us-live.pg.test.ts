@@ -305,3 +305,73 @@ test('шаг 64: перезапуск консоли на той же базе �
   const us = screen.body.accounts.filter((a) => a.marketplaces.includes('EBAY_US') || a.marketplaces.includes('ATVPDKIKX0DER'));
   assert.deepEqual(us.map((a) => a.offers), [12, 12], 'у нового демо свои аккаунты США со своим каталогом');
 });
+
+/**
+ * Шаг 96 (аудит, II): период — 24h / 7d / 30d или свой диапазон дат в поясе пространства — на Shadow mode, Protections и Price changes
+ * (обоих видах). Живой прогон через консоль на прожатой неделе демо: окна вложены, у решений исход делит итог без остатка, поиск
+ * фильтрует саму таблицу, выгрузка «All N entries as a file» — ровно за период экрана, неверный период — 400, а не «всё»
+ */
+test('шаг 96: периоды и поиск через консоль — тень, решения с исходом, лента, защита', async () => {
+  // Гость демо — наблюдатель: читает всё; задание выгрузки ему создать нельзя [Р-160] — выгрузку за период проверяет тест консоли на стенде
+  const token = ((await (await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json()) as StandToken).accessToken;
+  const demo = (await call<WorldSummary[]>('GET', '/api/worlds', token)).body.find((w) => w.demo)!;
+  const w = encodeURIComponent(demo.id);
+  const get = async <T>(path: string): Promise<T> => {
+    const r = await call<T>('GET', `/api/worlds/${w}/${path}`, token);
+    assert.equal(r.status, 200, `${path}: ${JSON.stringify(r.body).slice(0, 300)}`);
+    return r.body;
+  };
+  // Тень: окна вложены — сутки ⊆ неделя ⊆ месяц; свой диапазон «вчера» — внутри недели и не пуст на прожатой неделе
+  const shadow = async (q: string) => (await get<ShadowView>(`shadow?offset=0&limit=5&${q}`)).summary;
+  const [day, week, month] = [await shadow('period=24h'), await shadow('period=7d'), await shadow('period=30d')];
+  assert.ok(day.decisions <= week.decisions && week.decisions <= month.decisions && week.decisions > 0, JSON.stringify([day.decisions, week.decisions, month.decisions]));
+  const now = Date.parse(week.until);
+  const dateOf = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+  const yesterday = dateOf(now - 86_400_000);
+  const one = await shadow(`from=${yesterday}&to=${yesterday}`);
+  assert.ok(one.decisions > 0 && one.decisions <= week.decisions, `вчера: ${one.decisions} из ${week.decisions}`);
+  // Сутки по поясу пространства: окно — от полуночи Лос-Анджелеса, а не UTC
+  assert.equal(dateOf(Date.parse(one.since)), yesterday);
+  assert.equal(new Date(Date.parse(one.since)).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', hour12: false }).replace(/\D/g, ''), '00');
+  assert.equal(Date.parse(one.until) - Date.parse(one.since) >= 23 * 3_600_000, true, 'одни сутки (23–25 часов с учётом перевода часов)');
+
+  // Решения: исход делит итог периода без остатка; каждая строка — своего исхода. Равенство — на ЗАКРЫТОМ диапазоне (до конца вчерашних
+  // суток): демо-мир живой, и у пресета окно кончается «сейчас» — решение между запросами ломало равенство (первый прогон шага 96)
+  const decisions = (q: string) => get<DecisionListView>(`decisions?offset=0&limit=50&${q}`);
+  const closed = `from=${dateOf(now - 6 * 86_400_000)}&to=${yesterday}`;
+  const all = await decisions(closed);
+  const parts = await Promise.all(['CHANGED', 'NO_CHANGE', 'REJECTED'].map((o) => decisions(`${closed}&outcome=${o}`)));
+  assert.equal(parts.reduce((n, p) => n + p.page.total, 0), all.page.total, JSON.stringify(parts.map((p) => p.page.total)));
+  assert.ok(parts[0]!.page.total > 0 && parts[1]!.page.total > 0, 'на прожатой неделе есть и изменения, и «без изменения»');
+  const en = messagesFor('en');
+  assert.ok(parts[1]!.items.every((d) => d.outcome === en.ui.outcomes.NO_CHANGE), JSON.stringify(parts[1]!.items.slice(0, 3).map((d) => d.outcome)));
+  // окна пресетов вложены: сутки запрашиваются раньше недели, поэтому новое решение между запросами порядок не ломает
+  const dayTotal = (await decisions('period=24h')).page.total;
+  assert.ok(dayTotal <= (await decisions('period=7d')).page.total);
+  // Поиск по мере ввода: строки — только найденных предложений
+  const searched = await decisions(`${closed}&q=water`);
+  assert.ok(searched.page.total > 0 && searched.page.total < all.page.total, `поиск «water»: ${searched.page.total} из ${all.page.total}`);
+  assert.ok(searched.items.every((d) => /water/i.test(d.unit?.label ?? '')), JSON.stringify(searched.items.slice(0, 3).map((d) => d.unit?.label)));
+  assert.deepEqual(searched.search, { total: searched.search!.total, shown: searched.search!.total }, 'все найденные предложения — в фильтре');
+
+  // Лента: окна вложены; поиск фильтрует таблицу; выгрузка — ровно за период и поиск экрана
+  const feed = (q: string) => get<PriceFeedView>(`feed?limit=50&${q}`);
+  const [feedDay, feedWeek, feedAll] = [await feed('period=24h'), await feed('period=7d'), await feed('')];
+  assert.ok(feedDay.page.total <= feedWeek.page.total && feedWeek.page.total <= feedAll.page.total && feedWeek.page.total > 0,
+    JSON.stringify([feedDay.page.total, feedWeek.page.total, feedAll.page.total]));
+  const feedSearch = await feed('period=7d&q=water');
+  assert.ok(feedSearch.page.total > 0 && feedSearch.page.total < feedWeek.page.total && feedSearch.items.every((i) => /water/i.test(i.unit?.label ?? '')),
+    `лента, поиск «water»: ${feedSearch.page.total} из ${feedWeek.page.total}`);
+  assert.equal((await call('POST', `/api/worlds/${w}/feed/export`, token, { query: { period: '24h', q: 'water' } })).status, 403, 'гость задания не создаёт [Р-160]');
+
+  // Защита: отчёт о поле и список остановленного — за период; свой диапазон называется датами
+  const report = await get<{ headline: string; clipped: boolean }>(`dangerous?from=${dateOf(now - 3 * 86_400_000)}&to=${dateOf(now)}`);
+  assert.match(report.headline, / from [A-Z][a-z]{2} \d+, \d{4} to [A-Z][a-z]{2} \d+, \d{4}/);
+  assert.equal(report.clipped, false);
+  assert.equal((await get<{ clipped: boolean }>(`dangerous?from=${dateOf(now - 60 * 86_400_000)}&to=${dateOf(now)}`)).clipped, true, 'глубже 30 дней — отрезано и названо');
+  await get('rejected?period=24h');
+  // Неверный период — 400, а не молчаливое «всё»
+  for (const bad of ['shadow?period=5d', `decisions?period=7d&outcome=MAYBE`, `feed?from=${dateOf(now)}&to=${dateOf(now - 86_400_000)}`, 'dangerous?period=7d&days=7', 'rejected?from=2026-02-30&to=2026-03-01']) {
+    assert.equal((await call('GET', `/api/worlds/${w}/${bad}`, token)).status, 400, bad);
+  }
+});

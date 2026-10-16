@@ -58,17 +58,18 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
   );
 }
 
-export function BoundsEditPanel({ worldId, items, total, canEdit }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; canEdit: boolean }) {
+export function BoundsEditPanel({ worldId, items, total, canEdit, preselect = null }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; canEdit: boolean; preselect?: string | null }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   if (!canEdit) return <section className="bounds-edit"><h3>{t.pageTitle}</h3><p className="notice">{t.noRight}</p></section>;
-  return <BoundsEditForm worldId={worldId} items={items} total={total} />;
+  return <BoundsEditForm worldId={worldId} items={items} total={total} preselect={preselect} />;
 }
 
-function BoundsEditForm({ worldId, items, total }: { worldId: string; items: readonly BoundsIndexItem[]; total: number }) {
+function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; preselect: string | null }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
-  const [selected, setSelected] = useState<string[]>([]);
+  // Шаг 96 (аудит В20): «Change this floor» со страницы предложения — правка открывается с этим предложением выбранным
+  const [selected, setSelected] = useState<string[]>(preselect ? [preselect] : []);
   const [min, setMin] = useState<AdjustForm>({ mode: 'KEEP', value: '' });
   const [max, setMax] = useState<AdjustForm>({ mode: 'KEEP', value: '' });
   const [diff, setDiff] = useState<{ view: BoundsDiffView; request: BoundsEditRequest } | null>(null);
@@ -169,7 +170,7 @@ function BoundsEditForm({ worldId, items, total }: { worldId: string; items: rea
       {(() => {
         const nothing = selected.length === 0 && !wholeCatalog;
         return (
-          <FormActions hint={diff === null && nothing ? m.ui.forms.why.selectOffers : null}>
+          <FormActions inline hint={diff === null && nothing ? m.ui.forms.why.selectOffers : null}>
             {diff === null
               ? <button type="button" className="primary" disabled={busy || nothing} title={nothing ? m.ui.forms.why.selectOffers : undefined} onClick={() => void plan()}>{t.plan}</button>
               : <><button type="button" className="primary" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}

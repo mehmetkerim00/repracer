@@ -113,7 +113,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
                   const why = t.requiresAck && !ack ? m.ui.forms.why.confirmSideEffect : job !== null ? m.ui.forms.why.jobRunning : null;
                   return (
                     <Banner key={t.channelAccountId} title={t.title} badge={<Badge tone="warn">{m.ui.stock.traps.title}</Badge>} summary={t.summary} details={t.text}>
-                      {t.requiresAck ? <CheckField label={m.ui.stock.enable.acknowledge} caption={m.ui.stock.enable.acknowledgeCaption} checked={ack} onChange={setAck} /> : null}
+                      {t.requiresAck ? <CheckField label={t.acknowledgeLabel} caption={m.ui.stock.enable.acknowledgeCaption} checked={ack} onChange={setAck} /> : null}
                       <FormActions hint={why}>
                         <button type="button" onClick={() => enable(t.channelAccountId)} disabled={why !== null} title={why ?? undefined}>{m.ui.stock.enable.submit}</button>
                       </FormActions>
@@ -145,7 +145,8 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
   const [withReservations, setWithReservations] = useState(v.filter.withReservations);
   return (
     <section className="stock">
-      <h2>{t.title}</h2>
+      {/* Шаг 96 (В19): страница остатков — Inventory; заголовок — тот же текст, что пункт меню */}
+      <h2>{m.ui.app.screens.inventory}</h2>
       {/* Шаг 77: пометку демо даёт полоса под шапкой на каждом экране мира [Р-151] — второй баннер на экране не нужен */}
       <Intro text={v.intro} />
       {/* Шаг 64: у пустого экрана — не строка нулей, а объяснение ниже */}

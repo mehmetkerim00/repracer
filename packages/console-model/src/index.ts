@@ -14,8 +14,9 @@ export { CHANNEL_PRICING_SHOWN, currentStrategies, fingerprint, parseStrategyDra
 export { boundsDiffView, boundsPlanToken, DIFF_ROWS_SHOWN, expandBoundsEdit, MAX_SCOPES, parseAmountInput, parseBoundsEditRequest, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
 export { OFFER_CHOICES } from './compliance.ts';
 export { catalogPageOf, LIST_PAGE_DEFAULT, LIST_PAGE_MAX, listQuery, pageOf, parseListQuery, selectionAfterPaging, type ListQuery, type PageInfo } from './page.ts';
-export { FEED_PAGE_MAX, FEED_PERIODS_DAYS, FEED_STATUS_GROUPS, parseFeedQuery, priceFeed, feedPageQuery, feedItemOf, type FeedItem, type FeedQuery, type FeedStatusGroup, type PriceFeedView } from './price-feed.ts';
-export { dangerousReport, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
+export { FEED_MAX_DAYS, FEED_PAGE_MAX, FEED_PERIODS_DAYS, SEARCH_FILTER_LIMIT, FEED_STATUS_GROUPS, parseFeedQuery, priceFeed, feedPageQuery, feedItemOf, type FeedItem, type FeedQuery, type FeedStatusGroup, type PriceFeedView } from './price-feed.ts';
+export { dangerousReport, HOT_DECISIONS_DAYS, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
+export { parsePeriod, PERIOD_PRESETS, periodDays, periodPhrase, periodRange, periodSearch, zonedDate, zonedDayStart, type Period, type PeriodPreset, type PeriodRange } from './period.ts';
 export { complianceView, discountCheckView, historyDepthView, PRICE_EVIDENCE_HEADER, priceEvidenceRows, type ComplianceRow, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type OfferDepthRow } from './compliance.ts';
 export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
 export { bulkJobsView, bulkJobView, canCancelBulkJob, CANCEL_ACTION, type BulkJobView, type BulkJobsView } from './jobs.ts';

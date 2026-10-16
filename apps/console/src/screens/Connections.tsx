@@ -187,7 +187,8 @@ function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; 
     <div>
       {/* Шаг 94: вопрос — подписью над сегментами, ответ словами — пояснением под ними */}
       {a.otherTools.options.length > 0 ? (
-        <Field group label={a.otherTools.question} caption={a.otherTools.text}>
+        // Шаг 96 (аудит Б15): неотвеченный вопрос держит путь подключения — пилюля говорит это у самого вопроса
+        <Field group label={<>{a.otherTools.question}{a.otherTools.answer === null ? <> <Badge tone="warn">{m.ui.connections.otherTools.answerToFinish}</Badge></> : null}</>} caption={a.otherTools.text}>
           <div className="segmented">
             {a.otherTools.options.map((o) => (
               <button key={o.answer} type="button" disabled={o.answer === a.otherTools.answer} aria-pressed={o.answer === a.otherTools.answer} onClick={() => post('other-tools', { answer: o.answer })}>{o.label}</button>

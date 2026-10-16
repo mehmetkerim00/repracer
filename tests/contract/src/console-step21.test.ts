@@ -24,7 +24,7 @@ test('step 21: strategies, price feed and the dangerous-changes report render in
     const world = await w.view(user('OWNER'));
     for (const locale of LOCALES) {
       const m = messagesFor(locale);
-      const json = JSON.stringify({ s: strategiesView(world, m, true), f: await feedOf(w.store, world, m), d: await Promise.all([1, 7, 30].map((days) => dangerousOf(w.store, world, days, m))) });
+      const json = JSON.stringify({ s: strategiesView(world, m, true), f: await feedOf(w.store, world, m), d: await Promise.all(([1, 7, 30] as const).map((days) => dangerousOf(w.store, world, days, m))) });
       for (const bad of ['undefined', 'NaN', '[object Object]', 'Infinity']) assert.ok(!json.includes(bad), `${w.id} ${locale}: "${bad}"`);
     }
   }
@@ -108,6 +108,9 @@ test('step 21: the price feed shows the write with the price it started from and
   assert.deepEqual(report.prevented, [{ currency: 'EUR', minor: 1330, amount: '€13.30' }]);
   assert.equal(report.worst?.deviation, '53.2%');
   assert.equal(report.truncated, false);
-  assert.equal((await dangerousOf(aboveWorld.store, above, 90, en)).truncated, true);
+  // Шаг 96: глубже буфера решений (30 дней) период отрезается и экран это говорит — раньше это был «90 дней» и `truncated`
+  const deep = await dangerousOf(aboveWorld.store, above, { from: new Date(Date.parse(above.now) - 90 * 86_400_000).toISOString().slice(0, 10), to: above.now.slice(0, 10) }, en);
+  assert.deepEqual([deep.clipped, deep.truncated], [true, false]);
+  assert.equal(report.clipped, false);
   assert.equal((await dangerousOf(aboveWorld.store, above, 30, messagesFor('de'))).gateHeadline, 'Ihre Grenzen haben in den letzten 30 Tagen 1 gefährliche Änderung gestoppt');
 });

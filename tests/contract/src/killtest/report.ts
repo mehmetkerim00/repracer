@@ -1,4 +1,4 @@
-import { decisionTrace, describe, messagesFor, shadowView, type DecisionTrace, type Messages, type StandWorld } from '@repracer/console-model';
+import { decisionTrace, describe, HOT_DECISIONS_DAYS, messagesFor, periodRange, shadowView, type DecisionTrace, type Messages, type StandWorld } from '@repracer/console-model';
 import { storefrontPriceForMarginBp } from '@repracer/pricing-model';
 import { COLUMN_ALIASES, type Catalog, type CatalogField, type RowNote, type RowProblem } from './catalog.ts';
 import type { KilltestOptions, KilltestProduct, KilltestWorld } from './world.ts';
@@ -168,7 +168,7 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
     state: await world.store.readConsoleState(tenantId, now as never, { scopeIds }),
   }) as StandWorld;
   const page = await world.shadow.shadowPage(tenantId, now as never, { offset: 0, limit: 1, sinceDays: 7 });
-  const s = shadowView(await worldFor([]), page, { offset: 0, limit: 1 } as never, m, 7).summary;
+  const s = shadowView(await worldFor([]), page, { offset: 0, limit: 1 } as never, m, { preset: '7d' }, periodRange({ preset: '7d' }, now, null, HOT_DECISIONS_DAYS)).summary;
   const byScope = new Map<string, KilltestProduct>(world.products.map((p) => [world.dbScopeId(p), p]));
   const decisions = await world.db.rows<DecisionRow>(
     `SELECT d.write_scope_id, d.price_decision_id, d.outcome, d.final_amount_minor, d.effective_floor_minor, d.effective_ceiling_minor,

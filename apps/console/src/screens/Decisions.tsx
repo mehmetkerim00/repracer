@@ -16,11 +16,12 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
       {/* Шаг 95 [Р-217]: список решений — вид журнала Price changes (Kind: All decisions); заголовок страницы — у журнала */}
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         <div className="table-wrap">
-          <table className="cardify">
+          <table className="cardify clickable-rows">
             <thead><tr><th><WhenHead label={t.columns.when} zone={zone} /></th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
             <tbody>
               {items.map((d) => (
-                <tr key={d.decisionId}>
+                // Шаг 96 (Б17): строка журнала ведёт на квитанцию решения целиком
+                <tr key={d.decisionId} className="row-clickable" onClick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) window.location.hash = href(worldId, 'decisions', d.decisionId); }}>
                   <td data-label={`${t.columns.when}${zone ? ` · ${zone}` : ''}`}><When value={d.decidedAt} zone={!zone} /></td>
                   <td className="card-title">{d.unit?.label ?? m.ui.common.noValue}</td>
                   <td className="card-status"><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>

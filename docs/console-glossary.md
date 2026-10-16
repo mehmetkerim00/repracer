@@ -28,28 +28,48 @@
 
 Остальные слова экранов остаются, как были, — правило их не трогает:
 
-- «Shadow mode» / «Schattenmodus», «live writes» / «echte Schreibvorgänge» [Р-169];
+- «Shadow mode» / «Schattenmodus» [Р-169];
 - «bounds» / «Grenzen», «floor» / «Untergrenze»;
 - «strategy» / «Strategie», «Price Gate».
 
-## Меню рабочего пространства (шаг 95, Р-217)
+### Отправка в магазин (шаг 96)
 
-Девять пунктов; пункт меню и заголовок его страницы — одни и те же слова (правило браузерного смоука «step 86» на обоих языках).
+Жаргон «write / writes» на экранах не говорится: продавец читает «отправили цену в магазин», а не «запись в канал». Магазин продавца —
+**store** / **Shop** (разрешённое слово рядом со «storefront», когда речь о том, что видит покупатель).
+
+| Было | EN | DE |
+|---|---|---|
+| live writes, Switch on live writes | **Start sending prices**; поле карточки — **Sending prices** | **Senden der Preise einschalten**; **Senden der Preise** |
+| nothing is written | **nothing is sent to your store** | **es wird nichts an Ihren Shop gesendet** |
+| Writes held | **Held back** — «price changes we did NOT send to your store» | **Zurückgehalten** — «Preisänderungen, die wir NICHT an Ihren Shop gesendet haben» |
+| Write to the channel (шаг квитанции) | **Sending to your store** | **Übertragung an Ihren Shop** |
+| Stock writes, writes in flight, divergences | **stock updates**, **updates being sent now**, **our number differs from the store’s** | **Bestandsaktualisierungen**, **gerade gesendete Aktualisierungen**, **unsere Zahl weicht vom Shop ab** |
+| Price writes (поле Kind) | **Prices sent** | **Gesendete Preise** |
+
+«Write» остаётся только в текстах для оператора платформы (алерты диспетчера) и в коде; в немецком «überschreiben» — обычное слово
+«перезаписать», не жаргон.
+
+## Меню рабочего пространства (шаг 95, Р-217; шаг 96)
+
+Девять пунктов в четырёх разделах: **Overview** / **Überblick** — Shadow mode; **Pricing** / **Preise** — Price changes, Strategies, Costs &
+floors, Protections, Offers; **Inventory** / **Lagerbestand** — Inventory; **Workspace** / **Arbeitsbereich** — Channels, Stop pricing.
+Пункт меню и заголовок его страницы — одни и те же слова (правило браузерного смоука «step 86» на обоих языках). У каждого пункта своя
+иконка из Primer Octicons, все разные (правило «step 96» в токен-тесте и браузерном смоуке).
 
 | Пункт | EN | DE | Что внутри |
 |---|---|---|---|
-| Тень | **Shadow mode** | **Schattenmodus** | Что движок сделал бы, пока ничего не пишется [Р-169] |
-| Журнал цен | **Price changes** | **Preisänderungen** | Единственный журнал цен. «Kind» / «Art»: **Price writes** / **Preisübertragungen** — записи в канал; **All decisions** / **Alle Entscheidungen** — все решения, с записью и без. Строка ведёт на квитанцию **Why this price** / **Warum dieser Preis** — своей страницей |
+| Тень | **Shadow mode** | **Schattenmodus** | Что движок сделал бы, пока в магазин ничего не уходит [Р-169]; сверху — карточка **Next step** / **Nächster Schritt** (шаг 96) |
+| Журнал цен | **Price changes** | **Preisänderungen** | Единственный журнал цен. «Kind» / «Art»: **Prices sent** / **Gesendete Preise** — цены, отправленные в магазин или удержанные; **All decisions** / **Alle Entscheidungen** — все решения, с отправкой и без (шаг 96 — с фильтром **Outcome** / **Ergebnis**). Период — **Period** / **Zeitraum**: 24h / 7d / 30d / **Custom** (24 Std. / 7 Tage / 30 Tage / **Eigener**). Строка целиком ведёт на квитанцию **Why this price** / **Warum dieser Preis** — своей страницей |
 | Стратегии | **Strategies** | **Strategien** | Стратегии, назначение, предпросмотр |
-| Себестоимость и пол | **Costs & floors** | **Kosten & Untergrenzen** | Границы всех предложений и массовая правка, ниже — импорт себестоимости («Import unit costs» / «Stückkosten importieren»). Страница предложения — **Bounds and price floor** / **Grenzen und Preisuntergrenze** |
+| Себестоимость и пол | **Costs & floors** | **Kosten & Untergrenzen** | Границы всех предложений и массовая правка (**Set minimum & maximum price** / **Mindest- und Höchstpreis festlegen**, кнопка **Preview changes** / **Änderungen ansehen**), ниже — импорт себестоимости («Import unit costs» / «Stückkosten importieren»). Страница предложения — **Bounds and price floor** / **Grenzen und Preisuntergrenze**, кнопка **Change this floor** / **Diese Untergrenze ändern** |
 | Защита | **Protections** | **Schutz** | **Stopped by people** / **Von Menschen gestoppt** и **Prevented by rules** / **Durch Regeln verhindert** (сверху — «пол удержал цену N раз») |
-| Предложения | **Offers** | **Angebote** | Кнопка **Bulk edit** / **Massenbearbeitung** ведёт на массовые операции (**Bulk operations** / **Massenvorgänge**) |
-| Остатки | **Stock** | **Bestand** | Источники, синхронизация, расхождения, возвраты |
-| Каналы | **Channels** | **Kanäle** | Путь подключения (**Setup** / **Einrichtung**) — сверху, пока не пройден; ниже **Channel accounts** / **Kanalkonten**, разрешения записи количества, язык и пояс |
-| Остановка | **Stop pricing** | **Preise stoppen** | Три вида остановки и журнал |
+| Предложения | **Offers** | **Angebote** | Раздел Pricing (шаг 96). Колонка **Issues from the channel** / **Probleme vom Kanal**. Кнопка **Bulk operations** / **Massenvorgänge** ведёт на страницу массовых операций: три ссылки на правки и история |
+| Остатки | **Inventory** | **Lagerbestand** | Шаг 96: пункт, страница и раздел меню (прежние **Stock** / **Bestand**, адрес `stock` перенаправляется). Источники, синхронизация, расхождения, возвраты |
+| Каналы | **Channels** | **Kanäle** | Путь подключения (**Setup** / **Einrichtung**) — сверху, пока не пройден; когда он ждёт только решения владельца — одной строкой над аккаунтами (шаг 96); **Channel accounts** / **Kanalkonten**, разрешения отправки остатков, язык и пояс |
+| Остановка | **Stop pricing** | **Preise stoppen** | Первой строкой — «Pause is safe…» / «Pausieren ist sicher…» (шаг 96); три вида остановки и журнал |
 
 Omnibus — десятым пунктом только у пространства с витриной ЕС в профиле `eu` или `global` [Р-214]. Прежние имена экранов (Setup,
-Channel accounts, Why this price, Stopped changes, Dangerous changes, Bounds, Unit cost import, Bulk operations) живут заголовками
+Channel accounts, Why this price, Stopped changes, Dangerous changes, Bounds, Unit cost import, Bulk operations, Stock) живут заголовками
 разделов и страниц внутри новых пунктов; их адреса перенаправляются.
 
 ## Роли (шаг 88, Р-213)

@@ -13,9 +13,11 @@ export function ChannelsScreen({ worldId, section }: { worldId: string; section:
     <section className="channels-page">
       <h2>{m.ui.app.screens.channels}</h2>
       <p className="subtitle">{m.ui.app.subtitles.channels}</p>
-      <OnboardingScreen worldId={worldId} embedded />
+      {/* Шаг 96: путь, ждущий только решения владельца, — строкой сверху; аккаунты — первыми (аудит Б15); идущий путь — чеклистом ниже */}
+      <OnboardingScreen worldId={worldId} embedded slot="top" />
       <SectionAnchor id="channel-accounts" focus={section === 'accounts'} />
       <ConnectionsScreen worldId={worldId} embedded />
+      <OnboardingScreen worldId={worldId} embedded slot="bottom" />
     </section>
   );
 }

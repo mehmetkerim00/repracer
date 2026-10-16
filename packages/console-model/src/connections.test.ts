@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { ConnectionRow, PendingRequestRow } from '@repracer/pricing-store-pg';
 import { connectionsView, type ConnectableChannel } from './connections.ts';
 import { messagesFor } from './i18n/index.ts';
+import { periodRange } from './period.ts';
 
 /**
  * Р-175…Р-177, Р-150 (шаг 43): состояние подключения ВЫВОДИТСЯ из данных — аккаунта, запроса согласия и приложения
@@ -75,15 +76,15 @@ test('хвост шага 47: «нашли N» называет и то, что 
     ], pending: [],
   }, apps, m);
   const by = Object.fromEntries(v.accounts.map((a) => [a.channelAccountId, a]));
-  assert.match(by.mixed!.progressText!, /Found 10 offers\..* Of them we can write to 8; 2 are not open for our writes/);
-  assert.doesNotMatch(by.clean!.progressText!, /not open for our writes/, 'все управляемые — второй фразы нет');
+  assert.match(by.mixed!.progressText!, /Found 10 offers\..* Of them we can update 8; 2 are not open to our updates/);
+  assert.doesNotMatch(by.clean!.progressText!, /not open to our updates/, 'все управляемые — второй фразы нет');
   const de = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ channel: 'EBAY', offers: 10, unmanagedOffers: 2 })], pending: [] }, apps, messagesFor('de'));
   assert.match(de.accounts[0]!.progressText!, /Davon können wir 8 ändern; 2 sind für unsere Änderungen nicht offen/);
 });
 
 test('хвост шага 47: одно неуправляемое предложение — в единственном числе', () => {
   const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ channel: 'EBAY', offers: 3, unmanagedOffers: 1 })], pending: [] }, apps, messagesFor('en'));
-  assert.match(v.accounts[0]!.progressText!, /write to 2; 1 is not open/);
+  assert.match(v.accounts[0]!.progressText!, /update 2; 1 is not open/);
 });
 
 /**
@@ -95,7 +96,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
   const { shadowView } = await import('./shadow.ts');
   const ebayApps: ConnectableChannel[] = [{ channel: 'AMAZON', platformMissing: [], marketplaces: ['A1PA6795UKMFR9'] }, { channel: 'EBAY', platformMissing: [], marketplaces: ['EBAY_DE'] }];
   const expected = {
-    en: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our writes are confirmed by the offer record, and the price-basis check is limited.',
+    en: 'In live mode we do not yet see on eBay the price buyers see or edits made by other programs: our updates are confirmed by the offer record, and the price-basis check is limited.',
     de: 'Den Preis, den Käufer sehen, und Änderungen anderer Programme sehen wir auf eBay im Live-Betrieb noch nicht: Unsere Änderungen werden über den Angebotsdatensatz bestätigt, die Prüfung der Preisbasis ist eingeschränkt.',
   };
   for (const locale of ['de', 'en'] as const) {
@@ -115,7 +116,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
       { summary: { since: NOW, until: NOW, decisions: 0, changes: 0, floorHeld: 0, ceilingHeld: 0, heldWrites: 0, heldPriceWrites: 0, heldQuantityWrites: 0,
         wouldSpendBudget: 0, wouldSpendUnconfirmed: 0, floorSavings: [], floorSavingsHolds: 0 } as never,
         rows: [], total: 0, accounts: [account('ebay', 'EBAY'), account('amazon', 'AMAZON')], properties: [], digests: [], decisionsByHour: [] },
-      { offset: 0, limit: 20 } as never, m, 7);
+      { offset: 0, limit: 20 } as never, m, { preset: '7d' }, periodRange({ preset: '7d' }, NOW, null, 30));
     assert.deepEqual(shadow.accounts.map((a) => [a.channelAccountId, a.channelLimitText]), [['ebay', expected[locale]], ['amazon', null]], 'the shadow screen says it before the live button');
   }
 });
@@ -127,7 +128,7 @@ test('Р-190: every eBay account and the eBay channel card say in words what liv
 test('Р-190: a write confirmed by our own offer record is named so on the price feed and the stock screen; a live-listing confirmation is not', async () => {
   const { feedItemOf } = await import('./price-feed.ts');
   const { channelCell } = await import('./stock.ts');
-  const expected = { en: 'confirmed by our own write, not by reading the live price', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot' };
+  const expected = { en: 'confirmed by the update we sent, not by reading the live price', de: 'bestätigt über den Angebotsdatensatz, nicht über das Live-Angebot' };
   const world = { id: 'w', title: 't', description: 'd', tenantId: 't', now: NOW, accounts: [], viewer: { membershipId: 'membership-owner', role: 'OWNER' }, state: { scopes: [], strategies: [] } } as never;
   const write = (own: boolean, status = 'APPLIED') => ({ channelWriteId: 'cw', writeScopeId: 'ws', decisionId: null, amountMinor: 1349, currency: 'EUR', basis: 'GROSS' as const, version: 1, status,
     attemptCount: 1, competitorDerived: false, createdAt: NOW, dispatchedAt: NOW, acceptedAt: NOW, nextAttemptAt: null, lastErrorCode: null, endReason: null, endParams: {},

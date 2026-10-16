@@ -90,9 +90,10 @@ export function ShadowHero({ view, periods }: { view: ShadowView; periods: React
     <section className="shadow-summary">
       <div className="summary-head">{periods}</div>
       <div className="stats">
-        <Metric label={st.decisions} value={nf.format(s.decisions)} />
-        <Metric label={st.changes} value={nf.format(s.changes)} />
-        <Metric label={st.held} value={nf.format(s.heldWrites)} />
+        {/* Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили (остатки — в сводке ниже) */}
+        <Metric label={st.decisions} value={nf.format(s.decisions)} sub={st.decisionsSub} />
+        <Metric label={st.changes} value={nf.format(s.changes)} sub={st.changesSub} />
+        <Metric label={st.held} value={nf.format(s.heldPriceWrites)} sub={st.heldSub} />
         {s.floorSavings.length > 0 ? (
           <Metric label={st.savings} sub={st.notForecast}
             value={s.floorSavings.map((f) => <span key={f.currency} className="money-line">{m.money(f.minor, f.currency)}</span>)} />

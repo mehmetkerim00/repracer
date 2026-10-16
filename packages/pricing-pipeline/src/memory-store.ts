@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
 import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow} from './store.ts';
-import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
+import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
@@ -2226,7 +2226,11 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId);
 
   async decisionPage(_tenantId: string, query: DecisionPageQuery): Promise<DecisionPage> {
-    const all = this.decisions.filter((d) => !query.writeScopeId || d.writeScopeId === query.writeScopeId).sort(InMemoryPricingStore.newestFirst);
+    // Шаг 96: окно [since, until) и группа исхода — тем же правилом, что у базы (`DECISION_OUTCOME_GROUPS`)
+    const outcomes = query.outcome ? (DECISION_OUTCOME_GROUPS[query.outcome] as readonly string[]) : null;
+    const all = this.decisions.filter((d) => (!query.writeScopeId || d.writeScopeId === query.writeScopeId) && (!query.writeScopeIds || query.writeScopeIds.includes(d.writeScopeId))
+      && (!query.since || Date.parse(d.decidedAt) >= Date.parse(query.since)) && (!query.until || Date.parse(d.decidedAt) < Date.parse(query.until))
+      && (outcomes === null || outcomes.includes(d.outcome))).sort(InMemoryPricingStore.newestFirst);
     return { items: all.slice(query.offset, query.offset + query.limit).map((d) => ({ ...d })), total: all.length };
   }
 
@@ -2276,8 +2280,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async feedPage(_tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage> {
     const at = (w: WriteRow) => Date.parse(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt);
-    const since = query.sinceDays ? Date.parse(now) - query.sinceDays * 86_400_000 : null;
-    const scoped = this.writes.filter((w) => (!query.writeScopeId || w.writeScopeId === query.writeScopeId) && (since === null || at(w) >= since));
+    const since = query.since ? Date.parse(query.since) : query.sinceDays ? Date.parse(now) - query.sinceDays * 86_400_000 : null;
+    const until = query.until ? Date.parse(query.until) : null;
+    const scoped = this.writes.filter((w) => (!query.writeScopeId || w.writeScopeId === query.writeScopeId) && (!query.writeScopeIds || query.writeScopeIds.includes(w.writeScopeId))
+      && (since === null || at(w) >= since) && (until === null || at(w) < until));
     const counts: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0, SHADOW_HELD: 0 };
     if (query.counts !== false) for (const w of scoped) counts[feedGroupOf(w.status)] += 1;
     const rows = scoped.filter((w) => !query.status || feedGroupOf(w.status) === query.status).sort((a, b) => at(b) - at(a) || b.version - a.version);

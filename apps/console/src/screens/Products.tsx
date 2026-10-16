@@ -98,7 +98,13 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                 </td> : null}
                 {col.lastChange ? <td><Cell cell={r.lastChange} /></td> : null}
                 {col.nextCheck ? <td><Cell cell={r.nextCheck} /></td> : null}
-                {col.channel ? <td className="channel-says">{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => <Cell key={n.code} cell={n} />)}</td> : null}
+                {col.channel ? <td className="channel-says">{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => (
+                  <div key={n.code}>
+                    <Cell cell={n} />
+                    {/* Шаг 96 (А6): у пилюли — короткое «что делать», раскрывается на месте */}
+                    {n.whatToDo ? <details className="what-to-do"><summary>{n.whatToDo.label}</summary><p>{n.whatToDo.text}</p></details> : null}
+                  </div>
+                ))}</td> : null}
                 {/* Шаг 78: одна колонка действий — основная «Why this price», под ней мелкая вторичная «Bounds» */}
                 <td className="actions">
                   {r.latestDecisionId

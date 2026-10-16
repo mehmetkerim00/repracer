@@ -13,13 +13,15 @@ import { JobProgress } from './Jobs.tsx';
  * Шаг 95 [Р-217]: отдельного пункта «Setup» нет — путь живёт верхним разделом Channels, пока не пройден (`embedded`): заголовок
  * раздела вместо заголовка страницы, без списка каналов (аккаунты — ниже на той же странице), пройденный путь не показывается вовсе
  */
-export function OnboardingScreen({ worldId, embedded = false }: { worldId: string; embedded?: boolean }) {
+export function OnboardingScreen({ worldId, embedded = false, slot = 'top' }: { worldId: string; embedded?: boolean; slot?: 'top' | 'bottom' }) {
   const m = useMessages();
   const [view, retry] = useResource<OnboardingView>(worldPath(worldId, 'onboarding'), m.locale);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<BulkJobView | null>(null);
   /** Итог включения остаётся на экране, пока продавец его не уберёт: «не включено 50» без списка ничего не говорит */
   const [result, setResult] = useState<EnableResultView | null>(null);
+  // Шаг 96: свёрнутая строка раскрывается полным чеклистом на месте
+  const [expanded, setExpanded] = useState(false);
 
   const narrow = (widen: boolean) =>
     void requestJson<unknown>(worldPath(worldId, 'onboarding', 'narrow'), { method: 'POST', body: widen ? { widen: true } : {}, locale: m.locale })
@@ -37,7 +39,24 @@ export function OnboardingScreen({ worldId, embedded = false }: { worldId: strin
 
   return (
     <Load shape="cards" resource={view} retry={retry}>
-      {(v) => embedded && v.resumeAt === 'DONE' && job === null && result === null && error === null ? null : (
+      {(v) => {
+        if (embedded && v.resumeAt === 'DONE' && job === null && result === null && error === null) return null;
+        /**
+         * Шаг 96 (Channels): путь, ждущий только решения владельца, — одной строкой сверху с «Show the checklist»; путь, который ещё
+         * идёт, — полным чеклистом под аккаунтами (аккаунты — первыми, аудит Б15). Верхний слот рисует только строку, нижний — только чеклист
+         */
+        if (embedded && slot === 'top' && !v.waitsForOwner) return null;
+        if (embedded && slot === 'bottom' && v.waitsForOwner) return null;
+        if (embedded && slot === 'top' && v.collapsedText) {
+          return (
+            <section className="card setup-collapsed">
+              <p>{v.collapsedText}</p>
+              <button type="button" className="link" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? m.ui.onboarding.hideChecklist : m.ui.onboarding.showChecklist}</button>
+              {expanded ? <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} onChoosePath={choosePath} embedded /> : null}
+            </section>
+          );
+        }
+        return (
         <>
           <OnboardingScreenView view={v} worldId={worldId} busy={job !== null} onNarrow={narrow} onEnable={enable} onChoosePath={choosePath} embedded={embedded} />
           {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={(done) => {
@@ -48,7 +67,8 @@ export function OnboardingScreen({ worldId, embedded = false }: { worldId: strin
           {result ? <EnableResult result={result} onDismiss={() => setResult(null)} /> : null}
           {error ? <ErrorBox message={error} onRetry={retry} /> : null}
         </>
-      )}
+        );
+      }}
     </Load>
   );
 }
@@ -158,6 +178,24 @@ export function EnableResult({ result, onDismiss }: { result: EnableResultView; 
         </>
       ) : null}
       {onDismiss ? <button type="button" onClick={onDismiss}>{t.dismiss}</button> : null}
+    </section>
+  );
+}
+
+/**
+ * Шаг 96 (аудит В22): карточка «Next step» наверху Shadow mode — из того же вида пути, что Channels (`nextStep` модели): одна логика,
+ * один источник. Пройденный путь карточки не даёт
+ */
+export function NextStepCard({ worldId }: { worldId: string }) {
+  const m = useMessages();
+  const [view] = useResource<OnboardingView>(worldPath(worldId, 'onboarding'), m.locale);
+  if (view.state !== 'ready' || view.data.nextStep === null) return null;
+  const n = view.data.nextStep;
+  return (
+    <section className={`card next-step${n.waitsForOwner ? ' waits' : ''}`}>
+      <div className="next-step-head"><strong>{m.ui.onboarding.next.title}:</strong> {n.title}{n.progress ? <span className="muted"> ({n.progress})</span> : null}</div>
+      <p className="small">{n.hint}</p>
+      {n.goTo ? <a className="row-link" href={href(worldId, n.goTo.screen, ...(n.goTo.param ? [n.goTo.param] : []))}>{n.goTo.label}</a> : null}
     </section>
   );
 }

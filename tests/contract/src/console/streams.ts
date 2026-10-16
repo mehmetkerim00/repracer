@@ -1,6 +1,6 @@
 import {
-  dangerousReport, decisionItems, decisionListView, decisionTrace, feedPageQuery, priceFeed, rejectedView, stopView, REJECTED_WINDOW_DAYS,
-  type DangerousReportView, type DecisionListItem, type DecisionTrace, type FeedQuery, type Messages, type PriceFeedView, type RejectedView, type StandWorld, type StopView,
+  dangerousReport, decisionItems, decisionListView, decisionTrace, feedPageQuery, HOT_DECISIONS_DAYS, periodPhrase, periodRange, priceFeed, rejectedView, stopView, REJECTED_WINDOW_DAYS,
+  type DangerousReportView, type Period, type DecisionListItem, type DecisionTrace, type FeedQuery, type Messages, type PriceFeedView, type RejectedView, type StandWorld, type StopView,
 } from '@repracer/console-model';
 import type { PricingStore } from '@repracer/pricing-pipeline';
 
@@ -15,9 +15,11 @@ export async function feedOf(store: PricingStore, world: StandWorld, m: Messages
   return priceFeed(world, m, query, await store.feedPage(world.tenantId, world.now as never, q), q);
 }
 
-export async function dangerousOf(store: PricingStore, world: StandWorld, days: number, m: Messages): Promise<DangerousReportView> {
-  const from = new Date(Date.parse(world.now) - days * 86_400_000).toISOString();
-  return dangerousReport(world, await store.interventions(world.tenantId, from as never, world.now as never), days, m);
+export async function dangerousOf(store: PricingStore, world: StandWorld, days: 1 | 7 | 30 | Period, m: Messages): Promise<DangerousReportView> {
+  // Шаг 96: период — пресетом 24h / 7d / 30d от «сейчас» мира или своим диапазоном дат, как его считает сервер
+  const period: Period = typeof days === 'object' ? days : { preset: days === 1 ? '24h' : days === 30 ? '30d' : '7d' };
+  const range = periodRange(period, world.now, null, HOT_DECISIONS_DAYS);
+  return dangerousReport(world, await store.interventions(world.tenantId, range.since as never, range.until as never), range, periodPhrase(period, m), m);
 }
 
 export async function rejectedOf(store: PricingStore, world: StandWorld, m: Messages): Promise<RejectedView> {

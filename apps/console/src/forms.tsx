@@ -85,17 +85,18 @@ export function FieldGroup({ title, caption = null, children, className = '' }: 
 }
 
 /** Кнопки формы — одним рядом в конце группы; `hint` — почему главное действие недоступно (строкой под рядом) */
-export function FormActions({ children, hint = null, dialog = false }: { children: ReactNode; hint?: string | null; dialog?: boolean }) {
+export function FormActions({ children, hint = null, dialog = false, inline = false }: { children: ReactNode; hint?: string | null; dialog?: boolean; inline?: boolean }) {
   return (
     <div className={`form-actions${dialog ? ' dialog-actions' : ''}`}>
-      <div className="form-actions-row">{children}</div>
-      {hint ? <p className="field-caption form-hint" role="status">{hint}</p> : null}
+      {/* Шаг 96 (аудит Б18): `inline` — причина недоступности стоит в том же ряду, сразу за кнопкой, а не строкой под ним */}
+      <div className="form-actions-row">{children}{inline && hint ? <span className="field-caption form-hint inline-hint" role="status">{hint}</span> : null}</div>
+      {hint && !inline ? <p className="field-caption form-hint" role="status">{hint}</p> : null}
     </div>
   );
 }
 
 /**
- * Плашка канала («Before anything is written»): заголовок канала и пилюля, одна-две строки сути, подробности — по раскрытию. Текст
+ * Плашка канала («Before any stock is sent», шаг 96): заголовок канала и пилюля, одна-две строки сути, подробности — по раскрытию. Текст
  * не шире ~80 знаков: длинное предупреждение одной строкой через весь экран не читают
  */
 export function Banner({ title, badge, summary, details = null, children, tone = 'warn' }: {

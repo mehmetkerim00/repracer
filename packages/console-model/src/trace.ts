@@ -306,6 +306,10 @@ function channelStep(world: StandWorld, d: ConsoleDecision, writes: readonly Con
 export interface DecisionListView {
   items: DecisionListItem[];
   page: PageInfo;
+  /** Шаг 96: начало периода отрезано буфером решений (30 дней) */
+  clipped: boolean;
+  /** Шаг 96 (Б11): поиск по мере ввода — сколько предложений нашлось и по скольким отфильтрован список */
+  search: { total: number; shown: number } | null;
 }
 
 /**
@@ -313,9 +317,9 @@ export interface DecisionListView {
  * 150 включённых предложений дают 13 500 решений за три часа — 5,8 МБ одним ответом, а за сутки вышло бы за предел экрана
  * (8 МБ) в разы. Строки страницы собираются только для показанного: объяснение и текст причины — самое дорогое здесь.
  */
-export function decisionListView(world: StandWorld, page: DecisionPage, query: ListQuery, m: Messages): DecisionListView {
+export function decisionListView(world: StandWorld, page: DecisionPage, query: ListQuery, m: Messages, clipped = false, search: { total: number; shown: number } | null = null): DecisionListView {
   // Р-154: страницу и итог отдаёт база; здесь — только строки показанного
-  return { items: decisionItems(world, page.items, m), page: pageInfo(query, page.total, m) };
+  return { items: decisionItems(world, page.items, m), page: pageInfo(query, page.total, m), clipped, search };
 }
 
 export function decisionItems(world: StandWorld, decisions: readonly ConsoleDecision[], m: Messages): DecisionListItem[] {

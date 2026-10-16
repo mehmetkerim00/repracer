@@ -14,12 +14,12 @@
     "@repracer/contract-tests": "0.1.0",
     "@repracer/cost-import": "0.1.0",
     "@repracer/ebay-adapter": "0.1.0",
-    "@repracer/walmart-adapter": "0.1.0",
     "@repracer/identity": "0.1.0",
     "@repracer/kaufland-adapter": "0.1.0",
     "@repracer/pricing-pipeline": "0.1.0",
     "@repracer/pricing-store-pg": "0.1.0",
     "@repracer/stock-sync": "0.1.0",
+    "@repracer/walmart-adapter": "0.1.0",
     "@repracer/write-dispatcher": "0.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -33,6 +33,7 @@
     "bulk-worker": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/bulk-worker.ts"
   },
   "devDependencies": {
+    "@primer/octicons": "19.38.0",
     "@primer/primitives": "11.10.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

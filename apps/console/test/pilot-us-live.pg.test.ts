@@ -391,7 +391,7 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
   assert.ok(account.offers >= MANAGED, `тень нашла листинги: ${account.offers} — ${account.progressText}`);
   // Шаг 48 (находка 9 ревью шага 47, находка 4 ревью шага 48): «нашли N» называет и то, что вести нельзя — аукцион и немигрированный
   assert.deepEqual([account.offers, account.unmanagedOffers], [MANAGED + 2, 2], `число найденных и неуправляемых: ${account.progressText}`);
-  assert.match(account.progressText ?? '', new RegExp(`Found ${MANAGED + 2} offers\\..* we can write to ${MANAGED}; 2 are not open for our writes`), 'экран говорит оба числа');
+  assert.match(account.progressText ?? '', new RegExp(`Found ${MANAGED + 2} offers\\..* we can update ${MANAGED}; 2 are not open to our updates`), 'экран говорит оба числа');
   const { rows: catalog } = await observer.query<{ status: string; migration: string; format: string; n: number; scopes: number }>(
     `SELECT m.status, m.ebay_migration_status AS migration, m.ebay_listing_format AS format, count(*)::int AS n, count(m.price_write_scope_id)::int AS scopes
        FROM tenant_data.offer_mapping m WHERE m.tenant_id = $1 GROUP BY 1, 2, 3 ORDER BY 1`, [ids.tenantId]);
@@ -495,7 +495,7 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
   assert.match(live.body.error.message, /day boundary/i, 'отказ называет свойство витрины');
   // Шаг 68 (K2): словами — витрина, что не подтверждено и кто подтверждает; без идентификатора витрины и кода вопроса
   // Шаг 69 [Р-204]: граница суток закрывается неделей тени и решением команды платформы — отказ называет этот процесс
-  assert.match(live.body.error.message, /Live writes on ebay\.com stay closed: .*not confirmed yet\. This is usually settled within a week of shadow mode/, live.body.error.message);
+  assert.match(live.body.error.message, /Sending prices to ebay\.com cannot be switched on: .*not confirmed yet\. This is usually settled within a week of shadow mode/, live.body.error.message);
   assert.doesNotMatch(live.body.error.message, /EBAY_US|OQ-\d+|\b[AEK]-\d{2}\b|DAY_BOUNDARY/, live.body.error.message);
   const { rows: [still] } = await observer.query(`SELECT write_mode FROM tenant_data.channel_account WHERE channel_account_id = $1`, [ids.accountId]);
   assert.equal(still.write_mode, 'SHADOW', 'аккаунт остался в тени');
