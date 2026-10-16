@@ -741,7 +741,9 @@ export const en = {
         chooseFile: 'Choose your stock file (CSV or XLSX)',
         source: 'Source', sourceCaption: 'The file import source the stocktake goes to.', file: 'File',
         title: 'Stock file',
-        hint: 'Two columns: SKU and quantity (headers in German or English). The file becomes a stocktake of the internal pool: every listed product gets exactly the listed figure.',
+        // Шаг 96.2 (решение шага 87, Р-214): в профиле us о немецких заголовках не говорим — только в профилях eu и global
+        hint: 'Two columns: SKU and quantity (headers in English). The file becomes a stocktake of the internal pool: every listed product gets exactly the listed figure.',
+        hintBilingual: 'Two columns: SKU and quantity (headers in German or English). The file becomes a stocktake of the internal pool: every listed product gets exactly the listed figure.',
         choose: 'Choose file',
         submit: 'Import stock',
         created: 'The stock file is being applied in the background. You can leave this page.',
@@ -1283,6 +1285,14 @@ export const en = {
       none: 'Nothing was stopped or corrected in the last 7 days. Every time a bound, a person or the input check stops or corrects a price, it appears here with the reason.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Strategy capped at a bound', WRITE_RECHECK: 'Recheck at dispatch', STOP: 'Stopped by a person', INPUT: 'Input check', HALT: 'Storefront halt' },
       interventions: { DANGEROUS: 'dangerous', CORRECTED: 'corrected' },
+      // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
+      stateStopped: 'stopped', stateColumn: 'State', historyColumn: 'Price', historyLegend: 'was → wanted → set',
+      stats: { dangerous: 'Dangerous', corrected: 'Corrected', unresolvable: 'Bound not computable', limiterHolds: 'Step and frequency limits', stops: 'Stopped by a person', inputRejects: 'Rejected snapshots', halts: 'Storefront halts' },
+      statsLabel: 'This period by category',
+      filters: { label: 'Show one reason only', clear: 'Show all reasons' },
+      repeat: (n: number, period: string) => `×${n} · ${period}`,
+      // решение владельца по G2: одно значение у всех строк страницы — фразой в подписи таблицы, а не колонкой
+      uniformState: 'Every row below:', uniformReason: (category: string) => `Reason of every row below: ${category}`, eachRepeat: (chip: string) => `${chip} each`,
       columns: { when: 'When', where: 'Where', kind: 'Stopped by', proposed: 'Proposed', before: 'Before', change: 'Change', limit: 'Bound', deviation: 'Beyond bound', reason: 'Reason' },
       path: 'Decision path',
       limitMin: (amount: string) => `your minimum price ${amount}`, limitFloor: (amount: string) => `minimum-margin floor ${amount}`, limitMax: (amount: string) => `your maximum price ${amount}`,
@@ -1473,6 +1483,8 @@ export const en = {
       label: 'Period',
       // Шаг 96.1: один контрол диапазона — кнопка с датами, календарь, пресеты слева, Apply / Cancel внизу
       presetsLong: { '24h': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days' },
+      // Шаг 96.2: короткая подпись периода — в чипе повторов «×11 · 7d»
+      short: { '24h': '24h', '7d': '7d', '30d': '30d' },
       dialog: 'Choose a period', prevMonth: 'Previous month', nextMonth: 'Next month', cancel: 'Cancel', applyRange: 'Apply',
       pickEnd: (start: string) => `Now pick the last day — ${start} or later.`,
       endBeforeStart: (start: string) => `The end can’t be before the start: pick ${start} or a later day.`,
@@ -1574,6 +1586,8 @@ export const en = {
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
       floorTitle: 'Floor holds', floorKinds: { CAPPED: 'set to the floor', HELD: 'kept unchanged' },
+      // Шаг 96.2: «как удержано» — свойство секции, одной фразой; строка отмечает только вид, который отличается от остальных
+      floorCaption: { CAPPED: 'Each hold set the price to your floor.', HELD: 'Each hold kept the price unchanged at your floor.', MIXED: 'Each hold set the price to your floor; rows marked “kept unchanged” kept it there.' },
       floorColumns: { when: 'When', offer: 'Offer', kind: 'Held how', target: 'Strategy wanted', floor: 'Floor', below: 'Cheaper by', reason: 'Reason' },
       gateTitle: 'Rejected by the Price Gate (normally none)',
       headline: (n: number, phrase: string) => `Your bounds stopped ${n} dangerous ${n === 1 ? 'change' : 'changes'} ${phrase}`,

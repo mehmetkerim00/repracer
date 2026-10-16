@@ -52,6 +52,44 @@ function syntheticFloorReport(worldId: string) {
   };
 }
 
+/**
+ * Шаг 96.2: вкладка «Prevented by rules» как на живом скрине демо — 12 предложений по 11 одинаковых удержаний и поправок (×11), у всех
+ * «set to the floor», двойная пилюля, длинная причина и пустая колонка «Beyond bound». `dangerous` добавляет один опасный отказ Gate —
+ * тогда колонка «Beyond bound» появляется
+ */
+function demoLikeFloorReport(worldId: string) {
+  const reason = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'Target capped at your minimum price.', problems: [], limit: null, withheld: [] };
+  const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de` });
+  const at = (i: number) => new Date(Date.UTC(2026, 9, 15, 12) - i * 300_000).toISOString();
+  const items = Array.from({ length: 132 }, (_, n) => ({ at: at(n), unit: unit(n % 12), kind: 'CAPPED', target: `€${(8.99 + (n % 12) * 0.5).toFixed(2)}`, floor: `€${(14 + (n % 3)).toFixed(2)}`, below: `€${(5.01 - (n % 12) * 0.5 + (n % 3)).toFixed(2)}`, reason, decisionId: null }));
+  return {
+    worldId, phrase: 'in the last 7 days', from: at(132), to: at(0), clipped: false,
+    headline: 'The floor held the price 132 times in the last 7 days', floorHolds: { count: 132, withoutFloor: [], unknownAmount: 0, items },
+    gateHeadline: 'Your bounds stopped 0 dangerous changes in the last 7 days', count: 0, prevented: [], worst: null, byUnit: [], byBound: [], items: [], truncated: false, gaps: [],
+  };
+}
+function demoLikeRejected(worldId: string, dangerous = false) {
+  const capped = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'The target from competitor prices was below your minimum price — capped at €14.00.', problems: [], limit: null, withheld: [] };
+  const below = { code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', text: 'The price €12.20 is below your minimum price €14.00 — the Price Gate refused it.', problems: [], limit: null, withheld: [] };
+  const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de` });
+  const at = (i: number) => `Oct 15, ${String(12 - Math.floor(i / 12)).padStart(2, '0')}:${String(59 - (i % 12) * 4).padStart(2, '0')}`;
+  const items = [
+    ...Array.from({ length: 132 }, (_, n) => ({ kind: 'STRATEGY_CAP', tone: 'progress', at: at(n), unit: unit(n % 12), productRef: null, proposed: '€12.49', current: '€18.50', change: '−32.5%',
+      limit: 'your minimum price €14.00', set: '€14.00', deviation: null, intervention: 'CORRECTED', reason: capped, decisionId: null })),
+    ...Array.from({ length: 12 }, (_, n) => ({ kind: 'GATE', tone: 'progress', at: at(n), unit: unit(n), productRef: null, proposed: '€12.20', current: '€18.50', change: '−34.1%',
+      limit: 'your minimum price €14.00', set: '€18.50', deviation: '−12.9%', intervention: 'CORRECTED', reason: below, decisionId: null })),
+    ...(dangerous ? [{ kind: 'GATE', tone: 'stop', at: at(0), unit: unit(0), productRef: null, proposed: '€3.00', current: '€18.50', change: '−83.8%',
+      limit: 'your minimum price €14.00', set: '€18.50', deviation: '−78.6%', intervention: 'DANGEROUS', reason: below, decisionId: null }] : []),
+  ];
+  return {
+    worldId, headline: `Your bounds stopped ${dangerous ? 1 : 0} dangerous changes and corrected 144`,
+    summary: { dangerous: dangerous ? 1 : 0, corrected: 144, unresolvable: 0, limiterHolds: 0, stops: 0, inputRejects: 0, halts: 0 },
+    groups: [{ code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', count: 132 }, { code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', count: 12 + (dangerous ? 1 : 0) }],
+    items, gaps: [],
+  };
+}
+let syntheticRejected: unknown = null;
+
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
 function syntheticShadow() {
   const page = (now: string, sinceDays = 7): ShadowPage => {
@@ -121,7 +159,8 @@ before(async () => {
   extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true, people: STAND_PEOPLE });
   currentApi = euApi;
   // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
-  stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous }) : currentApi(req)));
+  stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous })
+    : syntheticRejected && /\/rejected(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticRejected }) : currentApi(req)));
   await new Promise<void>((resolve) => stand!.listen(0, '127.0.0.1', resolve));
   const standPort = (stand.address() as { port: number }).port;
   vite = await createServer({
@@ -442,6 +481,30 @@ const REPEATED_IN_ROWS = `(() => {
   return out.slice(0, 5);
 })()`;
 
+/**
+ * Шаг 96.2 [Р-146]: колонка таблицы, у которой на странице все ячейки — одно и то же значение или прочерк, — кандидат на подпись секции
+ * или на скрытие: «Held how: set to the floor» в каждой строке, «Beyond bound» из одних прочерков. Колонка без заголовка (действия,
+ * выбор строки) не считается; числовая колонка (`th.num`) — только если она целиком из прочерков: одинаковые суммы — данные (у демо пол
+ * $14.00 у всех предложений amazon.com), а не служебный текст. Таблица меньше трёх строк не судится
+ */
+const CONSTANT_COLUMNS = `(() => {
+  const out = [];
+  for (const table of document.querySelectorAll('.world-content table')) {
+    const rows = [...table.querySelectorAll('tbody tr')].filter((tr) => tr.querySelectorAll('td').length > 1);
+    if (rows.length < 3) continue;
+    [...table.querySelectorAll('thead th')].forEach((th, c) => {
+      const head = th.innerText.trim().replace(/\\s+/g, ' ');
+      if (!head) return;
+      const cells = rows.map((tr) => tr.children[c]);
+      if (cells.some((td) => !td)) return;
+      const values = cells.map((td) => td.innerText.trim().replace(/\\s+/g, ' ')).filter((v) => v !== '' && !/^[–—-]$/.test(v));
+      if (values.length === 0) out.push('«' + head + '»: every cell is a dash');
+      else if (!th.classList.contains('num') && values.length === cells.length && new Set(values).size === 1) out.push('«' + head + '»: every cell is «' + values[0].slice(0, 50) + '»');
+    });
+  }
+  return out;
+})()`;
+
 test('step 86: every menu item and the heading of its page are the same words — English and German', async () => {
   const b = browser!;
   await b.setViewport(1440, 900);
@@ -651,7 +714,8 @@ test('step 96: menu icons differ; the price journal search filters the table as 
     for (let i = 0; i < 50 && (await holdRows()) === 0; i++) await new Promise((x) => setTimeout(x, 100));
     assert.equal(await holdRows(), 50, 'the first page shows 50 rows');
     const first = await b.evaluate<string>(`document.querySelector('.protections table.sticky-end tbody tr').innerText`);
-    assert.match(first, /×24 in the last 7 days/, `repeats collapse into one row — ${first}`);
+    // шаг 96.2 (B): повтор — чипом «×N · период» (было «×24 in the last 7 days»)
+    assert.match(first, /×24 · 7d/, `repeats collapse into one row — ${first}`);
     const pager = () => b.evaluate<string>(`document.querySelector('.protections .local-pager span')?.textContent ?? ''`);
     assert.equal(await pager(), en.ui.protections.pageOf(1, 50, 107));
     await b.click(en.ui.feed.next, '.protections .local-pager button');
@@ -774,6 +838,149 @@ test('step 96.1: the period is one date-range control — dates on the button, t
 });
 
 /**
+ * Шаг 96.2: правила таблиц — на всех экранах консоли (мир смоука, Protections — на отчёте как у демо). Срабатывания вне Protections в
+ * этом шаге не правятся — они названы здесь поимённо и в docs/deferred.md (строки «96.2»); список только сокращается: новое срабатывание
+ * и исчезнувшее старое — оба красные
+ */
+const KNOWN_TABLE_FINDINGS: Readonly<Record<string, readonly string[]>> = {
+  // docs/deferred.md, «96.2»: таблица трёх видов остановки — колонка «Active» из одних нулей (в мире без остановок)
+  stop: ['«Active»: every cell is «0»'],
+};
+const TABLE_ROUTES = ['shadow', 'feed', 'feed/decisions', 'strategies', 'costs', 'costs/import', 'protections/people', 'protections/rules', 'products', 'products/bulk',
+  'inventory', 'channels', 'channels/accounts', 'compliance', 'stop'];
+
+test('step 96.2: no service sentence repeats and no column is one value on any console screen; Prevented by rules — one state pill, one price history, short reasons with a ×N chip, stat chips, reason filters', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  syntheticDangerous = demoLikeFloorReport(world);
+  syntheticRejected = demoLikeRejected(world);
+  try {
+    const visit = async (route: string) => {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+      await settled(b, route);
+      await new Promise((x) => setTimeout(x, 300));
+    };
+    const findings = async () => [...await b.evaluate<string[]>(REPEATED_IN_ROWS), ...await b.evaluate<string[]>(CONSTANT_COLUMNS)];
+    // 1) оба правила на каждом экране; квитанция решения и страница предложения — тоже
+    const found: Record<string, string[]> = {};
+    for (const route of TABLE_ROUTES) {
+      await visit(route);
+      const f = await findings();
+      if (f.length) found[route] = f;
+    }
+    await visit('feed/decisions');
+    const receipt = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
+    if (receipt) { await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`); await settled(b, 'receipt'); const f = await findings(); if (f.length) found['decisions/<id>'] = f; }
+    await visit('costs');
+    const bounds = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
+    if (bounds) { await b.evaluate(`(location.hash = ${JSON.stringify(bounds)}, true)`); await settled(b, 'bounds page'); const f = await findings(); if (f.length) found['bounds/<id>'] = f; }
+    assert.deepEqual([found['protections/rules'] ?? [], found['protections/people'] ?? []], [[], []], `Protections: tables say each thing once — ${JSON.stringify(found)}`);
+    const elsewhere = Object.fromEntries(Object.entries(found).filter(([r]) => !r.startsWith('protections')));
+    assert.deepEqual(elsewhere, KNOWN_TABLE_FINDINGS, 'findings outside Protections are exactly the known list of docs/deferred.md (it only shrinks)');
+
+    // 2) Prevented by rules — по пунктам задания; решение владельца по G2: одно значение у всей страницы — фразой подписи, а не колонкой
+    await visit('protections/rules');
+    const r = en.ui.rejected;
+    const also = () => b.evaluate<Array<{ pills: string[]; history: string; wanted: string; set: string; reason: string | null }>>(`[...document.querySelectorAll('table.also-stopped tbody tr')].map((tr) => ({
+      pills: [...tr.querySelectorAll('.badge')].map((x) => x.textContent.trim()), history: tr.querySelector('td.history')?.innerText.trim() ?? '',
+      wanted: tr.querySelector('td.history s')?.textContent.trim() ?? '', set: tr.querySelector('td.history strong')?.textContent.trim() ?? '',
+      reason: tr.querySelector('td.reason-cell')?.innerText.trim() ?? null }))`);
+    const caption = () => b.evaluate<{ state: string | null; reason: string | null }>(`(() => { const c = document.querySelector('.also-caption'); return {
+      state: c?.querySelector('.uniform-state .badge')?.textContent.trim() ?? null, reason: c?.querySelector('.uniform-reason')?.textContent.trim() ?? null }; })()`);
+    const heads = () => b.evaluate<string[]>(`[...document.querySelectorAll('table.also-stopped thead th')].map((th) => th.innerText.trim().replace(/\\s+/g, ' '))`);
+    let rows = await also();
+    assert.equal(rows.length, 24, 'the 144 corrections collapse into 24 rows (12 offers, two reasons)');
+    // C: все строки «corrected» — состояние одной пилюлей в подписи, колонки и пилюль в строках нет
+    assert.deepEqual([(await caption()).state, rows.every((x) => x.pills.length === 0), (await heads()).includes(r.stateColumn)], [r.interventions.CORRECTED, true, false],
+      'C: one state for every row — a pill in the caption, not a column of identical pills');
+    assert.deepEqual([rows[0]!.history, rows[0]!.wanted, rows[0]!.set], ['€18.50 → €12.49 → €14.00', '€12.49', '€14.00'], 'A: one price history, the refused target struck, the result bold');
+    assert.ok((await heads()).some((h) => h.includes(r.historyLegend)), `A: the legend once in the head — ${JSON.stringify(await heads())}`);
+    assert.ok(!(await heads()).includes(r.columns.deviation), 'A: no «Beyond bound» column without a dangerous case');
+    // B: две причины на странице — категория и чип в строке; полного предложения в строках нет
+    assert.ok(rows.every((x) => x.reason !== null && !x.reason.includes('The target from competitor prices') && !x.reason.includes('the Price Gate refused')), 'B: the full sentence is not in the rows');
+    assert.match(rows[0]!.reason!, /^Target capped at your minimum price\s*×11 · 7d$/, `B: a short category and a ×N chip — ${rows[0]!.reason}`);
+    assert.equal(rows[23]!.reason, 'Below your minimum price', 'B: a single occurrence has no chip');
+    // E: счётчики периода — чипами, все категории видны, ненулевые — акцентом
+    const chips = await b.evaluate<Array<{ text: string; on: boolean }>>(`[...document.querySelectorAll('.stat-chips .stat-chip')].map((c) => ({ text: c.innerText.replace(/\\s+/g, ' ').trim(), on: c.classList.contains('on') }))`);
+    assert.equal(chips.length, 7, `E: seven categories, zeros too — ${JSON.stringify(chips)}`);
+    assert.deepEqual(chips.filter((c) => c.on).map((c) => c.text), [`${r.stats.corrected} 144`], 'E: only non-zero chips are accented');
+    // F: группы причин — фильтры таблицы
+    const filters = () => b.evaluate<Array<{ text: string; pressed: string | null }>>(`[...document.querySelectorAll('.reason-filters button.reason-filter')].map((x) => ({ text: x.innerText.replace(/\\s+/g, ' ').trim(), pressed: x.getAttribute('aria-pressed') }))`);
+    const press = (i: number) => b.evaluate(`(document.querySelectorAll('.reason-filters button.reason-filter')[${i}].click(), true)`);
+    assert.deepEqual((await filters()).map((f) => f.pressed), ['false', 'false']);
+    await press(1);
+    rows = await also();
+    assert.deepEqual([rows.length, (await caption()).reason, rows.every((x) => x.reason === null)], [12, r.uniformReason('Below your minimum price'), true],
+      'F: a click shows only that reason — and one reason for the page goes to the caption');
+    assert.deepEqual((await filters()).map((f) => f.pressed), ['false', 'true'], 'F: the active filter is visible');
+    await press(1);
+    assert.equal((await also()).length, 24, 'F: a second click clears the filter');
+    await press(0);
+    assert.equal((await also()).length, 12);
+    await b.evaluate(`(document.querySelector('.reason-filters button.clear-filter').click(), true)`);
+    assert.equal((await also()).length, 24, 'F: the cross clears the filter');
+    // смена периода сбрасывает фильтр
+    await press(0);
+    await b.evaluate(`(document.querySelector('.drp-trigger').click(), true)`);
+    await b.evaluate(`([...document.querySelectorAll('.drp-presets button')].find((x) => x.textContent.trim() === ${JSON.stringify(en.ui.period.presetsLong['30d'])}).click(), true)`);
+    await new Promise((x) => setTimeout(x, 150));
+    await b.evaluate(`(document.querySelector('.drp-foot button.primary').click(), true)`);
+    await settled(b, 'protections 30d');
+    assert.match(await b.evaluate<string>(`document.querySelector('.drp-trigger').textContent`), /Last 30 days/, 'the period is now the last 30 days');
+    await new Promise((x) => setTimeout(x, 300));
+    assert.deepEqual([(await also()).length, (await filters()).map((f) => f.pressed)], [24, ['false', 'false']], 'a new period clears the reason filter');
+    // D: удержания полом — «как удержано» и одна на всех причина — подписью секции; числа справа табличными цифрами
+    const floor = await b.evaluate<{ heads: string[]; caption: string; reasonCells: number; nums: Array<{ align: string; numeric: string }> }>(`(() => { const t = document.querySelector('table.floor-holds');
+      return { heads: [...t.querySelectorAll('thead th')].map((th) => th.innerText.trim()), caption: document.querySelector('.floor-caption')?.textContent.trim() ?? '',
+        reasonCells: t.querySelectorAll('td.reason-cell').length,
+        nums: [...t.querySelector('tbody tr').querySelectorAll('td.num')].map((td) => ({ align: getComputedStyle(td).textAlign, numeric: getComputedStyle(td).fontVariantNumeric })) }; })()`);
+    const d = en.ui.dangerous;
+    assert.ok(!floor.heads.includes(d.floorColumns.kind) && !floor.heads.includes(d.floorColumns.reason) && floor.reasonCells === 0, `D: no «Held how» and no one-value «Reason» column — ${JSON.stringify(floor.heads)}`);
+    // период теперь 30 дней — чип повторов говорит это же
+    assert.equal(floor.caption, `${d.floorCaption.CAPPED} ${r.uniformReason('Target capped at your minimum price')} — ${r.eachRepeat('×11 · 30d')}`, 'D: how the floor held and the reason — once, as the caption of the section');
+    assert.ok(floor.nums.length === 3 && floor.nums.every((n) => n.align === 'right' && n.numeric.includes('tabular-nums')), `D: amounts right-aligned in tabular figures — ${JSON.stringify(floor.nums)}`);
+    // C: пилюли и чипы не переносятся ни на одной ширине (строки текста считаются по прямоугольникам текста, а не по высоте кнопки)
+    const LINES = `(() => { const lines = (el) => { const r = document.createRange(); r.selectNodeContents(el); const tops = [...r.getClientRects()].filter((q) => q.width > 0).map((q) => q.top).sort((a, b) => a - b);
+      return tops.filter((t, i) => i === 0 || t - tops[i - 1] > 6).length; };
+      return [...document.querySelectorAll('.protections .badge, .protections .stat-chip, .protections .reason-filter, .protections .repeat-chip')].filter((x) => x.getClientRects().length > 0 && lines(x) > 1).map((x) => x.textContent.trim()); })()`;
+    for (const [w, h] of [[375, 812], [768, 1024], [1012, 800], [1440, 900]] as const) {
+      await b.setViewport(w, h);
+      await new Promise((x) => setTimeout(x, 250));
+      assert.deepEqual(await b.evaluate<string[]>(LINES), [], `${w}px: no pill or chip wraps`);
+    }
+    // контроль правила переноса: пилюля в узкой ячейке прежнего вида (td.pills, white-space: normal, 160px) — переносится, и правило это видит
+    await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<div class="protections" id="wrap-control"><table><tbody><tr><td class="pills"><span class="badge" style="white-space: normal; max-width: 90px">Strategy capped at a bound</span></td></tr></tbody></table></div>'), true)`);
+    assert.deepEqual(await b.evaluate<string[]>(LINES), ['Strategy capped at a bound'], 'control: a wrapping pill is seen');
+    await b.evaluate(`(document.getElementById('wrap-control').remove(), true)`);
+    await b.setViewport(1440, 900);
+    // A, C: с опасным случаем в периоде — колонка «Beyond bound» и колонка состояния с одной пилюлей на строку
+    syntheticRejected = demoLikeRejected(world, true);
+    await visit('protections/people');
+    await visit('protections/rules');
+    rows = await also();
+    assert.ok((await heads()).includes(r.columns.deviation), 'A: a dangerous case brings the «Beyond bound» column');
+    assert.ok(rows.every((x) => x.pills.length === 1), 'C: states differ — one state pill per row');
+    assert.deepEqual(rows.filter((x) => x.pills[0] === r.interventions.DANGEROUS).length, 1, 'the dangerous row has its own red pill');
+    assert.deepEqual(await b.evaluate<string[]>(CONSTANT_COLUMNS), [], 'with a dangerous case no column is one value');
+  } finally {
+    syntheticDangerous = null;
+    syntheticRejected = null;
+    await b.setViewport(1440, 900);
+    await b.setColorScheme(null);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'the console page threw or logged errors');
+});
+
+/**
  * Шаг 93: тема — свойство устройства. По умолчанию — системная (`prefers-color-scheme`); ручной выбор «светлая» или «тёмная» перебивает
  * систему и переживает перезагрузку. Значения — пары Primer: канва `--bgColor-muted`, карточка `--bgColor-default`, текст
  * `--fgColor-default`. Шапка называет человека по имени от поставщика identity, адрес — подсказкой.
@@ -858,7 +1065,8 @@ test('step 93/96.1: the theme belongs to the device — sun or moon toggles ligh
  * вкладки Omnibus, канала Kaufland и витрин ЕС ни на одном экране; рабочие пространства без витрины профиля не показываются; пункт меню
  * по-прежнему равен заголовку страницы. Профиль eu на тех же мирах показывает Европу — положительный контроль правила
  */
-const EUROPE = /Kaufland|kaufland\.|amazon\.de|ebay\.de|€|\bEUR\b|Deutsch|Omnibus/;
+// Шаг 96.2: и «German» / «Europe» — подпись файла остатков говорила «headers in German or English» в профиле us, а правило знало только «Deutsch»
+const EUROPE = /Kaufland|kaufland\.|amazon\.de|ebay\.de|€|\bEUR\b|Deutsch|Omnibus|\bGerman\b|\bGermany\b|\bEuropean?\b/;
 
 test('step 87: the us market profile shows no German, no Omnibus, no Kaufland and no European storefront on any screen; eu still does', async () => {
   const b = browser!;
@@ -906,6 +1114,11 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   await settled(b, 'eu connections');
   const eu = await europeOnPage();
   assert.ok(eu !== null && /amazon\.de|Deutsch/.test(eu), `eu: the rule sees Europe — ${eu}`);
+  // шаг 96.2: в профиле eu подпись файла остатков называет немецкие заголовки — и правило это видит; в us её не было (выше)
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/inventory`)}, true)`);
+  await settled(b, 'eu inventory');
+  assert.ok((await b.evaluate<string>('document.body.innerText')).includes(en.ui.stock.importFile.hintBilingual), 'eu: the stock file takes German or English headers');
+  assert.deepEqual([EUROPE.test(en.ui.stock.importFile.hintBilingual), EUROPE.test(en.ui.stock.importFile.hint)], [true, false], 'the rule sees the German headers of the eu caption and nothing European in the us one');
   assert.ok(!/\bWalmart\b/.test(await b.evaluate<string>('document.body.innerText')), 'eu: Walmart is a channel of the us market only');
   const euMenu = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
   assert.ok(euMenu.includes(en.ui.app.screens.compliance), `eu: the same workspace has the Omnibus tab — ${euMenu.join(', ')}`);

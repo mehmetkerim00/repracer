@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Intro, Load, Pager, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Intro, Load, MarketContext, Pager, useMessages } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
@@ -21,6 +21,8 @@ function base64Of(bytes: Uint8Array): string {
 
 export function StockScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
+  // Шаг 96.2: профиль рынка — о немецких заголовках файла говорим только там, где немецкий есть (eu, global)
+  const market = useContext(MarketContext);
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
   // Шаг 69 (K8): поиск и фильтр — параметры запроса; новая выборка начинается с первой страницы
   const [filter, setFilter] = useState<{ search: string; withReservations: boolean }>({ search: '', withReservations: false });
@@ -84,7 +86,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
                 </FormActions>
                 {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
               </FieldGroup>
-              <FieldGroup title={m.ui.stock.importFile.title} caption={m.ui.stock.importFile.hint}>
+              <FieldGroup title={m.ui.stock.importFile.title} caption={market.locales.includes('de') ? m.ui.stock.importFile.hintBilingual : m.ui.stock.importFile.hint}>
                 <FieldGrid cols={2}>
                   <Field label={m.ui.stock.importFile.source} caption={m.ui.stock.importFile.sourceCaption}><select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
                     <option value="">—</option>

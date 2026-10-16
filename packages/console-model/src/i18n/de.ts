@@ -711,7 +711,9 @@ export const de: Messages = {
         chooseFile: 'Bestandsdatei wählen (CSV oder XLSX)',
         source: 'Quelle', sourceCaption: 'Die Dateiimport-Quelle, die die Inventur erhält.', file: 'Datei',
         title: 'Bestandsdatei',
-        hint: 'Zwei Spalten: SKU und Menge (Überschriften deutsch oder englisch). Die Datei wird zur Inventur des internen Pools: jedes genannte Produkt erhält genau den genannten Wert.',
+        // Шаг 96.2 (решение шага 87, Р-214): в профиле us о немецких заголовках не говорим — только в профилях eu и global
+        hint: 'Zwei Spalten: SKU und Menge (Überschriften englisch). Die Datei wird zur Inventur des internen Pools: jedes genannte Produkt erhält genau den genannten Wert.',
+        hintBilingual: 'Zwei Spalten: SKU und Menge (Überschriften deutsch oder englisch). Die Datei wird zur Inventur des internen Pools: jedes genannte Produkt erhält genau den genannten Wert.',
         choose: 'Datei wählen',
         submit: 'Bestand importieren',
         created: 'Die Bestandsdatei wird im Hintergrund übernommen. Sie können die Seite verlassen.',
@@ -1231,6 +1233,14 @@ export const de: Messages = {
       none: 'In den letzten 7 Tagen wurde nichts gestoppt oder korrigiert. Jedes Mal, wenn eine Grenze, eine Person oder die Eingangsprüfung einen Preis stoppt oder korrigiert, erscheint er hier mit dem Grund.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Strategie an Grenze begrenzt', WRITE_RECHECK: 'Prüfung beim Versand', STOP: 'Von einer Person gestoppt', INPUT: 'Eingangsprüfung', HALT: 'Anhalten der Storefront' },
       interventions: { DANGEROUS: 'gefährlich', CORRECTED: 'korrigiert' },
+      // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
+      stateStopped: 'gestoppt', stateColumn: 'Zustand', historyColumn: 'Preis', historyLegend: 'vorher → gewollt → gesetzt',
+      stats: { dangerous: 'Gefährlich', corrected: 'Korrigiert', unresolvable: 'Grenze nicht berechenbar', limiterHolds: 'Schritt- und Häufigkeitsgrenzen', stops: 'Von einer Person gestoppt', inputRejects: 'Abgelehnte Wettbewerbsdaten', halts: 'Anhaltungen von Storefronts' },
+      statsLabel: 'Dieser Zeitraum nach Kategorie',
+      filters: { label: 'Nur einen Grund zeigen', clear: 'Alle Gründe zeigen' },
+      repeat: (n: number, period: string) => `×${n} · ${period}`,
+      // решение владельца по G2: одно значение у всех строк страницы — фразой в подписи таблицы, а не колонкой
+      uniformState: 'Jede Zeile unten:', uniformReason: (category: string) => `Grund jeder Zeile unten: ${category}`, eachRepeat: (chip: string) => `je ${chip}`,
       columns: { when: 'Wann', where: 'Wo', kind: 'Gestoppt durch', proposed: 'Vorschlag', before: 'Vorher', change: 'Änderung', limit: 'Grenze', deviation: 'Abweichung', reason: 'Grund' },
       path: 'Entscheidungsweg',
       limitMin: (amount: string) => `Mindestpreis ${amount}`, limitFloor: (amount: string) => `Mindestmargen-Untergrenze ${amount}`, limitMax: (amount: string) => `Höchstpreis ${amount}`,
@@ -1419,6 +1429,8 @@ export const de: Messages = {
       label: 'Zeitraum',
       // Шаг 96.1: один контрол диапазона — кнопка с датами, календарь, пресеты слева, Apply / Cancel внизу
       presetsLong: { '24h': 'Letzte 24 Stunden', '7d': 'Letzte 7 Tage', '30d': 'Letzte 30 Tage' },
+      // Шаг 96.2: короткая подпись периода — в чипе повторов «×11 · 7 Tage»
+      short: { '24h': '24 Std.', '7d': '7 Tage', '30d': '30 Tage' },
       dialog: 'Zeitraum wählen', prevMonth: 'Vorheriger Monat', nextMonth: 'Nächster Monat', cancel: 'Abbrechen', applyRange: 'Übernehmen',
       pickEnd: (start: string) => `Wählen Sie jetzt den letzten Tag — ${start} oder später.`,
       endBeforeStart: (start: string) => `Das Ende kann nicht vor dem Anfang liegen: Wählen Sie ${start} oder einen späteren Tag.`,
@@ -1516,6 +1528,8 @@ export const de: Messages = {
         : `Die Untergrenze hat den Preis ${phrase} ${n}-mal gehalten${amounts.length ? `; ohne sie hätten Sie ${amounts.join(' + ')} billiger verkauft` : ''}${unknown ? ` (Betrag bei ${unknown} unbekannt)` : ''}`,
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
       floorTitle: 'Gehalten durch die Untergrenze', floorKinds: { CAPPED: 'auf die Untergrenze gesetzt', HELD: 'unverändert gelassen' },
+      // Шаг 96.2: «как удержано» — свойство секции, одной фразой; строка отмечает только вид, который отличается от остальных
+      floorCaption: { CAPPED: 'Jedes Halten hat den Preis auf Ihre Untergrenze gesetzt.', HELD: 'Jedes Halten hat den Preis an Ihrer Untergrenze unverändert gelassen.', MIXED: 'Jedes Halten hat den Preis auf Ihre Untergrenze gesetzt; Zeilen mit „unverändert gelassen“ haben ihn dort gehalten.' },
       floorColumns: { when: 'Wann', offer: 'Angebot', kind: 'Wie gehalten', target: 'Strategie wollte', floor: 'Untergrenze', below: 'Billiger um', reason: 'Grund' },
       gateTitle: 'Vom Price Gate abgelehnt (normalerweise keine)',
       headline: (n: number, phrase: string) => `Ihre Grenzen haben ${phrase} ${n} gefährliche ${n === 1 ? 'Änderung' : 'Änderungen'} gestoppt`,

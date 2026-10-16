@@ -22,6 +22,11 @@ export interface RejectedItem {
   current: string | null;
   change: string | null;
   limit: string | null;
+  /**
+   * Шаг 96.2: цена, которая получилась: у поправки границей — сама граница, у отказа и остановки — прежняя цена (она осталась). Вместе с
+   * `current` и `proposed` — одна история цены строки: «было → хотела стратегия → стало»
+   */
+  set: string | null;
   deviation: string | null;
   intervention: BoundIntervention | null;
   reason: HumanReason;
@@ -70,7 +75,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
         kind: 'STRATEGY_CAP', tone: 'progress', at: m.when(d.decidedAt), sortAt: d.decidedAt, unit, productRef: null,
         proposed: money(target), current: money(e!.strategy.currentMinor), change: target === null ? null : m.change(e!.strategy.currentMinor, target),
         limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? r.limitFloor(money(bound)) : r.limitMax(money(bound)),
-        deviation: null, intervention: 'CORRECTED', reason: describe(step, m), decisionId: d.decisionId,
+        set: money(bound), deviation: null, intervention: 'CORRECTED', reason: describe(step, m), decisionId: d.decisionId,
       });
     }
     if (d.outcome !== 'REJECTED' && d.outcome !== 'HELD') continue;
@@ -89,6 +94,8 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       limit: code === 'BELOW_MIN_PRICE' ? r.limitMin(money(params.minMinor as number))
         : code === 'BELOW_MARGIN_FLOOR' ? r.limitFloor(money(params.floorMinor as number))
           : code === 'ABOVE_MAX_PRICE' ? r.limitMax(money(params.maxMinor as number)) : null,
+      // отказ Gate и остановка — цена осталась прежней
+      set: e ? money(e.strategy.currentMinor) : null,
       deviation: d.boundDeviationBp === null ? null : m.percentBp(d.boundDeviationBp),
       // Ревью шага 68, находка 1: причина Gate — из строки решения (полные параметры, 30 суток), а не из слепка без сумм
       intervention, reason: describe(!e || e.gate.reason.code === d.reason.code ? d.reason : e.gate.reason, m), decisionId: d.decisionId,
@@ -101,7 +108,8 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       kind: w.endReason === 'PRICING_STOPPED' ? 'STOP' : 'WRITE_RECHECK', tone: 'stop', at: m.when(w.createdAt), sortAt: w.createdAt,
       unit: scope ? unitOf(world, scope, m) : null, productRef: null, proposed: m.money(w.amountMinor, w.currency),
       current: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, change: scope ? m.change(scope.currentPriceMinor, w.amountMinor) : null,
-      limit: null, deviation: null, intervention: null, reason: describe({ code: w.endReason!, params: w.endParams }, m), decisionId: w.decisionId,
+      limit: null, set: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, deviation: null, intervention: null,
+      reason: describe({ code: w.endReason!, params: w.endParams }, m), decisionId: w.decisionId,
     });
   }
 
@@ -114,7 +122,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     rows.push({
       kind: s.verdict === 'HALT_CHANNEL' ? 'HALT' : 'INPUT', tone: 'stop', at: m.when(s.receivedAt), sortAt: s.receivedAt,
       unit: scope ? unitOf(world, scope, m) : null, productRef: r.productRef(s.key.marketplace, s.key.channelProductRef),
-      proposed: null, current: null, change: null, limit: null, deviation: null, intervention: null,
+      proposed: null, current: null, change: null, limit: null, set: null, deviation: null, intervention: null,
       reason: describe({ code: s.reasonCode, params: s.details }, m), decisionId: null,
     });
   }
