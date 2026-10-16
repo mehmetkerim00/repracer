@@ -68,7 +68,7 @@ export class PgStockStore implements StockStore {
       return await inTenant(this.options.adminPool, tenantId, async (tx) => {
         const { rows: [source] } = await tx.query(`SELECT mode FROM tenant_data.stock_source WHERE tenant_id = $1 AND stock_source_id = $2 AND status = 'ACTIVE'`, [tenantId, stockSourceId]);
         if (!source || source.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' as const };
-        const out: StockImportOutcome = { status: 'APPLIED', matched: 0, changed: 0, unmatched: [], productIds: [] };
+        const out: StockImportOutcome = { status: 'APPLIED', matched: 0, changed: 0, unmatched: [], productIds: [], matchedProductIds: [] };
         const seen = new Set<string>();
         /**
          * Чем продавец называет товар: артикул у канала, ссылка на товар канала, EAN, наш SKU — как у импорта себестоимости.
@@ -110,6 +110,8 @@ export class PgStockStore implements StockStore {
           latest.set(productId, r.quantity);
         }
         const matched = [...latest].map(([productId, quantity]) => ({ productId, quantity }));
+        // Пересчёт идёт по всем сопоставленным товарам, а не только по изменившимся (повтор задания после падения — хаос 2054262221)
+        out.matchedProductIds.push(...matched.map((x) => x.productId));
         /**
          * Шаг 66 (CI шага 65: импорт 50 000 строк — 79,7 с на раннере): пулы и движения — множеством, пачками, а не два запроса на строку.
          * Товар в пачке один раз (выше), поэтому остаток пула читается до его движения, как прежде

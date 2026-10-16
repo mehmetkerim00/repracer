@@ -92,7 +92,7 @@ export class InMemoryStockStore implements StockStore {
     if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
     const source = this.sources.get(stockSourceId);
     if (!source || source.row.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' };
-    const out: StockImportOutcome = { status: 'APPLIED', matched: 0, changed: 0, unmatched: [], productIds: [] };
+    const out: StockImportOutcome = { status: 'APPLIED', matched: 0, changed: 0, unmatched: [], productIds: [], matchedProductIds: [] };
     const seen = new Set<string>();
     for (const r of rows) {
       if (seen.has(r.sku)) { out.unmatched.push({ sku: r.sku, reason: 'DUPLICATE_SKU' }); continue; }
@@ -101,6 +101,7 @@ export class InMemoryStockStore implements StockStore {
       const offer = this.offers.find((o) => o.sku === r.sku);
       if (!offer) { out.unmatched.push({ sku: r.sku, reason: 'UNKNOWN_SKU' }); continue; }
       out.matched += 1;
+      out.matchedProductIds.push(offer.productId);
       let pool = this.pools.find((p) => p.stockSourceId === stockSourceId && p.productId === offer.productId);
       if (!pool) { pool = { stockSourceId, mode: 'INTERNAL_POOL', productId: offer.productId, onHand: 0, asOf: null }; this.pools.push(pool); }
       if (pool.onHand !== r.quantity) { pool.onHand = r.quantity; out.changed += 1; out.productIds.push(offer.productId); }

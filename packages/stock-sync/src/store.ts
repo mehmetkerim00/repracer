@@ -42,6 +42,12 @@ export interface StockImportOutcome {
   changed: number;
   unmatched: Array<{ sku: string; reason: StockImportUnmatchedReason }>;
   productIds: string[];
+  /**
+   * Все сопоставленные товары файла, изменившиеся и нет. Пересчёт идёт по ним (как у Inbound API — все узнанные): задание, убитое между
+   * инвентаризацией и пересчётом, повторяется тем же файлом, и «изменившихся» уже нет — пересчёт по ним не случился бы никогда (хаос CI
+   * 38957827994, семя 2054262221)
+   */
+  matchedProductIds: string[];
 }
 
 export interface InboundStockRow {

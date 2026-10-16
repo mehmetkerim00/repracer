@@ -302,7 +302,12 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           await progress(parsed.rows.length, 'APPLYING');
           // Часы МИРА, а не стены процесса (находка 21 ревью шага 35): на виртуальных часах стенда стена — чужое время
           const now = (await options.world(ctx)).now as never;
-          const recalculated = applied.productIds.length > 0 ? await stock.recalculate(ctx.tenantId, applied.productIds, now) : { writes: [], unchanged: 0 };
+          /**
+           * Инвентаризация и пересчёт — разные транзакции. Пересчёт — по ВСЕМ сопоставленным товарам файла, как у Inbound API: задание, убитое
+           * между ними, повторяется тем же файлом, «изменившихся» уже нет, и пересчёт по ним не случился бы никогда — цель меняется, записи
+           * нет (красный хаос полного прогона шага 97, CI 38957827994, семя 2054262221). Неизменившийся товар пересчёт оставляет как есть
+           */
+          const recalculated = applied.matchedProductIds.length > 0 ? await stock.recalculate(ctx.tenantId, applied.matchedProductIds, now) : { writes: [], unchanged: 0 };
           const unmatched = [...parsed.skipped.map((s) => ({ sku: s.sku, reason: s.reason })), ...applied.unmatched];
           const byReason: Record<string, number> = {};
           for (const u of unmatched) byReason[u.reason] = (byReason[u.reason] ?? 0) + 1;
