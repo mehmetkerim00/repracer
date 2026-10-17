@@ -31,6 +31,9 @@ export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
   // А выгрузка не начинает собой ничего: отменить чужую может любой участник — его операция и есть просмотр
   PRICE_EVIDENCE: 'VIEW_PRICING',
   PRICE_FEED_EXPORT: 'VIEW_PRICING',
+  // Шаг 99 [Р-224]: шаблон импорта — выгрузка; примерка — первая половина импорта, как экран различий у правки каталога
+  IMPORT_TEMPLATE: 'VIEW_PRICING',
+  IMPORT_CHECK: 'MANAGE_PRICING',
 };
 
 /** СВОЁ задание отменяет любой участник; чужое — по праву на его вид операции */
@@ -109,6 +112,10 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
   const t = m.ui.jobs;
   const r = (job.result ?? {}) as Record<string, number | undefined>;
   const n = (v: number | undefined) => (typeof v === 'number' ? v : 0);
+  // Шаг 99 [Р-224, E]: применение импорта — «N строк применено за X с»; скорость называется числом
+  if ((job.result as { importKind?: unknown } | null)?.importKind !== undefined && job.kind !== 'IMPORT_CHECK') {
+    return t.doneImport(n(r.applied), Math.round(n(r.durationMs) / 100) / 10);
+  }
   switch (job.kind) {
     case 'COST_IMPORT': return t.doneCostImport(n(r.rows), n(r.offers), n(r.skipped));
     case 'BOUNDS_EDIT': return t.doneBounds(n(r.offers), n(r.changed));
@@ -120,6 +127,8 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
     case 'REPRICING_ENABLE': return t.doneEnable(n(r.enabled), n(r.already), n(r.skipped));
     case 'STOCK_IMPORT': return m.ui.stock.importFile.result({ matched: n(r.matched), changed: n(r.changed), unmatched: n(r.unmatched), writes: n(r.writes) });
     case 'STOCK_SYNC_ENABLE': return m.ui.stock.enable.done({ scopes: n(r.scopes), created: n(r.created), awaitingAck: n(r.awaitingAck), writes: n(r.writes) });
+    case 'IMPORT_TEMPLATE': return t.doneTemplate(n(r.rows));
+    case 'IMPORT_CHECK': return t.doneCheck({ total: n(r.total), changed: n(r.changed), rejected: n(r.rejected) });
   }
 }
 

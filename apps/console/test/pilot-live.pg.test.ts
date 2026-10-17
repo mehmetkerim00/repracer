@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 
 import { ModelOAuthProvider } from '@repracer/channel-oauth/model';
-import type { BulkJobView, ConnectionsView, CostImportView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import type { BulkJobView, ConnectionsView, ImportCheckView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
 import { nextNineUtc, VirtualClock } from '@repracer/contract-tests/live';
 import { AMAZON_DE, SimulatedAmazonPort } from '@repracer/contract-tests/simulator';
 import { FakeMail } from '@repracer/alert-delivery/testing';
@@ -360,7 +360,10 @@ test('Р-179: путь пилота целиком — от оператора �
   const source = await consoleCall<{ stockSourceId: string }>('остатки: источник', 'POST', api('stock', 'sources'), { mode: 'INTERNAL_POOL', name: 'Pilot-Lager' });
   assert.equal(source.status, 200, JSON.stringify(source.body));
   const stockCsv = ['Artikelnummer;Bestand', ...skus.map((s) => `${s};7`)].join('\r\n');
-  await job('остатки: файл', api('stock', 'import'), { fileName: 'bestand.csv', content: Buffer.from(stockCsv).toString('base64'), stockSourceId: source.body.stockSourceId });
+  // Шаг 99 [Р-224]: файл остатков — примерка, затем применение ровно примерки
+  const stockCheck = await job('остатки: примерка файла', api('imports', 'check'), { kind: 'STOCK', fileName: 'bestand.csv', content: Buffer.from(stockCsv).toString('base64'), stockSourceId: source.body.stockSourceId });
+  assert.equal((stockCheck.result as { view: ImportCheckView }).view.counts.changed, OFFERS, 'примерка: остаток меняется у всех товаров');
+  await job('остатки: файл', api('imports', 'apply'), { kind: 'STOCK', checkJobId: stockCheck.jobId, checkToken: (stockCheck.result as { view: ImportCheckView }).view.token, confirmed: true });
   // Шаг 60 [Р-202]: при подключении владельца спрашивают о других инструментах канала; запись количества — после его подтверждения
   assert.deepEqual([account.otherTools.answer, account.quantityWrites.confirmed], [null, false], 'новый аккаунт: вопрос не отвечен, запись количества выключена');
   const notConfirmed = await consoleCall<{ error: { code: string } }>('остатки: синхронизация до подтверждения записи количества', 'POST', api('stock', 'enable'), { channelAccountId: ids.accountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });
@@ -385,10 +388,11 @@ test('Р-179: путь пилота целиком — от оператора �
 
   // ---------------------------------------------------------------- себестоимость, границы, стратегия, включение
   const costCsv = ['Artikelnummer;Einstandspreis;Währung;Provision %;Fixkosten', ...skus.map((s) => `${s};8,00;EUR;15;0,00`)].join('\r\n');
-  const file = { fileName: 'kosten.csv', content: Buffer.from(costCsv).toString('base64') };
-  const plan = await consoleCall<CostImportView>('себестоимость: предпросмотр', 'POST', api('cost-import', 'plan'), file);
-  assert.equal(plan.body.summary?.apply, OFFERS, `сопоставлены все офферы: ${JSON.stringify(plan.body).slice(0, 300)}`);
-  await job('себестоимость: применить', api('cost-import', 'apply'), { ...file, fingerprint: plan.body.fingerprint, confirmed: true });
+  const file = { kind: 'COSTS', fileName: 'kosten.csv', content: Buffer.from(costCsv).toString('base64') };
+  const costCheck = await job('себестоимость: примерка', api('imports', 'check'), file);
+  const costView = (costCheck.result as { view: ImportCheckView }).view;
+  assert.deepEqual([costView.counts.changed, costView.counts.rejected], [OFFERS, 0], `сопоставлены все офферы: ${JSON.stringify(costView.errors).slice(0, 300)}`);
+  await job('себестоимость: применить', api('imports', 'apply'), { kind: 'COSTS', checkJobId: costCheck.jobId, checkToken: costView.token, confirmed: true });
   const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string; label: string } }> }>('товары', 'GET', `${api('products')}?limit=200`);
   const scopes = products.body.rows.map((r) => r.unit.writeScopeId);
   assert.equal(scopes.length, OFFERS);

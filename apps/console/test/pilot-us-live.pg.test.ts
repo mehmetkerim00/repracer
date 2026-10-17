@@ -12,7 +12,7 @@ import { after, before, test } from 'node:test';
 import type { AdapterDependencies } from '@repracer/channel-port';
 import { loadKeyring } from '@repracer/channel-oauth';
 import { ModelOAuthProvider } from '@repracer/channel-oauth/model';
-import type { BulkJobView, ConnectionsView, CostImportView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import type { BulkJobView, ConnectionsView, ImportCheckView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
 import { createEbayAdapter, EBAY_DESCRIPTOR, TokenBucket } from '@repracer/ebay-adapter';
 import { nextNineUtc, VirtualClock } from '@repracer/contract-tests/live';
 import { channelFetch, SimulatedEbayChannel, type TraceEntry } from '@repracer/contract-tests/simulator';
@@ -164,6 +164,14 @@ async function job(step: string, url: string, body: unknown): Promise<BulkJobVie
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   });
+}
+
+/** Шаг 99 [Р-224]: импорт файлом — примерка, затем применение ровно примерки; у файла прогона ошибок нет */
+async function imported(step: string, kind: string, body: Record<string, unknown>): Promise<{ view: ImportCheckView; applied: BulkJobView }> {
+  const checked = await job(`${step}: примерка`, api('imports', 'check'), { kind, ...body });
+  const view = (checked.result as { view: ImportCheckView }).view;
+  assert.equal(view.counts.rejected, 0, `${step}: ${JSON.stringify(view.errors).slice(0, 300)}`);
+  return { view, applied: await job(step, api('imports', 'apply'), { kind, checkJobId: checked.jobId, checkToken: view.token, confirmed: true }) };
 }
 
 async function schedulerFor(minutes: number): Promise<void> {
@@ -405,10 +413,8 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
   const skus = Array.from({ length: MANAGED }, (_, i) => L(i + 1).sku);
   // Файл продавца из США: заголовки по-английски, доллары, точка — десятичный разделитель
   const costCsv = ['SKU,Unit cost,Currency,Fee %,Fixed fee', ...skus.map((s) => `${s},5.00,USD,11,0.00`)].join('\r\n');
-  const file = { fileName: 'costs.csv', content: Buffer.from(costCsv).toString('base64') };
-  const plan = await consoleCall<CostImportView>('себестоимость: предпросмотр', 'POST', api('cost-import', 'plan'), file);
-  assert.equal(plan.body.summary?.apply, MANAGED, `сопоставлены все листинги под Inventory API: ${JSON.stringify(plan.body).slice(0, 300)}`);
-  await job('себестоимость: применить', api('cost-import', 'apply'), { ...file, fingerprint: plan.body.fingerprint, confirmed: true });
+  const costs = await imported('себестоимость: применить', 'COSTS', { fileName: 'costs.csv', content: Buffer.from(costCsv).toString('base64') });
+  assert.equal(costs.view.counts.changed, MANAGED, 'сопоставлены все листинги под Inventory API');
   const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string } | null }> }>('товары', 'GET', `${api('products')}?limit=200`);
   const scopes = products.body.rows.flatMap((r) => (r.unit ? [r.unit.writeScopeId] : []));
   assert.equal(scopes.length, MANAGED, 'единицы записи цены — только у листингов под Inventory API');
@@ -438,8 +444,8 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
   const source = await consoleCall<{ stockSourceId: string }>('остатки: источник — склад', 'POST', api('stock', 'sources'), { mode: 'INTERNAL_POOL', name: 'Warehouse Dallas' });
   assert.equal(source.status, 200, JSON.stringify(source.body));
   const stockCsv = ['SKU,Quantity', ...skus.map((s, i) => `${s},${10 + i}`)].join('\r\n');
-  const stocked = await job('остатки: файл', api('stock', 'import'), { fileName: 'inventory.csv', content: Buffer.from(stockCsv).toString('base64'), stockSourceId: source.body.stockSourceId });
-  assert.equal((stocked.result as { view: { matched: number } }).view.matched, MANAGED, 'все SKU файла найдены');
+  const stocked = await imported('остатки: файл', 'STOCK', { fileName: 'inventory.csv', content: Buffer.from(stockCsv).toString('base64'), stockSourceId: source.body.stockSourceId });
+  assert.equal(stocked.view.counts.changed, MANAGED, 'все SKU файла найдены');
   const synced = await job('остатки: включить синхронизацию', api('stock', 'enable'), { channelAccountId: ids.accountId, bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 });
   assert.equal(synced.status, 'SUCCEEDED');
   const stockScreen = await consoleCall<{ summary: { products: number; synced: number } }>('экран остатков', 'GET', api('stock'));
@@ -550,7 +556,7 @@ test('шаг 64: путь продавца из США с eBay EBAY_US — от 
    * списана с бюджета листинга [Р-19, Р-163], значение дошло до модели. До шага 64 пересчёт ключа не ставил, и триггер отклонял каждую
    * запись количества eBay; в тени день бюджета обнуляется, поэтому теневая часть прогона боевую ветку не проходила
    */
-  await job('остатки: новый файл в бою', api('stock', 'import'),
+  await imported('остатки: новый файл в бою', 'STOCK',
     { fileName: 'inventory-live.csv', content: Buffer.from(['SKU,Quantity', `${skus[0]},3`].join('\r\n')).toString('base64'), stockSourceId: source.body.stockSourceId });
   await timed('планировщик: отправка остатка в бою', () => schedulerFor(5));
   const { rows: [quantityWrite] } = await observer.query(

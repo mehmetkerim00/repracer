@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobCreatedResponse, StandToken } from '../src/api-types.ts';
-import type { BulkJobView, ConnectionsView, OnboardingView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
+import type { BulkJobView, ConnectionsView, ImportCheckView, OnboardingView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { demoWorld, nextNineUtc, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
@@ -205,12 +205,30 @@ test('Р-152: путь «только остатки» — от выбора п�
   assert.equal(source.body.apiKey, null, 'у файлового источника ключа нет');
   const skus = Array.from({ length: DEMO_OFFERS }, (_, i) => String(340_100_001 + i).slice(-6));
   const csv = ['Artikelnummer;Bestand', ...skus.map((sku, i) => `${sku};${10 + (i % 7)}`), 'nicht-da;5'].join('\r\n');
-  const created = await step<JobCreatedResponse>('файл остатков (задание)', 'POST', api('stock', 'import'), { fileName: 'bestand.csv', content: Buffer.from(csv, 'utf8').toString('base64'), stockSourceId: source.body.stockSourceId });
-  assert.equal(created.status, 200, JSON.stringify(created.body).slice(0, 300));
-  const imported = await pollJob(created.body.jobId);
+  /**
+   * Шаг 99 [Р-224]: файл — примеркой. Строка «nicht-da» — ошибка со своим номером и причиной, и файл с ошибкой не применяется вовсе:
+   * прежний путь применял 200 строк и молча пропускал одну. Продавец убирает строку — и тот же файл без неё применяется целиком
+   */
+  const checkOf = async (content: string) => {
+    const created = await step<JobCreatedResponse>('файл остатков: примерка (задание)', 'POST', api('imports', 'check'), { kind: 'STOCK', fileName: 'bestand.csv', content: Buffer.from(content, 'utf8').toString('base64'), stockSourceId: source.body.stockSourceId });
+    assert.equal(created.status, 200, JSON.stringify(created.body).slice(0, 300));
+    const checked = await pollJob(created.body.jobId);
+    assert.equal(checked.status, 'SUCCEEDED', checked.error ?? checked.headline);
+    return { jobId: checked.jobId, view: (checked.result as { view: ImportCheckView }).view };
+  };
+  const withError = await checkOf(csv);
+  assert.deepEqual([withError.view.counts.changed, withError.view.counts.rejected], [DEMO_OFFERS, 1], 'к изменению 200 строк, одна с ошибкой');
+  assert.deepEqual(withError.view.errors.map((e) => e.line), [DEMO_OFFERS + 2], 'ошибка названа номером строки файла (заголовок — строка 1)');
+  const refused = await step<{ error: { code: string } }>('файл с ошибкой: применение', 'POST', api('imports', 'apply'), { kind: 'STOCK', checkJobId: withError.jobId, checkToken: withError.view.token, confirmed: true });
+  assert.deepEqual([refused.status, refused.body.error.code], [409, 'HAS_ERRORS'], 'файл с ошибочной строкой не применяется — ни одной строки');
+  assert.equal((await step<StockView>('экран остатков после отказа', 'GET', api('stock'))).body.summary.withStock, 0, 'в пуле ничего не изменилось');
+  const clean = await checkOf(csv.split('\r\n').filter((l) => !l.startsWith('nicht-da')).join('\r\n'));
+  assert.deepEqual([clean.view.counts.changed, clean.view.counts.rejected], [DEMO_OFFERS, 0]);
+  const applyJob = await step<JobCreatedResponse>('файл остатков: применение (задание)', 'POST', api('imports', 'apply'), { kind: 'STOCK', checkJobId: clean.jobId, checkToken: clean.view.token, confirmed: true });
+  assert.equal(applyJob.status, 200, JSON.stringify(applyJob.body).slice(0, 300));
+  const imported = await pollJob(applyJob.body.jobId);
   assert.equal(imported.status, 'SUCCEEDED', imported.error ?? imported.headline);
-  const importView = (imported.result as { view: { matched: number; changed: number; unmatched: number; writes: number } }).view;
-  assert.deepEqual([importView.matched, importView.changed, importView.unmatched, importView.writes], [DEMO_OFFERS, DEMO_OFFERS, 1, 0], 'все 200 строк применены, одна не найдена; записей ещё нет — синхронизация не включена');
+  assert.match(imported.headline, new RegExp(`^Fertig: ${DEMO_OFFERS} Zeilen in \\d+(,\\d)? s angewendet\\.$`), 'применены все 200 строк — и названо время');
   view = (await step<OnboardingView>('экран пути', 'GET', api('onboarding'))).body;
   assert.equal(view.resumeAt, 'STOCK_SYNC', `источник отдал остаток — дальше синхронизация: ${view.resumeText}`);
 

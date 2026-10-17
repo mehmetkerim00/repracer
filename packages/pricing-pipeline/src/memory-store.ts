@@ -2,7 +2,8 @@ import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/chan
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow } from './store.ts';
+import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow,
+  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -209,6 +210,8 @@ export const DEFAULT_MEMBERS: ReadonlyArray<{ membershipId: string; role: Member
 
 interface ScopeRow extends MemorySeedScope {
   status: PriceScopeContext['status'];
+  /** Шаг 99: оценка комиссии, объявленная продавцом в импорте себестоимости (`SELLER_DECLARED` у базы) */
+  sellerFee?: { feeRateBp: number | null; fixedFeeMinor: number | null } | null;
   taxRegime: TaxRegime;
   priceVersion: number;
   knownPricesMinor: number[];
@@ -1542,7 +1545,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
      * за спор о скидке: её создаёт и зритель. Задания, меняющие цены, — только участник с правом и со вторым фактором [Р-135].
      */
     const readOnly = READ_ONLY_JOB_KINDS.includes(input.kind);
-    const member = readOnly ? this.member(actor.membershipId) : this.adminMember(actor);
+    /**
+     * Шаг 99: право — по виду операции, как `security.bulk_job_cancel_action` в базе: остатки ведёт тот, кто ведёт каталог [Р-152],
+     * движок включает своё право [Р-143], остальное — право менять цены. Прежде здесь для всех видов стояло право на цены, и менеджер
+     * остатков в памяти не мог применить файл остатков, который база ему разрешает
+     */
+    const right = input.kind === 'STOCK_IMPORT' || input.kind === 'STOCK_SYNC_ENABLE' ? 'MANAGE_CATALOG'
+      : input.kind === 'REPRICING_ENABLE' ? 'ENABLE_REPRICING' : 'MANAGE_PRICING';
+    const candidate = this.member(actor.membershipId);
+    const member = readOnly ? candidate : candidate && can(candidate.role, right) ? candidate : null;
     if (!member || member.userId !== actor.userId) return { status: 'FORBIDDEN' };
     // Второй фактор при создании обязателен только у импорта: он массовый всегда [Р-134, находка 4 ревью шага 30]
     if (input.kind === 'COST_IMPORT' && !actor.mfa) return { status: 'MFA_REQUIRED' };
@@ -1644,7 +1655,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!FILE_PRODUCING_JOB_KINDS.includes(job.kind)) {
       throw Object.assign(new Error(`a bulk job of kind ${job.kind} gives the seller no file (Р-145)`), { cause: 'NO_FILE_FOR_KIND' });
     }
-    if (artifact.sha256 !== createHash('sha256').update(artifact.content).digest('hex')) {
+    // Шаг 99: XLSX лежит base64, сумма — по байтам книги, как у базы (0193)
+    const bytes = artifact.contentType === 'text/csv' ? Buffer.from(artifact.content, 'utf8') : Buffer.from(artifact.content, 'base64');
+    if (artifact.sha256 !== createHash('sha256').update(bytes).digest('hex')) {
       throw Object.assign(new Error('the checksum of the file does not match its content (Р-145)'), { cause: 'BAD_CHECKSUM' });
     }
     this.bulkArtifacts.set(jobId, { ...artifact });
@@ -1756,21 +1769,32 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const ids = batch.rows.map((r) => r.writeScopeId);
     const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
     if (duplicate) return { status: 'INVALID', cause: 'DUPLICATE_SCOPE', writeScopeId: duplicate };
-    const planned: Array<{ row: ScopeRow; cost: CostInputs }> = [];
+    const planned: Array<{ row: ScopeRow; cost: CostInputs; sellerFee: { feeRateBp: number | null; fixedFeeMinor: number | null } | null; costChanged: boolean }> = [];
     for (const r of batch.rows) {
       const row = this.scopes.get(r.writeScopeId);
       if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND', writeScopeId: r.writeScopeId };
-      if (!Number.isSafeInteger(r.unitCostMinor) || r.unitCostMinor < 0) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      // Шаг 99: строка без себестоимости несёт только комиссию — себестоимость остаётся прежней (как в базе)
+      if (r.unitCostMinor === undefined && r.fixedFeeMinor === undefined && r.feeRateBp === undefined) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      if (r.unitCostMinor !== undefined && (!Number.isSafeInteger(r.unitCostMinor) || r.unitCostMinor < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      if (r.unitCostMinor === undefined && !row.cost) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
       if (r.fixedFeeMinor !== undefined && (!Number.isSafeInteger(r.fixedFeeMinor) || r.fixedFeeMinor < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
       if (r.feeRateBp !== undefined && (!Number.isSafeInteger(r.feeRateBp) || r.feeRateBp < 0 || r.feeRateBp >= 10_000)) {
         return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
       }
       if (row.currency !== r.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH', writeScopeId: r.writeScopeId };
+      // Шаг 99 [Р-224]: применяется ровно примерка — себестоимость и комиссия продавца те же, что она видела
+      if (r.expected && ((row.cost?.costProfileId ?? null) !== r.expected.costProfileId
+        || JSON.stringify(row.sellerFee ?? null) !== JSON.stringify(r.expected.sellerFee === null ? null : { feeRateBp: r.expected.sellerFee.feeRateBp, fixedFeeMinor: r.expected.sellerFee.fixedFeeMinor }))) {
+        return { status: 'CONFLICT', writeScopeId: r.writeScopeId };
+      }
+      const sellerFee = r.feeRateBp === undefined && r.fixedFeeMinor === undefined ? row.sellerFee ?? null
+        : { feeRateBp: r.feeRateBp ?? row.sellerFee?.feeRateBp ?? null, fixedFeeMinor: r.fixedFeeMinor ?? row.sellerFee?.fixedFeeMinor ?? null };
       planned.push({
-        row,
+        row, sellerFee, costChanged: r.unitCostMinor !== undefined,
         cost: {
-          currency: r.currency, costProfileId: `cp-import-${row.writeScopeId}-${(row.cost?.costProfileId ?? '').length}`,
-          unitCostMinor: r.unitCostMinor,
+          currency: r.unitCostMinor === undefined ? row.cost!.currency : r.currency,
+          costProfileId: r.unitCostMinor === undefined ? row.cost!.costProfileId : `cp-import-${row.writeScopeId}-${(row.cost?.costProfileId ?? '').length}`,
+          unitCostMinor: r.unitCostMinor ?? row.cost!.unitCostMinor,
           fixedFeeMinor: r.fixedFeeMinor ?? row.cost?.fixedFeeMinor ?? 0,
           feeRateBp: r.feeRateBp ?? row.cost?.feeRateBp ?? 0,
           tax: row.cost?.tax ?? (row.taxRegime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: null }),
@@ -1781,12 +1805,16 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     // Р-135: второй фактор проверяется после разбора — продавец видит содержательную причину отказа, а не «нет второго фактора» на мусорный файл
     if (mode === 'APPLY' && !actor.mfa && !this.jobSecondFactor(actor, ['COST_IMPORT'])) return { status: 'MFA_REQUIRED' };
     if (mode === 'PREVIEW') return { status: 'PREVIEWED', rows: batch.rows.length, offers };
+    // Шаг 99: строка журнала — как в базе, вместе с применением; отказ стража журнала — отказ всего применения
+    const run = batch.run && actor.bulkJobId ? this.appendImportRun(batch.run, actor.bulkJobId) : undefined;
+    if (run === 'REFUSED') return { status: 'FORBIDDEN' };
     for (const p of planned) {
       p.row.cost = p.cost;
+      p.row.sellerFee = p.sellerFee;
       // Р-210: новая себестоимость — запрос на переоценку, как триггер базы (0180; ревью шага 73, находка 7 по Р-209/Р-210)
       if (p.row.pricingMode === 'ENGINE') this.requestFloorRaise(p.row.writeScopeId, 'COST_UPDATE', this.now());
     }
-    return { status: 'APPLIED', importId: `import-${batch.fingerprint}`, rows: batch.rows.length, offers };
+    return { status: 'APPLIED', importId: planned.some((p) => p.costChanged) ? `import-${batch.fingerprint}` : null, rows: batch.rows.length, offers, ...(run ? { run } : {}) };
   }
 
   async saveStrategy(_tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {
@@ -1848,6 +1876,118 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
     for (const id of input.assignTo) this.scope(id).strategy = strategy;
     return { status: 'SAVED', strategy, assigned: [...input.assignTo] };
+  }
+
+  /**
+   * Шаг 99 [Р-224, Р-225]: импорт границ и минимальной маржи в памяти — как в базе: действующие значения сверяются с примеркой, всё
+   * целиком, второй фактор задания или сессии у больше чем одного предложения, строка журнала вместе с применением
+   */
+  async importBounds(_tenantId: string, input: { rows: readonly BoundsImportRowInput[]; run?: ImportRunInput }, actor: AdminActor): Promise<BoundsImportResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    const ids = input.rows.map((r) => r.writeScopeId);
+    const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (duplicate) return { status: 'INVALID', writeScopeId: duplicate, cause: 'DUPLICATE_SCOPE' };
+    if (input.rows.length === 0) return { status: 'INVALID', writeScopeId: '', cause: 'NOTHING_TO_CHANGE' };
+    if (input.rows.length > 1 && !actor.mfa && !this.jobSecondFactor(actor, ['COST_IMPORT', 'BOUNDS_EDIT'])) return { status: 'MFA_REQUIRED' };
+    const planned: Array<{ row: ScopeRow; min: SeedBound | null; max: SeedBound | null; margin: number | undefined }> = [];
+    for (const r of input.rows) {
+      const row = this.scopes.get(r.writeScopeId);
+      if (!row) return { status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'SCOPE_NOT_FOUND' };
+      if (r.minMinor === undefined && r.maxMinor === undefined && r.minMarginBp === undefined) return { status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'NOTHING_TO_CHANGE' };
+      if ([r.minMinor, r.maxMinor].some((v) => v !== undefined && (!Number.isSafeInteger(v) || v <= 0))
+        || (r.minMarginBp !== undefined && (!Number.isSafeInteger(r.minMarginBp) || r.minMarginBp < 0 || r.minMarginBp >= 10_000))) {
+        return { status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'AMOUNT_INVALID' };
+      }
+      const b = this.boundsOf(row);
+      const before = { minMinor: b.min.status === 'RESOLVED' ? b.min.amountMinor : null, maxMinor: b.max.status === 'RESOLVED' ? b.max.amountMinor : null };
+      if (before.minMinor !== r.expected.minMinor || before.maxMinor !== r.expected.maxMinor || (row.guardrails?.minMarginBp ?? null) !== r.expected.minMarginBp) {
+        return { status: 'CONFLICT', writeScopeId: r.writeScopeId };
+      }
+      const version = (bound: SeedBound | null | undefined, kind: 'min' | 'max') => `${kind}-${row.writeScopeId}-v${Number((bound?.id ?? '').match(/-v(\d+)$/)?.[1] ?? 1) + 1}`;
+      const min = r.minMinor === undefined ? row.minPrice ?? null : { amountMinor: r.minMinor, id: version(row.minPrice, 'min') };
+      const max = r.maxMinor === undefined ? row.maxPrice ?? null : { amountMinor: r.maxMinor, id: version(row.maxPrice, 'max') };
+      const after = this.boundsOf({ ...row, minPrice: min, maxPrice: max });
+      if (after.min.status === 'RESOLVED' && after.max.status === 'RESOLVED' && after.min.amountMinor > after.max.amountMinor) {
+        return { status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'MIN_ABOVE_MAX' };
+      }
+      planned.push({ row, min, max, margin: r.minMarginBp });
+    }
+    const run = input.run && actor.bulkJobId ? this.appendImportRun(input.run, actor.bulkJobId) : undefined;
+    if (run === 'REFUSED') return { status: 'FORBIDDEN' };
+    for (const p of planned) {
+      p.row.minPrice = p.min;
+      p.row.maxPrice = p.max;
+      if (p.margin !== undefined) p.row.guardrails = { ...(p.row.guardrails ?? {}), minMarginBp: p.margin } as ScopeRow['guardrails'];
+      if (p.row.pricingMode === 'ENGINE') this.requestFloorRaise(p.row.writeScopeId, 'BOUNDS_UPDATE', this.now());
+    }
+    return { status: 'APPLIED', offers: planned.length, ...(run ? { run } : {}) };
+  }
+
+  /** Шаг 99 [Р-225]: назначение стратегий из файла — как назначение версии, но у предложений разные стратегии; целиком */
+  async importStrategies(_tenantId: string, input: StrategiesImportInput, actor: AdminActor): Promise<StrategiesImportResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    const conflict = this.expectedConflict(input.expected);
+    if (conflict) return conflict as StrategiesImportResult;
+    const planned: Array<{ row: ScopeRow; strategy: StrategyDefinition }> = [];
+    for (const a of input.assignments) {
+      const row = this.scopes.get(a.writeScopeId);
+      if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+      const strategy = this.strategyVersions.get(`${a.strategyId}@${a.version}`);
+      if (!strategy) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
+      const meta = this.strategyMeta.get(`${a.strategyId}@${a.version}`);
+      if (meta && meta.status !== 'ACTIVE') return { status: 'INVALID', cause: 'VERSION_NOT_ACTIVE' };
+      const sources = this.sourcesFor(row.channelAccountId);
+      if (sources && !strategyAvailability(strategy.params, sources).available) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE', writeScopeId: a.writeScopeId };
+      if (this.channelPricingActive(row)) return { status: 'INVALID', cause: 'CHANNEL_PRICING_ACTIVE', writeScopeId: a.writeScopeId };
+      planned.push({ row, strategy });
+    }
+    const run = input.run && actor.bulkJobId ? this.appendImportRun(input.run, actor.bulkJobId) : undefined;
+    if (run === 'REFUSED') return { status: 'FORBIDDEN' };
+    for (const p of planned) p.row.strategy = p.strategy;
+    return { status: 'ASSIGNED', offers: planned.length, ...(run ? { run } : {}) };
+  }
+
+  /**
+   * Шаг 99 [Р-224]: журнал импортов в памяти повторяет стража базы (0193): строку пишет идущее задание своего вида, автор и длительность —
+   * из задания, одна строка на задание. Иначе стенд был бы слабее базы, и регрессия «журнал пишет кто угодно» не видна без PostgreSQL
+   */
+  private readonly importRunLog: ImportRunRow[] = [];
+
+  private appendImportRun(run: ImportRunInput, bulkJobId: string): ImportRunRow | 'REFUSED' {
+    const existing = this.importRunLog.find((r) => r.bulkJobId === bulkJobId);
+    if (existing) return existing;
+    const job = this.bulkJobs.find((j) => j.jobId === bulkJobId);
+    if (!job || job.status !== 'RUNNING' || job.leaseUntil === null || Date.parse(job.leaseUntil) <= this.nowMs()) return 'REFUSED';
+    const applyKind: Partial<Record<BulkJobKind, ImportRunInput['kind']>> = { COST_IMPORT: 'COSTS', STOCK_IMPORT: 'STOCK', BOUNDS_EDIT: 'BOUNDS', STRATEGY_ASSIGN: 'STRATEGY' };
+    const matches = (job.kind === 'IMPORT_CHECK' && run.outcome === 'CHECKED' && (job.params as { importKind?: unknown }).importKind === run.kind)
+      || ((run.outcome === 'APPLIED' || run.outcome === 'REFUSED') && 'checkJobId' in job.params && applyKind[job.kind] === run.kind);
+    if (!matches) return 'REFUSED';
+    if ((run.reason !== undefined) !== (run.outcome === 'REFUSED')) return 'REFUSED';
+    if (run.rowsChanged + run.rowsUnchanged + run.rowsRejected !== run.rowsTotal) return 'REFUSED';
+    if (run.outcome === 'APPLIED' && (run.rowsRejected !== 0 || run.rowsChanged === 0)) return 'REFUSED';
+    const row: ImportRunRow = {
+      runId: `run-${this.importRunLog.length + 1}`, kind: run.kind, outcome: run.outcome, reason: run.reason ?? null,
+      fileName: run.fileName.slice(0, 200) || 'import', fileSha256: run.fileSha256, rowsTotal: run.rowsTotal, rowsChanged: run.rowsChanged,
+      rowsUnchanged: run.rowsUnchanged, rowsRejected: run.rowsRejected, bulkJobId, createdByMembershipId: job.createdByMembershipId,
+      createdByUserId: job.createdByUserId, durationMs: Math.max(0, this.nowMs() - Date.parse(job.createdAt)), recordedAt: this.now(),
+    };
+    this.importRunLog.push(row);
+    return row;
+  }
+
+  async recordImportRun(_tenantId: string, run: ImportRunInput, actor: AdminActor & { bulkJobId: string }): Promise<ImportRunRow> {
+    const row = this.appendImportRun(run, actor.bulkJobId);
+    if (row === 'REFUSED') throw Object.assign(new Error('an import run is written by its own bulk job while it runs (Р-224)'), { cause: 'IMPORT_RUN_REFUSED' });
+    return { ...row };
+  }
+
+  async importRunOfJob(_tenantId: string, bulkJobId: string): Promise<ImportRunRow | null> {
+    const row = this.importRunLog.find((r) => r.bulkJobId === bulkJobId);
+    return row ? { ...row } : null;
+  }
+
+  async importRuns(_tenantId: string, query: { kind: ImportRunInput['kind']; limit: number }): Promise<ImportRunRow[]> {
+    return this.importRunLog.filter((r) => r.kind === query.kind).reverse().slice(0, Math.max(1, Math.min(200, query.limit))).map((r) => ({ ...r }));
   }
 
   /** Как PgPricingStore.unassignStrategy (OQ-169): только при выключенном репрайсинге */
@@ -2234,6 +2374,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
           channelProductRef: s.channelProductRef, condition: s.condition, gtin: s.gtin ?? null, currency: s.currency, basis: s.basis, taxRegime: s.taxRegime,
           pricingMode: s.pricingMode, status: s.status, strategy: s.strategy, currentPriceMinor: s.currentPriceMinor, bounds: this.boundsOf(s),
           cost: s.cost ?? null, minMarginBp: s.guardrails?.minMarginBp ?? null,
+          // Шаг 99: себестоимость продавца и маржа по уровням — в памяти уровень один, предложения
+          declaredCost: s.cost ? { costProfileId: s.cost.costProfileId, currency: s.cost.currency, unitCostMinor: s.cost.unitCostMinor } : null,
+          ownMinMarginBp: s.guardrails?.minMarginBp ?? null, widerMinMarginBp: null,
+          ...(s.sellerFee ? { feeEstimates: [{ source: 'SELLER_DECLARED', feeRateBp: s.sellerFee.feeRateBp, fixedFeeMinor: s.sellerFee.fixedFeeMinor, scheduleVersion: null }] } : {}),
           channelHalt: halt ? InMemoryPricingStore.haltRef(halt) : null, priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
           channelDistrust: (() => { const d = this.activeDistrust(s.channelAccountId, s.marketplace); return d ? InMemoryPricingStore.distrustRef(d) : null; })(),
           lastApplied: this.lastAppliedOf(s.writeScopeId),

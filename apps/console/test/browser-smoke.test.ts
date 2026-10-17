@@ -11,6 +11,8 @@ import { createTestIssuer } from '@repracer/identity/test-issuer';
 import type { ShadowPage } from '@repracer/pricing-store-pg';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import { launchBrowser, type Browser } from './browser.ts';
+import { runPendingJobs } from './run-jobs.ts';
+import type { LiveWorld } from '@repracer/contract-tests/stand';
 import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts';
 
 /**
@@ -72,6 +74,8 @@ let usApi: ReturnType<typeof createStandApi>;
 /** Шаг 88 [Р-213]: профиль us с флагом расширенных ролей — вход предлагает пять ролей */
 let extendedApi: ReturnType<typeof createStandApi>;
 let currentApi: ReturnType<typeof createStandApi>;
+/** Шаг 99: мир смоука — по нему исполняются задания импорта (исполнителя у смоука нет, задания зовутся из теста) */
+let smokeLive: LiveWorld;
 /** Шаг 96: подменённый ответ отчёта о поле (страницы по 50 и схлопывание повторов); null — настоящий ответ стенда */
 let syntheticDangerous: unknown = null;
 
@@ -176,6 +180,7 @@ before(async () => {
    * ширины таблицы видело колонку «Channel says» (шаг 89 нашёл её переполнение проходом, а не смоуком — в мирах смоука заметок не было)
    */
   const w0 = worlds[0]!;
+  smokeLive = w0;
   const scope0 = (await w0.view(STAND_USERS[0] as never) as { state: { scopes: Array<{ channelAccountId: string; marketplace: string; channelProductRef: string; condition: string }> } }).state.scopes[0]!;
   await w0.store.recordPricingHealth(w0.tenantId, scope0.channelAccountId, {
     marketplace: scope0.marketplace, channelProductRef: scope0.channelProductRef, condition: scope0.condition, issueType: WALMART_UNPUBLISHED,
@@ -535,6 +540,14 @@ const OUT_OF_BOX = `(() => {
       if (b.right > bb.right + 1.5 || b.left < bb.left - 1.5) { out.push(el.tagName.toLowerCase() + ' «' + (el.textContent ?? '').trim().slice(0, 40) + '» sticks out of ' + box.tagName.toLowerCase() + '.' + String(box.className) + ' by ' + Math.round(Math.max(b.right - bb.right, bb.left - b.left)) + 'px'); break; }
     }
   }
+  // Шаг 99: таблица в рамке с прокруткой, ушедшая под её левый край (поле карточки шага 86 у таблицы в рамке), — срезана, а не листается:
+  // выступ прежняя проверка не видит, он внутри листаемого
+  for (const wrap of document.querySelectorAll('.table-wrap')) {
+    const table = wrap.firstElementChild;
+    if (!table || !visible(wrap) || wrap.scrollLeft !== 0) continue;
+    const shift = wrap.getBoundingClientRect().left + wrap.clientLeft - table.getBoundingClientRect().left;
+    if (shift > 0.5) out.push(table.tagName.toLowerCase() + '.' + String(table.className) + ' starts under the left edge of its frame by ' + Math.round(shift) + 'px');
+  }
   return out.slice(0, 5);
 })()`;
 
@@ -639,6 +652,10 @@ test('step 86, step 98 (Р-223): every menu item and the heading of its page are
   await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="out-control"><table style="margin: 0 -24px; width: calc(100% + 48px)"><tbody><tr><td>control</td></tr></tbody></table></section>'), true)`);
   assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
   await b.evaluate(`(document.getElementById('out-control').remove(), true)`);
+  // Положительный контроль шага 99: таблица в рамке внутри карточки с полем карточки шага 86 (как журнал импортов до правки) — срезана слева
+  await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="frame-control"><div class="table-wrap"><table class="frame-control" style="margin: 0 -16px; width: calc(100% + 32px)"><tbody><tr><td>control</td></tr></tbody></table></div></section>'), true)`);
+  assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /table\.frame-control starts under the left edge of its frame by 16px/);
+  await b.evaluate(`(document.getElementById('frame-control').remove(), true)`);
   // Положительный контроль правила повторов: прежняя строка канала Inventory (шаг 96) в четырёх строках с разными числами и временем —
   // повтор; три таких строки — ещё нет
   const old = (n: number, at: string) => `${en.ui.stock.channel.published(n)}; ${en.ui.stock.channel.heldInShadow(n, at)}; ${en.ui.stock.channel.notConfirmed}`;
@@ -1267,3 +1284,126 @@ test('step 88 (Р-213), step 98 (Р-222): sign-in offers two roles at 375 and 14
     await b.setViewport(1440, 900);
   }
 });
+
+/**
+ * Шаг 99 [Р-224, Р-225]: импорты продавца на своих страницах — меню не растёт. Шаблон скачивается, файл с ошибочной строкой проверяется
+ * и НЕ применяется (кнопки «Apply» нет, причина названа), исправленный файл применяется ровно по примерке, и экран называет время. Каждый
+ * экран импорта — в обеих темах, на 375 и 1440, без выступов и без прокрутки страницы вбок; на испанском и французском — без английских
+ * строк словаря. Задания исполняются тем же обработчиком, что у исполнителя (`run-jobs.ts`)
+ */
+test('step 99 (Р-224): imports on their own pages — template, a check with an error by row and no Apply, the corrected file applied with the time; themes, phone, ES and FR', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const visit = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+    await new Promise((x) => setTimeout(x, 300));
+  };
+  const t = en.ui.imports;
+  const headings = () => b.evaluate<string[]>(`[...document.querySelectorAll('.import-panel > h3')].map((h) => h.textContent.trim())`);
+  // Меню прежнее — девять пунктов и Omnibus; импорты — разделами страниц
+  assert.equal((await b.evaluate<number>(`document.querySelectorAll('.nav-group a').length`)), 10, 'the menu does not grow');
+  await visit('costs');
+  assert.deepEqual(await headings(), [t.titles.COSTS, t.titles.BOUNDS], 'Costs & floors holds the unit-cost and the bounds imports');
+  await visit('strategies');
+  assert.deepEqual(await headings(), [t.titles.STRATEGY]);
+  await visit('inventory');
+  assert.deepEqual(await headings(), [t.titles.STOCK]);
+
+  // Шаблон: задание, затем файл забирается клиентом консоли — ошибок страницы нет
+  await visit('costs');
+  await b.click(t.templateCsv, '.import-costs button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.import-costs .job') === null`, 'the template job card leaves once the file is downloaded');
+
+  // Файл с ошибочной строкой: строка названа номером и причиной, применить нельзя — и сказано почему
+  const offer = await smokeLive.view(STAND_USERS[0] as never) as { state: { scopes: Array<{ externalUnitId: string; currency: string }> } };
+  const unit = offer.state.scopes[0]!.externalUnitId;
+  const upload = async (text: string, name: string) => {
+    await b.evaluate(`(() => { const input = document.querySelector('.import-costs input[type=file]'); const dt = new DataTransfer();
+      dt.items.add(new File([${JSON.stringify(text)}], ${JSON.stringify(name)}, { type: 'text/csv' })); input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(b, `[...document.querySelectorAll('.import-costs .file-drop')].some((x) => x.textContent.includes(${JSON.stringify(name)}))`, 'the file is chosen');
+    await b.click(t.check, '.import-costs button');
+    await new Promise((x) => setTimeout(x, 300));
+    await runPendingJobs(smokeLive);
+    await waitFor(b, `document.querySelector('.import-costs .import-check') !== null`, 'the check is shown');
+  };
+  await upload(`sku,unit_cost,currency\n${unit},9.99,EUR\nNO-SUCH-SKU,7.00,EUR\n`, 'costs-with-error.csv');
+  const check = await b.evaluate<{ chips: string[]; errors: string[][]; apply: boolean; hint: string }>(`(() => { const c = document.querySelector('.import-costs');
+    return { chips: [...c.querySelectorAll('.stat-chip')].map((x) => x.innerText.replace(/\\s+/g, ' ').trim()),
+      errors: [...c.querySelectorAll('.import-errors tbody tr')].map((tr) => [...tr.children].map((td) => td.innerText.trim())),
+      apply: [...c.querySelectorAll('button')].some((x) => x.textContent.trim() === ${JSON.stringify(t.apply)}),
+      hint: c.querySelector('.form-hint')?.innerText.trim() ?? '' }; })()`);
+  assert.deepEqual(check.chips, [`${t.stats.total} 2`, `${t.stats.changed} 1`, `${t.stats.unchanged} 0`, `${t.stats.rejected} 1`]);
+  assert.deepEqual(check.errors, [['3', 'NO-SUCH-SKU', t.fields.sku, t.problems.NOT_FOUND]], 'the error names the row of the file and the reason');
+  assert.equal(check.apply, false, 'a file with an error has no Apply button');
+  assert.equal(check.hint, t.applyBlocked.errors(1));
+  for (const width of [375, 1440]) {
+    await b.setViewport(width, 900);
+    await new Promise((x) => setTimeout(x, 200));
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll with a check on screen — ${
+      await b.evaluate<string>(`[...document.querySelectorAll('.world-content *')].filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1).slice(0, 6).map((e) => e.tagName + '.' + e.className + ' ' + Math.round(e.getBoundingClientRect().right)).join(' | ')`)}`);
+    assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out of its frame`);
+  }
+  await b.setViewport(1440, 900);
+
+  // Исправленный файл: одна строка к изменению, «Apply» — и экран называет время
+  await b.click(t.back, '.import-costs button');
+  await upload(`sku,unit_cost,currency\n${unit},9.99,EUR\n`, 'costs.csv');
+  await b.click(t.apply, '.import-costs button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.import-costs .import-applied') !== null`, 'the applied notice');
+  const applied = await b.evaluate<string>(`document.querySelector('.import-costs .import-applied').innerText.trim()`);
+  assert.match(applied, /^Done: 1 row applied in \d+(\.\d)? s\.$/, `the time is named: ${applied}`);
+  await waitFor(b, `document.querySelectorAll('.import-costs .import-history tbody tr').length >= 3`, 'the journal lists the checks and the apply');
+  const outcomes = await b.evaluate<string[]>(`[...document.querySelectorAll('.import-costs .import-history .badge')].map((x) => x.textContent.trim())`);
+  assert.equal(outcomes[0], t.outcomes.APPLIED, `the newest run is the apply: ${outcomes.join(', ')}`);
+
+  // Обе темы и телефон: страницы импортов без выступов; испанский и французский — без английских строк словаря
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const width of [375, 1440]) {
+      await b.setViewport(width, 900);
+      for (const route of ['costs', 'strategies', 'inventory']) {
+        await visit(route);
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width} ${route}: no sideways scroll`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width} ${route}: nothing sticks out`);
+      }
+    }
+  }
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  for (const m of [es, fr]) {
+    await b.click(en.ui.app.languages[m.locale], '.topbar .lang button');
+    await b.waitText(m.ui.app.screens.feed);
+    const english = englishOnly(m);
+    for (const route of ['costs', 'strategies', 'inventory']) {
+      await visit(route);
+      assert.deepEqual(await b.evaluate<string[]>(UNTRANSLATED(english)), [], `${m.locale} ${route}: an English dictionary string on an import page`);
+    }
+    await b.click(m.ui.app.languages.en, '.topbar .lang button');
+    await b.waitText(en.ui.app.screens.feed);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+async function waitFor(b: Browser, expression: string, what: string, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await b.evaluate<boolean>(expression))) {
+    if (Date.now() > deadline) assert.fail(`${what}: not reached in ${timeoutMs / 1000} s`);
+    await new Promise((x) => setTimeout(x, 200));
+  }
+}

@@ -1,4 +1,3 @@
-import type { ImportPreview } from '@repracer/cost-import';
 import type { Messages } from './i18n/index.ts';
 import { feedItemOf, type FeedQuery } from './price-feed.ts';
 import type { FeedPageItem } from '@repracer/pricing-pipeline';
@@ -20,21 +19,6 @@ const quote = (raw: string): string => {
 
 const csv = (header: readonly string[], rows: readonly (readonly string[])[]): string =>
   `${[header.join(','), ...rows.map((r) => r.map(quote).join(','))].join('\n')}\n`;
-
-export const COST_IMPORT_REPORT_HEADER = ['line', 'offer_key', 'raw_value', 'problem', 'problem_text'];
-
-/**
- * Отчёт об импорте себестоимости [Р-134]: КАЖДАЯ строка, которая не применилась, с её причиной. Экран показывает по пять
- * примеров на причину — на выгрузке в 10 000 строк с 1430 несопоставленными (замер шага 28) продавец по экрану не поймёт,
- * какие именно строки чинить. Причина названа на языке продавца, номер строки — как в его файле.
- */
-export function costImportReportRows(preview: ImportPreview, m: Messages): string[][] {
-  const t = m.ui.costImport;
-  return preview.skipped.map((r) => [
-    String(r.line), r.offerKey, r.raw ?? '', r.problem ?? '',
-    (r.problem ? t.problems[r.problem as keyof typeof t.problems] : undefined) ?? r.problem ?? '',
-  ]);
-}
 
 /**
  * Выгрузка ленты цен [Р-136]: что мы отправляли каналу за период и что с этим стало. Экран отдаёт страницу не больше 200

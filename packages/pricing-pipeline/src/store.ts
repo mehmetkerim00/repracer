@@ -428,11 +428,17 @@ export type BoundsEditResult =
  */
 export interface CostImportRowInput {
   writeScopeId: string;
-  unitCostMinor: number;
+  /** Шаг 99: нет — себестоимость не меняется, строка несёт только комиссию */
+  unitCostMinor?: number;
   currency: string;
   /** Фиксированная комиссия канала и комиссия от цены — оценка комиссии оффера [Р-32]; без них остаётся прежняя */
   fixedFeeMinor?: number;
   feeRateBp?: number;
+  /**
+   * Шаг 99 [Р-224]: что было на примерке — действующий профиль себестоимости предложения (null — не было) и оценка комиссии продавца.
+   * Изменилось к применению — CONFLICT, ничего не применяется
+   */
+  expected?: { costProfileId: string | null; sellerFee: { feeRateBp: number | null; fixedFeeMinor: number | null } | null };
 }
 
 export interface CostImportBatch {
@@ -444,15 +450,86 @@ export interface CostImportBatch {
   /** Сколько строк файла применены НЕ будут (показаны продавцу отдельно) */
   skippedRows: number;
   rows: readonly CostImportRowInput[];
+  /** Шаг 99 [Р-224]: строка журнала импортов — пишется В ТОЙ ЖЕ транзакции, что и применение */
+  run?: ImportRunInput;
+  /** Шаг 99: часы мира, по которым считалась примерка, — на них сверяются ожидаемые значения (`expected` строк) */
+  asOf?: string;
 }
 
 export type CostImportResult =
   | { status: 'PREVIEWED'; rows: number; offers: number }
-  | { status: 'APPLIED'; importId: string; rows: number; offers: number }
+  | { status: 'APPLIED'; importId: string | null; rows: number; offers: number; run?: ImportRunRow }
+  /** Шаг 99 [Р-224]: данные предложения изменились после примерки — не применено ничего */
+  | { status: 'CONFLICT'; writeScopeId: string }
   | { status: 'FORBIDDEN' }
   /** Р-135: импорт применяется только со вторым фактором; предпросмотр его не требует */
   | { status: 'MFA_REQUIRED'; window?: boolean }
   | { status: 'INVALID'; cause: 'NO_ROWS' | 'DUPLICATE_SCOPE' | 'AMOUNT_INVALID' | 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH'; writeScopeId?: string };
+
+/**
+ * Шаг 99 [Р-224]: импорт продавца — один из четырёх видов, и у каждого запуска (примерка, применение, отказ) строка журнала. Журнал
+ * только на добавление; автора, момент и длительность ставит база из задания, которое строку пишет
+ */
+export type ImportKind = 'COSTS' | 'STOCK' | 'BOUNDS' | 'STRATEGY';
+export const IMPORT_KINDS: readonly ImportKind[] = ['COSTS', 'STOCK', 'BOUNDS', 'STRATEGY'];
+export type ImportRunOutcome = 'CHECKED' | 'APPLIED' | 'REFUSED';
+
+export interface ImportRunInput {
+  kind: ImportKind;
+  outcome: ImportRunOutcome;
+  /** Только у отказа: код причины (DATA_CHANGED, HAS_ERRORS, NOTHING_TO_APPLY, MFA_REQUIRED…) */
+  reason?: string;
+  fileName: string;
+  /** SHA-256 файла продавца — по байтам, как он лежит у него на диске */
+  fileSha256: string;
+  rowsTotal: number;
+  rowsChanged: number;
+  rowsUnchanged: number;
+  rowsRejected: number;
+}
+
+export interface ImportRunRow extends Omit<ImportRunInput, 'reason'> {
+  runId: string;
+  reason: string | null;
+  bulkJobId: string;
+  createdByMembershipId: string;
+  createdByUserId: string;
+  /** От нажатия («Check» или «Apply») до итога — считает база */
+  durationMs: number;
+  recordedAt: Instant;
+}
+
+/**
+ * Шаг 99 [Р-224, Р-225]: импорт границ — нижняя и верхняя граница и минимальная маржа предложения. Всё уровня единицы записи;
+ * `expected` — действующие значения на примерке: изменились — CONFLICT
+ */
+export interface BoundsImportRowInput {
+  writeScopeId: string;
+  minMinor?: number;
+  maxMinor?: number;
+  minMarginBp?: number;
+  expected: { minMinor: number | null; maxMinor: number | null; minMarginBp: number | null };
+}
+
+export type BoundsImportResult =
+  | { status: 'APPLIED'; offers: number; run?: ImportRunRow }
+  | { status: 'FORBIDDEN' }
+  | { status: 'MFA_REQUIRED'; window?: boolean }
+  | { status: 'CONFLICT'; writeScopeId: string }
+  | { status: 'INVALID'; writeScopeId: string; cause: 'SCOPE_NOT_FOUND' | 'AMOUNT_INVALID' | 'MIN_ABOVE_MAX' | 'NOTHING_TO_CHANGE' | 'DUPLICATE_SCOPE' };
+
+/** Шаг 99 [Р-225]: назначение стратегий из файла — у каждого предложения своя действующая версия; `expected` — как у назначения */
+export interface StrategiesImportInput {
+  assignments: ReadonlyArray<{ writeScopeId: string; strategyId: string; version: number }>;
+  expected: Array<{ writeScopeId: string; strategyId: string | null; version: number | null }>;
+  run?: ImportRunInput;
+}
+
+export type StrategiesImportResult =
+  | { status: 'ASSIGNED'; offers: number; run?: ImportRunRow }
+  | { status: 'FORBIDDEN' }
+  | { status: 'CONFLICT'; writeScopeId: string }
+  | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING_ACTIVE' | 'VERSION_NOT_ACTIVE'; writeScopeId?: string };
 
 /** Шаг 21: новая версия стратегии и её назначение единицам записи — после превью */
 export interface StrategySaveInput {
@@ -613,6 +690,19 @@ export interface PricingStore {
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   /** Р-134, Р-135: массовый импорт себестоимости — предпросмотр без записи, применение целиком и со вторым фактором */
   importCosts(tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult>;
+  /** Шаг 99 [Р-224, Р-225]: импорт границ и минимальной маржи — целиком, одной транзакцией вместе со строкой журнала */
+  importBounds(tenantId: string, input: { rows: readonly BoundsImportRowInput[]; run?: ImportRunInput }, actor: AdminActor): Promise<BoundsImportResult>;
+  /** Шаг 99 [Р-225]: назначение стратегий из файла — целиком, одной транзакцией вместе со строкой журнала */
+  importStrategies(tenantId: string, input: StrategiesImportInput, actor: AdminActor): Promise<StrategiesImportResult>;
+  /**
+   * Шаг 99 [Р-224]: строка журнала импортов вне применения (примерка, отказ). Пишет её задание, которое сейчас идёт (`actor.bulkJobId`);
+   * повтор того же задания строку не дублирует — возвращается записанная
+   */
+  recordImportRun(tenantId: string, run: ImportRunInput, actor: AdminActor & { bulkJobId: string }): Promise<ImportRunRow>;
+  /** Строка журнала, которую задание уже записало: применение, повторённое после падения процесса, не применяется дважды */
+  importRunOfJob(tenantId: string, bulkJobId: string): Promise<ImportRunRow | null>;
+  /** История импортов одного вида — новые первыми; читает экран страницы импорта */
+  importRuns(tenantId: string, query: { kind: ImportKind; limit: number }): Promise<ImportRunRow[]>;
   /** Р-139 (шаг 30): массовые операции — фоновые задания с видимым ходом */
   createBulkJob(tenantId: string, input: BulkJobInput, actor: AdminActor): Promise<BulkJobCreated>;
   claimBulkJob(tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null>;
@@ -817,6 +907,8 @@ export interface PricingStore {
  * потому это работа, а не запрос, — предпросмотр по выборке был ценой синхронного ответа, а не свойством продукта.
  */
 export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRATEGY_ASSIGN' | 'STRATEGY_PREVIEW' | 'PRICE_EVIDENCE' | 'PRICE_FEED_EXPORT'
+  /** Шаг 99 [Р-224]: шаблон импорта (файл с текущими значениями) и примерка файла — ничего не меняют, отдают файл */
+  | 'IMPORT_TEMPLATE' | 'IMPORT_CHECK'
   /** Шаг 34 [Р-149]: включение движка у набора предложений — последний шаг пути; право своё, ENABLE_REPRICING */
   | 'REPRICING_ENABLE'
   /** Шаг 35 [Р-152]: файл остатков продавца — инвентаризация внутреннего пула; право — на каталог (MANAGE_CATALOG) */
@@ -834,14 +926,14 @@ export const BULK_JOB_QUEUE_LIMIT = 20;
 /** Сколько заданий держит в очереди ОДИН участник: меньше общего предела, чтобы один не занимал очередь тенанта */
 export const BULK_JOB_MEMBER_QUEUE_LIMIT = 5;
 
-export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
+export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'IMPORT_TEMPLATE', 'IMPORT_CHECK'];
 
 /**
- * Р-145 (шаг 32): виды заданий, которые отдают продавцу ФАЙЛ. Повторяет `security.file_producing_job_kinds()` (0113) — список
- * один, база последнее слово. COST_IMPORT здесь потому, что отчёт о несопоставленных строках — такой же файл продавца, хотя
- * само задание меняет базу; значит со списком «ничего не меняющих» видов этот список не совпадает и совпадать не должен.
+ * Р-145 (шаг 32): виды заданий, которые отдают продавцу ФАЙЛ. Повторяет `security.file_producing_job_kinds()` (0193) — список
+ * один, база последнее слово. Шаг 99: файлы отдают шаблон импорта и примерка (отчёт об ошибочных строках); импорт себестоимости
+ * файла больше не отдаёт — файл с ошибками не применяется вовсе [Р-224].
  */
-export const FILE_PRODUCING_JOB_KINDS: readonly BulkJobKind[] = ['COST_IMPORT', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
+export const FILE_PRODUCING_JOB_KINDS: readonly BulkJobKind[] = ['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
 export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED' | 'CANCELLED';
 export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
 
@@ -897,9 +989,12 @@ export type BulkJobOutcome =
   /** Процесс упал посреди применения: задание возвращается в очередь, а транзакция откатилась целиком [Р-134] */
   | { status: 'INTERRUPTED' };
 
+/** Шаг 99: XLSX шаблона импорта — содержимое base64, контрольная сумма по байтам файла */
+export const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export interface BulkJobArtifact {
   fileName: string;
-  contentType: 'text/csv';
+  contentType: 'text/csv' | typeof XLSX_CONTENT_TYPE;
+  /** CSV — текст; XLSX — base64 байтов файла */
   content: string;
   sha256: string;
   rows: number;
@@ -928,6 +1023,17 @@ export interface ConsoleScopeRow {
   /** Себестоимость и комиссии в валюте возникновения (перевод — при показе, как в решении) */
   cost: CostInputs | null;
   minMarginBp: number | null;
+  /**
+   * Шаг 99 [Р-224]: себестоимость, объявленная продавцом, — даже без оценки комиссии (у `cost` её тогда нет). Шаблон импорта показывает
+   * её как есть, и примерка сравнивает файл с ней: без этого предложение без комиссии всегда выглядело бы «без себестоимости»
+   */
+  declaredCost?: { costProfileId: string; currency: string; unitCostMinor: number } | null;
+  /**
+   * Шаг 99 [Р-225]: минимальная маржа уровня предложения (гардрейл единицы записи) и наибольшая из более широких уровней (товар, аккаунт,
+   * тенант). Действует наибольшая из всех: маржа предложения ниже более широкой ничего не меняет, и импорт говорит это строкой
+   */
+  ownMinMarginBp?: number | null;
+  widerMinMarginBp?: number | null;
   /**
    * Р-138 (шаг 29): все действующие оценки комиссии с источниками. Оценка продавца (`SELLER_DECLARED`) и тарифная таблица
    * репозитория (`FEE_SCHEDULE`) не смешиваются: при расхождении продавец видит оба числа, а пол считается по большему [Р-83].

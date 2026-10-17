@@ -313,8 +313,22 @@ after(async () => {
 async function sellerImportsStock(): Promise<string> {
   const skus = Array.from({ length: between(5, 15) }, () => String(live.products[between(0, live.products.length - 1)]!.idProduct).slice(-6));
   const csv = ['SKU,Quantity', ...[...new Set(skus)].map((s) => `${s},${between(5, ON_HAND)}`)].join('\r\n');
-  const r = await call<{ jobId?: string }>('POST', api('stock', 'import'), { fileName: 'stock.csv', content: Buffer.from(csv).toString('base64'), stockSourceId });
-  return `${r.status}`;
+  /**
+   * Шаг 99 [Р-224]: файл — примеркой, затем применение ровно примерки. Примерка — задание исполнителя, которого хаос убивает: она
+   * ждётся недолго, и не дождавшаяся примерка — тоже исход раунда (примерка ничего не меняет)
+   */
+  const checked = await call<{ jobId?: string }>('POST', api('imports', 'check'), { kind: 'STOCK', fileName: 'stock.csv', content: Buffer.from(csv).toString('base64'), stockSourceId });
+  if (checked.status !== 200 || !checked.body.jobId) return `${checked.status}`;
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const job = await call<{ status: string; result: { view?: { token: string } } | null }>('GET', api('jobs', checked.body.jobId));
+    if (job.body?.status === 'SUCCEEDED' && job.body.result?.view) {
+      const applied = await call('POST', api('imports', 'apply'), { kind: 'STOCK', checkJobId: checked.body.jobId, checkToken: job.body.result.view.token, confirmed: true });
+      return `${checked.status}/${applied.status}`;
+    }
+    if (job.body?.status === 'FAILED' || Date.now() > deadline) return `${checked.status}/check-${job.body?.status ?? job.status}`;
+    await sleep(200);
+  }
 }
 
 // ---------------------------------------------------------------- затишье и инварианты

@@ -1,16 +1,19 @@
-import { buildPreview, readTable, suggestMapping, type ColumnMapping, type TableEncoding } from '@repracer/cost-import';
+import { createHash } from 'node:crypto';
+import { readTable, TABLE_ENCODINGS, type TableEncoding } from '@repracer/cost-import';
 import {
-  boundsDiffView, costImportView, currentStrategies, expandBoundsEdit, importTargets, messagesFor, parseBoundsEditRequest,
+  boundsDiffView, currentStrategies, expandBoundsEdit, messagesFor, parseBoundsEditRequest,
   parseStrategyDraft, PRICE_EVIDENCE_HEADER, priceEvidenceRows, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
-  COST_IMPORT_REPORT_HEADER, costImportReportRows, parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf, feedPageQuery, FEED_PAGE_MAX,
-  describe, unitOf, type ConsoleScope, type EnableResultView, type Locale, type StandWorld,
+  parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf, feedPageQuery, FEED_PAGE_MAX,
+  describe, unitOf, buildImportPlan, importCheckView, importMapping, importReportRows, importTemplate, IMPORT_FILE_NAMES, IMPORT_KIND_LIST, IMPORT_REPORT_HEADER,
+  refineBoundsPlan, type ConsoleScope, type EnableResultView, type ImportKind, type ImportPlan, type ImportPlanContext, type Locale, type StandWorld,
 } from '@repracer/console-model';
 import type { StrategyDefinition } from '@repracer/pricing-model';
+import type { ImportRunInput, ImportRunRow } from '@repracer/pricing-pipeline';
 
 /** Стратегия предложения на момент предпросмотра — как её ждёт хранилище */
 type StrategyExpectation = { writeScopeId: string; strategyId: string | null; version: number | null };
 import type { BoundsEditInput, BulkJobRow, StrategyPreview } from '@repracer/pricing-pipeline';
-import { parseStockSheet, type StockStore } from '@repracer/stock-sync';
+import type { StockStore } from '@repracer/stock-sync';
 import type { BulkJobContext, BulkJobHandlers, BulkJobWork } from './index.ts';
 import type { BulkJobPhase } from '@repracer/pricing-pipeline';
 
@@ -38,7 +41,27 @@ export interface BulkJobWorldOptions {
   enableRepricing?(ctx: BulkJobContext, scope: ConsoleScope): Promise<{ enabled: boolean; problems: Array<{ code: string; params?: Record<string, unknown> }> }>;
   /** Шаг 35 [Р-152]: хранилище остатков — файл остатков применяется им от имени автора задания, пересчёт создаёт записи в каналы */
   stock?: StockStore;
+  /**
+   * Шаг 99 [Р-225, Р-39]: даёт ли канал предложения данные, нужные стратегии, — по описанию канала, которое знает хозяин обработчиков.
+   * Без него импорт стратегий доступность не проверяет (последнее слово всё равно за базой, 0082)
+   */
+  strategyAvailable?(scope: ConsoleScope, params: StrategyDefinition['params']): { available: true } | { available: false; unmet: Record<string, string[]> };
 }
+
+/** Шаг 99 [Р-224]: что задание шаблона, примерки и применения знает о файле — ровно то, что прислал человек */
+interface ImportFileParams {
+  importKind: ImportKind;
+  fileName: string;
+  content: string;
+  encoding?: TableEncoding;
+  mapping?: Record<string, unknown>;
+  stockSourceId?: string;
+}
+
+/** Задание применения каждого импорта (то же сопоставление держит страж журнала, 0193) */
+export const APPLY_JOB_OF: Readonly<Record<ImportKind, 'COST_IMPORT' | 'STOCK_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN'>> = {
+  COSTS: 'COST_IMPORT', STOCK: 'STOCK_IMPORT', BOUNDS: 'BOUNDS_EDIT', STRATEGY: 'STRATEGY_ASSIGN',
+};
 
 const PROGRESS_STEP = 500;
 
@@ -57,73 +80,190 @@ const messagesOfJob = (job: BulkJobRow) => {
   return messagesFor(localeOf(job), { timeZone: typeof zone === 'string' ? zone : null });
 };
 
+const fail = (cause: string): never => { throw Object.assign(new Error(cause), { cause }); };
+
 export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
-  return {
-    /** Импорт себестоимости: разбор файла с видимым ходом, затем применение одной транзакцией [Р-134] */
-    async COST_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesOfJob(job);
-      const p = job.params as { fileName: string; content: string; mapping?: ColumnMapping; encoding?: TableEncoding; fingerprint?: string };
-      const sheet = readTable(Buffer.from(p.content, 'base64'), p.encoding);
-      const suggested = suggestMapping(sheet);
-      // Выбор продавца сильнее подсказки, а null — «этой колонки в файле нет»: подсказка снимается так же явно, как ставится
-      const mapping = { ...suggested.mapping };
-      for (const [field, index] of Object.entries((p.mapping ?? {}) as Record<string, unknown>)) {
-        if (index === null) delete mapping[field as keyof typeof mapping];
-        else if (typeof index === 'number' && Number.isSafeInteger(index) && index >= 0) mapping[field as keyof typeof mapping] = index;
+  const actorOf = (ctx: BulkJobContext) => ({ membershipId: ctx.membershipId, userId: ctx.userId, mfa: false, bulkJobId: ctx.jobId });
+
+  /**
+   * Шаг 99 [Р-224]: примерка файла против ТЕКУЩИХ данных — одним путём у задания примерки и у задания применения. Применение не берёт
+   * примерку из итога, а считает её заново и сравнивает отпечаток: так оно видит изменения, случившиеся после примерки
+   */
+  const prepareImport = async (p: ImportFileParams, ctx: BulkJobContext, m: ReturnType<typeof messagesFor>) => {
+    if (!IMPORT_KIND_LIST.includes(p.importKind) || typeof p.content !== 'string') fail('BAD_REQUEST');
+    const bytes = Buffer.from(p.content, 'base64');
+    let sheet;
+    try { sheet = readTable(bytes, TABLE_ENCODINGS.find((e) => e === p.encoding)); } catch { return fail('BAD_FILE'); }
+    const mapping = importMapping(p.importKind, sheet, p.mapping ?? null);
+    const world = await options.world(ctx);
+    const context: ImportPlanContext = {
+      ...(options.strategyAvailable ? { strategyAvailable: options.strategyAvailable } : {}),
+    };
+    if (p.importKind === 'STOCK') {
+      if (!options.stock || typeof p.stockSourceId !== 'string') fail('NOT_INTERNAL_POOL');
+      const targets = await options.stock!.stockImportTargets(ctx.tenantId, p.stockSourceId!);
+      if ('status' in targets) return fail('NOT_INTERNAL_POOL');
+      context.stockTargets = targets;
+    }
+    let plan = buildImportPlan(p.importKind, sheet, mapping, world, m, context);
+    /**
+     * Границы: что станет действующей границей на деле, считает база без записи — у товара может быть своя граница, и тогда строка
+     * предложения ничего не меняет (ошибка с причиной). Строка с полом выше потолка по уровню товара — тоже ошибка этой строки
+     */
+    if (plan.kind === 'BOUNDS') {
+      const excluded = new Set<string>();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const edits = plan.changed.filter((r) => !excluded.has(r.target) && (r.set.minMinor !== undefined || r.set.maxMinor !== undefined)).map((r) => ({
+          writeScopeId: r.target,
+          ...(r.set.minMinor !== undefined ? { minMinor: Number(r.set.minMinor) } : {}),
+          ...(r.set.maxMinor !== undefined ? { maxMinor: Number(r.set.maxMinor) } : {}),
+          expected: { minMinor: (r.expected.minMinor ?? null) as number | null, maxMinor: (r.expected.maxMinor ?? null) as number | null },
+        }));
+        if (edits.length === 0) break;
+        const preview = await ctx.store.editBounds(ctx.tenantId, edits, actorOf(ctx), 'PREVIEW');
+        if (preview.status === 'PREVIEWED') { plan = refineBoundsPlan(plan, new Map(preview.rows.map((r) => [r.writeScopeId, r.after]))); break; }
+        if (preview.status === 'INVALID' && preview.cause === 'MIN_ABOVE_MAX') {
+          // Пол выше потолка с учётом уровня товара — ошибка этой строки; остальные считаются заново
+          const row = plan.changed.find((r) => r.target === preview.writeScopeId)!;
+          excluded.add(row.target);
+          plan = refineBoundsPlan({ ...plan, changed: plan.changed.filter((r) => r !== row),
+            errors: [...plan.errors, { line: row.line, key: row.key, problem: 'BOUND_HELD_ELSEWHERE', field: row.set.minMinor !== undefined ? 'min_price' : 'max_price' }] }, new Map());
+          continue;
+        }
+        if (preview.status === 'FORBIDDEN') fail('FORBIDDEN');
+        if (preview.status === 'CONFLICT') fail('DATA_CHANGED');
+        break;
       }
+    }
+    const fileSha256 = createHash('sha256').update(bytes).digest('hex');
+    return { sheet, mapping, world, context, plan, fileSha256 };
+  };
+
+  const runOf = (p: ImportFileParams, plan: ImportPlan, fileSha256: string, outcome: ImportRunInput['outcome'], reason?: string): ImportRunInput => ({
+    kind: p.importKind, outcome, ...(reason ? { reason } : {}), fileName: p.fileName, fileSha256,
+    rowsTotal: plan.rowsTotal, rowsChanged: plan.changed.length, rowsUnchanged: plan.unchanged, rowsRejected: plan.errors.length,
+  });
+
+  /**
+   * Шаг 99 [Р-224]: применение импорта. Примерка — ЗАДАНИЕ того же человека; применение считает её заново по текущим данным и
+   * отказывает, если отпечаток другой (данные изменились), если в файле ошибки или менять нечего — каждый отказ строкой журнала.
+   * Запись — одной транзакцией хранилища вместе со строкой «применено»; повтор задания после падения процесса не применяет дважды
+   */
+  const applyImport = async (kind: ImportKind, job: BulkJobRow, ctx: BulkJobContext,
+    write: (prepared: Awaited<ReturnType<typeof prepareImport>>, run: ImportRunInput) => Promise<{ status: string; run?: ImportRunRow; cause?: string; window?: boolean }>,
+    after?: (prepared: Awaited<ReturnType<typeof prepareImport>>) => Promise<void>): Promise<BulkJobWork> => {
+    const m = messagesOfJob(job);
+    const p = job.params as { checkJobId?: string; checkToken?: string };
+    const checkJob = typeof p.checkJobId === 'string' ? await ctx.store.bulkJob(ctx.tenantId, p.checkJobId) : null;
+    const checked = (checkJob?.params ?? {}) as unknown as ImportFileParams;
+    if (!checkJob || checkJob.kind !== 'IMPORT_CHECK' || checkJob.status !== 'SUCCEEDED' || checked.importKind !== kind
+      || checkJob.createdByMembershipId !== ctx.membershipId || (checkJob.result as { token?: unknown } | null)?.token !== p.checkToken) fail('CHECK_MISSING');
+    const prepared = await prepareImport(checked, ctx, m);
+    const { plan, fileSha256 } = prepared;
+    const result = (run: ImportRunRow) => ({ importKind: kind, applied: run.rowsChanged, total: run.rowsTotal, durationMs: run.durationMs, fileName: run.fileName });
+    return {
+      total: plan.changed.length,
+      async run(progress) {
+        // Повтор задания после падения: строка журнала уже есть — данные применены той же транзакцией, второй раз не применяются
+        const recorded = await ctx.store.importRunOfJob(ctx.tenantId, ctx.jobId);
+        if (recorded?.outcome === 'APPLIED') { if (after) await after(prepared); return result(recorded); }
+        if (recorded?.outcome === 'REFUSED') fail(recorded.reason ?? 'DATA_CHANGED');
+        const refuse = async (reason: string): Promise<never> => {
+          await ctx.store.recordImportRun(ctx.tenantId, runOf(checked, plan, fileSha256, 'REFUSED', reason), actorOf(ctx));
+          return fail(reason);
+        };
+        if (plan.token !== p.checkToken) await refuse('DATA_CHANGED');
+        if (plan.missingColumns.length > 0 || plan.errors.length > 0) await refuse('HAS_ERRORS');
+        if (plan.changed.length === 0) await refuse('NOTHING_TO_APPLY');
+        await progress(0, 'APPLYING');
+        const written = await write(prepared, runOf(checked, plan, fileSha256, 'APPLIED'));
+        if (written.status === 'CONFLICT') await refuse('DATA_CHANGED');
+        if (written.status === 'MFA_REQUIRED') await refuse(written.window ? 'MFA_REQUIRED_WINDOW' : 'MFA_REQUIRED');
+        if (written.status === 'FORBIDDEN' || written.status === 'NOT_INTERNAL_POOL') await refuse(written.status);
+        if (written.status === 'INVALID') await refuse('INVALID');
+        await progress(plan.changed.length, 'APPLYING');
+        // В памяти журнал остатков у хранилища цен: строка пишется сразу после применения
+        const run = written.run ?? await ctx.store.recordImportRun(ctx.tenantId, runOf(checked, plan, fileSha256, 'APPLIED'), actorOf(ctx));
+        if (after) await after(prepared);
+        return result(run);
+      },
+    };
+  };
+
+  return {
+    /**
+     * Шаг 99 [Р-224]: шаблон импорта — текущие значения каталога файлом CSV или XLSX: заголовки по-английски, пример «#», пояснение на
+     * языке пространства. Ничего не меняет
+     */
+    async IMPORT_TEMPLATE(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const m = messagesOfJob(job);
+      const p = job.params as { importKind?: ImportKind; format?: string; stockSourceId?: string };
+      if (!p.importKind || !IMPORT_KIND_LIST.includes(p.importKind)) fail('BAD_REQUEST');
+      const kind = p.importKind!;
       const world = await options.world(ctx);
-      const offers = importTargets(world, m);
-      const preview = buildPreview({ sheet, mapping, offers });
-      const view = costImportView(world, preview, { name: p.fileName, sheet, mapping }, suggested.suggestions, m);
+      const context: ImportPlanContext = {};
+      if (kind === 'STOCK') {
+        if (!options.stock || typeof p.stockSourceId !== 'string') fail('NOT_INTERNAL_POOL');
+        const targets = await options.stock!.stockImportTargets(ctx.tenantId, p.stockSourceId!);
+        if ('status' in targets) return fail('NOT_INTERNAL_POOL');
+        context.stockTargets = targets;
+      }
+      const tpl = importTemplate(kind, world, m, context);
       return {
-        total: preview.apply.length + preview.skipped.length,
+        total: tpl.rows.length,
         async run(progress, produce) {
-          // Ход разбора: продавец видит, что файл читается, а не что «ничего не происходит»
-          for (let done = 0; done < preview.apply.length; done += PROGRESS_STEP) await progress(Math.min(done, preview.apply.length));
-          if (p.fingerprint !== undefined && p.fingerprint !== preview.fingerprint) throw Object.assign(new Error('plan changed'), { cause: 'PLAN_CHANGED' });
-          if (preview.blocked) throw Object.assign(new Error('blocked'), { cause: 'COLUMNS_MISSING' });
-          if (preview.apply.length === 0) throw Object.assign(new Error('no rows'), { cause: 'NO_ROWS' });
-          /**
-           * Отчёт об импорте пишется ДО применения (находка 13 ревью шага 31). Он описывает предпросмотр и известен заранее, а
-           * писать его ПОСЛЕ значило расширить окно между «в базе уже применено» и «задание об этом знает»: процесс, убитый в
-           * этом окне, оставлял бы применённую себестоимость при задании, которое говорит «в базе ничего не изменено».
-           */
-          if (preview.skipped.length > 0) {
-            await produce({
-              fileName: `import-report_${p.fileName}`,
-              header: COST_IMPORT_REPORT_HEADER, rows: costImportReportRows(preview, m),
-            });
+          await progress(0, 'PRODUCING');
+          const file = await produce({
+            fileName: tpl.fileName, header: tpl.header, rows: tpl.rows, format: p.format === 'xlsx' ? 'xlsx' : 'csv',
+            comments: [{ cells: tpl.example, onDataSheet: true }, ...tpl.notes.map((n) => ({ cells: [`# ${n}`] }))],
+            sheets: { data: m.ui.imports.sheets.data, help: m.ui.imports.sheets.help, helpLines: tpl.notes },
+          });
+          return { ...file };
+        },
+      };
+    },
+
+    /**
+     * Шаг 99 [Р-224]: примерка файла — сколько строк изменится, сколько без изменений, ошибки по строкам; итог — экран примерки и её
+     * отпечаток, ошибочные строки — файлом. Строка журнала «проверено». Ничего не меняет
+     */
+    async IMPORT_CHECK(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const m = messagesOfJob(job);
+      const p = job.params as unknown as ImportFileParams;
+      const prepared = await prepareImport(p, ctx, m);
+      const { plan, fileSha256 } = prepared;
+      return {
+        total: plan.rowsTotal,
+        async run(progress, produce) {
+          await progress(plan.rowsTotal, 'PRODUCING');
+          if (plan.errors.length > 0) {
+            await produce({ fileName: `${IMPORT_FILE_NAMES[p.importKind]}-errors_${p.fileName}`, header: IMPORT_REPORT_HEADER, rows: importReportRows(plan, m) });
           }
-          await progress(preview.apply.length, 'APPLYING');
-          const applied = await ctx.store.importCosts(ctx.tenantId, {
-            sourceName: p.fileName, sourceFormat: sheet.format, fingerprint: preview.fingerprint, skippedRows: preview.totals.skipped,
-            rows: preview.apply.map((r) => ({
-              writeScopeId: r.writeScopeId!, unitCostMinor: r.unitCostMinor!, currency: r.currency!,
-              ...(r.fixedFeeMinor === undefined ? {} : { fixedFeeMinor: r.fixedFeeMinor }),
-              ...(r.feeRateBp === undefined ? {} : { feeRateBp: r.feeRateBp }),
-            })),
-          }, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: false, bulkJobId: ctx.jobId }, 'APPLY');
-          /**
-           * OQ-196 (шаг 33): окно массовой правки [Р-135] и массовая правка — РАЗНЫЕ отказы, и продавцу нужен разный совет.
-           * Окно срабатывает и на правке ОДНОГО предложения, если за последние десять минут их было больше пяти.
-           */
-          if (applied.status !== 'APPLIED') {
-            const cause = applied.status === 'INVALID' ? applied.cause
-              : applied.status === 'MFA_REQUIRED' && applied.window === true ? 'MFA_REQUIRED_WINDOW' : applied.status;
-            throw Object.assign(new Error(applied.status), { cause });
-          }
-          /**
-           * Р-142 (шаг 31): отчёт об импорте — ФАЙЛ, а не пять примеров на экране. На выгрузке в 10 000 строк с 1430
-           * несопоставленными продавец по экрану не поймёт, какие строки чинить; с файлом он правит свою выгрузку и ввозит
-           * снова.
-           */
+          await ctx.store.recordImportRun(ctx.tenantId, runOf(p, plan, fileSha256, 'CHECKED'), actorOf(ctx));
+          const view = importCheckView(prepared.world, plan, { name: p.fileName, sheet: prepared.sheet, mapping: prepared.mapping }, m, prepared.context);
           return {
-            rows: applied.rows, offers: applied.offers, skipped: preview.totals.skipped,
-            offersMissing: preview.totals.offersMissing, headline: view.headline,
-            problems: view.skipped.map((g) => ({ problem: g.problem, rows: g.rows })),
+            view: view as unknown as Record<string, unknown>, token: plan.token, importKind: p.importKind, fileSha256,
+            total: plan.rowsTotal, changed: plan.changed.length, unchanged: plan.unchanged, rejected: plan.errors.length,
           };
         },
       };
+    },
+
+    /**
+     * Импорт себестоимости [Р-134]. Шаг 99 [Р-224]: применяется ровно примерка — ни одной строки, если в файле есть ошибка, и ничего,
+     * если себестоимость или комиссия предложения изменились после примерки
+     */
+    async COST_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      return applyImport('COSTS', job, ctx, async ({ plan, sheet, world }, run) => ctx.store.importCosts(ctx.tenantId, {
+        sourceName: run.fileName, sourceFormat: sheet.format, fingerprint: plan.token, skippedRows: 0, run, asOf: world.now,
+        rows: plan.changed.map((r) => ({
+          writeScopeId: r.target, currency: String(r.set.currency),
+          ...(r.set.unitCostMinor !== undefined ? { unitCostMinor: Number(r.set.unitCostMinor) } : {}),
+          ...(r.set.feeRateBp !== undefined ? { feeRateBp: Number(r.set.feeRateBp) } : {}),
+          ...(r.set.fixedFeeMinor !== undefined ? { fixedFeeMinor: Number(r.set.fixedFeeMinor) } : {}),
+          expected: r.expected as { costProfileId: string | null; sellerFee: { feeRateBp: number | null; fixedFeeMinor: number | null } | null },
+        })),
+      }, actorOf(ctx), 'APPLY'));
     },
 
     /**
@@ -131,6 +271,19 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * пересчёт различий по каталогу (10 000 предложений) остался бы в синхронном запросе — ровно то, от чего уходит Р-139.
      */
     async BOUNDS_EDIT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      // Шаг 99 [Р-225]: импорт границ — та же массовая правка границ, но из файла и ровно по примерке, с минимальной маржой
+      if ('checkJobId' in job.params) {
+        return applyImport('BOUNDS', job, ctx, async ({ plan }, run) => ctx.store.importBounds(ctx.tenantId, {
+          run,
+          rows: plan.changed.map((r) => ({
+            writeScopeId: r.target,
+            ...(r.set.minMinor !== undefined ? { minMinor: Number(r.set.minMinor) } : {}),
+            ...(r.set.maxMinor !== undefined ? { maxMinor: Number(r.set.maxMinor) } : {}),
+            ...(r.set.minMarginBp !== undefined ? { minMarginBp: Number(r.set.minMarginBp) } : {}),
+            expected: r.expected as { minMinor: number | null; maxMinor: number | null; minMarginBp: number | null },
+          })),
+        }, actorOf(ctx)));
+      }
       const p = job.params as { planJobId?: string; planToken?: string };
       /**
        * Задача D шага 31: правка берёт ГОТОВЫЙ набор из задания экрана различий, а не считает его заново. Прежде задание
@@ -200,6 +353,14 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * существующей версии (OQ-169) — тем же видом задания, потому что для продавца это одна операция.
      */
     async STRATEGY_ASSIGN(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      // Шаг 99 [Р-225]: импорт стратегий — у предложений разные стратегии по имени, ровно по примерке
+      if ('checkJobId' in job.params) {
+        return applyImport('STRATEGY', job, ctx, async ({ plan }, run) => ctx.store.importStrategies(ctx.tenantId, {
+          run,
+          assignments: plan.changed.map((r) => ({ writeScopeId: r.target, strategyId: String(r.set.strategyId), version: Number(r.set.version) })),
+          expected: plan.changed.map((r) => ({ writeScopeId: r.target, strategyId: (r.expected.strategyId ?? null) as string | null, version: (r.expected.version ?? null) as number | null })),
+        }, actorOf(ctx)));
+      }
       const m = messagesOfJob(job);
       const p = job.params as { draft?: unknown; strategyId?: string | null; version?: number; previewJobId?: string };
       /**
@@ -286,39 +447,22 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
      * количества создаёт записи в каналы, которые отправит диспетчер [Р-64]. Итог — поимённо с причинами, как у себестоимости.
      */
     async STOCK_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
-      const m = messagesOfJob(job);
-      const p = job.params as { fileName: string; content: string; stockSourceId: string; encoding?: TableEncoding };
-      if (!options.stock) throw Object.assign(new Error('no stock store'), { cause: 'NOT_SUPPORTED' });
-      const stock = options.stock;
-      const sheet = readTable(Buffer.from(p.content, 'base64'), p.encoding);
-      const parsed = parseStockSheet(sheet.rows);
-      if ('code' in parsed) throw Object.assign(new Error(parsed.code), { cause: parsed.code });
-      return {
-        total: parsed.rows.length,
-        async run(progress) {
-          await progress(0, 'APPLYING');
-          const applied = await stock.importStock(ctx.tenantId, p.stockSourceId, parsed.rows, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: job.createdWithMfa });
-          if (applied.status !== 'APPLIED') throw Object.assign(new Error(applied.status), { cause: applied.status });
-          await progress(parsed.rows.length, 'APPLYING');
+      if (!options.stock) fail('NOT_SUPPORTED');
+      const stock = options.stock!;
+      const sourceOf = async () => ((await ctx.store.bulkJob(ctx.tenantId, String((job.params as { checkJobId?: string }).checkJobId ?? '')))?.params as { stockSourceId?: string } | undefined)?.stockSourceId ?? '';
+      /**
+       * Шаг 99 [Р-224]: инвентаризация ровно по примерке — остатки сверяются с примеркой (CONFLICT — ничего), строка журнала той же
+       * транзакцией. Пересчёт публикуемого количества — после, по ВСЕМ сопоставленным товарам файла, и при повторе задания тоже: задание,
+       * убитое между инвентаризацией и пересчётом, иначе не пересчитало бы никогда (хаос CI 38957827994, шаг 97.2)
+       */
+      return applyImport('STOCK', job, ctx,
+        async ({ plan }, run) => stock.applyStockImport(ctx.tenantId, await sourceOf(), {
+          run, rows: plan.changed.map((r) => ({ productId: r.target, quantity: Number(r.set.quantity), expectedOnHand: (r.expected.onHand ?? null) as number | null })),
+        }, { membershipId: ctx.membershipId, userId: ctx.userId, mfa: job.createdWithMfa, bulkJobId: ctx.jobId }),
+        async ({ plan, world }) => {
           // Часы МИРА, а не стены процесса (находка 21 ревью шага 35): на виртуальных часах стенда стена — чужое время
-          const now = (await options.world(ctx)).now as never;
-          /**
-           * Инвентаризация и пересчёт — разные транзакции. Пересчёт — по ВСЕМ сопоставленным товарам файла, как у Inbound API: задание, убитое
-           * между ними, повторяется тем же файлом, «изменившихся» уже нет, и пересчёт по ним не случился бы никогда — цель меняется, записи
-           * нет (красный хаос полного прогона шага 97, CI 38957827994, семя 2054262221). Неизменившийся товар пересчёт оставляет как есть
-           */
-          const recalculated = applied.matchedProductIds.length > 0 ? await stock.recalculate(ctx.tenantId, applied.matchedProductIds, now) : { writes: [], unchanged: 0 };
-          const unmatched = [...parsed.skipped.map((s) => ({ sku: s.sku, reason: s.reason })), ...applied.unmatched];
-          const byReason: Record<string, number> = {};
-          for (const u of unmatched) byReason[u.reason] = (byReason[u.reason] ?? 0) + 1;
-          const view = {
-            matched: applied.matched, changed: applied.changed, unmatched: unmatched.length, writes: recalculated.writes.length,
-            byReason: Object.entries(byReason).map(([reason, count]) => ({ reason, title: (m.ui.stock.importFile.unmatched as Record<string, string>)[reason] ?? reason, count })),
-            examples: unmatched.slice(0, 50),
-          };
-          return { matched: applied.matched, changed: applied.changed, unmatched: unmatched.length, writes: recalculated.writes.length, view };
-        },
-      };
+          if (plan.matchedTargets.length > 0) await stock.recalculate(ctx.tenantId, plan.matchedTargets, world.now as never);
+        });
     },
 
     /**

@@ -330,6 +330,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .card table th:first-child, .card table td:first-child { padding-left: var(--space-4); }
 .card table th:last-child, .card table td:last-child { padding-right: var(--space-4); }
 .card table:last-child tbody tr:last-child td { border-bottom: 0; }
+/* шаг 99: у таблицы в своей рамке внутри карточки рамка уже по полям карточки — поле шага 86 уводило её под левый край рамки (срезано) */
+.card .table-wrap > table { margin: 0; width: 100%; }
 td.cell .muted, .cell .muted { margin-top: var(--base-size-2); max-width: 280px; font-size: var(--font-size-sm); }
 /* колонка предложения и причины держат читаемую ширину: таблица шире экрана листается внутри своей рамки */
 /* закреплённые колонки (предложение слева, ссылка справа) непрозрачны — оттенок наведения и у них */
@@ -1129,3 +1131,21 @@ details.competitors-at > .table-wrap { margin-top: var(--space-2); }
   /* закреплённая первая ячейка нашей строки на телефоне — та же подсветка, непрозрачная */
   .table-wrap > table.competitors:not(.cardify) tr.self-row td:first-child { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface); }
 }
+
+/* ---------- Шаг 99 [Р-224]: импорты — раздел на своей странице; примерка — сводка, ошибки и изменения таблицами; журнал ---------- */
+.import-panel { margin-top: var(--space-6); }
+.import-panel > h3 { margin-bottom: var(--space-1); }
+/* Колонка сетки не шире экрана: без minmax(0, …) длинная строка раздвигала карточку сводки до 441px на телефоне 375 */
+.import-check { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-3); }
+.import-check .source, .import-history .mono { overflow-wrap: anywhere; }
+.import-check > * { margin: 0; }
+.import-check.stop .summary-card { border-color: var(--danger-border); }
+.import-check .summary-card .source { margin: var(--space-2) 0 0; }
+.import-check .summary-card p.notice { margin-top: var(--space-3); }
+p.notice.warn { background: var(--warning-soft); color: var(--warning); border-color: var(--warning-border); }
+p.notice.import-applied { background: var(--success-soft); color: var(--success); border-color: var(--success-border); font-weight: var(--weight-heading); }
+.import-columns > summary { cursor: pointer; font-weight: var(--weight-heading); }
+.import-columns[open] > summary { margin-bottom: var(--space-2); }
+.import-history { margin-top: var(--space-3); }
+.import-history h4, .import-errors h4, .import-changes h4 { margin: 0 0 var(--space-2); }
+.mono { font-family: var(--font-mono); }

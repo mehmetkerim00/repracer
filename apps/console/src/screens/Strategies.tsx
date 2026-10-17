@@ -3,6 +3,7 @@ import { LIST_PAGE_DEFAULT, parseAmountInput, parsePercentInput, type ListQuery,
 import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
+import { ImportPanel } from './Imports.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When, WhenHead } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
@@ -213,6 +214,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
     <section>
       <h2>{t.pageTitle}</h2>
       <p className="subtitle">{m.ui.app.subtitles.strategies}</p>
+      {/* Шаг 99 [Р-225]: назначение стратегий файлом — разделом этой страницы, меню не растёт */}
+      <p className="page-actions"><button type="button" onClick={() => document.getElementById('strategy-import')?.scrollIntoView({ block: 'start' })}>{t.importAction}</button></p>
       <h3>{t.inUse}</h3>
       {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
       {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
@@ -363,6 +366,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
       {preview ? <PreviewTable view={preview} /> : null}
       <Gaps gaps={view.gaps} />
+      <span id="strategy-import" />
+      <ImportPanel worldId={worldId} kind="STRATEGY" canEdit={view.canEdit} />
     </section>
   );
 }

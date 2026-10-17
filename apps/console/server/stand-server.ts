@@ -1,19 +1,19 @@
 import { createHash } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import type { TenantWorldIndex } from './tenant-worlds.ts';
-import { parseStockSheet } from '@repracer/stock-sync';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, costImportView, currentStrategies, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, importTargets, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
   BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor,
 } from '@repracer/console-model';
-import { DECISION_OUTCOME_GROUPS, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
-import { buildPreview, readTable, suggestMapping, TABLE_ENCODINGS } from '@repracer/cost-import';
+import { DECISION_OUTCOME_GROUPS, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
+import { TABLE_ENCODINGS } from '@repracer/cost-import';
+import { APPLY_JOB_OF } from '@repracer/bulk-jobs/handlers';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_PEOPLE, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
@@ -76,7 +76,8 @@ export interface ApiResponse {
   /** Шаг 59: ответ «повторите через N секунд» (503 очереди пересчётов остатков) */
   retryAfterSeconds?: number;
   /** Файл задания [OQ-202]: он не JSON — выгрузка в 28 МБ внутри JSON была бы тем же синхронным ответом, только длиннее */
-  file?: { contentType: string; content: string; fileName: string };
+  /** Шаг 99: CSV — текст; XLSX — байты книги (в базе она лежит base64) */
+  file?: { contentType: string; content: string | Uint8Array; fileName: string };
 }
 
 export interface StandIdentity {
@@ -793,6 +794,17 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const page = await live.shadow.shadowPage(world.tenantId, now, { ...clamped, ...window });
           return ok(shadowView(world, page, clamped, m, period, range, display?.timeZone ?? null));
         }
+        /**
+         * Шаг 99 [Р-224, D]: история импортов одного вида — журнал базы, новые первыми; видна на странице импорта. Читать её может любой
+         * участник: она называет файлы и числа, а не значения
+         */
+        case 'imports': {
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          const kind = IMPORT_KIND_LIST.find((k) => k === url.searchParams.get('kind'));
+          if (!kind) return fail(400, 'BAD_REQUEST', s.badRequest);
+          const world = await load([]);
+          return ok(importHistoryView(kind, await live.store.importRuns(world.tenantId, { kind, limit: IMPORT_HISTORY_SHOWN }), world, m));
+        }
         // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
         case 'stock': {
           const world = await load([]);
@@ -985,7 +997,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (parts[5] === 'artifact') {
             const file = await live.store.bulkJobArtifact(live.tenantId, param);
             if (!file) return fail(404, 'NO_FILE', m.ui.jobs.noFile);
-            return { status: 200, body: null, file: { contentType: file.contentType, content: file.content, fileName: file.fileName } };
+            const content = file.contentType === XLSX_CONTENT_TYPE ? Buffer.from(file.content, 'base64') : file.content;
+            return { status: 200, body: null, file: { contentType: file.contentType, content, fileName: file.fileName } };
           }
           if (parts.length > 5) return fail(404, 'NOT_FOUND', s.notFound);
           const file = job.status === 'SUCCEEDED' ? await live.store.bulkJobArtifact(live.tenantId, param) : null;
@@ -1009,7 +1022,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       || ((screen === 'stops' && parts[5] === 'resume') || ((screen === 'halts' || screen === 'distrusts') && parts[5] === 'release')) && param !== null;
     const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
       || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
-      || (screen === 'bounds' && param === 'apply') || (screen === 'cost-import' && param === 'apply');
+      || (screen === 'bounds' && param === 'apply') || screen === 'imports';
     const oneUnit = screen === 'scopes' && param !== null && parts[5] === 'enable' ? [param]
       : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId]
         : screen === 'feed' && param === 'export' ? [((body.query ?? {}) as Record<string, unknown>).writeScopeId] : null;
@@ -1039,7 +1052,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * Р-139: массовая операция — создание ЗАДАНИЯ. Запрос обязан быть дешёвым: всё, что растёт с размером каталога, делает
      * задание. Второй фактор предъявляется здесь, человеком; фоновый процесс предъявит базе само задание.
      */
-    const createJob = async (kind: BulkJobInput['kind'], params: Record<string, unknown>, totalItems: number | null, message: string): Promise<ApiResponse> => {
+    const createJob = async (kind: BulkJobInput['kind'], params: Record<string, unknown>, totalItems: number | null, message: string, mfaText?: string): Promise<ApiResponse> => {
       /**
        * Язык — тот, на котором говорит мир задания [Р-72]: тексты его итога пишет процесс, у которого запроса уже нет. Ревью шага 69,
        * находка 8: у мира тенанта это язык тенанта (K1), и пояс тоже его (K4) — итог задания и файлы не должны говорить языком куки и UTC
@@ -1048,7 +1061,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         kind, params: { ...params, locale: m.locale, ...(display ? { timeZone: display.timeZone } : {}) }, ...(totalItems === null ? {} : { totalItems }),
       },
         { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
-      if (created.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', kind === 'COST_IMPORT' ? m.ui.costImport.mfa : s.mfaRequiredBounds);
+      if (created.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', mfaText ?? s.mfaRequiredBounds);
       if (created.status === 'QUEUE_FULL') return fail(409, 'QUEUE_FULL', m.ui.jobs.queueFull);
       if (created.status !== 'CREATED') return fail(403, 'FORBIDDEN', s.forbidden);
       const job = await live.store.bulkJob(world.tenantId, created.jobId);
@@ -1178,19 +1191,6 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         if (created.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
         // Ключ уходит в ответ ОДИН раз и нигде не пишется — ни в журнал, ни в базу (там отпечаток)
         return ok({ stockSourceId: created.stockSourceId, apiKey: created.apiKey });
-      }
-      if (param === 'import') {
-        if (typeof body.content !== 'string' || typeof body.fileName !== 'string' || typeof body.stockSourceId !== 'string') return fail(400, 'BAD_FILE', s.badRequest);
-        const sources = await live.stock.stockSources(world.tenantId);
-        const source = sources.find((x) => x.stockSourceId === body.stockSourceId);
-        if (!source || source.mode !== 'INTERNAL_POOL') return fail(400, 'BAD_SOURCE', s.badRequest);
-        let rows = 0;
-        try {
-          const parsed = parseStockSheet(readTable(Buffer.from(body.content, 'base64')).rows);
-          if ('code' in parsed) return fail(400, parsed.code, s.badRequest);
-          rows = parsed.rows.length;
-        } catch { return fail(400, 'BAD_FILE', s.badRequest); }
-        return createJob('STOCK_IMPORT', { fileName: body.fileName, content: body.content, stockSourceId: body.stockSourceId }, rows, m.ui.stock.importFile.created);
       }
       /**
        * Шаг 59 [Р-199]: решение человека о возврате внутреннего пула. Автоматического возврата в пул нет: «принять на склад» —
@@ -1568,47 +1568,58 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     }
 
     /**
-     * Р-139 (находка 10 ревью шага 30): применение создаёт задание и БОЛЬШЕ НИЧЕГО. Читать файл и строить предпросмотр здесь
-     * незачем: задание читает его заново и само сверяет отпечаток с тем, который видел человек. Пока разбор оставался в
-     * запросе, «дешёвое нажатие» на файле в 200 000 строк стоило ровно столько же, сколько предпросмотр.
+     * Шаг 99 [Р-224, Р-225]: импорты продавца — шаблон, примерка, применение ровно примерки. Все три — задания [Р-139]: запрос только
+     * проверяет право и создаёт задание, файл разбирает и сравнивает с данными фоновый исполнитель. Право — на вид импорта: себестоимость,
+     * границы и стратегии ведёт тот, кто правит цены; остатки — тот, кто ведёт каталог [Р-152]
      */
-    if (screen === 'cost-import' && param === 'apply') {
-      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
-      if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
-      if (typeof body.content !== 'string' || typeof body.fingerprint !== 'string') return fail(400, 'BAD_REQUEST', s.badRequest);
-      const name = typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim().slice(0, 200) : 'import';
-      return createJob('COST_IMPORT', {
-        fileName: name, content: body.content, fingerprint: body.fingerprint, ...(body.mapping ? { mapping: body.mapping } : {}),
-        ...(body.encoding ? { encoding: body.encoding } : {}),
-      }, null, m.ui.jobs.createdCostImport);
-    }
-
-    if (screen === 'cost-import' && param === 'plan') {
-      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', m.ui.costImport.noRight);
-      const name = typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim().slice(0, 200) : 'import';
-      const content = typeof body.content === 'string' ? body.content : null;
-      if (content === null) return fail(400, 'BAD_REQUEST', s.badRequest);
-      // Файл приходит в base64: и таблица XLSX (двоичная), и CSV в любой кодировке проходят одним путём
-      let sheet;
-      try {
-        // OQ-200: продавец может задать кодировку, если наша догадка не подошла — её показывает экран
-        const chosen = TABLE_ENCODINGS.find((e) => e === body.encoding);
-        sheet = readTable(Buffer.from(content, 'base64'), chosen);
-      } catch (error) {
-        return fail(400, (error as { code?: string }).code ?? 'UNSUPPORTED_FORMAT', String((error as Error).message).slice(0, 200));
+    if (screen === 'imports') {
+      const kind = IMPORT_KIND_LIST.find((k) => k === body.kind);
+      if (!kind) return fail(400, 'BAD_REQUEST', s.badRequest);
+      const right = kind === 'STOCK' ? 'MANAGE_CATALOG' : 'MANAGE_PRICING';
+      const stockSourceId = typeof body.stockSourceId === 'string' ? body.stockSourceId : null;
+      const ownSource = async () => {
+        if (kind !== 'STOCK') return true;
+        const source = stockSourceId ? (await live.stock.stockSources(world.tenantId)).find((x) => x.stockSourceId === stockSourceId) : undefined;
+        return source?.mode === 'INTERNAL_POOL';
+      };
+      // Шаблон ничего не меняет: его скачивает любой участник, как выгрузку [Р-143]
+      if (param === 'template') {
+        if (!(await ownSource())) return fail(400, 'BAD_SOURCE', m.ui.imports.noStockSource);
+        return createJob('IMPORT_TEMPLATE', { importKind: kind, format: body.format === 'xlsx' ? 'xlsx' : 'csv', ...(stockSourceId ? { stockSourceId } : {}) },
+          null, m.ui.jobs.createdTemplate);
       }
-      const suggested = suggestMapping(sheet);
-      // Продавец мог поправить сопоставление колонок: его выбор сильнее подсказки
-      const chosen = body.mapping && typeof body.mapping === 'object' ? (body.mapping as Record<string, unknown>) : {};
-      const mapping = { ...suggested.mapping };
-      for (const [field, index] of Object.entries(chosen)) {
-        // null — «этой колонки в файле нет»: продавец снимает подсказку так же явно, как ставит свою
-        if (index === null) delete mapping[field as keyof typeof mapping];
-        else if (typeof index === 'number' && Number.isSafeInteger(index) && index >= 0) mapping[field as keyof typeof mapping] = index;
+      if (!can(viewer.role, right)) return fail(403, 'FORBIDDEN', m.ui.imports.noRight);
+      if (param === 'check') {
+        if (typeof body.content !== 'string' || body.content === '') return fail(400, 'BAD_FILE', s.badRequest);
+        if (!(await ownSource())) return fail(400, 'BAD_SOURCE', m.ui.imports.noStockSource);
+        const name = typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim().slice(0, 200) : 'import';
+        return createJob('IMPORT_CHECK', {
+          importKind: kind, fileName: name, content: body.content, ...(stockSourceId ? { stockSourceId } : {}),
+          ...(TABLE_ENCODINGS.includes(body.encoding as never) ? { encoding: body.encoding } : {}),
+          ...(body.mapping && typeof body.mapping === 'object' ? { mapping: body.mapping } : {}),
+        }, null, m.ui.jobs.createdCheck);
       }
-      const offers = importTargets(world, m);
-      const preview = buildPreview({ sheet, mapping, offers });
-      return ok(costImportView(world, preview, { name, sheet, mapping }, suggested.suggestions, m));
+      if (param === 'apply') {
+        if (body.confirmed !== true) return fail(400, 'NOT_CONFIRMED', s.notConfirmed);
+        /**
+         * Применяется ровно ТА примерка, что видел человек: своя (того же участника), того же вида импорта, завершённая и с тем же
+         * отпечатком. Файл с ошибками и примерка без изменений отказывают здесь, до задания, — продавец узнаёт это сразу. Пересчёт
+         * примерки по текущим данным делает задание: изменилось — отказ с причиной и строкой журнала
+         */
+        const checkJobId = typeof body.checkJobId === 'string' ? body.checkJobId : null;
+        const checked = checkJobId ? await live.store.bulkJob(world.tenantId, checkJobId) : null;
+        const result = (checked?.result ?? {}) as { token?: string; changed?: number; rejected?: number };
+        if (!checked || checked.kind !== 'IMPORT_CHECK' || checked.status !== 'SUCCEEDED' || (checked.params as { importKind?: unknown }).importKind !== kind
+          || checked.createdByMembershipId !== viewer.membershipId || typeof body.checkToken !== 'string' || result.token !== body.checkToken) {
+          return fail(409, 'CHECK_CHANGED', m.ui.jobs.errors.CHECK_MISSING);
+        }
+        if ((result.rejected ?? 0) > 0) return fail(409, 'HAS_ERRORS', m.ui.imports.applyBlocked.errors(result.rejected ?? 0));
+        if ((result.changed ?? 0) === 0) return fail(409, 'NOTHING_TO_APPLY', m.ui.imports.applyBlocked.nothing);
+        // Р-135: массовый импорт себестоимости и границ — только со вторым фактором; база требует его и сама
+        if ((kind === 'COSTS' || kind === 'BOUNDS') && !hasSecondFactor(principal.amr)) return fail(403, 'MFA_REQUIRED', m.ui.imports.mfa);
+        return createJob(APPLY_JOB_OF[kind], { checkJobId, checkToken: body.checkToken }, result.changed ?? null, m.ui.jobs.createdImport, m.ui.imports.mfa);
+      }
+      return fail(404, 'NOT_FOUND', s.notFound);
     }
 
     // Шаг 12, G и Р-77: включение с предупреждениями по типу стратегии
@@ -1649,6 +1660,8 @@ export function resolveStandIdentityMode(env: Readonly<Record<string, string | u
   throw new Error('STAND_IDENTITY must be "simulator" or "oidc": the stand does not choose the sign-in mode on its own');
 }
 
+/** Шаг 99 [Р-224]: сколько последних запусков импорта показывает история на странице импорта */
+const IMPORT_HISTORY_SHOWN = 20;
 const MAX_BODY_BYTES = 64 * 1024;
 /**
  * Ревью шага 28, находка 6: массовый импорт — это файл продавца, и 64 КиБ хватало примерно на 2 180 строк при объявленном пределе
@@ -1669,7 +1682,7 @@ const MAX_IMPORT_BODY_BYTES = 48 * 1024 * 1024;
  * адрес импорта, занимал бы память процесса до ответа 401. Большой предел даётся только тому, кто ПРЕДЪЯВИЛ вход:
  * токен или ключ Inbound API. Проверка предъявленного — дальше и в прежнем месте.
  */
-const bodyLimitFor = (url: string, authorized: boolean) => (authorized && (url.includes('/cost-import/') || url.includes('/stock/import') || url.includes('/inbound/v1/')) ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
+const bodyLimitFor = (url: string, authorized: boolean) => (authorized && (url.includes('/imports/check') || url.includes('/inbound/v1/')) ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES);
 
 /**
  * Шаг 52 (OWASP A05, самопроверка — docs/evidence/step52-owasp.md): заголовки безопасности каждого ответа консоли, страницы и API.
@@ -1717,7 +1730,8 @@ export function screenBody(r: Pick<ApiResponse, 'status' | 'body'>, route = ''):
 function send(res: ServerResponse, r: ApiResponse, route = '', method = 'GET'): void {
   if (r.file) {
     res.writeHead(r.status, {
-      'content-type': `${r.file.contentType}; charset=utf-8`, 'cache-control': 'no-store',
+      // У двоичного файла кодировки текста нет — она бывает только у CSV
+      'content-type': typeof r.file.content === 'string' ? `${r.file.contentType}; charset=utf-8` : r.file.contentType, 'cache-control': 'no-store',
       'content-disposition': `attachment; filename="${r.file.fileName.replace(/[^\w.\-]/g, '_')}"`,
     });
     res.end(r.file.content);

@@ -1,3 +1,4 @@
+import type { ImportRunInput, ImportRunRow } from '@repracer/pricing-pipeline';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 
 /** Участник, от чьего имени пишется административная запись [Р-97] */
@@ -49,6 +50,31 @@ export interface StockImportOutcome {
    */
   matchedProductIds: string[];
 }
+
+/**
+ * Шаг 99 [Р-224]: товар глазами импорта остатков — чем продавец называет его в файле (SKU, EAN, номера у каналов) и сколько штук сейчас в
+ * пуле источника (null — пула в источнике ещё нет). Шаблон показывает остаток, примерка сравнивает с ним файл
+ */
+export interface StockImportTarget {
+  productId: string;
+  sku: string | null;
+  title: string | null;
+  keys: string[];
+  onHand: number | null;
+}
+
+/** Шаг 99 [Р-224]: строка применения — товар уже найден примеркой; `expectedOnHand` — остаток на примерке (null — пула не было) */
+export interface StockApplyRow {
+  productId: string;
+  quantity: number;
+  expectedOnHand: number | null;
+}
+
+export type StockApplyOutcome =
+  | { status: 'APPLIED'; changed: number; productIds: string[]; run?: ImportRunRow }
+  | { status: 'FORBIDDEN' | 'NOT_INTERNAL_POOL' }
+  /** Остаток товара изменился после примерки — не применено ничего */
+  | { status: 'CONFLICT'; productId: string };
 
 export interface InboundStockRow {
   sku: string;
@@ -234,6 +260,14 @@ export interface StockStore {
   createStockSource(tenantId: string, input: { mode: StockSourceMode; name: string }, actor: StockActor): Promise<CreateStockSourceResult>;
   /** Файл продавца → внутренний пул: инвентаризация (STOCKTAKE) до целевого значения по каждому найденному товару */
   importStock(tenantId: string, stockSourceId: string, rows: readonly StockImportRow[], actor: StockActor): Promise<StockImportOutcome | { status: 'FORBIDDEN' | 'NOT_INTERNAL_POOL' }>;
+  /** Шаг 99 [Р-224]: товары тенанта с остатком в пуле источника — шаблон и примерка импорта остатков */
+  stockImportTargets(tenantId: string, stockSourceId: string): Promise<StockImportTarget[] | { status: 'NOT_INTERNAL_POOL' }>;
+  /**
+   * Шаг 99 [Р-224]: применение импорта остатков ровно по примерке — одной транзакцией, остатки сверяются с примеркой, строка журнала там же.
+   * Возвращает `runRecorded: false`, если хранилище журнала не ведёт (в памяти журнал у хранилища цен)
+   */
+  applyStockImport(tenantId: string, stockSourceId: string, input: { rows: readonly StockApplyRow[]; run?: ImportRunInput },
+    actor: StockActor & { bulkJobId?: string }): Promise<StockApplyOutcome>;
   /** Inbound API → пул источника: значение с более старым `asOf` не применяется */
   inboundStock(tenantId: string, stockSourceId: string, rows: readonly InboundStockRow[]): Promise<InboundStockOutcome>;
   /** Ключ Inbound API → тенант и источник; сам ключ сюда не попадает — только префикс и отпечаток */

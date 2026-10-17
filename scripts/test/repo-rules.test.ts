@@ -116,17 +116,24 @@ test('Р-146: флаг, нужный пакету для тестов, есть 
  * (`FILE_PRODUCING_JOB_KINDS`). Разойтись они могут молча: вид, забытый в базе, упадёт в проде отказом `insufficient_privilege`
  * уже после того, как задание отработало, и продавец увидит непонятный код.
  */
-test('Р-145: список видов, отдающих файл, одинаков в базе и в коде (находка 9 ревью шага 32)', () => {
+test('Р-145: список видов, отдающих файл, одинаков в базе и в коде (находка 9 ревью шага 32)', async () => {
   const kindsIn = (text: string, marker: RegExp) => {
     const body = marker.exec(text)?.[1] ?? '';
     return [...body.matchAll(/'([A-Z_]+)'/g)].map((h) => h[1]!).sort();
   };
-  const inDb = kindsIn(read('migrations/0113_bulk_job_artifact_guards.sql'),
+  /**
+   * Шаг 99: список переопределяется миграциями (0113, 0193) — действует ПОСЛЕДНЯЯ, что его определяет. Правило берёт её, а не первую:
+   * иначе оно сверяло бы код с отменённым списком
+   */
+  const { readdirSync } = await import('node:fs');
+  const defining = readdirSync(new URL('migrations/', root)).filter((f) => f.endsWith('.sql')).sort()
+    .filter((f) => /FUNCTION security\.file_producing_job_kinds\(\)/.test(read(`migrations/${f}`)));
+  const inDb = kindsIn(read(`migrations/${defining.at(-1)}`),
     /file_producing_job_kinds\(\)[\s\S]*?unnest\(ARRAY\[([^\]]*)\]/);
   const inCode = kindsIn(read('packages/pricing-pipeline/src/store.ts'),
     /FILE_PRODUCING_JOB_KINDS[^=]*=\s*\[([^\]]*)\]/);
   // Зубы: правило обязано что-то прочитать, а не сравнить два пустых списка
-  assert.ok(inDb.length === 3 && inCode.length === 3, `списки прочитаны: база ${inDb}, код ${inCode}`);
+  assert.ok(defining.length >= 2 && inDb.length === 4 && inCode.length === 4, `списки прочитаны (${defining.at(-1)}): база ${inDb}, код ${inCode}`);
   assert.deepEqual(inCode, inDb, 'список видов с файлом разошёлся между базой и кодом: база откажет уже после работы задания');
 });
 

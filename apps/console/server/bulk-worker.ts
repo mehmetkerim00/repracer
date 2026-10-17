@@ -6,7 +6,7 @@ import { bulkWorldReader, runBulkWorker, type BulkWorldDescriptor } from '@repra
 import type { Instant } from '@repracer/channel-port';
 import { createPool, IdMap, PgPricingStore, PgStockStore, translateStore } from '@repracer/pricing-store-pg';
 import { createPricingPipeline, type PricingStore } from '@repracer/pricing-pipeline';
-import { descriptorOf, haltReleaseOf } from './channel-descriptors.ts';
+import { descriptorOf, haltReleaseOf, strategyAvailableOn } from './channel-descriptors.ts';
 import { ConfigError, createHeartbeat, intFromEnv, ProcessHealth, requiredValue, secretFromEnv, serveHealth, type Env } from '@repracer/service-runtime';
 
 /**
@@ -160,6 +160,8 @@ async function runWorld(config: BulkWorkerConfig, world: BulkWorkerWorldConfig, 
       const reasons = result.problems.length > 0 ? result.problems : result.warnings;
       return { enabled: result.enabled, problems: reasons.map((x) => ({ code: x.code, params: x.params as Record<string, unknown> })) };
     },
+    // Шаг 99 [Р-225]: импорт стратегий проверяет доступность стратегии каналу предложения по описанию канала [Р-39]
+    strategyAvailable: (scope, params) => strategyAvailableOn(world.descriptor.accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.channel ?? '', params),
     previewStrategy: async (_ctx, scope, strategy) => pipelineOf(scope.channelAccountId).previewStrategy({
       tenantId: world.descriptor.tenantId as never, channelAccountId: scope.channelAccountId as never,
       correlationId: `bulk-preview:${scope.writeScopeId}`, deadline: now(),

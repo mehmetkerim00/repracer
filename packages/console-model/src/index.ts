@@ -18,9 +18,15 @@ export { FEED_MAX_DAYS, FEED_PAGE_MAX, FEED_PERIODS_DAYS, SEARCH_FILTER_LIMIT, F
 export { dangerousReport, HOT_DECISIONS_DAYS, REPORT_PERIODS_DAYS, type DangerousItem, type DangerousReportView } from './dangerous-report.ts';
 export { parsePeriod, PERIOD_PRESETS, periodDays, periodPhrase, periodRange, periodSearch, zonedDate, zonedDayStart, type Period, type PeriodPreset, type PeriodRange } from './period.ts';
 export { complianceView, discountCheckView, historyDepthView, PRICE_EVIDENCE_HEADER, priceEvidenceRows, type ComplianceRow, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type OfferDepthRow } from './compliance.ts';
-export { columnName, costImportView, importTargets, PREVIEW_ROWS_SHOWN, SKIPPED_EXAMPLES, type CostImportView, type ImportPreviewRowView, type ImportSkippedGroupView } from './cost-import.ts';
+// Шаг 99 [Р-224, Р-225]: импорты продавца — схемы колонок, шаблон, примерка с отпечатком, экран, отчёт и история
+export {
+  IMPORT_KIND_LIST, IMPORT_SCHEMAS, IMPORT_FILE_NAMES, IMPORT_ERRORS_SHOWN, IMPORT_CHANGES_SHOWN, IMPORT_REPORT_HEADER, importMapping, missingImportColumns, importDataRows,
+  buildImportPlan, refineBoundsPlan, importTemplate, importCheckView, importReportRows, importProblemText, importHistoryView, importTargetsOffers, secondsOf, sheetColumnName, strategiesByName,
+  type ImportKind, type ImportFieldName, type ImportMapping, type ImportPlan, type ImportPlanRow, type ImportRowError, type ImportProblem, type ImportPlanContext, type StockTarget,
+  type ImportTemplate, type ImportCheckView, type ImportHistoryItem, type ImportHistoryView,
+} from './imports.ts';
 export { bulkJobsView, bulkJobView, canCancelBulkJob, CANCEL_ACTION, type BulkJobView, type BulkJobsView } from './jobs.ts';
-export { COST_IMPORT_REPORT_HEADER, costImportReportRows, csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf } from './exports.ts';
+export { csvOf, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf } from './exports.ts';
 export { onboardingView, type OnboardingView, type OnboardingStepView, type ChannelAccountView, type EnableResultView, type OnboardingPathChoice } from './onboarding.ts';
 export { stockView, stockDivergencesView, stockReturnsView, stockTraps, type StockView, type StockRowView, type StockChannelCell, type StockTrap, type StockDivergencesView, type StockReturnsView, type StockReturnItem } from './stock.ts';
 // Шаг 41 [Р-169…Р-171]: экран теневого режима — сводка, would-be изменения и включение боя

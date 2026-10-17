@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import { csvOf } from '@repracer/console-model';
-import type { BulkJobKind, BulkJobPhase, BulkJobRow, PricingStore } from '@repracer/pricing-pipeline';
+import { XLSX_CONTENT_TYPE, type BulkJobKind, type BulkJobPhase, type BulkJobRow, type PricingStore } from '@repracer/pricing-pipeline';
+import { xlsxOf } from './xlsx.ts';
 
 /**
  * Р-139 (шаг 30): массовые операции продавца выполняет фоновый исполнитель. Синхронный запрос на 10 000 предложений занимал
@@ -29,6 +30,15 @@ export interface BulkJobFile {
   fileName: string;
   header: readonly string[];
   rows: readonly (readonly string[])[];
+  /** Шаг 99 [Р-224]: шаблон импорта бывает и книгой XLSX; по умолчанию — CSV */
+  format?: 'csv' | 'xlsx';
+  /**
+   * Шаг 99: строки между заголовком и данными — пример и пояснение шаблона, у каждой «#» в первой ячейке (разбор импорта их пропускает).
+   * В XLSX на листе данных остаются только те, что помечены `onDataSheet` (пример): пояснение уходит на лист справки
+   */
+  comments?: ReadonlyArray<{ cells: readonly string[]; onDataSheet?: boolean }>;
+  /** Шаг 99: XLSX — имена листов данных и справки и строки справки */
+  sheets?: { data: string; help: string; helpLines: readonly string[] };
 }
 
 /** Р-151: метка файла демо-тенанта — в имени и в каждой строке */
@@ -162,14 +172,36 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
     const demo = await store.tenantIsDemo(tenantId);
     const produce: ProduceBulkJobFile = async (declared) => {
       const file: BulkJobFile = demo
-        ? { fileName: `${DEMO_FILE_PREFIX}${declared.fileName}`, header: [...declared.header, 'demo'], rows: declared.rows.map((r) => [...r, DEMO_ROW_MARK]) }
+        ? { ...declared, fileName: `${DEMO_FILE_PREFIX}${declared.fileName}`, header: [...declared.header, 'demo'], rows: declared.rows.map((r) => [...r, DEMO_ROW_MARK]) }
         : declared;
+      /**
+       * Шаг 99 [Р-224]: книга XLSX — тот же единственный путь: строки объявляет обработчик, байты делает исполнитель. В базе книга лежит
+       * base64, а контрольная сумма — по байтам файла: её продавец сверяет со скачанным [Р-123]; база считает её так же (0193)
+       */
+      if (file.format === 'xlsx') {
+        await progress(0, 'PRODUCING');
+        const data = [file.header, ...(file.comments ?? []).filter((c) => c.onDataSheet).map((c) => c.cells), ...file.rows];
+        const sheets = file.sheets ?? { data: 'Data', help: 'Help', helpLines: [] };
+        const bytes = xlsxOf([
+          { name: sheets.data, rows: data, header: true },
+          ...(sheets.helpLines.length > 0 ? [{ name: sheets.help, rows: sheets.helpLines.map((l) => [l]), widths: [120] }] : []),
+        ]);
+        await progress(work.total, 'PRODUCING');
+        const digest = createHash('sha256').update(bytes).digest('hex');
+        await store.saveBulkJobArtifact(tenantId, job.jobId, {
+          fileName: safeFileName(file.fileName, XLSX_CONTENT_TYPE), contentType: XLSX_CONTENT_TYPE, content: bytes.toString('base64'), sha256: digest, rows: file.rows.length,
+        }, owner);
+        return { rows: file.rows.length, bytes: bytes.length, sha256: digest };
+      }
+      // Строки примера и пояснения — сразу после заголовка, как обычные строки файла
+      const leading = (file.comments ?? []).map((c) => c.cells);
+      const body = leading.length > 0 ? [...leading, ...file.rows] : file.rows;
       let content = '';
-      if (file.rows.length === 0) content = csvOf(file.header, file.rows);
-      for (let i = 0; i < file.rows.length; i += CSV_CHUNK_ROWS) {
-        const part = csvOf(file.header, file.rows.slice(i, i + CSV_CHUNK_ROWS));
+      if (body.length === 0) content = csvOf(file.header, body);
+      for (let i = 0; i < body.length; i += CSV_CHUNK_ROWS) {
+        const part = csvOf(file.header, body.slice(i, i + CSV_CHUNK_ROWS));
         content += i === 0 ? part : part.slice(part.indexOf('\n') + 1);
-        await progress(Math.min(Math.round(((i + CSV_CHUNK_ROWS) / file.rows.length) * work.total), work.total), 'PRODUCING');
+        await progress(Math.min(Math.round(((i + CSV_CHUNK_ROWS) / body.length) * work.total), work.total), 'PRODUCING');
       }
       const digest = sha256(content);
       await store.saveBulkJobArtifact(tenantId, job.jobId, {
@@ -226,8 +258,8 @@ const CSV_CHUNK_ROWS = 20_000;
  * отчёт по выгрузке `kosten.xlsx` стал бы `import-report_kosten.xlsx` с CSV внутри (находка 1 ревью шага 32). Имя, которое
  * дал обработчик, — это подпись для продавца; чем файл является, знает только тот, кто его собрал.
  */
-const EXTENSION_OF: Readonly<Record<'text/csv', string>> = { 'text/csv': 'csv' };
-function safeFileName(raw: string, contentType: 'text/csv'): string {
+const EXTENSION_OF: Readonly<Record<'text/csv' | typeof XLSX_CONTENT_TYPE, string>> = { 'text/csv': 'csv', [XLSX_CONTENT_TYPE]: 'xlsx' };
+function safeFileName(raw: string, contentType: 'text/csv' | typeof XLSX_CONTENT_TYPE): string {
   const dot = raw.lastIndexOf('.');
   const name = (dot > 0 ? raw.slice(0, dot) : raw).replace(/[^\w\-]/g, '_').slice(0, 150) || 'file';
   return `${name}.${EXTENSION_OF[contentType]}`;

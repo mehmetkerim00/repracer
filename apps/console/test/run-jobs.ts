@@ -3,6 +3,7 @@ import { bulkJobHandlers } from '@repracer/bulk-jobs/handlers';
 import { bulkJobView, type BulkJobView } from '@repracer/console-model';
 import { messagesFor } from '@repracer/console-model';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
+import { strategyAvailableOn } from '../server/channel-descriptors.ts';
 
 /**
  * Р-139 (шаг 30): в тестах фоновый исполнитель зовётся явно. Так видно, ЧТО именно он делает, и так же явно проверяется, что
@@ -14,6 +15,9 @@ import type { LiveWorld } from '@repracer/contract-tests/stand';
 export function handlersFor(live: LiveWorld) {
   return bulkJobHandlers({
     world: async (ctx) => live.view({ membershipId: ctx.membershipId, role: 'PRICING_MANAGER' }),
+    // Шаг 99: импорт остатков применяется хранилищем остатков мира; доступность стратегии — по описанию канала, как у исполнителя
+    ...(live.stock ? { stock: live.stock } : {}),
+    strategyAvailable: (scope, params) => strategyAvailableOn(live.accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.channel ?? '', params),
     // OQ-201: решение по предложению считает путь решения — канал при этом не опрашивается
     previewStrategy: (_ctx, scope, strategy) => live.pipeline.previewStrategy(live.callContext(scope.channelAccountId), scope.writeScopeId, strategy),
   });

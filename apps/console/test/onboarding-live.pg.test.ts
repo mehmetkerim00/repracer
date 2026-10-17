@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobCreatedResponse, StandToken, WorldSummary } from '../src/api-types.ts';
-import type { BoundsDiffView, BulkJobView, CostImportView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import type { BoundsDiffView, BulkJobView, ImportCheckView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
 import { DEMO_FILE_PREFIX, DEMO_ROW_MARK } from '@repracer/bulk-jobs';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { demoWorld, nextNineUtc, DEMO_COMPETITORS_PER_OFFER, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
@@ -95,6 +95,14 @@ async function runJob(operation: string, world: string, url: string, body: unkno
   measured.push({ operation: `${operation} (задание целиком)`, seconds: Math.round(Number(process.hrtime.bigint() - started) / 1e6) / 1000, bytes: 0, status: job.status === 'SUCCEEDED' ? 200 : 500, note: job.headline });
   assert.equal(job.status, 'SUCCEEDED', `${operation}: ${job.error ?? job.headline}`);
   return job;
+}
+
+/** Шаг 99 [Р-224]: импорт файлом — примерка, затем применение ровно примерки; у файла прогона ошибок нет */
+async function importFile(operation: string, world: string, kind: string, body: Record<string, unknown>): Promise<{ view: ImportCheckView; applied: BulkJobView }> {
+  const checked = await runJob(`${operation} (примерка)`, world, api(world, 'imports', 'check'), { kind, ...body });
+  const view = (checked.result as { view: ImportCheckView }).view;
+  assert.equal(view.counts.rejected, 0, `${operation}: ${JSON.stringify(view.errors).slice(0, 300)}`);
+  return { view, applied: await runJob(operation, world, api(world, 'imports', 'apply'), { kind, checkJobId: checked.jobId, checkToken: view.token, confirmed: true }) };
 }
 
 const onboarding = async (world = DEMO_WORLD) => {
@@ -289,7 +297,7 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   const source = await measure<{ stockSourceId: string }>('stock/sources', 'POST', api(DEMO_WORLD, 'stock', 'sources'), { mode: 'INTERNAL_POOL', name: 'Demo-Lager' });
   assert.equal(source.status, 200, JSON.stringify(source.body));
   const stockCsv = ['Artikelnummer;Bestand', ...Array.from({ length: DEMO_OFFERS }, (_, i) => `${String(340_100_001 + i).slice(-6)};12`)].join('\r\n');
-  await runJob('stock/import', DEMO_WORLD, api(DEMO_WORLD, 'stock', 'import'), { fileName: 'bestand.csv', content: Buffer.from(stockCsv, 'utf8').toString('base64'), stockSourceId: source.body.stockSourceId });
+  await importFile('imports/STOCK', DEMO_WORLD, 'STOCK', { fileName: 'bestand.csv', content: Buffer.from(stockCsv, 'utf8').toString('base64'), stockSourceId: source.body.stockSourceId });
   // Шаг 60 [Р-202]: запись количества — после подтверждения владельца на экране подключений, как у продавца
   await confirmQuantityWritesAsOwner((method, url, body) => measure(`connections ${method}`, method, url, body), api(DEMO_WORLD, 'connections'), demo.live.seeded.channelAccountId);
   // Идентификатор аккаунта МИРА, как у экрана остатков (находка 1 доказательства пути остатков)
@@ -307,11 +315,8 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
    * теперь критерий шага тот же, что у включения (`write_scope_cost_ready`).
    */
   const csv = ['Artikelnummer;Einstandspreis;Währung;Provision %;Fixkosten', ...skus.map((sku, i) => `${sku};${10 + (i % 9)},25;EUR;15;0,00`)].join('\r\n');
-  const file = { fileName: 'demo-kosten.csv', content: Buffer.from(csv, 'utf8').toString('base64') };
-  const plan = await measure<CostImportView>('cost-import/plan', 'POST', api(DEMO_WORLD, 'cost-import', 'plan'), file);
-  assert.equal(plan.status, 200, JSON.stringify(plan.body).slice(0, 300));
-  assert.equal(plan.body.summary.apply, WITH_COST, `сопоставлено ровно столько строк, сколько в файле: ${JSON.stringify(plan.body.summary)}`);
-  const imported = await runJob('cost-import/apply', DEMO_WORLD, api(DEMO_WORLD, 'cost-import', 'apply'), { ...file, fingerprint: plan.body.fingerprint, confirmed: true });
+  const { view: plan, applied: imported } = await importFile('imports/COSTS', DEMO_WORLD, 'COSTS', { fileName: 'demo-kosten.csv', content: Buffer.from(csv, 'utf8').toString('base64') });
+  assert.equal(plan.counts.changed, WITH_COST, `к изменению — ровно столько строк, сколько в файле: ${JSON.stringify(plan.counts)}`);
   // Р-147: итог задания в ответ экрана не входит — о сделанном говорит заголовок задания и состояние пути ниже
   assert.match(imported.headline, new RegExp(String(WITH_COST)), `импорт назвал число предложений: ${imported.headline}`);
 

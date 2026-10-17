@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { StockView } from '@repracer/console-model';
 import type { BoundsIndexView, JobCreatedResponse, StandToken } from '../src/api-types.ts';
-import { DIFF_ROWS_SHOWN, LIST_PAGE_DEFAULT, type BoundsDiffView, type BulkJobView, type CostImportView, type ProductListView, type StopPlan, type StopView, type StrategyPreviewView } from '@repracer/console-model';
+import { DIFF_ROWS_SHOWN, LIST_PAGE_DEFAULT, type BoundsDiffView, type BulkJobView, type ImportCheckView, type ProductListView, type StopPlan, type StopView, type StrategyPreviewView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -145,6 +145,13 @@ async function runBulkOperation(operation: string, url: string, body: unknown, n
   assert.equal(job.status, 'SUCCEEDED', `${operation}: ${job.error ?? job.headline}`);
   return job;
 }
+
+/** Шаг 99 [Р-224]: примерка файла импорта — задание; итог — экран примерки */
+async function checkFile(operation: string, kind: string, body: Record<string, unknown>, note = ''): Promise<{ jobId: string; job: BulkJobView; view: ImportCheckView }> {
+  const job = await runBulkOperation(operation, api('imports', 'check'), { kind, ...body }, note);
+  return { jobId: job.jobId, job, view: (job.result as { view: ImportCheckView }).view };
+}
+const applyBody = (kind: string, checked: { jobId: string; view: ImportCheckView }) => ({ kind, checkJobId: checked.jobId, checkToken: checked.view.token, confirmed: true });
 
 function scope(n: number): MemorySeedScope {
   return {
@@ -305,14 +312,12 @@ test('Р-136: остальные экраны продавца — лента, �
 test('Р-136: импорт себестоимости целого каталога — файл продавца через HTTP', async () => {
   const lines = ['Artikelnummer;Einstandspreis;Währung', ...Array.from({ length: OFFERS }, (_, i) => `SKU-${i + 1};${9 + (i % 40)},${String(i % 100).padStart(2, '0')};EUR`)];
   const content = Buffer.from(lines.join('\r\n'), 'utf8').toString('base64');
-  const file = { fileName: 'kosten.csv', content };
-  const plan = await measure<CostImportView>('cost-import/plan (предпросмотр 10 000 строк)', 'POST', api('cost-import', 'plan'), file,
+  const checked = await checkFile('imports/check COSTS (примерка 10 000 строк)', 'COSTS', { fileName: 'kosten.csv', content },
     `файл ${Math.round(Buffer.byteLength(content) / 1024)} КБ в base64`);
-  assert.equal(plan.status, 200, JSON.stringify(plan.body).slice(0, 300));
-  assert.equal(plan.body.summary.apply, OFFERS);
-  const job = await runBulkOperation('cost-import/apply (применение 10 000 строк)', api('cost-import', 'apply'),
-    { ...file, fingerprint: plan.body.fingerprint, confirmed: true }, `файл ${Math.round(Buffer.byteLength(content) / 1024)} КБ в base64`);
-  assert.match(job.headline, /10000 Zeilen/, job.headline);
+  assert.deepEqual([checked.view.counts.changed, checked.view.counts.rejected], [OFFERS, 0]);
+  const job = await runBulkOperation('imports/apply COSTS (применение 10 000 строк)', api('imports', 'apply'), applyBody('COSTS', checked));
+  // Шаг 99 (E): скорость — лицом; время считает база от нажатия до фиксации
+  assert.match(job.headline, /^Fertig: 10000 Zeilen in \d+(,\d)? s angewendet\.$/, job.headline);
 });
 
 test('Р-136: массовая правка границ всего каталога', async () => {
@@ -455,30 +460,26 @@ test('Р-136: экспорт доказательной истории цен з
  * Omnibus; двух других файлов не существовало вовсе — экран показывал выдержку, и это и есть находка.
  */
 test('Р-142: отчёт об импорте и выгрузка ленты цен — файлы, и берутся они как в браузере', async () => {
-  // --- Отчёт об импорте: КАЖДАЯ несопоставленная строка с причиной, а не пять примеров на экране
+  // --- Отчёт примерки: КАЖДАЯ ошибочная строка с причиной, а не первые на экране (шаг 99: файл с ошибками не применяется вовсе)
   const rows = 2_000;
   const lines = ['Artikelnummer;Einstandspreis;Währung',
     // Половина строк ложится на каталог, половина — нет: именно их продавцу и надо чинить в своей выгрузке
     ...Array.from({ length: rows }, (_, i) => (i % 2 === 0 ? `SKU-${i + 1};12,50;EUR` : `NICHT-IM-KATALOG-${i};12,50;EUR`))];
-  const file = { fileName: 'report.csv', content: Buffer.from(lines.join('\r\n'), 'utf8').toString('base64') };
-  const plan = await call('POST', api('cost-import', 'plan'), file);
-  assert.equal(plan.status, 200, plan.text.slice(0, 200));
-  const planned = JSON.parse(plan.text) as CostImportView;
-  const importJob = await runBulkOperation('cost-import/apply (отчёт об импорте)', api('cost-import', 'apply'),
-    { ...file, fingerprint: planned.fingerprint, confirmed: true });
-  assert.ok(importJob.artifact, 'у импорта с несопоставленными строками есть файл отчёта');
-  assert.equal(importJob.artifact!.rows, rows / 2, 'в отчёте КАЖДАЯ несопоставленная строка, а не примеры');
+  const checked = await checkFile('imports/check COSTS (отчёт примерки)', 'COSTS', { fileName: 'report.csv', content: Buffer.from(lines.join('\r\n'), 'utf8').toString('base64') });
+  assert.ok(checked.job.artifact, 'у примерки с ошибочными строками есть файл отчёта');
+  assert.equal(checked.job.artifact!.rows, rows / 2, 'в отчёте КАЖДАЯ ошибочная строка, а не примеры');
+  assert.equal(checked.view.errors.length, 200, 'экран показывает первые 200');
 
-  const reportByLink = await browserNavigate(api('jobs', `${importJob.jobId}/artifact`));
-  assert.equal(reportByLink.status, 401, 'отчёт об импорте по ссылке без заголовка не отдаётся');
-  const report = await consoleDownload('cost-import (скачивание отчёта клиентом консоли)', api('jobs', `${importJob.jobId}/artifact`));
+  const reportByLink = await browserNavigate(api('jobs', `${checked.jobId}/artifact`));
+  assert.equal(reportByLink.status, 401, 'отчёт примерки по ссылке без заголовка не отдаётся');
+  const report = await consoleDownload('imports (скачивание отчёта примерки клиентом консоли)', api('jobs', `${checked.jobId}/artifact`));
   assert.equal(report.contentType, 'text/csv');
-  // Имя файла продавец видит в своих «Загрузках»: расширение исходной выгрузки не должно удваиваться (`report.csv.csv`)
-  assert.equal(report.fileName, 'import-report_report.csv', `имя файла отчёта: ${report.fileName}`);
+  // Имя файла продавец видит в своих «Загрузках»: расширение исходной выгрузки не удваивается (`report.csv.csv`)
+  assert.equal(report.fileName, 'unit-costs-errors_report.csv', `имя файла отчёта: ${report.fileName}`);
   const reportLines = report.text.trim().split('\n');
-  assert.equal(reportLines[0], 'line,offer_key,raw_value,problem,problem_text');
-  assert.equal(reportLines.length, planned.summary.skipped + 1, 'строк в файле столько же, сколько названо на ЭКРАНЕ предпросмотра');
-  assert.ok(reportLines[1]!.includes('OFFER_NOT_FOUND'), `причина названа у каждой строки: ${reportLines[1]}`);
+  assert.equal(reportLines[0], 'line,sku,column,problem,problem_text');
+  assert.equal(reportLines.length, checked.view.counts.rejected + 1, 'строк в файле столько же, сколько названо на ЭКРАНЕ примерки');
+  assert.ok(reportLines[1]!.includes('NOT_FOUND'), `причина названа у каждой строки: ${reportLines[1]}`);
 
   /**
    * Выгрузка ленты цен: здесь измеряется ПУТЬ — нажатие, работа задания и скачивание тем же клиентом, что у страницы. Строк в
@@ -509,19 +510,17 @@ test('OQ-199: предел импорта в 200 000 строк — замер �
   const lines = ['Artikelnummer;Einstandspreis;Währung',
     ...Array.from({ length: ROWS }, (_, i) => `SKU-${i + 1};${9 + (i % 40)},${String(i % 100).padStart(2, '0')};EUR`)];
   const content = Buffer.from(lines.join('\r\n'), 'utf8').toString('base64');
-  const plan = await measure<CostImportView>('cost-import/plan (200 000 строк, предел базы)', 'POST', api('cost-import', 'plan'),
-    { fileName: 'limit.csv', content }, `файл ${Math.round(Buffer.byteLength(content) / 1024 / 1024)} МБ в base64`);
-  assert.equal(plan.status, 200, JSON.stringify(plan.body).slice(0, 300));
-  assert.equal(plan.body.summary.apply, OFFERS, 'применятся только сопоставленные с каталогом');
-  assert.equal(plan.body.summary.apply + plan.body.summary.skipped, ROWS, 'разобраны все строки файла: несопоставленные названы, а не потеряны');
+  const checked = await checkFile('imports/check COSTS (200 000 строк, предел базы)', 'COSTS', { fileName: 'limit.csv', content },
+    `файл ${Math.round(Buffer.byteLength(content) / 1024 / 1024)} МБ в base64`);
+  assert.equal(checked.view.counts.changed, OFFERS, 'к изменению — только строки каталога');
+  assert.equal(checked.view.counts.total, ROWS, 'разобраны все строки файла: ошибочные названы, а не потеряны');
+  assert.equal(checked.view.counts.rejected, ROWS - OFFERS);
   /**
-   * Предел объявлен базой и должен быть достижим. Мерится он пределом ЭКРАНА, а не работы: предпросмотр — обычный запрос
-   * продавца, он ждёт ответа. Выводить его из-под предела экрана значило бы прятать цену объявленного предела (находка 10
-   * ревью шага 30).
+   * Предел объявлен базой и должен быть достижим. Шаг 99: примерка — задание [Р-139], и мерится она пределом работы, а не экрана:
+   * продавец смотрит на ход, а не ждёт ответа
    */
-  const measuredPlan = measured.find((x) => x.operation.startsWith('cost-import/plan (200 000'))!;
-  assert.ok(measuredPlan.seconds < SCREEN_LIMIT_SECONDS,
-    `разбор 200 000 строк: ${measuredPlan.seconds} с при пределе экрана ${SCREEN_LIMIT_SECONDS} с`);
+  const measuredCheck = measured.find((x) => x.operation.startsWith('imports/check COSTS (200 000 строк') && x.operation.endsWith('(задание целиком)'))!;
+  assert.ok(measuredCheck.seconds < APPLY_LIMIT_SECONDS, `примерка 200 000 строк: ${measuredCheck.seconds} с при пределе работы ${APPLY_LIMIT_SECONDS} с`);
 });
 
 /**
@@ -534,10 +533,8 @@ test('Р-139: процесс убит на половине применения
   // Своя себестоимость: по ней видно, применился импорт или нет. Значение отличается от всех прежних прогонов
   const marker = 777;
   const lines = ['Artikelnummer;Einstandspreis;Währung', ...Array.from({ length: OFFERS }, (_, i) => `SKU-${i + 1};${marker},00;EUR`)];
-  const file = { fileName: 'kill.csv', content: Buffer.from(lines.join('\r\n'), 'utf8').toString('base64') };
-  const plan = await call('POST', api('cost-import', 'plan'), file);
-  assert.equal(plan.status, 200, plan.text.slice(0, 300));
-  const fingerprint = (JSON.parse(plan.text) as CostImportView).fingerprint;
+  const checked = await checkFile('imports/check COSTS (перед убийством процесса)', 'COSTS', { fileName: 'kill.csv', content: Buffer.from(lines.join('\r\n'), 'utf8').toString('base64') });
+  assert.equal(checked.view.counts.changed, OFFERS);
 
   const costsWithMarker = async () => {
     const [row] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(
@@ -546,7 +543,7 @@ test('Р-139: процесс убит на половине применения
   };
   assert.equal(await costsWithMarker(), 0, 'до задания этой себестоимости в базе нет');
 
-  const created = await call('POST', api('cost-import', 'apply'), { ...file, fingerprint, confirmed: true });
+  const created = await call('POST', api('imports', 'apply'), applyBody('COSTS', checked));
   assert.equal(created.status, 200, created.text.slice(0, 300));
   const jobId = (JSON.parse(created.text) as JobCreatedResponse).jobId;
 
@@ -602,11 +599,12 @@ test('Р-153: остатки на 10 000 предложений — файл, в
   assert.equal(source.status, 200, JSON.stringify(source.body));
   const lines = ['Artikelnummer;Bestand', ...Array.from({ length: OFFERS }, (_, i) => `SKU-${i + 1};${(i * 7) % 50}`)];
   const content = Buffer.from(lines.join('\r\n'), 'utf8').toString('base64');
-  const imported = await runBulkOperation('stock/import (10 000 строк)', api('stock', 'import'), { fileName: 'bestand.csv', content, stockSourceId: source.body.stockSourceId }, `файл ${Math.round(Buffer.byteLength(content) / 1024)} КБ в base64`);
-  const importView = (imported.result as { view: { matched: number; changed: number; unmatched: number } }).view;
+  const checked = await checkFile('imports/check STOCK (10 000 строк)', 'STOCK', { fileName: 'bestand.csv', content, stockSourceId: source.body.stockSourceId }, `файл ${Math.round(Buffer.byteLength(content) / 1024)} КБ в base64`);
   // Товаров с нулевым остатком движение не создаёт: строка «0» у пустого пула ничего не меняет
-  assert.deepEqual([importView.matched, importView.unmatched], [OFFERS, 0], JSON.stringify(importView));
-  assert.equal(importView.changed, lines.length - 1 - Array.from({ length: OFFERS }, (_, i) => (i * 7) % 50).filter((q) => q === 0).length);
+  const zeros = Array.from({ length: OFFERS }, (_, i) => (i * 7) % 50).filter((q) => q === 0).length;
+  assert.deepEqual([checked.view.counts.changed, checked.view.counts.unchanged, checked.view.counts.rejected], [OFFERS - zeros, zeros, 0], JSON.stringify(checked.view.counts));
+  const imported = await runBulkOperation('imports/apply STOCK (10 000 строк)', api('imports', 'apply'), applyBody('STOCK', checked));
+  assert.match(imported.headline, new RegExp(`^Fertig: ${OFFERS - zeros} Zeilen in \\d+(,\\d)? s angewendet\\.$`), imported.headline);
   // Шаг 60 [Р-202]: запись количества — после подтверждения владельца на экране подключений, как у продавца
   await confirmQuantityWritesAsOwner((method, url, body) => measure(`connections ${method}`, method, url, body), api('connections'), world.channelAccountId);
   const enabledJob = await runBulkOperation('stock/enable (10 000 единиц)', api('stock', 'enable'), { channelAccountId: world.channelAccountId, bufferUnits: 1, maxQuantity: null, minQuantityToList: 0 });

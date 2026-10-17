@@ -496,6 +496,9 @@ SELECT pg_temp.expect_fail('append-only tenant_data.cost_import', $q$
 -- TRUNCATE пакетов вместе со строками себестоимости: без CASCADE база отказывает внешним ключом, поэтому проверяется именно страж
 SELECT pg_temp.expect_fail('truncate tenant_data.cost_import', $q$ TRUNCATE tenant_data.cost_import CASCADE $q$,
   'TRUNCATE of tenant_data.cost_import is forbidden');
+-- Шаг 99 [Р-224]: журнал импортов — append-only, и TRUNCATE его не берёт
+SELECT pg_temp.expect_fail('truncate tenant_data.import_run', $q$ TRUNCATE tenant_data.import_run $q$,
+  'TRUNCATE of tenant_data.import_run is forbidden');
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$ TRUNCATE tenant_data.channel_write_mode_change $q$,
   'TRUNCATE of tenant_data.channel_write_mode_change is forbidden');
@@ -748,6 +751,18 @@ SELECT pg_temp.expect_fail('a confirmation applied over another tool managing st
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4620000-0000-4000-8000-000000000001', 'matched', 'a2000000-0000-0000-0000-00000000000a') $q$,
   'another tool managing stock would make two writers');
 ALTER TABLE tenant_data.channel_quantity_writes_confirmation ENABLE TRIGGER b_channel_quantity_writes_confirmation_guard;
+
+-- Шаг 99 [Р-224]: строка журнала импортов — от примерки, которая идёт (страж: пишет только своё задание, пока оно идёт); автор — участник без
+-- заданий в очереди: у владельца её занимают задания smoke_bulk_jobs.sql
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
+INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id, status, lease_owner, lease_until, started_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'bf000000-0000-4000-8000-000000000099', 'IMPORT_CHECK', '{"importKind": "COSTS"}'::jsonb,
+        'a2000000-0000-0000-0000-0000000000a9', 'RUNNING', 'smoke-r103', now() + interval '5 minutes', now());
+SELECT set_config('app.bulk_job_id', 'bf000000-0000-4000-8000-000000000099', true) \gset
+INSERT INTO tenant_data.import_run (tenant_id, kind, outcome, file_name, file_sha256, rows_total, rows_changed, rows_unchanged, rows_rejected,
+                                   duration_ms, bulk_job_id, created_by_membership_id, created_by_user_id)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'COSTS', 'CHECKED', 'r103.csv', repeat('a', 64), 1, 1, 0, 0, 0,
+        'bf000000-0000-4000-8000-000000000099', 'a2000000-0000-0000-0000-0000000000a9', 'a1000000-0000-0000-0000-0000000000a9');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

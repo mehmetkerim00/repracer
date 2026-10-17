@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0190_verify_schema_invariants_v51.sql';
+const VERIFY = 'migrations/0194_verify_schema_invariants_v52.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -1183,8 +1183,9 @@ export const STEP32_ROWS = [
         'IF j.kind NOT IN (SELECT k FROM security.file_producing_job_kinds() AS k) THEN', 'IF false THEN'),
         smoke('a file attached to a job kind that gives the seller no file (Р-145)')),
       // Сам список видов, отдающих файл: добавить в него вид, который файлов не делает, — снять страж для него
-      m(replaceInFunction('security.file_producing_job_kinds()', "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']",
-        "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'BOUNDS_EDIT']"),
+      // Шаг 99: импорт себестоимости файла больше не отдаёт, отдают шаблон и примерка (0193) — текст списка другой, проверка та же
+      m(replaceInFunction('security.file_producing_job_kinds()', "ARRAY['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']",
+        "ARRAY['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'BOUNDS_EDIT']"),
         smoke('a file attached to a job kind that gives the seller no file (Р-145)')),
       /**
        * Правило 14д: список называет вид, которого нет. Опечатка молча выводит вид из-под правила, и ни один тест её не
@@ -2536,6 +2537,94 @@ export const STEP98_ROWS = [
       m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)',
         "AND EXISTS (SELECT 1 FROM tenant_data.membership m WHERE m.tenant_id = p_tenant_id AND m.user_id = p_user_id AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN", 'AND false THEN'),
         node(R98, 'relinks the sign-in of a member, but not the sign-in of the owner', 'step 98: a manager does not relink the sign-in of the owner', '^"string"$')),
+    ],
+  },
+];
+
+/**
+ * Шаг 99 [Р-224, Р-225]: импорты продавца — журнал импортов пишет только своё идущее задание и только своего вида, автор и длительность —
+ * из задания, применённый импорт без отклонённых строк; минимальная маржа многих предложений — со вторым фактором; файл задания XLSX —
+ * сумма по байтам книги; шаблон и примерка — виды без второго фактора, отдающие файл. Каждая защита — своей проверкой с причиной [Р-108]
+ */
+const R99 = T('imports-step99.pg.test.ts');
+const J99 = 'the import journal is written only by its own job while it runs';
+const M99 = 'the run matches its job — a check writes CHECKED of its own import, an import apply writes APPLIED or REFUSED';
+const A99 = 'the database sets the author and the duration of a run, not the caller';
+const V99 = 'the values of a run are checked by the database';
+export const STEP99_ROWS = [
+  {
+    row: 'шаг 99 (Р-224, журнал)', critical: false,
+    invariant: 'строку журнала импортов пишет задание, которое сейчас идёт и назвало себя базе, своего вида; автора и длительность ставит база',
+    mutations: [
+      m(dropTrigger('a_import_run_from_its_job', 'tenant_data.import_run'), node(R99, J99, 'a job writes no run of another job', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "OR NEW.bulk_job_id::text IS DISTINCT FROM nullif(current_setting('app.bulk_job_id', true), '') THEN", 'THEN'),
+        node(R99, J99, 'a job writes no run of another job', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "IF j.bulk_job_id IS NULL OR j.status <> 'RUNNING' OR j.lease_until <= now()", 'IF j.bulk_job_id IS NULL'),
+        node(R99, J99, 'a finished job writes no import run', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "AND NEW.kind = j.params ->> 'importKind')", ')'),
+        node(R99, M99, 'a check of stock writes no unit-cost run', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "IF NOT coalesce((j.kind = 'IMPORT_CHECK' AND NEW.outcome = 'CHECKED'", "IF NOT coalesce((j.kind = 'IMPORT_CHECK'"),
+        node(R99, M99, 'a check writes no APPLIED run', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "AND j.params ? 'checkJobId'", ''),
+        node(R99, M99, 'a catalog bounds edit writes no import run', '^accepted$')),
+      // Шаг 99 (мутационная проверка): сопоставление вида у чужого задания — NULL, и без coalesce `IF NOT NULL` пропускало строку
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "END), false) THEN", "END), NULL) THEN"),
+        node(R99, M99, 'a job of another kind writes no run even if it names a check', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "WHEN 'COST_IMPORT' THEN 'COSTS'", "WHEN 'COST_IMPORT' THEN NEW.kind"),
+        node(R99, M99, 'a unit-cost apply writes no bounds run', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "OR (NEW.outcome IN ('APPLIED', 'REFUSED') AND j.params ? 'checkJobId'", "OR (j.params ? 'checkJobId'"),
+        node(R99, M99, 'an outcome outside the list is refused', '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', 'NEW.created_by_membership_id := j.created_by_membership_id;', ''),
+        node(R99, A99, 'the author is the creator of the job, not the caller', '^[0-9a-f-]{36}$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "NEW.duration_ms := greatest(0, round(extract(epoch FROM clock_timestamp() - j.created_at) * 1000))::int;", ''),
+        node(R99, A99, { re: 'the duration is counted by the database from the job, not declared: (\\d+)' }, '^99999999$')),
+      // Страж и аудит административной записи — правило 14а: строку журнала пишет человек через задание, и она в аудите [Р-97]
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.import_run'),
+        verify('tenant_data\\.import_run: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.import_run'),
+        verify('tenant_data\\.import_run: administrative INSERT is not written to the audit log')),
+      // Журнал только на добавление: изменение строки и TRUNCATE отклоняют триггеры неизменяемости [Р-103]
+      m(dropTrigger('zz_append_only', 'tenant_data.import_run'), smoke('append-only tenant_data.import_run')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.import_run'), smoke('truncate tenant_data.import_run')),
+      // Закрытие тенанта уносит журнал импортов (правило 0102)
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.import_run', ", ''),
+        verify('tenant_data\\.import_run: tenant closure does not delete the table')),
+    ],
+  },
+  {
+    row: 'шаг 99 (Р-224, значения)', critical: false,
+    invariant: 'значения строки журнала: вид импорта из перечня, причина — только у отказа и кодом, файл назван и с суммой SHA-256, строки складываются, «применено» — без отклонённых и с изменениями, одна строка на задание',
+    mutations: [
+      m(dropConstraint('import_run_kind_known', 'tenant_data.import_run'), node(R99, V99, 'an import kind outside the list is refused', '^accepted$')),
+      m(dropConstraint('import_run_reason_only_refused', 'tenant_data.import_run'), node(R99, V99, 'a refusal names its reason', '^accepted$')),
+      m(dropConstraint('import_run_file_name_length', 'tenant_data.import_run'), node(R99, V99, 'a run names its file', '^accepted$')),
+      m(dropConstraint('import_run_file_sha256_form', 'tenant_data.import_run'), node(R99, V99, 'the checksum of the file is a SHA-256', '^accepted$')),
+      m(dropConstraint('import_run_rows_non_negative', 'tenant_data.import_run'), node(R99, V99, 'row counts are not negative', '^accepted$')),
+      m(dropConstraint('import_run_rows_add_up', 'tenant_data.import_run'), node(R99, V99, 'changed, unchanged and rejected rows add up to the rows of the file', '^accepted$')),
+      // Частично-молчаливых применений не бывает [Р-224]
+      m(dropConstraint('import_run_applied_whole', 'tenant_data.import_run'), node(R99, V99, 'an applied import had no rejected rows', '^accepted$')),
+      m(dropConstraint('import_run_one_per_job', 'tenant_data.import_run'), node(R99, V99, 'a job writes one run (the database)', '^accepted$')),
+    ],
+  },
+  {
+    row: 'шаг 99 (Р-135, Р-143, Р-145)', critical: true,
+    invariant: 'минимальная маржа многих предложений — со вторым фактором; шаблон и примерка не требуют права на цены, но чужую примерку отменяет только право на цены; XLSX задания — сумма по байтам книги',
+    mutations: [
+      m(dropTrigger('zh_guardrail_mass_edit_requires_mfa', 'tenant_data.guardrail'),
+        node(R99, 'minimum margins of more than one offer in one transaction need a second factor', 'a mass minimum-margin edit without a second factor is refused', '^accepted$')),
+      m(replaceInFunction('tenant_data.guardrail_mass_edit_requires_mfa()', 'IF offers > 1 THEN', 'IF false THEN'),
+        node(R99, 'minimum margins of more than one offer in one transaction need a second factor', 'a mass minimum-margin edit without a second factor is refused', '^accepted$')),
+      m(replaceInFunction('security.read_only_job_kinds()', "UNION ALL SELECT unnest(ARRAY['IMPORT_TEMPLATE', 'IMPORT_CHECK'])", ''),
+        node(R99, 'a check needs no right to change prices', 'an inventory manager creates a check of a stock file', '^FORBIDDEN$')),
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'IMPORT_CHECK' THEN 'MANAGE_PRICING'", "WHEN p_kind = 'IMPORT_CHECK' THEN 'VIEW_PRICING'"),
+        node(R99, 'a check needs no right to change prices', "an inventory manager does not cancel another member's check", '^CANCELLED$')),
+      // Правило 14е: у шаблона — право, известное матрице
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'IMPORT_TEMPLATE' THEN 'VIEW_PRICING'", "WHEN p_kind = 'IMPORT_TEMPLATE' THEN 'NO_SUCH_RIGHT'"),
+        verify('bulk job kind IMPORT_TEMPLATE has no cancel right known to the permission matrix')),
+      m(replaceInFunction('tenant_data.bulk_job_artifact_digest_matches()', "bytes := decode(NEW.content, 'base64');", "bytes := convert_to(NEW.content, 'UTF8');"),
+        node(R99, 'an XLSX file of a job is checked by the bytes of the workbook', 'the checksum of the base64 text is not the checksum of the file', '^accepted$')),
+      m(replaceInFunction('security.file_producing_job_kinds()', "ARRAY['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']", "ARRAY['IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']"),
+        node(R99, 'an XLSX file of a job is checked by the bytes of the workbook', 'the checksum of the workbook bytes is accepted', 'does not give the seller a file')),
     ],
   },
 ];

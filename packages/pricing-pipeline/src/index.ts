@@ -86,6 +86,11 @@ export { EXPLANATION_RULESETS } from './dictionary.ts';
 export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, MemberRoleChangeResult, DiscoveryStop, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, BuyboxHolderObservation } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, stalestFirst, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
 export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
+// Шаг 99 [Р-225]: доступность стратегии каналу [Р-39] — та же проверка, что у назначения и предпросмотра, для импорта стратегий
+export { strategyAvailability } from '@repracer/strategy-engine';
+// Шаг 99 [Р-224, Р-225]: импорты продавца — виды, журнал, применение границ и стратегий из файла
+export { IMPORT_KINDS, XLSX_CONTENT_TYPE } from './store.ts';
+export type { ImportKind, ImportRunOutcome, ImportRunInput, ImportRunRow, BoundsImportRowInput, BoundsImportResult, StrategiesImportInput, StrategiesImportResult } from './store.ts';
 // Шаг 34 [Р-149, Р-150]: онбординг и честное состояние канала
 export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, OnboardingStep, OnboardingPath, ChannelAccountRow, ChannelAccessBlocker, ChannelAuthStatus } from './store.ts';
 export { ONBOARDING_STOCK_STEPS, ONBOARDING_PRICING_STEPS, onboardingStepsOf } from './store.ts';

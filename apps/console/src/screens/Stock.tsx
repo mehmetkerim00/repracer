@@ -2,8 +2,9 @@ import { useContext, useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, FileDrop, Gaps, href, Intro, Load, MarketContext, Pager, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, MarketContext, Pager, useMessages } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
+import { ImportPanel } from './Imports.tsx';
 import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
 /**
@@ -11,13 +12,6 @@ import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '.
  * что отправлено и что канал ПОДТВЕРДИЛ; расхождения — отдельным списком; ловушки каналов — до первой записи.
  * Экран честно говорит, чего не показывает: между записями канал не читается.
  */
-
-function base64Of(bytes: Uint8Array): string {
-  const CHUNK = 0x8000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  return btoa(binary);
-}
 
 export function StockScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
@@ -33,10 +27,8 @@ export function StockScreen({ worldId }: { worldId: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [job, setJob] = useState<BulkJobView | null>(null);
-  const [file, setFile] = useState<{ name: string; content: string } | null>(null);
   const [sourceName, setSourceName] = useState('');
   const [sourceMode, setSourceMode] = useState<'INTERNAL_POOL' | 'INBOUND_API'>('INTERNAL_POOL');
-  const [sourceId, setSourceId] = useState('');
   const [buffer, setBuffer] = useState('0');
   const [maxQuantity, setMaxQuantity] = useState('');
   const [minToList, setMinToList] = useState('0');
@@ -47,16 +39,8 @@ export function StockScreen({ worldId }: { worldId: string }) {
   const post = <T,>(path: string, body: Record<string, unknown>) => requestJson<T>(worldPath(worldId, 'stock', path), { method: 'POST', body, locale: m.locale });
 
   const createSource = () => void post<{ stockSourceId: string; apiKey: string | null }>('sources', { mode: sourceMode, name: sourceName })
-    .then((r) => { setError(null); setApiKey(r.apiKey); setSourceId(r.stockSourceId); refresh(); })
+    .then((r) => { setError(null); setApiKey(r.apiKey); refresh(); })
     .catch((e: unknown) => setError(errorText(e, m)));
-  const choose = async (input: HTMLInputElement) => {
-    const picked = input.files?.[0];
-    if (!picked) return setFile(null);
-    setFile({ name: picked.name, content: base64Of(new Uint8Array(await picked.arrayBuffer())) });
-  };
-  const importFile = () => { if (file) void post<{ jobId: string; job?: BulkJobView; message: string }>('import', { ...file, fileName: file.name, stockSourceId: sourceId })
-    .then((r) => { setError(null); setMessage(r.message); if (r.job) setJob(r.job); })
-    .catch((e: unknown) => setError(errorText(e, m))); };
   // Р-139: включение — задание; ход виден, итог приходит с заданием
   const enable = (channelAccountId: string) => void post<{ jobId: string; job?: BulkJobView; message: string }>('enable', {
     channelAccountId, bufferUnits: Number(buffer), maxQuantity: maxQuantity === '' ? null : Number(maxQuantity), minQuantityToList: Number(minToList), acknowledgeSideEffects: ack,
@@ -86,24 +70,10 @@ export function StockScreen({ worldId }: { worldId: string }) {
                 </FormActions>
                 {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
               </FieldGroup>
-              <FieldGroup title={m.ui.stock.importFile.title} caption={market.locales.includes('de') ? m.ui.stock.importFile.hintBilingual : m.ui.stock.importFile.hint}>
-                <FieldGrid cols={2}>
-                  <Field label={m.ui.stock.importFile.source} caption={m.ui.stock.importFile.sourceCaption}><select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
-                    <option value="">—</option>
-                    {v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => <option key={s.stockSourceId} value={s.stockSourceId}>{s.name}</option>)}
-                  </select></Field>
-                  <Field label={m.ui.stock.importFile.file}><FileDrop label={m.ui.stock.importFile.chooseFile} fileName={file ? file.name : null} onChoose={(input) => void choose(input)} /></Field>
-                </FieldGrid>
-                {(() => {
-                  const why = sourceId === '' ? m.ui.forms.why.source : !file ? m.ui.forms.why.file : job !== null ? m.ui.forms.why.jobRunning : null;
-                  return (
-                    <FormActions hint={why}>
-                      <button type="button" className="primary" onClick={importFile} disabled={why !== null} title={why ?? undefined}>{m.ui.stock.importFile.submit}</button>
-                    </FormActions>
-                  );
-                })()}
-                {job ? <JobProgress worldId={worldId} jobId={job.jobId} onFinished={() => { setJob(null); refresh(); }} /> : null}
-              </FieldGroup>
+              {/* Шаг 99 [Р-224]: файл остатков — тем же путём, что остальные импорты: шаблон, примерка, применение ровно примерки, журнал */}
+              <ImportPanel worldId={worldId} kind="STOCK" canEdit={v.canManage} onApplied={refresh}
+                caption={market.locales.includes('de') ? m.ui.stock.importFile.hintBilingual : m.ui.stock.importFile.hint}
+                stockSources={v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => ({ stockSourceId: s.stockSourceId, name: s.name }))} />
               <FieldGroup title={m.ui.stock.enable.title}>
                 <FieldGrid cols={3}>
                   <Field label={m.ui.stock.enable.buffer} caption={m.ui.stock.enable.bufferCaption}><input inputMode="numeric" value={buffer} onChange={(e) => setBuffer(e.currentTarget.value)} /></Field>

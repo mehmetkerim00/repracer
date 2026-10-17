@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type CostImportView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -361,7 +361,7 @@ test('Р-131, G: without the declared cost the screen shows a requirement, not a
   assert.equal((await call(viewer, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).status, 403);
 });
 
-test('Р-134, Р-135 (шаг 28): импорт себестоимости — предпросмотр до применения, несопоставленное перечислено, применение со вторым фактором', async () => {
+test('Р-134, Р-135 (шаг 28), шаг 99 [Р-224]: импорт себестоимости — примерка до применения, ошибки по строкам, файл с ошибкой не применяется', async () => {
   const id = 'kaufland/pipeline/happy-path';
   const owner = await login('OWNER', 'de');
   const viewer = await login('INVENTORY_MANAGER');
@@ -372,70 +372,53 @@ test('Р-134, Р-135 (шаг 28): импорт себестоимости — п
     'Artikelnummer;Einstandspreis;Währung;Provision %',
     `${unit};10,50;EUR;15`,
     'A-DOES-NOT-EXIST;7,00;EUR;15',
-    `${unit};;EUR;15`,   // тот же оффер, но без себестоимости: строка не применяется и названа отдельно
   ].join('\n');
-  const file = { fileName: 'kosten.csv', content: Buffer.from(csv, 'utf8').toString('base64') };
-  assert.equal((await call(viewer, 'POST', api(id, 'cost-import', 'plan'), file)).status, 403, 'у менеджера остатков импорта себестоимости нет');
-  const planned = await call(owner, 'POST', api(id, 'cost-import', 'plan'), file);
-  assert.equal(planned.status, 200, JSON.stringify(planned.body));
-  const view = planned.body as CostImportView;
-  // Продавец видит: как прочитан файл, какие колонки узнаны, что применится и что нет — с причиной
+  const file = { kind: 'COSTS', fileName: 'kosten.csv', content: Buffer.from(csv, 'utf8').toString('base64') };
+  assert.equal((await call(viewer, 'POST', api(id, 'imports', 'check'), file)).status, 403, 'у менеджера остатков импорта себестоимости нет');
+  const checked = await finishJob(id, await call(owner, 'POST', api(id, 'imports', 'check'), file));
+  assert.equal(checked.status, 'SUCCEEDED', checked.error ?? '');
+  const view = (checked.result as { view: ImportCheckView }).view;
+  // Продавец видит: как прочитан файл (чужие заголовки узнаны), что изменится и какие строки с ошибкой — номер строки и причина
   assert.deepEqual([view.source.format, view.source.delimiter], ['CSV', ';']);
-  assert.equal(view.summary.apply, 1);
-  assert.ok(view.skipped.some((g) => g.problem === 'OFFER_NOT_FOUND' && g.examples.some((e) => e.offerKey === 'A-DOES-NOT-EXIST')));
-  assert.ok(view.skipped.some((g) => g.problem === 'COST_MISSING'));
-  // Ревью шага 28, находка 15: «больше либо равно нулю» — не проверка. Значение имеет число офферов, которые после импорта
-  // репрайсинг включить не смогут [Р-131], и то, что продавец видит его на экране
-  assert.equal(view.stillWithoutCost, products.rows.length - view.summary.offersCovered,
-    'без себестоимости остаются все офферы списка, кроме тех, чьи строки применятся [Р-131]');
+  assert.deepEqual(view.counts, { total: 2, changed: 1, unchanged: 0, rejected: 1 });
+  assert.deepEqual(view.errors.map((e) => e.line), [3]);
   assert.equal(view.mfaRequired, true);
-  // Ревью шага 28, находка 6: массовый импорт — это файл продавца, а не несколько строк. Раньше тело запроса было ограничено
-  // 64 КиБ, и выгрузка больше ~2 000 строк не доходила до сервера вовсе
-  const bigCsv = ['Artikelnummer;Einstandspreis;Währung;Provision %',
-    ...Array.from({ length: 4000 }, (_, i) => `A-SYNTH-${i};10,50;EUR;15`)].join('\n');
+  // Ревью шага 28, находка 6: массовый импорт — это файл продавца, и он доходит до сервера больше прежних 64 КиБ
+  const bigCsv = ['Artikelnummer;Einstandspreis;Währung', ...Array.from({ length: 4000 }, (_, i) => `A-SYNTH-${i};10,50;EUR`)].join('\n');
   assert.ok(Buffer.from(bigCsv, 'utf8').toString('base64').length > 64 * 1024, 'файл заведомо больше прежнего предела тела запроса');
-  const big = await call(owner, 'POST', api(id, 'cost-import', 'plan'),
-    { fileName: 'gross.csv', content: Buffer.from(bigCsv, 'utf8').toString('base64') });
-  assert.equal(big.status, 200, 'выгрузка в сотни килобайт доходит до сервера');
-  assert.equal((big.body as CostImportView).summary.skipped, 4000, 'все её строки разобраны и перечислены с причиной');
-
-  // Ревью шага 28, находка 8: подсказку можно исправить — выбор продавца сильнее, и предпросмотр строится заново
-  const wrongColumn = await call(owner, 'POST', api(id, 'cost-import', 'plan'), { ...file, mapping: { unitCostMinor: 2 } });
-  assert.equal(wrongColumn.status, 200);
-  const wrongView = wrongColumn.body as CostImportView;
-  assert.equal(wrongView.summary.apply, 0, 'колонка валюты вместо себестоимости — применять нечего');
-  assert.equal(wrongView.fields.find((f) => f.field === 'unitCostMinor')?.columnIndex, 2, 'экран показывает выбор продавца');
+  const big = await finishJob(id, await call(owner, 'POST', api(id, 'imports', 'check'), { kind: 'COSTS', fileName: 'gross.csv', content: Buffer.from(bigCsv, 'utf8').toString('base64') }));
+  assert.equal((big.result as { view: ImportCheckView }).view.counts.rejected, 4000, 'все её строки разобраны и названы с причиной');
+  // Ревью шага 28, находка 8: колонку можно исправить — выбор продавца сильнее подсказки, и примерка строится заново
+  const wrong = await finishJob(id, await call(owner, 'POST', api(id, 'imports', 'check'), { ...file, mapping: { unit_cost: 2 } }));
+  const wrongView = (wrong.result as { view: ImportCheckView }).view;
+  assert.equal(wrongView.fields.find((f) => f.field === 'unit_cost')?.columnIndex, 2, 'экран показывает выбор продавца');
   assert.deepEqual(view.fileColumns.map((c) => c.name), ['A', 'B', 'C', 'D'], 'колонки файла названы так же, как в таблице продавца');
-  const preview = await html('/src/screens/CostImport.tsx', 'CostImportPreview', { view }, 'de');
-  // На экране: заголовок списка непримененных строк, правило «целиком или никак» и требование второго фактора
-  for (const text of ['Zeilen, die nicht angewendet werden', 'vollständig angewendet', 'zweitem Faktor']) assert.ok(preview.includes(text), text);
-  // Применение: подтверждение обязательно, отпечаток — тоже, второй фактор — тоже
-  const apply = (auth: Auth, body: Record<string, unknown>) => call(auth, 'POST', api(id, 'cost-import', 'apply'), { ...file, ...body });
-  assert.equal((await apply(owner, { fingerprint: view.fingerprint })).status, 400, 'без подтверждения не применяется');
-  /**
-   * Р-139 (находка 10 ревью шага 30): отпечаток сверяет ЗАДАНИЕ, а не запрос. Разобрать файл, чтобы его посчитать, стоит
-   * столько же, сколько предпросмотр, — держать это в нажатии значило бы не перенести работу в фон, а только переименовать её.
-   */
-  const stale = await finishJob(id, await apply(owner, { fingerprint: 'stale', confirmed: true }));
-  assert.deepEqual([stale.status, stale.error], ['FAILED', messagesFor('de').ui.jobs.errors.PLAN_CHANGED],
-    'устаревший предпросмотр не применяется, и продавец читает почему');
-  // Вход только паролем: второго фактора нет — импорт не применяется [Р-135]
+  const screen = await html('/src/screens/Imports.tsx', 'ImportCheck', { view }, 'de');
+  // На экране: таблица ошибок, правило «все или ни одной» и требование второго фактора
+  for (const text of ['Zeilen mit Fehlern', 'alle oder keine', 'zweitem Faktor']) assert.ok(screen.includes(text), text);
+  // Применение: подтверждение обязательно; файл с ошибкой не применяется вовсе — ни одной строки [Р-224]
+  const apply = (auth: Auth, body: Record<string, unknown>) => call(auth, 'POST', api(id, 'imports', 'apply'), { kind: 'COSTS', checkJobId: checked.jobId, checkToken: view.token, ...body });
+  assert.equal((await apply(owner, {})).status, 400, 'без подтверждения не применяется');
+  const refused = await apply(owner, { confirmed: true });
+  assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [409, 'HAS_ERRORS']);
+  // Исправленный файл — одна строка без ошибок; вход одним паролем импорт не применяет [Р-135]
+  const clean = await finishJob(id, await call(owner, 'POST', api(id, 'imports', 'check'), { ...file, content: Buffer.from(csv.split('\n').slice(0, 2).join('\n'), 'utf8').toString('base64') }));
+  const cleanView = (clean.result as { view: ImportCheckView }).view;
   const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=de' };
-  const withoutMfa = await apply(passwordOnly, { fingerprint: view.fingerprint, confirmed: true });
+  const withoutMfa = await call(passwordOnly, 'POST', api(id, 'imports', 'apply'), { kind: 'COSTS', checkJobId: clean.jobId, checkToken: cleanView.token, confirmed: true });
   assert.deepEqual([withoutMfa.status, (withoutMfa.body as { error: { code: string } }).error.code], [403, 'MFA_REQUIRED']);
-  const strong = owner;
   /**
    * Р-139 (шаг 30): применение — фоновое задание. Ответ несёт идентификатор задания, а не итог; до работы исполнителя в базе
-   * ничего не изменено. Это и проверяется: сначала состояние задания «ничего не изменено», потом — итог.
+   * ничего не изменено. Это и проверяется: сначала состояние задания «ничего не изменено», потом — итог со временем [шаг 99, E]
    */
-  const created = await apply(strong, { fingerprint: view.fingerprint, confirmed: true });
+  const created = await call(owner, 'POST', api(id, 'imports', 'apply'), { kind: 'COSTS', checkJobId: clean.jobId, checkToken: cleanView.token, confirmed: true });
   assert.equal(created.status, 200, JSON.stringify(created.body));
   const pending = (created.body as JobCreatedResponse).job!;
   assert.deepEqual([pending.status, pending.effect], ['PENDING', messagesFor('de').ui.jobs.effectPending],
     'до работы исполнителя задание ждёт, и экран говорит, что в базе ничего не изменено');
   const done = await finishJob(id, created);
   assert.equal(done.status, 'SUCCEEDED', done.error ?? '');
-  assert.match(done.headline, /Stückkosten von 1 Angebot importiert \(1 Zeilen/);
+  assert.match(done.headline, /^Fertig: 1 Zeile in \d+(,\d)? s angewendet\.$/);
   assert.equal(done.effect, messagesFor('de').ui.jobs.effectApplied);
 });
 
@@ -869,11 +852,13 @@ test('Р-145: файл собирается ровно в одном месте 
    * Что запрещено: положить файл задания в базу, превратить строки в CSV и посчитать контрольную сумму файла. Вместе это и
    * есть «собрать выгрузку»; порознь любое из трёх означает, что рядом растёт второй путь.
    */
-  const BUILDS_A_FILE = /\.\s*saveBulkJobArtifact\s*\(|(?<!function\s)\bcsvOf\s*\(/;
+  // Шаг 99: книга XLSX — тоже файл; собирать её вправе только тот же единственный путь
+  const BUILDS_A_FILE = /\.\s*saveBulkJobArtifact\s*\(|(?<!function\s)\bcsvOf\s*\(|(?<!function\s)\bxlsxOf\s*\(/;
   // У правила должны быть зубы [Р-94]: оно обязано находить ровно тот код, который шаг 32 из обработчиков и убрал
   for (const bad of [
     `await ctx.store.saveBulkJobArtifact(ctx.tenantId, ctx.jobId, { fileName, content: csv });`,
     `const csv = await buildCsvInChunks(rows, (chunk) => csvOf(PRICE_FEED_CSV_HEADER, chunk), progress, total);`,
+    `const bytes = xlsxOf([{ name: 'Data', rows: template.rows }]);`,
   ]) assert.match(bad, BUILDS_A_FILE, `правило обязано ловить: ${bad.slice(0, 60)}`);
   /**
    * Чего правило ловить не должно: ОБЪЯВИТЬ выгрузку — не значит собрать файл. Хранилище обязано уметь класть файл, а
@@ -884,6 +869,7 @@ test('Р-145: файл собирается ровно в одном месте 
     `export function priceFeedRowsOf(world: StandWorld, m: Messages, query: FeedQuery): string[][] {`,
     `export function csvOf(header: readonly string[], rows: readonly (readonly string[])[]): string {`,
     `async saveBulkJobArtifact(tenantId: string, jobId: string, artifact: BulkJobArtifact): Promise<void> {`,
+    `export function xlsxOf(sheets: readonly XlsxSheet[]): Buffer {`,
   ]) assert.doesNotMatch(fine, BUILDS_A_FILE, `правило не должно ловить: ${fine.slice(0, 60)}`);
 
   const root = new URL('../../../', import.meta.url);
@@ -987,7 +973,7 @@ test('Р-147: список заданий не несёт их итогов', as
  */
 test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
   const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
-  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE'] as const;
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE', 'IMPORT_TEMPLATE', 'IMPORT_CHECK'] as const;
   // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 

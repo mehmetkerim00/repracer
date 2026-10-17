@@ -47,10 +47,12 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow } from '@repracer/pricing-pipeline';
+  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow,
+  BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult } from '@repracer/pricing-pipeline';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
+import { IMPORT_RUN_COLUMNS, importRunRow, insertImportRun } from './import-runs.ts';
 
 /**
  * PricingStore на реальной схеме. Инварианты — в БД: RLS с FORCE, append-only, монотонность версий,
@@ -428,7 +430,7 @@ const SCOPE_JSON = `json_build_object(
                   WHERE x.source = 'ECB' AND x.available_from <= $2::timestamptz AND x.rate_date <= ($2::timestamptz)::date
                   ORDER BY x.quote_currency, x.rate_date DESC) f),
   'guardrails', (SELECT coalesce(json_agg(gg), '[]') FROM (
-      SELECT DISTINCT ON (g.scope_type) g.guardrail_id, g.min_margin_bp, g.max_step_change_bp, g.max_changes_per_hour, g.on_violation, g.is_active
+      SELECT DISTINCT ON (g.scope_type) g.guardrail_id, g.scope_type, g.min_margin_bp, g.max_step_change_bp, g.max_changes_per_hour, g.on_violation, g.is_active
         FROM tenant_data.guardrail g
        WHERE g.tenant_id = $1
          AND (g.scope_type = 'TENANT'
@@ -437,6 +439,53 @@ const SCOPE_JSON = `json_build_object(
               OR (g.scope_type = 'WRITE_SCOPE' AND g.write_scope_id = sc.write_scope_id))
        ORDER BY g.scope_type, g.version DESC) gg)
 )`;
+
+/**
+ * Шаг 99 [Р-225]: действующие границы и минимальная маржа предложений — как их видят Gate и экран: пол — наибольший из уровней,
+ * потолок — наименьший (функции базы), маржа — наибольшая из последних действующих версий уровней
+ */
+async function effectiveBoundsAndMargin(tx: Tx, tenantId: string, ids: readonly string[]): Promise<Map<string, { minMinor: number | null; maxMinor: number | null; minMarginBp: number | null }>> {
+  const { rows } = await tx.query(
+    `SELECT s.write_scope_id, tenant_data.effective_min_price($1, s.write_scope_id) AS min, tenant_data.effective_max_price($1, s.write_scope_id) AS max,
+            (SELECT max(g.min_margin_bp) FROM (
+               SELECT DISTINCT ON (g.scope_type) g.min_margin_bp, g.is_active FROM tenant_data.guardrail g
+                WHERE g.tenant_id = $1
+                  AND (g.scope_type = 'TENANT'
+                       OR (g.scope_type = 'CHANNEL_ACCOUNT' AND g.channel_account_id = s.channel_account_id)
+                       OR (g.scope_type = 'PRODUCT' AND g.product_id = s.product_id)
+                       OR (g.scope_type = 'WRITE_SCOPE' AND g.write_scope_id = s.write_scope_id))
+                ORDER BY g.scope_type, g.version DESC) g WHERE g.is_active) AS margin
+       FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.write_scope_id = ANY ($2::uuid[]) AND s.field = 'PRICE'`, [tenantId, ids]);
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  return new Map(rows.map((r) => [String(r.write_scope_id), { minMinor: num(r.min), maxMinor: num(r.max), minMarginBp: num(r.margin) }]));
+}
+
+/** Новые версии границы уровня единицы записи — одной вставкой на таблицу, как у массовой правки (шаг 29) */
+async function insertScopeBounds(tx: Tx, tenantId: string, membershipId: string, table: 'min_price' | 'max_price',
+  targets: ReadonlyArray<{ writeScopeId: string; amountMinor: number }>): Promise<void> {
+  if (targets.length === 0) return;
+  await tx.query(
+    `INSERT INTO tenant_data.${table} (tenant_id, scope_type, write_scope_id, currency, price_basis, amount_minor, is_active, version, created_by_membership_id)
+     SELECT s.tenant_id, 'WRITE_SCOPE', s.write_scope_id, s.currency, s.price_basis, i.amount, true, coalesce(v.max_version, 0) + 1, $3
+       FROM unnest($2::uuid[], $4::bigint[]) AS i(write_scope_id, amount)
+       JOIN tenant_data.write_scope s ON s.tenant_id = $1 AND s.write_scope_id = i.write_scope_id AND s.field = 'PRICE'
+       LEFT JOIN LATERAL (
+         SELECT max(b.version) AS max_version FROM tenant_data.${table} b
+          WHERE b.tenant_id = $1 AND b.scope_type = 'WRITE_SCOPE' AND b.write_scope_id = i.write_scope_id
+       ) v ON true`,
+    [tenantId, targets.map((t) => t.writeScopeId), membershipId, targets.map((t) => t.amountMinor)]);
+}
+
+/**
+ * Шаг 99 [Р-225]: минимальная маржа по уровням — последняя версия каждого уровня (SCOPE_CONTEXT), только действующие. Своя — уровня
+ * предложения; более широкая — наибольшая из уровней товара, аккаунта и тенанта (действует наибольшая из всех, как у Gate)
+ */
+function marginLevelsOf(guardrails: unknown): { ownMinMarginBp: number | null; widerMinMarginBp: number | null } {
+  const active = ((guardrails ?? []) as Row[]).filter((g) => g.is_active && typeof g.min_margin_bp === 'number');
+  const own = active.find((g) => g.scope_type === 'WRITE_SCOPE');
+  const wider = active.filter((g) => g.scope_type !== 'WRITE_SCOPE').map((g) => g.min_margin_bp as number);
+  return { ownMinMarginBp: own ? own.min_margin_bp as number : null, widerMinMarginBp: wider.length > 0 ? Math.max(...wider) : null };
+}
 
 /** Окно массового сдвига [Р-50]; $1 тенант, $2 момент, $3 аккаунт, $4 витрина, $5 товар, $6 состояние, $7 окно, $8/$9 пороги */
 const WINDOW_PROJECTION = `
@@ -1376,6 +1425,137 @@ export class PgPricingStore implements PricingStore {
   }
 
   /**
+   * Шаг 99 [Р-224, Р-225]: импорт границ — нижняя и верхняя граница и минимальная маржа предложения, уровень единицы записи. Одна
+   * транзакция вместе со строкой журнала: предложения блокируются, действующие значения сверяются с примеркой (`expected`), затем версии
+   * границ и гардрейлов. Второй фактор — задания или сессии: больше одного предложения без него не пропустят стражи базы [Р-135]
+   */
+  async importBounds(tenantId: string, input: { rows: readonly BoundsImportRowInput[]; run?: ImportRunInput }, actor: AdminActor): Promise<BoundsImportResult> {
+    const rows = input.rows;
+    const ids = rows.map((r) => r.writeScopeId);
+    const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (duplicate) return { status: 'INVALID', writeScopeId: duplicate, cause: 'DUPLICATE_SCOPE' };
+    for (const r of rows) {
+      if (r.minMinor === undefined && r.maxMinor === undefined && r.minMarginBp === undefined) return { status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'NOTHING_TO_CHANGE' };
+      if ([r.minMinor, r.maxMinor].some((v) => v !== undefined && (!Number.isSafeInteger(v) || v <= 0))
+        || (r.minMarginBp !== undefined && (!Number.isSafeInteger(r.minMarginBp) || r.minMarginBp < 0 || r.minMarginBp >= 10_000))) {
+        return { status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'AMOUNT_INVALID' };
+      }
+    }
+    if (rows.length === 0) return { status: 'INVALID', writeScopeId: '', cause: 'NOTHING_TO_CHANGE' };
+    if (rows.length > 1 && !actor.mfa && !actor.bulkJobId) return { status: 'MFA_REQUIRED' };
+    try {
+      return await inTenant(this.admin('importBounds'), tenantId, async (tx) => {
+        const { rows: scopes } = await tx.query(
+          `SELECT write_scope_id FROM tenant_data.write_scope
+            WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND field = 'PRICE'
+            ORDER BY write_scope_id FOR NO KEY UPDATE`, [tenantId, ids]);
+        const known = new Set(scopes.map((x) => String(x.write_scope_id)));
+        const missing = ids.find((id) => !known.has(id));
+        if (missing) throw new RollbackWith<BoundsImportResult>({ status: 'INVALID', writeScopeId: missing, cause: 'SCOPE_NOT_FOUND' });
+        const before = await effectiveBoundsAndMargin(tx, tenantId, ids);
+        for (const r of rows) {
+          const now = before.get(r.writeScopeId)!;
+          if (now.minMinor !== r.expected.minMinor || now.maxMinor !== r.expected.maxMinor || now.minMarginBp !== r.expected.minMarginBp) {
+            throw new RollbackWith<BoundsImportResult>({ status: 'CONFLICT', writeScopeId: r.writeScopeId });
+          }
+        }
+        for (const table of ['min_price', 'max_price'] as const) {
+          await insertScopeBounds(tx, tenantId, actor.membershipId, table,
+            rows.flatMap((r) => { const v = table === 'min_price' ? r.minMinor : r.maxMinor; return v === undefined ? [] : [{ writeScopeId: r.writeScopeId, amountMinor: v }]; }));
+        }
+        const margins = rows.filter((r) => r.minMarginBp !== undefined);
+        if (margins.length > 0) {
+          // Новая версия гардрейла предложения: прочие поля действующей версии сохраняются, меняется только минимальная маржа
+          await tx.query(
+            `INSERT INTO tenant_data.guardrail (tenant_id, scope_type, write_scope_id, min_margin_bp, max_price_minor, currency, price_basis,
+                                                max_step_change_bp, max_changes_per_hour, on_violation, is_active, version, created_by_membership_id)
+             SELECT $1, 'WRITE_SCOPE', i.id, i.margin,
+                    CASE WHEN p.is_active THEN p.max_price_minor END, CASE WHEN p.is_active THEN p.currency END, CASE WHEN p.is_active THEN p.price_basis END,
+                    CASE WHEN p.is_active THEN p.max_step_change_bp END, CASE WHEN p.is_active THEN p.max_changes_per_hour END,
+                    CASE WHEN p.is_active THEN p.on_violation ELSE 'HOLD' END, true, coalesce(p.version, 0) + 1, $4
+               FROM unnest($2::uuid[], $3::int[]) AS i(id, margin)
+               LEFT JOIN LATERAL (
+                 SELECT g.* FROM tenant_data.guardrail g
+                  WHERE g.tenant_id = $1 AND g.scope_type = 'WRITE_SCOPE' AND g.write_scope_id = i.id ORDER BY g.version DESC LIMIT 1
+               ) p ON true`,
+            [tenantId, margins.map((r) => r.writeScopeId), margins.map((r) => r.minMarginBp!), actor.membershipId]);
+        }
+        const after = await effectiveBoundsAndMargin(tx, tenantId, ids);
+        for (const r of rows) {
+          const a = after.get(r.writeScopeId)!;
+          if (a.minMinor !== null && a.maxMinor !== null && a.minMinor > a.maxMinor) {
+            throw new RollbackWith<BoundsImportResult>({ status: 'INVALID', writeScopeId: r.writeScopeId, cause: 'MIN_ABOVE_MAX' });
+          }
+        }
+        const run = input.run && actor.bulkJobId ? await insertImportRun(tx, tenantId, input.run, actor.bulkJobId, actor) : undefined;
+        return { status: 'APPLIED', offers: rows.length, ...(run ? { run } : {}) } satisfies BoundsImportResult;
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
+    } catch (error) {
+      if (windowRefused(error)) return { status: 'MFA_REQUIRED', window: true };
+      if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Шаг 99 [Р-225]: назначение стратегий из файла — у предложений разные стратегии, одной транзакцией. Стратегии предложений
+   * сверяются с примеркой (`expected`, CONFLICT), доступность стратегии каналу и чужое ценообразование проверяет база (0082)
+   */
+  async importStrategies(tenantId: string, input: StrategiesImportInput, actor: AdminActor): Promise<StrategiesImportResult> {
+    try {
+      return await inTenant(this.admin('importStrategies'), tenantId, async (tx) => {
+        await PgPricingStore.assertExpected(tx, tenantId, input.expected);
+        const groups = new Map<string, { strategyId: string; version: number; ids: string[] }>();
+        for (const a of input.assignments) {
+          const key = `${a.strategyId}@${a.version}`;
+          const g = groups.get(key) ?? { strategyId: a.strategyId, version: a.version, ids: [] };
+          g.ids.push(a.writeScopeId);
+          groups.set(key, g);
+        }
+        for (const g of groups.values()) {
+          const { rows: [v] } = await tx.query(
+            `SELECT 1 FROM tenant_data.pricing_strategy WHERE tenant_id = $1 AND pricing_strategy_id = $2 AND version = $3`, [tenantId, g.strategyId, g.version]);
+          if (!v) throw new RollbackWith<StrategiesImportResult>({ status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' });
+          const { rowCount } = await tx.query(
+            `UPDATE tenant_data.write_scope SET pricing_strategy_id = $2, pricing_strategy_version = $3
+              WHERE tenant_id = $1 AND write_scope_id = ANY ($4::uuid[]) AND field = 'PRICE'`, [tenantId, g.strategyId, g.version, g.ids]);
+          if (rowCount !== new Set(g.ids).size) throw new RollbackWith<StrategiesImportResult>({ status: 'INVALID', cause: 'SCOPE_NOT_FOUND' });
+        }
+        const run = input.run && actor.bulkJobId ? await insertImportRun(tx, tenantId, input.run, actor.bulkJobId, actor) : undefined;
+        return { status: 'ASSIGNED', offers: input.assignments.length, ...(run ? { run } : {}) } satisfies StrategiesImportResult;
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
+    } catch (error) {
+      const refusal = PgPricingStore.strategyRefusal(error);
+      if (refusal) return refusal as StrategiesImportResult;
+      throw error;
+    }
+  }
+
+  /** Шаг 99 [Р-224]: строка журнала вне применения — примерка или отказ; пишет задание, которое сейчас идёт */
+  async recordImportRun(tenantId: string, run: ImportRunInput, actor: AdminActor & { bulkJobId: string }): Promise<ImportRunRow> {
+    return inTenant(this.admin('recordImportRun'), tenantId, (tx) => insertImportRun(tx, tenantId, run, actor.bulkJobId, actor),
+      actor.userId, { mfa: actor.mfa, bulkJobId: actor.bulkJobId });
+  }
+
+  async importRunOfJob(tenantId: string, bulkJobId: string): Promise<ImportRunRow | null> {
+    if (!UUID_FORM.test(bulkJobId)) return null;
+    return inTenant(this.admin('importRunOfJob'), tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(`SELECT ${IMPORT_RUN_COLUMNS} FROM tenant_data.import_run WHERE tenant_id = $1 AND bulk_job_id = $2`, [tenantId, bulkJobId]);
+      return r ? importRunRow(r) : null;
+    });
+  }
+
+  async importRuns(tenantId: string, query: { kind: ImportKind; limit: number }): Promise<ImportRunRow[]> {
+    return inTenant(this.admin('importRuns'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT ${IMPORT_RUN_COLUMNS} FROM tenant_data.import_run WHERE tenant_id = $1 AND kind = $2 ORDER BY recorded_at DESC, import_run_id LIMIT $3`,
+        [tenantId, query.kind, Math.max(1, Math.min(200, query.limit))]);
+      return rows.map(importRunRow);
+    });
+  }
+
+  /**
    * Р-134, Р-135 (шаг 28): массовый импорт себестоимости. Предпросмотр только читает: он проверяет, что офферы на месте и валюта их,
    * и ничего не пишет. Применение — одна транзакция: пакет `cost_import` и все его строки; база отказывает, если строк пришло не
    * столько, сколько пакет объявил (частичного применения нет), и если у сессии нет второго фактора.
@@ -1386,8 +1566,10 @@ export class PgPricingStore implements PricingStore {
     const duplicate = ids.find((id, i) => ids.indexOf(id) !== i);
     if (duplicate) return { status: 'INVALID', cause: 'DUPLICATE_SCOPE', writeScopeId: duplicate };
     for (const r of batch.rows) {
-      const amounts = [r.unitCostMinor, r.fixedFeeMinor ?? 0];
+      const amounts = [r.unitCostMinor ?? 0, r.fixedFeeMinor ?? 0];
       if (amounts.some((v) => !Number.isSafeInteger(v) || v < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
+      // Шаг 99: строка без себестоимости несёт комиссию — иначе ей нечего применять
+      if (r.unitCostMinor === undefined && r.fixedFeeMinor === undefined && r.feeRateBp === undefined) return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
       if (r.feeRateBp !== undefined && (!Number.isSafeInteger(r.feeRateBp) || r.feeRateBp < 0 || r.feeRateBp >= 10_000)) {
         return { status: 'INVALID', cause: 'AMOUNT_INVALID', writeScopeId: r.writeScopeId };
       }
@@ -1411,19 +1593,65 @@ export class PgPricingStore implements PricingStore {
         }
         const offers = new Set(batch.rows.map((r) => r.writeScopeId)).size;
         if (mode === 'PREVIEW') throw new RollbackWith<CostImportResult>({ status: 'PREVIEWED', rows: batch.rows.length, offers });
-        const { rows: [created] } = await tx.query(
-          `INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint, skipped_rows)
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING cost_import_id`,
-          [tenantId, actor.membershipId, batch.sourceName, batch.sourceFormat, batch.rows.length, batch.fingerprint, batch.skippedRows]);
-        const importId = String(created.cost_import_id);
+        /**
+         * Шаг 99 [Р-224]: применяется ровно примерка. Предложения уже заблокированы выше, и их себестоимость и комиссия продавца сверяются
+         * с тем, что видела примерка, — на те же часы мира (`asOf`), по которым она считалась. Изменилось — не применяется ничего
+         */
+        const withExpected = batch.rows.filter((r) => r.expected !== undefined);
+        if (withExpected.length > 0) {
+          // Часы мира примерки; без них — часы базы (`now()` в запросе), а не процесса
+          /**
+           * Одним запросом по уже заблокированным предложениям (товар, аккаунт, витрина прочитаны выше), а не подзапросом на строку: на
+           * 10 000 строк коррелированный подзапрос стоил 20 с из 30 (живой прогон шага 99). Порядок выбора профиля — тот же, что у
+           * контекста решения: сначала уровень аккаунта и витрины, затем самый поздний действующий
+           */
+          const target = new Map(scopes.map((x) => [String(x.write_scope_id), x]));
+          const ids = withExpected.map((r) => r.writeScopeId);
+          await tx.query('SET LOCAL enable_nestloop = off');
+          const { rows: profiles } = await tx.query(
+            `SELECT DISTINCT ON (i.ws) i.ws AS write_scope_id, cp.cost_profile_id
+               FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::text[]) AS i(ws, product_id, account, marketplace)
+               LEFT JOIN tenant_data.cost_profile cp ON cp.tenant_id = $1 AND cp.product_id = i.product_id
+                     AND (cp.channel_account_id IS NULL OR (cp.channel_account_id = i.account AND cp.marketplace = i.marketplace))
+                     AND cp.valid_from <= coalesce($6::timestamptz, now())
+              ORDER BY i.ws, (cp.channel_account_id IS NOT NULL) DESC, cp.valid_from DESC, cp.version DESC`,
+            [tenantId, ids, ids.map((id) => target.get(id)!.product_id), ids.map((id) => target.get(id)!.channel_account_id),
+              ids.map((id) => target.get(id)!.marketplace ?? null), batch.asOf ?? null]);
+          const { rows: fees } = await tx.query(
+            `SELECT write_scope_id, fee_model FROM channel_data.fee_estimate
+              WHERE tenant_id = $1 AND write_scope_id = ANY ($2::uuid[]) AND source = 'SELLER_DECLARED' AND valid_until > coalesce($3::timestamptz, now())`,
+            [tenantId, ids, batch.asOf ?? null]);
+          await tx.query('SET LOCAL enable_nestloop = on');
+          const profileOf = new Map(profiles.map((c) => [String(c.write_scope_id), c.cost_profile_id === null ? null : String(c.cost_profile_id)]));
+          const feeOf = new Map(fees.map((f) => [String(f.write_scope_id), f.fee_model as { feeRateBp?: number; fixedFeeMinor?: number }]));
+          for (const r of withExpected) {
+            const fee = feeOf.get(r.writeScopeId);
+            const sellerFee = fee ? { feeRateBp: typeof fee.feeRateBp === 'number' ? fee.feeRateBp : null, fixedFeeMinor: typeof fee.fixedFeeMinor === 'number' ? fee.fixedFeeMinor : null } : null;
+            const want = r.expected!;
+            if ((profileOf.get(r.writeScopeId) ?? null) !== want.costProfileId
+              || JSON.stringify(sellerFee) !== JSON.stringify(want.sellerFee === null ? null : { feeRateBp: want.sellerFee.feeRateBp, fixedFeeMinor: want.sellerFee.fixedFeeMinor })) {
+              throw new RollbackWith<CostImportResult>({ status: 'CONFLICT', writeScopeId: r.writeScopeId });
+            }
+          }
+        }
+        // Шаг 99: строки только с комиссией себестоимости не пишут; пакет импорта — только у строк себестоимости (он объявляет их число)
+        const costRows = batch.rows.filter((r) => r.unitCostMinor !== undefined);
+        let importId: string | null = null;
+        if (costRows.length > 0) {
+          const { rows: [created] } = await tx.query(
+            `INSERT INTO tenant_data.cost_import (tenant_id, created_by_membership_id, source_name, source_format, row_count, fingerprint, skipped_rows)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING cost_import_id`,
+            [tenantId, actor.membershipId, batch.sourceName, batch.sourceFormat, costRows.length, batch.fingerprint, batch.skippedRows]);
+          importId = String(created.cost_import_id);
+        }
         /**
          * Р-136 (шаг 29): применение — ПАКЕТНЫМИ запросами, а не строкой на строку. Живой прогон через консоль показал 11,7 секунды
          * на 10 000 строк: столько продавец смотрит на «применяется…», не зная, случилось ли что-нибудь. Поиск области оффера тоже
          * был квадратичным (`scopes.find` внутри цикла, ревью шага 28, замечание 21) — теперь это отображение.
          */
         const byScope = new Map(scopes.map((x) => [x.write_scope_id as string, x]));
-        const target = batch.rows.map((r) => ({ r, scope: byScope.get(r.writeScopeId)! }));
-        await tx.query(
+        const target = costRows.map((r) => ({ r, scope: byScope.get(r.writeScopeId)! }));
+        if (target.length > 0) await tx.query(
           `INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
                                                  purchase_cost_minor, inbound_logistics_minor, packaging_minor, handling_minor,
                                                  outbound_shipping_minor, other_fixed_minor, source, created_by_membership_id, cost_import_id)
@@ -1448,7 +1676,7 @@ export class PgPricingStore implements PricingStore {
              ) p ON true`,
           [tenantId, actor.membershipId, importId,
             target.map((t) => t.scope.product_id), target.map((t) => t.scope.channel_account_id), target.map((t) => t.scope.marketplace),
-            target.map((t) => t.r.currency), target.map((t) => t.r.unitCostMinor)]);
+            target.map((t) => t.r.currency), target.map((t) => t.r.unitCostMinor!)]);
         /**
          * Комиссия канала — оценка оффера [Р-32]: в файле её может не быть, и тогда прежняя оценка остаётся. Ревью шага 28,
          * находка 5: колонки в файле может быть ОДНА, и вторую составляющую тогда нельзя обнулять — она сливается с прежней.
@@ -1470,7 +1698,9 @@ export class PgPricingStore implements PricingStore {
             [tenantId, withFee.map((r) => r.writeScopeId),
               withFee.map((r) => r.feeRateBp ?? null), withFee.map((r) => r.fixedFeeMinor ?? null)]);
         }
-        return { status: 'APPLIED', importId, rows: batch.rows.length, offers } satisfies CostImportResult;
+        // Шаг 99 [Р-224]: строка журнала — в той же транзакции: «применено» в журнале значит, что данные в базе
+        const run = batch.run && actor.bulkJobId ? await insertImportRun(tx, tenantId, batch.run, actor.bulkJobId, actor) : undefined;
+        return { status: 'APPLIED', importId, rows: batch.rows.length, offers, ...(run ? { run } : {}) } satisfies CostImportResult;
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if (windowRefused(error)) return { status: 'MFA_REQUIRED', window: true };
@@ -2219,6 +2449,10 @@ export class PgPricingStore implements PricingStore {
               }
             : null,
           minMarginBp: ctx.guardrails.minMarginBp, channelHalt: ctx.channelHalt, channelDistrust: ctx.channelDistrust, priceStop: ctx.priceStop,
+          // Шаг 99 [Р-224]: себестоимость продавца — и без оценки комиссии; шаблон импорта и примерка сравнивают файл с ней
+          declaredCost: c ? { costProfileId: String(c.costProfileId), currency: String(c.currency), unitCostMinor: Number(c.unitCost) } : null,
+          // Шаг 99 [Р-225]: минимальная маржа уровня предложения и наибольшая из более широких — импорт маржи говорит, когда своя ничего не меняет
+          ...marginLevelsOf(j.guardrails),
           lastApplied: j.lastApplied ? { amountMinor: Number((j.lastApplied as Row).amountMinor), acceptedAt: iso((j.lastApplied as Row).acceptedAt as string) } : null,
           // Р-138: все действующие оценки комиссии с источниками — расхождение продавец должен видеть, а не угадывать
           feeEstimates: ((c?.feeEstimates ?? []) as Array<{ source: string; feeRateBp: number | null; fixedFeeMinor: number | null; scheduleVersion: string | null }>)

@@ -12,7 +12,7 @@ import { after, before, test } from 'node:test';
 import type { AdapterDependencies } from '@repracer/channel-port';
 import { loadKeyring } from '@repracer/channel-oauth';
 import { ModelOAuthProvider } from '@repracer/channel-oauth/model';
-import type { BulkJobView, ConnectionsView, CostImportView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import type { BulkJobView, ConnectionsView, ImportCheckView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
 import { createEbayAdapter, EBAY_DESCRIPTOR, TokenBucket } from '@repracer/ebay-adapter';
 import { nextNineUtc, VirtualClock } from '@repracer/contract-tests/live';
 import { channelFetch, SimulatedEbayChannel, type TraceEntry } from '@repracer/contract-tests/simulator';
@@ -152,6 +152,14 @@ async function job(step: string, url: string, body: unknown): Promise<BulkJobVie
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   });
+}
+
+/** Шаг 99 [Р-224]: импорт файлом — примерка, затем применение ровно примерки; у файла прогона ошибок нет */
+async function imported(step: string, kind: string, body: Record<string, unknown>): Promise<{ view: ImportCheckView; applied: BulkJobView }> {
+  const checked = await job(`${step}: примерка`, api('imports', 'check'), { kind, ...body });
+  const view = (checked.result as { view: ImportCheckView }).view;
+  assert.equal(view.counts.rejected, 0, `${step}: ${JSON.stringify(view.errors).slice(0, 300)}`);
+  return { view, applied: await job(step, api('imports', 'apply'), { kind, checkJobId: checked.jobId, checkToken: view.token, confirmed: true }) };
 }
 
 async function schedulerFor(minutes: number): Promise<void> {
@@ -376,10 +384,8 @@ test('шаг 47, D: путь пилота с eBay — от оператора в
   // ---------------------------------------------------------------- себестоимость, границы, стратегия, включение
   const skus = Array.from({ length: MANAGED }, (_, i) => L(i + 1).sku);
   const costCsv = ['Artikelnummer;Einstandspreis;Währung;Provision %;Fixkosten', ...skus.map((s) => `${s};5,00;EUR;11;0,00`)].join('\r\n');
-  const file = { fileName: 'kosten.csv', content: Buffer.from(costCsv).toString('base64') };
-  const plan = await consoleCall<CostImportView>('себестоимость: предпросмотр', 'POST', api('cost-import', 'plan'), file);
-  assert.equal(plan.body.summary?.apply, MANAGED, `сопоставлены все листинги под Inventory API: ${JSON.stringify(plan.body).slice(0, 300)}`);
-  await job('себестоимость: применить', api('cost-import', 'apply'), { ...file, fingerprint: plan.body.fingerprint, confirmed: true });
+  const costs = await imported('себестоимость: применить', 'COSTS', { fileName: 'kosten.csv', content: Buffer.from(costCsv).toString('base64') });
+  assert.equal(costs.view.counts.changed, MANAGED, 'сопоставлены все листинги под Inventory API');
   const products = await consoleCall<{ rows: Array<{ unit: { writeScopeId: string; label: string } | null }> }>('товары', 'GET', `${api('products')}?limit=200`);
   const scopes = products.body.rows.flatMap((r) => (r.unit ? [r.unit.writeScopeId] : []));
   assert.equal(scopes.length, MANAGED, 'единицы записи цены — только у листингов под Inventory API');

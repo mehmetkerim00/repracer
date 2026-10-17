@@ -6,8 +6,11 @@ import {
   availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
   type StockPage, type StockPageQuery, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
+  type StockApplyOutcome, type StockApplyRow, type StockImportTarget,
 } from '@repracer/stock-sync';
-import { inTenant, type PgPool, type Tx } from './db.ts';
+import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
+import { insertImportRun } from './import-runs.ts';
+import type { ImportRunInput } from '@repracer/pricing-pipeline';
 
 type Row = Record<string, any>;
 const iso = (v: unknown): Instant => new Date(v as string).toISOString() as Instant;
@@ -148,6 +151,83 @@ export class PgStockStore implements StockStore {
         }
         return out;
       }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Шаг 99 [Р-224]: товары тенанта глазами импорта остатков — ключи, которыми продавец их называет (как у `importStock`), и остаток в
+   * пуле источника. Каталог читается целиком хеш-соединением, как у импорта (шаг 66: без статистики вложенный цикл — минуты на 50 000)
+   */
+  async stockImportTargets(tenantId: string, stockSourceId: string): Promise<StockImportTarget[] | { status: 'NOT_INTERNAL_POOL' }> {
+    return inTenant(this.options.adminPool, tenantId, async (tx) => {
+      const { rows: [source] } = await tx.query(`SELECT mode FROM tenant_data.stock_source WHERE tenant_id = $1 AND stock_source_id = $2 AND status = 'ACTIVE'`, [tenantId, stockSourceId]);
+      if (!source || source.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' as const };
+      await tx.query('SET LOCAL enable_nestloop = off');
+      const { rows } = await tx.query(
+        `SELECT p.product_id, p.sku, p.title,
+                array_remove(array_agg(DISTINCT k.key), NULL) AS keys,
+                (SELECT sp.on_hand FROM tenant_data.stock_pool sp
+                  WHERE sp.tenant_id = p.tenant_id AND sp.stock_source_id = $2 AND sp.product_id = p.product_id AND sp.location_ref = 'default') AS on_hand
+           FROM tenant_data.product p
+           LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = p.tenant_id AND om.product_id = p.product_id AND om.status = 'ACTIVE'
+           LEFT JOIN LATERAL unnest(ARRAY[p.sku, p.gtin, om.external_unit_id, om.external_sku, om.channel_product_ref]) AS k(key) ON true
+          WHERE p.tenant_id = $1
+          GROUP BY p.tenant_id, p.product_id, p.sku, p.title
+          ORDER BY p.sku NULLS LAST, p.product_id`, [tenantId, stockSourceId]);
+      await tx.query('SET LOCAL enable_nestloop = on');
+      return rows.map((r): StockImportTarget => ({
+        productId: String(r.product_id), sku: r.sku ?? null, title: r.title ?? null,
+        keys: ((r.keys ?? []) as string[]).filter((k) => typeof k === 'string' && k.trim() !== ''),
+        onHand: r.on_hand === null || r.on_hand === undefined ? null : Number(r.on_hand),
+      }));
+    });
+  }
+
+  /**
+   * Шаг 99 [Р-224]: импорт остатков применяется ровно по примерке — одной транзакцией вместе со строкой журнала. Пулы товаров
+   * блокируются и сверяются с остатком примерки; изменился хоть один — не применяется ничего (CONFLICT). Инвентаризация — движением
+   * STOCKTAKE до целевого значения, как у `importStock`; равный остаток движения не создаёт
+   */
+  async applyStockImport(tenantId: string, stockSourceId: string, input: { rows: readonly StockApplyRow[]; run?: ImportRunInput },
+    actor: StockActor & { bulkJobId?: string }): Promise<StockApplyOutcome> {
+    try {
+      return await inTenant(this.options.adminPool, tenantId, async (tx) => {
+        const { rows: [source] } = await tx.query(`SELECT mode FROM tenant_data.stock_source WHERE tenant_id = $1 AND stock_source_id = $2 AND status = 'ACTIVE'`, [tenantId, stockSourceId]);
+        if (!source || source.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' as const };
+        const products = input.rows.map((r) => r.productId);
+        const { rows: existing } = await tx.query(
+          `SELECT product_id, on_hand FROM tenant_data.stock_pool
+            WHERE tenant_id = $1 AND stock_source_id = $2 AND location_ref = 'default' AND product_id = ANY ($3::uuid[])
+            ORDER BY product_id FOR UPDATE`, [tenantId, stockSourceId, products]);
+        const onHand = new Map(existing.map((x) => [String(x.product_id), Number(x.on_hand)]));
+        for (const r of input.rows) {
+          if ((onHand.get(r.productId) ?? null) !== r.expectedOnHand) throw new RollbackWith<StockApplyOutcome>({ status: 'CONFLICT', productId: r.productId });
+        }
+        await tx.query(
+          `INSERT INTO tenant_data.stock_pool (tenant_id, stock_source_id, source_mode, product_id)
+           SELECT $1, $2, 'INTERNAL_POOL', p FROM unnest($3::uuid[]) AS p
+           ON CONFLICT (tenant_id, stock_source_id, product_id, location_ref) DO NOTHING`, [tenantId, stockSourceId, products.filter((id) => !onHand.has(id))]);
+        const { rows: pools } = await tx.query(
+          `SELECT stock_pool_id, product_id, on_hand FROM tenant_data.stock_pool
+            WHERE tenant_id = $1 AND stock_source_id = $2 AND location_ref = 'default' AND product_id = ANY ($3::uuid[])`, [tenantId, stockSourceId, products]);
+        const poolOf = new Map(pools.map((x) => [String(x.product_id), x]));
+        const moves = input.rows.flatMap((r) => {
+          const pool = poolOf.get(r.productId)!;
+          const delta = r.quantity - Number(pool.on_hand);
+          return delta === 0 ? [] : [{ poolId: String(pool.stock_pool_id), delta, productId: r.productId }];
+        });
+        if (moves.length > 0) {
+          await tx.query(
+            `INSERT INTO tenant_data.stock_movement (tenant_id, stock_pool_id, delta, reason, created_by_membership_id, occurred_at)
+             SELECT $1, m.pool, m.delta, 'STOCKTAKE', $4, now() FROM unnest($2::uuid[], $3::int[]) AS m(pool, delta)`,
+            [tenantId, moves.map((m) => m.poolId), moves.map((m) => m.delta), actor.membershipId]);
+        }
+        const run = input.run && actor.bulkJobId ? await insertImportRun(tx, tenantId, input.run, actor.bulkJobId, actor) : undefined;
+        return { status: 'APPLIED' as const, changed: moves.length, productIds: moves.map((m) => m.productId), ...(run ? { run } : {}) };
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
     } catch (error) {
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;

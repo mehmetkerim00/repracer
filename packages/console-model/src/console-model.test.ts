@@ -567,9 +567,11 @@ test('step 84: the shadow summary as «metric — value» says what the sentence
  */
 const SAME_AS_ENGLISH: Readonly<Record<'es' | 'fr', readonly string[]>> = {
   es: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Demo', 'Deutsch', 'English', 'Español', 'Français',
-    'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com'],
-  fr: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Deutsch', 'English', 'Español', 'Français',
     'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com',
+    // Шаг 99: код SKU — как в глоссарии, во всех языках
+    'SKU'],
+  fr: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Deutsch', 'English', 'Español', 'Français',
+    'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com', 'SKU',
     // Французские слова, которые пишутся так же
     'position', 'active', 'Stock', 'stock', 'Protections', 'Menu', 'Note', 'Sources', 'Source', 'Mode', 'urgent', 'attention', 'Attention', 'Type', 'Versions'],
 };

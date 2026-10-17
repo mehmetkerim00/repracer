@@ -8,7 +8,9 @@ const OWNER_LEVEL: readonly string[] = ['OWNER', 'MANAGER'];
 import type {
   AnswerOtherToolsResult, ConfirmOrdersOutcome, ConfirmQuantityWritesResult, RevokeQuantityWritesResult, OtherTools, QuantityWritesState, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
   OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockPageQuery, StockRow, StockSourceMode, StockSourceRow, StockStore,
+  StockApplyOutcome, StockApplyRow, StockImportTarget,
 } from './store.ts';
+import type { ImportRunInput } from '@repracer/pricing-pipeline';
 
 /** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
 const IN_FLIGHT = ['PENDING', 'DISPATCHED', 'ACCEPTED'];
@@ -110,6 +112,39 @@ export class InMemoryStockStore implements StockStore {
       if (pool.onHand !== r.quantity) { pool.onHand = r.quantity; out.changed += 1; out.productIds.push(offer.productId); }
     }
     return out;
+  }
+
+  async stockImportTargets(_tenantId: string, stockSourceId: string): Promise<StockImportTarget[] | { status: 'NOT_INTERNAL_POOL' }> {
+    const source = this.sources.get(stockSourceId);
+    if (!source || source.row.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' };
+    const byProduct = new Map<string, StockImportTarget>();
+    for (const o of this.offers) {
+      const known = byProduct.get(o.productId);
+      const keys = [o.sku, o.gtin ?? null].filter((k): k is string => typeof k === 'string' && k.trim() !== '');
+      if (known) { known.keys = [...new Set([...known.keys, ...keys])]; continue; }
+      const pool = this.pools.find((p) => p.stockSourceId === stockSourceId && p.productId === o.productId);
+      byProduct.set(o.productId, { productId: o.productId, sku: o.sku, title: o.title ?? null, keys, onHand: pool ? pool.onHand : null });
+    }
+    return [...byProduct.values()];
+  }
+
+  async applyStockImport(_tenantId: string, stockSourceId: string, input: { rows: readonly StockApplyRow[]; run?: ImportRunInput }, actor: StockActor): Promise<StockApplyOutcome> {
+    if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
+    const source = this.sources.get(stockSourceId);
+    if (!source || source.row.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' };
+    // Сначала сверка всех строк — применяется целиком или никак
+    for (const r of input.rows) {
+      const pool = this.pools.find((p) => p.stockSourceId === stockSourceId && p.productId === r.productId);
+      if ((pool ? pool.onHand : null) !== r.expectedOnHand) return { status: 'CONFLICT', productId: r.productId };
+    }
+    const productIds: string[] = [];
+    for (const r of input.rows) {
+      let pool = this.pools.find((p) => p.stockSourceId === stockSourceId && p.productId === r.productId);
+      if (!pool) { pool = { stockSourceId, mode: 'INTERNAL_POOL', productId: r.productId, onHand: 0, asOf: null }; this.pools.push(pool); }
+      if (pool.onHand !== r.quantity) { pool.onHand = r.quantity; productIds.push(r.productId); }
+    }
+    // Журнал импортов в памяти ведёт хранилище цен: строку пишет обработчик задания (`run` здесь не записывается)
+    return { status: 'APPLIED', changed: productIds.length, productIds };
   }
 
   async inboundStock(_tenantId: string, stockSourceId: string, rows: readonly InboundStockRow[]): Promise<InboundStockOutcome> {

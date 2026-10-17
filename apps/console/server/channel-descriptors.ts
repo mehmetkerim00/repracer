@@ -1,8 +1,10 @@
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
-import type { ChannelDescriptor } from '@repracer/channel-port';
+import type { ChannelDescriptor, CompetitorSourceDescriptor } from '@repracer/channel-port';
 import { EBAY_DESCRIPTOR } from '@repracer/ebay-adapter';
 import { KAUFLAND_DESCRIPTOR } from '@repracer/kaufland-adapter';
 import { WALMART_DESCRIPTOR } from '@repracer/walmart-adapter';
+import { strategyAvailability } from '@repracer/pricing-pipeline';
+import type { StrategyDefinition } from '@repracer/pricing-model';
 
 /**
  * Описание канала по его коду — одно место для консоли (мир тенанта, демо). Шаг 68: до него консоль знала два канала, и аккаунт eBay
@@ -38,3 +40,14 @@ export function haltReleaseOf(channel: string): 'SAMPLE' | 'MANUAL_ONLY' {
 export const consoleAdapter = (channel: string) => new Proxy({ descriptor: descriptorOf(channel) } as Record<string, unknown>, {
   get: (target, key) => (key in target ? target[key as string] : noChannel),
 }) as never;
+
+/**
+ * Шаг 99 [Р-225, Р-39]: даёт ли канал данные, нужные стратегии, — по источникам конкурентов из описания канала, как экран конкурентов и
+ * предпросмотр. Импорт стратегий называет недоступную стратегию строкой файла с причиной, а не отказом базы на применении
+ */
+export function strategyAvailableOn(channel: string, params: StrategyDefinition['params']): { available: true } | { available: false; unmet: Record<string, string[]> } {
+  let sources: CompetitorSourceDescriptor[];
+  try { sources = (descriptorOf(channel).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE'); } catch { sources = []; }
+  const a = strategyAvailability(params, sources);
+  return a.available ? { available: true } : { available: false, unmet: a.unmet };
+}
