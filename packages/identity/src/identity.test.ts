@@ -27,8 +27,8 @@ test('a valid provider token resolves to our user and memberships; roles are rea
   const { idp, directory, auth } = world();
   const principal = await auth.authenticate(`Bearer ${idp.token('sub-operator', { email: 'operator@stand.repracer.test' })}`);
   assert.deepEqual([principal?.userId, principal?.memberships.map((m) => m.role), principal?.amr], ['user-operator', ['OPERATOR'], ['pwd', 'otp']]);
-  directory.setRole('user-operator', 'tenant-1', 'VIEWER');
-  assert.equal((await auth.authenticate(`Bearer ${idp.token('sub-operator')}`))?.memberships[0]?.role, 'VIEWER');
+  directory.setRole('user-operator', 'tenant-1', 'MANAGER');
+  assert.equal((await auth.authenticate(`Bearer ${idp.token('sub-operator')}`))?.memberships[0]?.role, 'MANAGER');
   assert.equal(await auth.authenticate(`Bearer ${idp.token('sub-unlinked')}`), null, 'a subject without a link is not our user');
   assert.equal(await auth.authenticate(undefined), null);
   assert.equal(await auth.authenticate('Basic abc'), null);

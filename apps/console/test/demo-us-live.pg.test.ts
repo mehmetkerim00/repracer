@@ -102,7 +102,7 @@ test('шаг 64: демо с профилем США — аккаунты eBay U
     // Проход консоли (шаг 64): аккаунт назван словами — «eBay · … · ebay.com», а не кодами канала и витрины
     assert.ok(!/\bEBAY\b|EBAY_US|ATVPDKIKX0DER|WALMART_US|\bWALMART\b/.test(a.label), `${a.channel}: подпись аккаунта кодами: ${a.label}`);
   }
-  // Гость — наблюдатель: ответить на вопрос о других инструментах не может [Р-160]
+  // Гость демо (техническая роль «только чтение», шаг 98): ответить на вопрос о других инструментах не может [Р-160]
   const answered = await call<{ error: { code: string } }>('POST', `/api/worlds/${encodeURIComponent(demo.id)}/connections/other-tools`, guest,
     { channelAccountId: us[0]!.channelAccountId, answer: 'STOCK' });
   assert.equal(answered.status, 403, JSON.stringify(answered.body));
@@ -312,7 +312,7 @@ test('шаг 64: перезапуск консоли на той же базе �
  * фильтрует саму таблицу, выгрузка «All N entries as a file» — ровно за период экрана, неверный период — 400, а не «всё»
  */
 test('шаг 96: периоды и поиск через консоль — тень, решения с исходом, лента, защита', async () => {
-  // Гость демо — наблюдатель: читает всё; задание выгрузки ему создать нельзя [Р-160] — выгрузку за период проверяет тест консоли на стенде
+  // Гость демо (техническая роль «только чтение»): читает всё; задание выгрузки ему создать нельзя [Р-160] — выгрузку за период проверяет тест консоли на стенде
   const token = ((await (await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json()) as StandToken).accessToken;
   const demo = (await call<WorldSummary[]>('GET', '/api/worlds', token)).body.find((w) => w.demo)!;
   const w = encodeURIComponent(demo.id);

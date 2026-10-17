@@ -201,7 +201,8 @@ export const DEFAULT_MEMBERS: ReadonlyArray<{ membershipId: string; role: Member
   { membershipId: 'membership-admin', role: 'ADMIN', userId: 'user-admin' },
   { membershipId: 'membership-operator', role: 'OPERATOR', userId: 'user-operator' },
   { membershipId: 'membership-pricing-manager', role: 'PRICING_MANAGER', userId: 'user-pricing-manager' },
-  { membershipId: 'membership-viewer', role: 'VIEWER', userId: 'user-viewer' },
+  // Шаг 98 [Р-222]: наблюдателя нет; отказы «без права» проверяются на менеджере остатков — у прежней роли только чтение цен и каталог
+  { membershipId: 'membership-inventory-manager', role: 'INVENTORY_MANAGER', userId: 'user-inventory-manager' },
   // Шаг 88 [Р-213]: видимая роль ежедневной работы; прежние роли выше остаются — их назначения и тесты живут
   { membershipId: 'membership-manager', role: 'MANAGER', userId: 'user-manager' },
 ];
@@ -2386,15 +2387,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   /**
-   * Шаг 88 [Р-213]: смена роли — как `membership_role_change_guard` и `membership_audit` (0053, 0058): меняет другой действующий
-   * владелец или администратор своим входом со вторым фактором; роль владельца — только владелец, администратор не трогает
+   * Шаг 88 [Р-213]: смена роли — как `membership_role_change_guard` и `membership_audit` (0053, 0058, 0191): меняет другой действующий
+   * владелец, менеджер (шаг 98) или администратор своим входом со вторым фактором; роль владельца — только владелец, администратор не трогает
    * администраторов; одна роль на человека — новая заменяет прежнюю, в журнал — автор, время, прежняя и новая роль
    */
   async changeMemberRole(_tenantId: string, membershipId: string, role: MemberRole, actor: { userId: string; mfa: boolean }): Promise<MemberRoleChangeResult> {
     const target = this.members.find((m) => m.membershipId === membershipId && m.status !== 'REVOKED');
     if (!target) return { status: 'NOT_FOUND' };
     if (target.role === role) return { status: 'UNCHANGED' };
-    const by = this.members.find((m) => m.userId === actor.userId && m.status === 'ACTIVE' && m.membershipId !== membershipId && (m.role === 'OWNER' || m.role === 'ADMIN'));
+    const by = this.members.find((m) => m.userId === actor.userId && m.status === 'ACTIVE' && m.membershipId !== membershipId && (m.role === 'OWNER' || m.role === 'MANAGER' || m.role === 'ADMIN'));
     if (!by) return { status: 'FORBIDDEN' };
     if (!actor.mfa) return { status: 'MFA_REQUIRED' };
     if ((role === 'OWNER' || target.role === 'OWNER') && by.role !== 'OWNER') return { status: 'FORBIDDEN' };

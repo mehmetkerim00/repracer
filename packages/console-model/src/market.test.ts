@@ -18,8 +18,8 @@ test('step 87: the deployment market profile is us unless set, and a wrong value
 test('step 87: the us profile offers amazon.com and ebay.com in English without Omnibus; eu keeps the European offer whole', () => {
   const us = marketScope('us'), eu = marketScope('eu'), global = marketScope('global');
   // Шаг 89: Walmart — канал рынка США, только в us и global
-  assert.deepEqual([us.channels, us.locales, us.omnibus, us.currencies], [['AMAZON', 'EBAY', 'WALMART'], ['en'], false, ['USD']]);
-  assert.deepEqual([eu.channels, eu.locales, eu.omnibus], [['KAUFLAND', 'AMAZON', 'EBAY'], ['de', 'en'], true]);
+  assert.deepEqual([us.channels, us.locales, us.omnibus, us.currencies], [['AMAZON', 'EBAY', 'WALMART'], ['en', 'es', 'fr'], false, ['USD']]);
+  assert.deepEqual([eu.channels, eu.locales, eu.omnibus], [['KAUFLAND', 'AMAZON', 'EBAY'], ['de', 'en', 'es', 'fr'], true]);
   const cases: Array<[string, string, boolean, boolean, boolean]> = [
     // канал, витрина, us, eu, global
     ['AMAZON', 'ATVPDKIKX0DER', true, false, true],
@@ -36,6 +36,8 @@ test('step 87: the us profile offers amazon.com and ebay.com in English without 
   // язык: немецкий в us — английский; в eu — свой
   assert.equal(localeInMarket(us, 'de'), 'en');
   assert.equal(localeInMarket(eu, 'de'), 'de');
+  // Шаг 98 [Р-223]: испанский и французский — языки обоих профилей; немецкий в us спрятан, как прежде
+  assert.deepEqual([localeInMarket(us, 'es'), localeInMarket(us, 'fr'), localeInMarket(eu, 'fr')], ['es', 'fr', 'fr']);
 });
 
 test('step 87: connect offers only the channels and storefronts of the profile; a world is shown when it has a storefront of the profile', () => {

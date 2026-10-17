@@ -97,6 +97,9 @@ function raisedInSource(): Map<string, string[]> {
 
 const de = messagesFor('de').ui.alerts.codes as Record<string, { what: string; step: string } | undefined>;
 const en = messagesFor('en').ui.alerts.codes as Record<string, { what: string; step: string } | undefined>;
+// Шаг 98 [Р-223]: письма рабочего пространства — и на испанском, и на французском
+const es = messagesFor('es').ui.alerts.codes as Record<string, { what: string; step: string } | undefined>;
+const fr = messagesFor('fr').ui.alerts.codes as Record<string, { what: string; step: string } | undefined>;
 
 test('Р-161: у каждого события, которое поднимает код репозитория, есть текст письма', () => {
   const raised = raisedInSource();
@@ -107,7 +110,7 @@ test('Р-161: у каждого события, которое поднимае�
   assert.ok(raised.get('CHANNEL_AUTHORIZATION_REVOKED')?.some((w) => w.startsWith('migrations/')),
     'детектор обязан находить и алерт, который поднимает функция базы (шаг 43)');
 
-  const withoutText = [...raised.keys()].filter((code) => !de[code] || !en[code]).sort();
+  const withoutText = [...raised.keys()].filter((code) => !de[code] || !en[code] || !es[code] || !fr[code]).sort();
   assert.deepEqual(withoutText, [], `событие без текста приходит письмом «Ereignis CODE»: ${withoutText.join(', ')}`);
 });
 
@@ -124,7 +127,7 @@ test('Р-161: английский текст события — перевод,
     const d = de[code]!;
     const e = en[code]!;
     // Пустой текст хуже кода: он ничего не говорит и прячет код
-    for (const [lang, text] of [['de', d], ['en', e]] as const) {
+    for (const [lang, text] of [['de', d], ['en', e], ['es', es[code]!], ['fr', fr[code]!]] as const) {
       assert.ok(text.what.trim().length > 10, `${code}/${lang}: «что случилось» не написано`);
       assert.ok(text.step.trim().length > 20, `${code}/${lang}: первое действие не написано`);
       assert.ok(!text.what.includes(code), `${code}/${lang}: текст пересказывает код вместо события`);
@@ -132,6 +135,11 @@ test('Р-161: английский текст события — перевод,
     // Копия немецкого в английском словаре — то же самое немецкое письмо, только с английским подзаголовком
     assert.notEqual(e.what, d.what, `${code}: английский текст — копия немецкого`);
     assert.notEqual(e.step, d.step, `${code}: английское первое действие — копия немецкого`);
+    // Шаг 98: испанский и французский — переводы, а не копии английского
+    for (const [lang, text] of [['es', es[code]!], ['fr', fr[code]!]] as const) {
+      assert.notEqual(text.what, e.what, `${code}/${lang}: «что случилось» — копия английского`);
+      assert.notEqual(text.step, e.step, `${code}/${lang}: первое действие — копия английского`);
+    }
   }
 });
 

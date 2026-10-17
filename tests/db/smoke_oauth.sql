@@ -35,16 +35,16 @@ SELECT pg_temp.expect_fail('closing an authorization request without a person (�
   UPDATE tenant_data.channel_authorization_request SET status = 'FAILED', failure_code = 'x'
    WHERE tenant_id = %L AND authorization_request_id = 'a4430000-0000-4000-8000-0000000000a1' $q$, :tA),
   'without a person');
--- Подключает канал тот, кто управляет тенантом [Р-175]: наблюдатель тенанта запроса не начинает и не закрывает
+-- Подключает канал тот, кто управляет тенантом [Р-175]: участник без права управлять тенантом (менеджер остатков) запроса не начинает и не закрывает
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', false) \gset
-SELECT pg_temp.expect_fail('a viewer starts an authorization request (Р-175, Р-100)', format($q$
+SELECT pg_temp.expect_fail('an inventory manager starts an authorization request (Р-175, Р-100)', format($q$
   INSERT INTO tenant_data.channel_authorization_request (tenant_id, channel, region, marketplaces, state_sha256, requested_by_membership_id, expires_at)
-  VALUES (%L, 'AMAZON', 'EU', ARRAY['A1PA6795UKMFR9'], sha256('state-viewer'), 'a2000000-0000-0000-0000-0000000000a9', now() + interval '5 minutes') $q$, :tA),
-  'role VIEWER may not MANAGE_TENANT');
-SELECT pg_temp.expect_fail('a viewer closes an authorization request (Р-175, Р-100)', format($q$
+  VALUES (%L, 'AMAZON', 'EU', ARRAY['A1PA6795UKMFR9'], sha256('state-clerk'), 'a2000000-0000-0000-0000-0000000000a9', now() + interval '5 minutes') $q$, :tA),
+  'role INVENTORY_MANAGER may not MANAGE_TENANT');
+SELECT pg_temp.expect_fail('an inventory manager closes an authorization request (Р-175, Р-100)', format($q$
   UPDATE tenant_data.channel_authorization_request SET status = 'FAILED', failure_code = 'x'
    WHERE tenant_id = %L AND authorization_request_id = 'a4430000-0000-4000-8000-0000000000a1' $q$, :tA),
-  'role VIEWER may not MANAGE_TENANT');
+  'role INVENTORY_MANAGER may not MANAGE_TENANT');
 SELECT set_config('app.user_id', :ownerU, false) \gset
 SELECT pg_temp.ok('starting a request is written to the audit log (Р-97)', format($q$
   DO $inner$
@@ -203,10 +203,10 @@ SELECT pg_temp.expect_fail('storing a token without a person (Р-97, Р-177)', f
   VALUES (%L, %L, 'k1', pg_temp.rb(12), pg_temp.rb(16), pg_temp.rb(48), %L) $q$, :tA, :oAcc, :ownerM),
   'without a person');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', false) \gset
-SELECT pg_temp.expect_fail('a viewer stores a channel token (Р-177, Р-100)', format($q$
+SELECT pg_temp.expect_fail('an inventory manager stores a channel token (Р-177, Р-100)', format($q$
   INSERT INTO tenant_data.channel_credential (tenant_id, channel_account_id, key_id, iv, auth_tag, ciphertext, created_by_membership_id)
   VALUES (%L, %L, 'k1', pg_temp.rb(12), pg_temp.rb(16), pg_temp.rb(48), 'a2000000-0000-0000-0000-0000000000a9') $q$, :tA, :oAcc),
-  'role VIEWER may not MANAGE_TENANT');
+  'role INVENTORY_MANAGER may not MANAGE_TENANT');
 SELECT set_config('app.user_id', :ownerU, false) \gset
 -- В аудите — ИМЕНА столбцов, а не значения: шифротекста в журнале нет
 SELECT pg_temp.ok('storing a token is written to the audit log without the token (Р-97, Р-177)', format($q$
@@ -755,10 +755,10 @@ ROLLBACK;
 -- Мир тенанта — только по ДЕЙСТВУЮЩЕМУ членству и только у действующего тенанта
 -- Наблюдатель тенанта A видит мир A, пока членство действует; отзыв делает владелец в своей сессии
 SET ROLE repracer_authenticator;
-SELECT pg_temp.ok('an active viewer sees the world of the tenant (Р-178)', $q$
+SELECT pg_temp.ok('an active inventory manager sees the world of the tenant (Р-178)', $q$
   DO $inner$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM security.console_tenant_worlds('a1000000-0000-0000-0000-0000000000a9') WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a') THEN
-      RAISE EXCEPTION 'an active viewer does not see the world of tenant A';
+      RAISE EXCEPTION 'an active inventory manager does not see the world of tenant A';
     END IF;
   END $inner$ $q$);
 RESET ROLE;

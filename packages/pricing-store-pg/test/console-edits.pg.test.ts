@@ -42,7 +42,7 @@ test('step 21: bounds edit — role checked by the database, preview rolls back,
   const { w, store, actor, bounds, ws } = await world();
   assert.deepEqual(await store.editBounds(w.tenantId, [{ writeScopeId: ws(1), minMinor: 1400, expected }], actor('membership-operator'), 'APPLY'), { status: 'FORBIDDEN' },
     'an operator may stop pricing but not change bounds (MANAGE_PRICING)');
-  assert.deepEqual(await store.editBounds(w.tenantId, [{ writeScopeId: ws(1), minMinor: 1400, expected }], actor('membership-viewer'), 'PREVIEW'), { status: 'FORBIDDEN' });
+  assert.deepEqual(await store.editBounds(w.tenantId, [{ writeScopeId: ws(1), minMinor: 1400, expected }], actor('membership-inventory-manager'), 'PREVIEW'), { status: 'FORBIDDEN' });
 
   const preview = await store.editBounds(w.tenantId, [{ writeScopeId: ws(1), minMinor: 1400, expected }], actor('membership-pricing-manager'), 'PREVIEW');
   assert.deepEqual(preview, { status: 'PREVIEWED', rows: [{ writeScopeId: ws(1), currency: 'EUR', before: { minMinor: 1500, maxMinor: 2500 }, after: { minMinor: 1400, maxMinor: 2500 } }] });

@@ -265,7 +265,7 @@ export interface StandServices {
    */
   market?: MarketProfile;
   /**
-   * Шаг 88 [Р-213]: флаг «расширенные роли» — вход стенда предлагает три видимые роли (владелец, менеджер, наблюдатель) или пять
+   * Шаг 88 [Р-213]: флаг «расширенные роли» — вход стенда предлагает две роли для людей (владелец и менеджер, шаг 98) или четыре
    * (ещё администратор и оператор). Вход по роли, которой нет в списке, имитатор принимает: назначения прежних ролей работают
    */
   extendedRoles?: boolean;
@@ -284,6 +284,14 @@ function connectInMarket(connect: ChannelConnectService, scope: ReturnType<typeo
     start: async (tenantId, input, actor) => (input.marketplaces.length > 0 && input.marketplaces.every((mp) => storefrontInMarket(scope, input.channel, mp))
       ? connect.start(tenantId, input, actor) : { status: 'BAD_MARKETPLACES' as const }),
   };
+}
+
+/**
+ * Шаг 98 [Р-222]: подпись роли в списке рабочих пространств. Ролей для людей две; техническая роль гостя публичного демо — не роль
+ * продукта и не показывается (у гостя подписи роли нет вовсе)
+ */
+function roleShown(role: Viewer['role'], m: Messages): string | null {
+  return role === 'GUEST' ? null : m.values[role];
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
@@ -412,7 +420,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     }
 
     /**
-     * Р-160: «посмотреть демо». Гостя заводит база и возвращает наблюдателя демо-тенанта; ответ — такой же токен, как у
+     * Р-160: «посмотреть демо». Гостя заводит база и возвращает техническую роль «только чтение» демо-тенанта (GUEST, шаг 98); ответ — такой же токен, как у
      * продавца, потому что дальше гость ходит ТЕМ ЖЕ путём: те же экраны, те же проверки прав, та же роль из членства.
      */
     if (parts[1] === 'demo' && parts[2] === 'guest') {
@@ -504,7 +512,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         if (!membership || !c) return [];
         return [{
           id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
-          interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[membership.role],
+          interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: roleShown(membership.role, m),
           demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale ? localeInMarket(market, c.locale) : c.locale, timeZone: c.timeZone, landing: 'products',
         }];
       });
@@ -519,7 +527,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Шаг 87: демо профиля us — американский продавец, а не магазин на симуляторе Kaufland с тремя конкурентами
           description: c.demo ? (live.ownName ? m.ui.app.demoSellerDescription : market.profile === 'us' ? m.ui.app.demoWorldDescriptionUs : m.ui.app.demoWorldDescription) : live.description,
           failures: live.failures, scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
-          interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: m.values[viewer.role],
+          interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: roleShown(viewer.role, m),
           // Р-151: демо помечается уже в списке миров; Р-150: сколько каналов ждёт доступа — видно до входа в мир
           demo: c.demo,
           awaitingAccess: accounts.filter((a) => a.authStatus === 'AWAITING_ACCESS').length,
@@ -588,7 +596,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     /**
      * Шаг 43 [Р-175…Р-177]: подключение каналов. Экран читает только аккаунты и запросы согласия — состояние консоли
      * целиком ему не нужно [Р-154]. Начинает и завершает подключение тот, кто управляет тенантом; гость демо [Р-160] и
-     * наблюдатель получают 403 здесь, а запись без права всё равно отклонит база (страж административной записи).
+     * роли без права управлять пространством получают 403 здесь, а запись без права всё равно отклонит база (страж административной записи).
      */
     if (parts[3] === 'connections') {
       const offered = services.connect?.(live.id) ?? null;
@@ -1897,7 +1905,7 @@ async function main(): Promise<void> {
   // зритель из США видел немецкий экран входа до нажатия «English»
   // Как у развёрнутой консоли (config.ts): не задано — язык по умолчанию, задано — только de или en (ревью шага 76, находка 13)
   const consoleLocale = process.env.REPRACER_CONSOLE_LOCALE;
-  if (consoleLocale !== undefined && !isLocale(consoleLocale)) throw new Error(`REPRACER_CONSOLE_LOCALE must be de or en, got ${consoleLocale}`);
+  if (consoleLocale !== undefined && !isLocale(consoleLocale)) throw new Error(`REPRACER_CONSOLE_LOCALE must be de, en, es or fr, got ${consoleLocale}`);
   /**
    * Шаг 87 [Р-214]: профиль рынка стенда — тот же `REPRACER_MARKET_PROFILE`, что у развёрнутой консоли, по умолчанию us: Kaufland,
    * витрины ЕС, немецкий и Omnibus спрятаны, демо — американский продавец. `eu` и `global` открывают Европу одним значением
@@ -1966,7 +1974,7 @@ async function main(): Promise<void> {
         // Шаг 68 (K7): `REPRACER_DEMO_PRESS_DAYS=7` — неделя тени США прожата при подъёме: недельный отчёт показуем сразу (0…7)
         usPressDays: market === 'us' || process.env.REPRACER_DEMO_US === 'on' ? pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS) : 0,
         // Шаг 69 (K1, K4): язык и пояс демо-тенанта (команда подготовки демо для клиента из США ставит en и его пояс)
-        ...(process.env.REPRACER_DEMO_LOCALE === 'en' || process.env.REPRACER_DEMO_LOCALE === 'de' ? { locale: process.env.REPRACER_DEMO_LOCALE } : {}),
+        ...(LOCALES.includes(process.env.REPRACER_DEMO_LOCALE as Locale) ? { locale: process.env.REPRACER_DEMO_LOCALE as Locale } : {}),
         ...(process.env.REPRACER_DEMO_TIME_ZONE ? { timeZone: process.env.REPRACER_DEMO_TIME_ZONE } : {}),
         // Шаг 64: `REPRACER_DEMO_SHADOW=on` — демо в тени [Р-169]: сценарий показа «система физически не может трогать цены»
         ...(process.env.REPRACER_DEMO_SHADOW === 'on' ? { writeMode: 'SHADOW' as const } : {}),
@@ -1975,7 +1983,7 @@ async function main(): Promise<void> {
       demoWorldId = started.world.id;
       /**
        * Шаг 91 (вид преп-центра): `REPRACER_DEMO_SELLERS=on` — рядом с главным демо два лёгких продавца с американскими именами; владелец
-       * стенда — менеджер у одного и наблюдатель у другого [Р-213]. Только демо профиля us: продавцы — американские
+       * стенда — менеджер у обоих (шаг 98 [Р-222]: ролей для людей две). Только демо профиля us: продавцы — американские
        */
       if (process.env.REPRACER_DEMO_SELLERS === 'on') {
         if (market !== 'us') throw new Error('REPRACER_DEMO_SELLERS=on needs the us market profile: the sellers are American');
@@ -1989,7 +1997,7 @@ async function main(): Promise<void> {
           pgUrl: url, tag: 3410, standOwnerUserId: memberUsers[owner.membershipAlias]!, standOwnerEmail: owner.email,
           joinAs: pgStandJoinAs(adminPool, directory, owner.membershipAlias),
           pressDays: pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS),
-          ...(process.env.REPRACER_DEMO_LOCALE === 'en' || process.env.REPRACER_DEMO_LOCALE === 'de' ? { locale: process.env.REPRACER_DEMO_LOCALE } : {}),
+          ...(LOCALES.includes(process.env.REPRACER_DEMO_LOCALE as Locale) ? { locale: process.env.REPRACER_DEMO_LOCALE as Locale } : {}),
           ...(process.env.REPRACER_DEMO_TIME_ZONE ? { timeZone: process.env.REPRACER_DEMO_TIME_ZONE } : {}),
         });
         worlds.push(...sellers.worlds);

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import { PERIOD_PRESETS, type Period } from '@repracer/console-model';
+import { humanDate, monthDay, nameTag, PERIOD_PRESETS, type Period } from '@repracer/console-model';
 import { useMessages } from './components.tsx';
 import { Field, FormActions } from './forms.tsx';
 import { Octicon } from './icons.tsx';
@@ -43,6 +43,13 @@ export function presetDays(preset: (typeof PERIOD_PRESETS)[number], nowMs: numbe
 
 /** «Oct 10 – Oct 16, 2026»: год один раз, если он общий; один день — одной датой */
 export function rangeText(from: Day, to: Day, locale: string): string {
+  // Шаг 98 [Р-223]: у испанского и французского месяцы — на языке экрана, порядок даты — американский (как у дат во фразах)
+  if (locale === 'es' || locale === 'fr') {
+    const md = (d: Day) => monthDay(locale, Number(d.slice(5, 7)), Number(d.slice(8, 10)));
+    const fullEs = (d: Day) => humanDate(locale, Number(d.slice(0, 4)), Number(d.slice(5, 7)), Number(d.slice(8, 10)));
+    if (from === to) return fullEs(to);
+    return `${from.slice(0, 4) === to.slice(0, 4) ? md(from) : fullEs(from)} – ${fullEs(to)}`;
+  }
   const intl = locale === 'de' ? 'de-DE' : 'en-US';
   const short = new Intl.DateTimeFormat(intl, { month: 'short', day: 'numeric', timeZone: 'UTC' });
   const full = new Intl.DateTimeFormat(intl, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
@@ -110,7 +117,8 @@ export function DateRangePicker({ id, value, onChange, maxDays = 30, 'aria-descr
 
   // месяцы — только у открытого календаря: до открытия месяц не задан
   const months = !open || !anchor ? [] : wide ? [addMonths(anchor, -1), anchor] : [anchor];
-  const intl = m.locale === 'de' ? 'de-DE' : 'en-US';
+  // Шаг 98 [Р-223]: названия месяцев и дней — на языке экрана; неделя ES и FR — американская, с воскресенья (форматы профиля us)
+  const intl = nameTag(m.locale);
   const weekStart = m.locale === 'de' ? 1 : 0;
   const monthTitle = new Intl.DateTimeFormat(intl, { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const dayLong = new Intl.DateTimeFormat(intl, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });

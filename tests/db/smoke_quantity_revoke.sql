@@ -70,13 +70,13 @@ SELECT pg_temp.ok('a quantity write of a blocked unit is born BLOCKED (подг�
   END $d$ $q$);
 
 -- ---------------------------------------------------------------- кто отзывает
--- Администратор: право MANAGE_TENANT у него есть, поэтому отказывает именно правило «только владелец»
-SELECT pg_temp.expect_fail('quantity writes revoked by a non-owner (Р-202)', $q$
+-- Администратор: право MANAGE_TENANT у него есть, поэтому отказывает именно правило «только владелец или менеджер» (шаг 98, Р-222)
+SELECT pg_temp.expect_fail('quantity writes revoked by an admin (Р-202, Р-222)', $q$
   DO $d$ BEGIN
     PERFORM set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true);
     INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action)
     VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'seller-A', 'a2000000-0000-0000-0000-0000000000ad', 'REVOKE');
-  END $d$ $q$, 'only the owner confirms or revokes quantity writes');
+  END $d$ $q$, 'only the owner or a manager confirms or revokes quantity writes');
 SELECT pg_temp.expect_fail('quantity writes revoked with a mistyped account (Р-202)', format($q$
   INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id, action)
   VALUES (%L, %L, 'seller-B', %L, 'REVOKE') $q$, :tA, :kAcc, :ownerM), 'the typed confirmation does not name the channel account');

@@ -314,7 +314,7 @@ export function unmetText(unmet: Readonly<Record<string, readonly string[]>>, m:
   return Object.entries(unmet)
     .map(([source, codes]) => {
       const words = codes.map((c) => m.values[c as keyof typeof m.values] ?? c).join(', ');
-      return source === '*' ? words : `${source}: ${words}`;
+      return source === '*' ? words : `${source}${m.colon}${words}`;
     })
     .join('; ');
 }

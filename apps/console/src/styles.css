@@ -55,6 +55,8 @@ td.cur .note, td.cur .muted, td.cur .small, td.cur a, td.cur .badge, td.cur .flo
 .lang { display: inline-flex; padding: var(--space-1) 0; }
 .lang button { border: 0; border-radius: var(--radius); padding: var(--space-1) var(--space-3); background: transparent; color: var(--text-2); font-size: var(--font-size-sm); box-shadow: none; }
 .lang button.active { background: var(--nav-selected); color: var(--text); font-weight: var(--weight-heading); }
+/* шаг 98: код языка — только на телефоне, где имена не помещаются в шапку */
+.lang .lang-code { display: none; }
 .topbar .lang button { color: var(--header-fg); }
 .topbar .lang button:hover { color: var(--header-fg-logo); background: transparent; }
 .topbar .lang button.active { color: var(--header-fg-logo); background: transparent; text-decoration: underline; text-underline-offset: var(--space-1); }
@@ -672,7 +674,7 @@ button.role-row .role-dot { margin-right: var(--space-1); }
 button.role-row:hover { background: var(--surface-muted); }
 .role-dot {
   flex: none; width: var(--control-h); height: var(--control-h); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-  font-size: var(--font-size-xs); font-weight: var(--weight-heading); background: var(--role-viewer-bg); color: var(--role-viewer-fg);
+  font-size: var(--font-size-xs); font-weight: var(--weight-heading); background: var(--role-neutral-bg); color: var(--role-neutral-fg);
 }
 .role-OWNER .role-dot { background: var(--role-owner-bg); color: var(--role-owner-fg); }
 .role-ADMIN .role-dot { background: var(--role-admin-bg); color: var(--role-admin-fg); }
@@ -680,7 +682,6 @@ button.role-row:hover { background: var(--surface-muted); }
 .role-PRICING_MANAGER .role-dot { background: var(--role-pricing-bg); color: var(--role-pricing-fg); }
 .role-INVENTORY_MANAGER .role-dot { background: var(--role-inventory-bg); color: var(--role-inventory-fg); }
 .role-MANAGER .role-dot { background: var(--role-manager-bg); color: var(--role-manager-fg); }
-.role-VIEWER .role-dot { background: var(--role-viewer-bg); color: var(--role-viewer-fg); }
 .role-name { font-weight: var(--weight-heading); color: var(--text); white-space: nowrap; }
 .role-name::after { content: ' —'; color: var(--text-3); font-weight: 400; }
 .role-can { color: var(--text-2); min-width: 0; }
@@ -987,6 +988,12 @@ p.notice.live-blocked { margin: 0; }
   td .reason { min-width: 0; }
 }
 
+/* шаг 98 [Р-223]: на телефоне у переключателя языка — коды (EN · ES · FR), три-четыре имени выдвинули бы шапку за край экрана */
+@media (width < 34rem) {
+  .lang .lang-name { display: none; }
+  .lang .lang-code { display: inline; }
+  .lang button { padding: var(--space-1) var(--space-2); }
+}
 @media (width < 34rem) {
   /* плитки тени — одной колонкой */
   .stats { grid-template-columns: minmax(0, 1fr); }

@@ -46,7 +46,7 @@ function worldOf(owner: { userId: string; address: string }, n: number) {
   });
 }
 
-const invite = (tenantId: string, userId: string, address: string, role: 'PRICING_MANAGER' | 'MANAGER' | 'VIEWER' = 'PRICING_MANAGER') =>
+const invite = (tenantId: string, userId: string, address: string, role: 'PRICING_MANAGER' | 'MANAGER' = 'PRICING_MANAGER') =>
   inTenant(admin, tenantId, (tx) => inviteMember(tx, { tenantId, email: address, role }), userId, { mfa: true });
 
 test('Р-88, findings 11 and 13: a provider subject is linked only by accepting an invitation for its own verified email; the decision path neither links nor resolves', async () => {
@@ -85,7 +85,7 @@ test('Р-88, Р-90: an owner with a second factor invites a member from the admi
     inTenant(viaPool, world.tenantId, (tx) => inviteMember(tx, { tenantId: world.tenantId, email: memberEmail, role: role as never }), userId, { mfa });
   await assert.rejects(inviteAs(ownerId, true, 'PRICING_MANAGER', pool), /permission denied/, 'Р-90: not from the decision path');
   await assert.rejects(inviteAs(ownerId, false), /second factor/);
-  await assert.rejects(inviteAs(operatorUser, true), /owner or admin/);
+  await assert.rejects(inviteAs(operatorUser, true), /owner, manager or admin/);
   await assert.rejects(inviteAs(ownerId, true, 'OWNER'), /cannot be granted/);
   const invited = await inviteAs(ownerId, true);
 
@@ -97,14 +97,14 @@ test('Р-88, Р-90: an owner with a second factor invites a member from the admi
   assert.deepEqual([member.membershipId, member.role], [invited.membershipId, 'PRICING_MANAGER']);
 
   const setRole = (userId: string | undefined, mfa: boolean, viaPool = admin) => inTenant(viaPool, world.tenantId, (tx) => tx.query(
-    `UPDATE tenant_data.membership SET role = 'VIEWER' WHERE membership_id = $1`, [invited.membershipId]), userId, { mfa });
+    `UPDATE tenant_data.membership SET role = 'MANAGER' WHERE membership_id = $1`, [invited.membershipId]), userId, { mfa });
   await assert.rejects(setRole(ownerId, true, pool), /permission denied/, 'Р-90: the decision path does not change roles');
   await assert.rejects(setRole(ownerId, false), /second factor/);
   // Р-97 (0066): смена роли без пользователя сессии — отказ стража административной записи
   await assert.rejects(setRole(undefined, true), /without a person/);
-  await assert.rejects(setRole(invited.userId, true), /another active owner or admin/, 'nobody changes their own role');
+  await assert.rejects(setRole(invited.userId, true), /another active owner, manager or admin/, 'nobody changes their own role');
   await setRole(ownerId, true);
-  assert.equal((await auth.authenticate(`Bearer ${idp.token(memberSubject.subject)}`))!.memberships.find((m) => m.tenantId === world.tenantId)!.role, 'VIEWER');
+  assert.equal((await auth.authenticate(`Bearer ${idp.token(memberSubject.subject)}`))!.memberships.find((m) => m.tenantId === world.tenantId)!.role, 'MANAGER');
 });
 
 test('finding 10, Р-9: a linked user accepts an invitation to a second tenant with the same sign-in; a second sign-in of the same provider and a sign-in of another user are refused', async () => {
@@ -121,12 +121,12 @@ test('finding 10, Р-9: a linked user accepts an invitation to a second tenant w
   assert.deepEqual(tenants, [worldA.tenantId, worldB.tenantId].sort(), 'one sign-in, two tenants');
 
   const worldC = await worldOf(b, 7);
-  const toC = await invite(worldC.tenantId, b.userId, addressA, 'VIEWER');
+  const toC = await invite(worldC.tenantId, b.userId, addressA, 'MANAGER');
   await assert.rejects(directory.acceptInvitation(toC.token, { issuer: ISSUER, subject: `sub-${randomUUID()}` }, addressA, true),
     /already linked to another sign-in/, 'relinking a user to another subject of the same provider is not supported (OQ-148)');
 
   const addressD = email('someone');
-  const toD = await invite(worldC.tenantId, b.userId, addressD, 'VIEWER');
+  const toD = await invite(worldC.tenantId, b.userId, addressD, 'MANAGER');
   await assert.rejects(directory.acceptInvitation(toD.token, a.subject, addressD, true), /linked to another user/, 'a sign-in linked to another user does not accept an invitation of someone else');
 });
 
@@ -140,12 +140,14 @@ test('Р-98: a sign-in is relinked only by a new invitation of the tenant owner 
   const address = email('relink');
   const owner = await signUp(address);
   const world = await worldOf(owner, 8);
-  const relinkAs = (userId: string | undefined, mfa: boolean, viaPool = admin) =>
-    inTenant(viaPool, world.tenantId, (tx) => inviteRelink(tx, { tenantId: world.tenantId, userId: owner.userId }), userId, { mfa });
+  const relinkAs = (userId: string | undefined, mfa: boolean, viaPool = admin, target = owner.userId) =>
+    inTenant(viaPool, world.tenantId, (tx) => inviteRelink(tx, { tenantId: world.tenantId, userId: target }), userId, { mfa });
 
   await assert.rejects(relinkAs(owner.userId, true, pool), /permission denied/, 'Р-90: the decision path does not relink');
   await assert.rejects(relinkAs(owner.userId, false), /second factor/, 'Р-98: a relink invitation without a second factor');
-  await assert.rejects(relinkAs(world.ids.dbId('user-operator'), true), /only an active owner/, 'Р-98: only an active owner relinks');
+  // Шаг 98 [Р-222]: вход обычного участника — вход владельца перепривязывает только владелец, и та ветка проверяется отдельно (roles-step98)
+  await assert.rejects(relinkAs(world.ids.dbId('user-operator'), true, admin, world.ids.dbId('user-pricing-manager')), /only an active owner or manager of the tenant relinks/,
+    'Р-98: only an active owner or manager relinks');
   const stranger = await signUp(email('stranger'));
   await assert.rejects(inTenant(admin, world.tenantId, (tx) => inviteRelink(tx, { tenantId: world.tenantId, userId: stranger.userId }), owner.userId, { mfa: true }),
     /is not an active member/, 'Р-98: a relink is issued only to a member of the tenant');
@@ -175,7 +177,7 @@ test('Р-98, step 17 finding 3: two invitations accepted at the same time link o
   const worldC = await worldOf(ownerC, 2);
   const address = email('race');
   const toB = await invite(worldB.tenantId, ownerB.userId, address);
-  const toC = await invite(worldC.tenantId, ownerC.userId, address, 'VIEWER');
+  const toC = await invite(worldC.tenantId, ownerC.userId, address, 'MANAGER');
   const sha256 = (token: string) => createHash('sha256').update(token, 'utf8').digest();
 
   const first = await authenticator.connect();
@@ -217,9 +219,9 @@ test('Р-98, step 18 finding 6: a sign-in is linked only in READ COMMITTED — a
 /**
  * Шаг 88 [Р-213]: у человека в рабочем пространстве ровно одна роль — одно членство на (тенант, пользователь); в разных
  * пространствах роли разные. Смена роли — событие журнала аудита (кто, когда, прежняя → новая), журнал только на добавление.
- * Менеджер ролей не меняет: управление людьми — у владельца. Набор ролей, который принимает база, равен набору модели.
+ * Шаг 98 [Р-222]: менеджер меняет роли, как владелец, — кроме роли владельца. Набор ролей, который принимает база, равен набору модели.
  */
-test('step 88 (Р-213): one role per person in a workspace, different roles across workspaces; a role change is audited who, when, old → new; a manager changes no roles', async () => {
+test('step 88 (Р-213), step 98 (Р-222): one role per person in a workspace, different roles across workspaces; a role change is audited who, when, old → new; a manager changes roles but not the owner role', async () => {
   const ownerA = await signUp(email('owner-a88'));
   const ownerB = await signUp(email('owner-b88'));
   const worldA = await worldOf(ownerA, 9);
@@ -228,34 +230,35 @@ test('step 88 (Р-213): one role per person in a workspace, different roles acro
   const toA = await invite(worldA.tenantId, ownerA.userId, address, 'MANAGER');
   const subject = { issuer: ISSUER, subject: `sub-${randomUUID()}` };
   await directory.acceptInvitation(toA.token, subject, address, true);
-  const toB = await invite(worldB.tenantId, ownerB.userId, address, 'VIEWER');
-  await directory.acceptInvitation(toB.token, subject, address, true);
-  const roles = new Map((await directory.resolve(subject))!.memberships.map((m) => [m.tenantId, m.role]));
-  assert.deepEqual([roles.get(worldA.tenantId), roles.get(worldB.tenantId)], ['MANAGER', 'VIEWER'], 'one person, a different role in each workspace');
+  // Тот же человек — владелец своего пространства и менеджер в чужом (ролей для людей две, шаг 98)
+  const toB = await invite(worldB.tenantId, ownerB.userId, ownerA.address, 'MANAGER');
+  await directory.acceptInvitation(toB.token, ownerA.subject, ownerA.address, true);
+  const roles = new Map((await directory.resolve(ownerA.subject))!.memberships.map((m) => [m.tenantId, m.role]));
+  assert.deepEqual([roles.get(worldA.tenantId), roles.get(worldB.tenantId)], ['OWNER', 'MANAGER'], 'one person, a different role in each workspace');
 
   // Вторая роль того же человека в том же пространстве — отказ базы ограничением «одно членство на тенант и пользователя»
-  await assert.rejects(invite(worldA.tenantId, ownerA.userId, address, 'VIEWER'), /membership_tenant_id_user_id_key/, 'a second role in the same workspace');
+  await assert.rejects(invite(worldA.tenantId, ownerA.userId, address, 'PRICING_MANAGER'), /membership_tenant_id_user_id_key/, 'a second role in the same workspace');
 
   const store = new PgPricingStore(pool, { adminPool: admin });
-  const viewerMembership = worldA.ids.dbId('membership-viewer');
-  // Менеджер не меняет роли (управление людьми — у владельца), без второго фактора не меняет никто
-  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'MANAGER', { userId: toA.userId, mfa: true }), { status: 'FORBIDDEN' });
-  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'MANAGER', { userId: ownerA.userId, mfa: false }), { status: 'MFA_REQUIRED' });
-  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'VIEWER', { userId: ownerA.userId, mfa: true }), { status: 'UNCHANGED' });
+  const target = worldA.ids.dbId('membership-inventory-manager');
+  // Без второго фактора роль не меняет никто; роль владельца менеджер не выдаёт
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, target, 'MANAGER', { userId: ownerA.userId, mfa: false }), { status: 'MFA_REQUIRED' });
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, target, 'INVENTORY_MANAGER', { userId: ownerA.userId, mfa: true }), { status: 'UNCHANGED' });
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, target, 'OWNER', { userId: toA.userId, mfa: true }), { status: 'FORBIDDEN' }, 'step 98: a manager does not grant the owner role');
   const before = Date.now();
-  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, viewerMembership, 'MANAGER', { userId: ownerA.userId, mfa: true }), { status: 'CHANGED' });
+  assert.deepEqual(await store.changeMemberRole(worldA.tenantId, target, 'MANAGER', { userId: toA.userId, mfa: true }), { status: 'CHANGED' }, 'step 98: a manager changes a role');
 
-  // Журнал: кто (владелец), когда, прежняя → новая — из события базы, а не из ответа хранилища
+  // Журнал: кто (менеджер), когда, прежняя → новая — из события базы, а не из ответа хранилища
   const { rows: [event] } = await inTenant(admin, worldA.tenantId, (tx) => tx.query(
     `SELECT actor_type, actor_user_id, actor_membership_id, changes FROM audit.audit_event
-      WHERE tenant_id = $1 AND entity_type = 'membership' AND entity_id = $2 AND action = 'membership.role_changed'`, [worldA.tenantId, viewerMembership]), ownerA.userId);
+      WHERE tenant_id = $1 AND entity_type = 'membership' AND entity_id = $2 AND action = 'membership.role_changed'`, [worldA.tenantId, target]), ownerA.userId);
   assert.deepEqual([event!.actor_type, event!.actor_user_id, event!.actor_membership_id, event!.changes.roleFrom, event!.changes.roleTo, event!.changes.secondFactor],
-    ['USER', ownerA.userId, worldA.ownerMembershipId, 'VIEWER', 'MANAGER', true]);
+    ['USER', toA.userId, toA.membershipId, 'INVENTORY_MANAGER', 'MANAGER', true]);
   assert.ok(Date.parse(event!.changes.at) >= before - 5_000, 'the event carries the time of the change');
   const shown = (await store.auditRecent(worldA.tenantId, 10)).find((a) => a.action === 'membership.role_changed')!;
-  assert.deepEqual([shown.role, shown.roleFrom, shown.roleTo], ['OWNER', 'VIEWER', 'MANAGER']);
-  // Чья роль сменилась — адрес участника-наблюдателя посева (`viewer-…@example.test`), а не автора
-  assert.match(shown.memberEmail ?? '', /^viewer-.*@example\.test$/, 'the log names whose role changed');
+  assert.deepEqual([shown.role, shown.roleFrom, shown.roleTo], ['MANAGER', 'INVENTORY_MANAGER', 'MANAGER']);
+  // Чья роль сменилась — адрес участника посева (`inventory_manager-…@example.test`), а не автора
+  assert.match(shown.memberEmail ?? '', /^inventory_manager-.*@example\.test$/, 'the log names whose role changed');
 
   // Журнал только на добавление: переписать событие административной роли нечем
   await assert.rejects(inTenant(admin, worldA.tenantId, (tx) => tx.query(`UPDATE audit.audit_event SET changes = '{}' WHERE tenant_id = $1`, [worldA.tenantId]), ownerA.userId, { mfa: true }),
@@ -272,10 +275,12 @@ test('step 88 (Р-213): the database accepts exactly the roles of the model — 
   try {
     await client.query('BEGIN');
     await client.query('CREATE TEMP TABLE probe_membership (LIKE tenant_data.membership INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP');
-    for (const role of [...MEMBER_ROLES, 'PRICING_ADMIN', 'manager']) {
+    // Шаг 98 [Р-222]: наблюдателя в базе нет; техническая роль гостя — только у гостевого членства (своё ограничение), поэтому проба
+    // ставит признак гостя ровно у GUEST — иначе отказывало бы не ограничение набора ролей
+    for (const role of [...MEMBER_ROLES, 'VIEWER', 'PRICING_ADMIN', 'manager']) {
       await client.query('SAVEPOINT p');
       try {
-        await client.query(`INSERT INTO probe_membership (tenant_id, user_id, role) VALUES (gen_random_uuid(), gen_random_uuid(), $1)`, [role]);
+        await client.query(`INSERT INTO probe_membership (tenant_id, user_id, role, guest) VALUES (gen_random_uuid(), gen_random_uuid(), $1, $1 = 'GUEST')`, [role]);
         accepted.push(role);
       } catch (error) {
         assert.match(String((error as Error).message), /membership_role_check/, `${role}: ${(error as Error).message}`);

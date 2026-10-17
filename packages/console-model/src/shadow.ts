@@ -1,8 +1,8 @@
-import { can } from '@repracer/pricing-model';
+import { can, holdsOwnerActions } from '@repracer/pricing-model';
 import type { MarketplaceProperty, ShadowAccountRow, ShadowPage, ShadowSummary, ShadowWriteRow } from '@repracer/pricing-store-pg';
 import { accountState, channelLimitText } from './connections.ts';
 import type { Messages } from './i18n/index.ts';
-import { zoneName } from './i18n/shape.ts';
+import { monthDay, nameTag, zoneName } from './i18n/shape.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, storefrontName, type Gap, type StandWorld } from './world.ts';
 import { periodDays, periodPhrase, type Period, type PeriodRange } from './period.ts';
@@ -176,9 +176,10 @@ export function shadowChart(byHour: ShadowPage['decisionsByHour'], until: string
     const k = localDay(b.hour);
     if (totals.has(k)) totals.set(k, (totals.get(k) ?? 0) + b.decisions);
   }
-  const intl = m.locale === 'de' ? 'de-DE' : 'en-US';
-  const label = new Intl.DateTimeFormat(intl, days <= 7 ? { weekday: 'short', timeZone: 'UTC' } : { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  const nf = new Intl.NumberFormat(intl);
+  // Шаг 98 [Р-223]: названия дней и месяцев — на языке экрана, числа — прежним форматом (у ES и FR — американским)
+  const weekday = new Intl.DateTimeFormat(nameTag(m.locale), { weekday: 'short', timeZone: 'UTC' });
+  const label = { format: (d: Date) => days <= 7 ? weekday.format(d) : monthDay(m.locale, d.getUTCMonth() + 1, d.getUTCDate()) };
+  const nf = new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US');
   return {
     title: m.ui.shadow.chartTitle,
     points: dayKeys.map((k, i) => {
@@ -311,7 +312,7 @@ function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): Shado
     changedText: a.changedAt === null ? null : t.changed(a.changedFrom === 'SHADOW' ? t.modes.SHADOW : t.modes.LIVE, m.when(a.changedAt)),
     confirmationHint: t.confirmationHint(a.externalAccountId),
     // Включить бой может только владелец [Р-170]; вернуть в тень — он же и администратор
-    canGoLive: noAccess === null && a.writeMode === 'SHADOW' && world.viewer.role === 'OWNER',
+    canGoLive: noAccess === null && a.writeMode === 'SHADOW' && holdsOwnerActions(world.viewer.role),
     // Шаг 89 (ADR-0054): обратно в тень — безопасная сторона, своё право матрицы (у менеджера тоже)
     canGoShadow: a.writeMode === 'LIVE' && can(world.viewer.role, 'RETURN_TO_SHADOW'),
     channelLimitText: channelLimitText(a.channel, m),

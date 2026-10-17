@@ -2,7 +2,7 @@
 -- именно она пишет всё, чего гость не должен мочь. Выполнять после smoke_guest.sql. Данные синтетические.
 --
 -- Проверки здесь про ДВЕ разные вещи:
---   1) гость остаётся наблюдателем: его роль не повышается и задания он не создаёт — даже те, что «ничего не меняют»
+--   1) гость остаётся технической ролью GUEST «только чтение» (шаг 98, Р-222: не роль продукта): роль не повышается и задания он не создаёт — даже те, что «ничего не меняют»
 --      (выгрузку доказательства и ленту цен создаёт любой с VIEW_PRICING [Р-143], а это 27 МБ файла на публичной кнопке);
 --   2) язык тенанта [Р-161] — из списка словаря консоли, иначе письмо ушло бы кодами.
 \set ON_ERROR_STOP 1
@@ -19,23 +19,27 @@ SELECT set_config('app.tenant_id', :tDemo, false), set_config('app.user_id', :ow
 -- Гостевое членство, созданное смоуком онбординга: его идентификатор выдала база, поэтому он ищется, а не подставляется
 SELECT membership_id AS "guestM", user_id AS "guestU" FROM tenant_data.membership WHERE guest ORDER BY created_at LIMIT 1 \gset
 
--- --------------------------------------------------------------- гость — наблюдатель, и это УТВЕРЖДАЕТСЯ, а не подразумевается
+-- --------------------------------------------------------------- гость — техническая роль GUEST, и это УТВЕРЖДАЕТСЯ, а не подразумевается
 DO $$
 DECLARE
   r record;
 BEGIN
   SELECT role, status, guest INTO r FROM tenant_data.membership WHERE guest ORDER BY created_at LIMIT 1;
-  IF r.role <> 'VIEWER' OR r.status <> 'ACTIVE' OR NOT r.guest THEN
-    RAISE EXCEPTION 'a demo guest is an ACTIVE VIEWER, got role=% status=% guest=%', r.role, r.status, r.guest;
+  IF r.role <> 'GUEST' OR r.status <> 'ACTIVE' OR NOT r.guest THEN
+    RAISE EXCEPTION 'a demo guest is an ACTIVE GUEST, got role=% status=% guest=%', r.role, r.status, r.guest;
   END IF;
-  RAISE NOTICE 'PASS accept | a demo guest is created as an ACTIVE VIEWER (Р-160)';
+  RAISE NOTICE 'PASS accept | a demo guest is created with the technical GUEST role (Р-160, Р-222)';
 END $$;
 
 -- --------------------------------------------------------------- повышение гостя [Р-160]
--- Ровно этим UPDATE публичный вход превратился бы в доступ продавца: членство уже есть, приглашения не нужно
+-- Ровно этим UPDATE публичный вход превратился бы в доступ продавца: членство уже есть, приглашения не нужно. Шаг 98 [Р-222]: держит
+-- ограничение «GUEST — тогда и только тогда, когда членство гостевое» (прежний страж смены роли гостя стал его дублем и удалён, Р-104)
 SELECT pg_temp.expect_fail('a demo guest is promoted to a pricing manager (Р-160)', format($q$
   UPDATE tenant_data.membership SET role = 'PRICING_MANAGER' WHERE tenant_id = %L AND membership_id = %L $q$, :tDemo, :'guestM'),
-  'a guest membership is never promoted');
+  'membership_guest_role');
+SELECT pg_temp.expect_fail('a demo guest is promoted to a manager (Р-160, Р-222)', format($q$
+  UPDATE tenant_data.membership SET role = 'MANAGER' WHERE tenant_id = %L AND membership_id = %L $q$, :tDemo, :'guestM'),
+  'membership_guest_role');
 
 /**
  * Снять сам признак гостя нечем. Держат это ДВА независимых механизма, и порядок именно такой:
@@ -52,7 +56,7 @@ SELECT pg_temp.expect_fail('a demo guest stops being a guest (Р-160)', format($
   'permission denied for table membership');
 
 -- --------------------------------------------------------------- задание от имени гостя [Р-160]
--- Выгрузка доказательной истории требует лишь VIEW_PRICING [Р-143], и у наблюдателя оно есть: отказать обязан страж гостя
+-- Выгрузка доказательной истории требует лишь VIEW_PRICING [Р-143], и у гостя оно есть: отказать обязан страж гостя
 SELECT pg_temp.expect_fail('a demo guest creates a price evidence job (Р-160)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
   VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tDemo, :'guestM'),
@@ -66,8 +70,13 @@ SELECT pg_temp.ok('the demo owner creates the same price evidence job (Р-160)',
 -- --------------------------------------------------------------- язык тенанта [Р-161]
 SELECT pg_temp.ok('the tenant language is set to English (Р-161)', format($q$
   UPDATE tenant_data.tenant SET locale = 'en' WHERE tenant_id = %L $q$, :tDemo));
+-- Шаг 98 [Р-223]: испанский и французский — языки словаря
+SELECT pg_temp.ok('the tenant language is set to Spanish (Р-223)', format($q$
+  UPDATE tenant_data.tenant SET locale = 'es' WHERE tenant_id = %L $q$, :tDemo));
+SELECT pg_temp.ok('the tenant language is set to French (Р-223)', format($q$
+  UPDATE tenant_data.tenant SET locale = 'fr' WHERE tenant_id = %L $q$, :tDemo));
 SELECT pg_temp.expect_fail('a tenant language the console dictionary does not have (Р-161)', format($q$
-  UPDATE tenant_data.tenant SET locale = 'fr' WHERE tenant_id = %L $q$, :tDemo),
+  UPDATE tenant_data.tenant SET locale = 'it' WHERE tenant_id = %L $q$, :tDemo),
   'tenant_locale_known');
 -- Язык возвращается к немецкому: остальные проверки смотрят мир таким, каким его оставил посев
 SELECT pg_temp.ok('the tenant language is set back to German (Р-161)', format($q$

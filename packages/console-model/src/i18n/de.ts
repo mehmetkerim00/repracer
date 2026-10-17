@@ -184,7 +184,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Nicht gesendet: das tägliche Änderungsbudget ist aufgebraucht${f.has('used') && f.has('limit') ? ` (${f.count('used')} von ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` für ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; es erneuert sich ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Nicht gesendet: dieses Kanalkonto ist im Schattenmodus, es wird nichts an Ihren Shop gesendet. Die Preisautomatik rechnet weiter; damit die Preise gesendet werden, schalten Sie auf der Seite „Schattenmodus“ das Senden der Preise ein.`,
-  QUANTITY_WRITES_REVOKED: (f) => `Nicht gesendet: der Inhaber hat Bestandsaktualisierungen für das Kanalkonto ${f.raw('channelAccountId')} widerrufen, es wird kein Bestand an Ihren Shop gesendet. Die Bestandssynchronisation lässt sich erst nach einer neuen Bestätigung wieder einschalten, dass kein anderes Werkzeug dort Bestände pflegt.`,
+  QUANTITY_WRITES_REVOKED: (f) => `Nicht gesendet: Bestandsaktualisierungen für das Kanalkonto ${f.raw('channelAccountId')} wurden widerrufen, es wird kein Bestand an Ihren Shop gesendet. Die Bestandssynchronisation lässt sich erst nach einer neuen Bestätigung wieder einschalten, dass kein anderes Werkzeug dort Bestände pflegt.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Nicht gesendet: die Wiederholung braucht das Änderungsbudget des aktuellen Tages, aber die Tagesgrenze der Storefront ${f.raw('marketplace')} ist nicht bestätigt. Die Übertragung wurde beendet; eine neue Preisentscheidung ist möglich, sobald die Zeitzone der Storefront bestätigt ist.`,
   CHANNEL_DISTRUSTED: (f) => `Alle Preise angehalten (${f.value('stage')}): wir vertrauen nicht, wie der Kanal unsere Preise anwendet${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` seit ${f.when('detectedAt')}`)}. Ein Fest- oder Margenpreis nähme denselben fehlerhaften Weg. Nur eine Person kann das aufheben.`,
   CHANNEL_PRICE_BASIS_MISMATCH: (f) => `Alle Preise der Storefront ${f.raw('marketplace')} angehalten: gesendet ${f.money('sentMinor')}, Käufer sehen ${f.money('observedMinor')} — genau der Umsatzsteuersatz ${f.bp('vatRateBp')} ${f.value('basisError')}. Der Kanal verwendet eine andere Preisbasis als wir; jeder weitere Preis wäre um denselben Anteil falsch. Prüfen Sie die Preiseinstellungen des Kanalkontos und heben Sie das Misstrauen manuell auf.`,
@@ -315,7 +315,7 @@ const values: Record<ValueKey, string> = {
   REVIEW_CHANNEL_POLICY: 'Prüfen Sie den Richtlinienhinweis des Kanals', CONTACT_CHANNEL_SUPPORT: 'Wenden Sie sich an den Kanal-Support', REVIEW_OFFER_STATUS: 'Prüfen Sie den Angebotsstatus',
   FEE_ESTIMATE_MISSING: 'die Gebührenschätzung des Kanals fehlt', VAT_RATE_MISSING: 'der USt.-Satz des Produkts ist nicht gesetzt',
   CHANNEL: 'der Kanal',
-  OWNER: 'Inhaber', MANAGER: 'Manager', ADMIN: 'Administrator', OPERATOR: 'Operator', PRICING_MANAGER: 'Preismanager', INVENTORY_MANAGER: 'Bestandsmanager', VIEWER: 'Betrachter',
+  OWNER: 'Inhaber', MANAGER: 'Manager', ADMIN: 'Administrator', OPERATOR: 'Operator', PRICING_MANAGER: 'Preismanager', INVENTORY_MANAGER: 'Bestandsmanager', GUEST: 'Demo-Gast',
   STRATEGY: 'die Strategie', MIN_MARGIN: 'die Mindestmarge',
   VAT_INCLUDED: 'USt. im Preis enthalten (EU)', SALES_TAX_EXCLUDED: 'Sales Tax an der Kasse (USA)',
 };
@@ -358,6 +358,8 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
 
 export const de: Messages = {
   locale: 'de' as Locale,
+  /** Шаг 98 [Р-223]: разделитель подписи и значения («Source: …»); во французском — неразрывный пробел перед двоеточием */
+  colon: ': ',
   ...numberFormat('de', noValue),
   titles,
   reasons,
@@ -392,7 +394,7 @@ export const de: Messages = {
       demoWorldDescriptionUs: 'Synthetischer US-Händler auf dem Kanalsimulator: Angebote auf amazon.com, ebay.com und walmart.com, ein Lager in Newark, Delaware.',
       demoSellerDescription: 'Synthetischer US-Händler auf dem Kanalsimulator: Angebote auf amazon.com und ebay.com, im Schattenmodus.',
       demoBadge: 'Demo', demoBanner: 'Demo-Arbeitsbereich: synthetische Daten, echter Weg. Alle Beträge sind erfunden.',
-      languages: { de: 'Deutsch', en: 'English' },
+      languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
       worlds: 'Ihre Arbeitsbereiche',
       worldsHint: 'Jeder Arbeitsbereich ist ein Verkäuferunternehmen mit eigenen Kanalkonten.',
       backToWorlds: '← Alle Arbeitsbereiche',
@@ -454,15 +456,15 @@ export const de: Messages = {
         noSimulator: 'Die Anmeldung läuft über den Identitätsanbieter, der noch nicht verbunden ist.',
         /** Шаг 84: что может роль — строкой рядом с именем роли на входе (по матрице прав, policy.ts) */
         roleCan: {
-          OWNER: 'alles, dazu Personen, Kanalkonten und das Senden der Preise einschalten',
-          MANAGER: 'Preise, Grenzen, Strategien, Bestand, Stückkosten-Import, Massenvorgänge, Preise stoppen', ADMIN: 'verwaltet Arbeitsbereich, Preise und Bestand, kann Preise stoppen',
+          OWNER: 'alles: Preise, Bestand, Personen, Kanalkonten und das Senden der Preise an Ihren Shop; die Inhaberrolle vergibt nur ein Inhaber',
+          MANAGER: 'alles, was der Inhaber kann, außer die Inhaberrolle zu vergeben oder zu entziehen', ADMIN: 'verwaltet Arbeitsbereich, Preise und Bestand, kann Preise stoppen',
           OPERATOR: 'kann Preise stoppen und Repricing einschalten, ändert keine Preise', PRICING_MANAGER: 'ändert Preise, Grenzen und Strategien, kann Preise stoppen',
-          INVENTORY_MANAGER: 'verwaltet Produkte und Bestand, sieht Preise nur lesend', VIEWER: 'nur lesend',
+          INVENTORY_MANAGER: 'verwaltet Produkte und Bestand, sieht Preise nur lesend', GUEST: 'nur lesend (öffentliche Demo)',
         },
-        roleMarks: { OWNER: 'In', MANAGER: 'Ma', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'BM', VIEWER: 'Be' }, asAccount: (role: string) => `Anmelden als ${role}`,
+        roleMarks: { OWNER: 'In', MANAGER: 'Ma', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'BM', GUEST: 'Ga' }, asAccount: (role: string) => `Anmelden als ${role}`,
         signedIn: (name: string) => `Angemeldet: ${name}`,
         logout: 'Abmelden',
-        noWorlds: 'Sie haben noch keinen Zugang zu einem Arbeitsbereich. Bitten Sie den Inhaber um eine Einladung.',
+        noWorlds: 'Sie haben noch keinen Zugang zu einem Arbeitsbereich. Bitten Sie den Inhaber oder einen Manager des Arbeitsbereichs um eine Einladung.',
         demoGuest: 'Demo ansehen',
         /** Шаг 81: строка бренд-панели входа */
         tagline: 'Repricing, das sich nachprüfen lässt',
@@ -622,7 +624,7 @@ export const de: Messages = {
       narrowed: (n: number) => `Der Weg ist auf ${n} Angebote verkleinert.`,
       widen: 'Verkleinerung aufheben',
       enable: (n: number) => `Repricing für ${n} Angebote einschalten`,
-      goTo: { CHANNEL: 'Kanäle ansehen', STOCK_SOURCE: 'Zum Bestand', STOCK_SYNC: 'Zum Bestand', COSTS: 'Zum Import', BOUNDS: 'Zu den Grenzen', STRATEGY: 'Zu den Strategien', ENABLE: 'Zu den Produkten' },
+      goTo: { CHANNEL: 'Kanäle ansehen', STOCK_SOURCE: 'Zum Lagerbestand', STOCK_SYNC: 'Zum Lagerbestand', COSTS: 'Zum Import', BOUNDS: 'Zu den Grenzen', STRATEGY: 'Zu den Strategien', ENABLE: 'Zu den Angeboten' },
       noRight: 'Die Auswahl der Angebote schränkt ein, wer Preise verwalten darf.',
       noRightEnable: 'Ihre Rolle darf dem Einrichtungsweg folgen, aber das Repricing nicht einschalten.',
       result: {
@@ -758,7 +760,7 @@ export const de: Messages = {
         // Шаг 60 [Р-202]: запись количества выключена до подтверждения владельца на экране подключений
         notConfirmed: (otherToolManagesStock: boolean): string => otherToolManagesStock
           ? 'Bestandsaktualisierungen an diesen Kanal sind aus: Sie haben auf der Seite „Kanalkonten“ angegeben, dass ein anderes Tool hier Bestände aktualisiert, und zwei Tools, die Bestände senden, überschreiben sich gegenseitig. Schalten Sie das Tool ab und ändern Sie dort zuerst die Antwort.'
-          : 'Bestandsaktualisierungen an diesen Kanal sind aus: Der Inhaber hat auf der Seite „Kanalkonten“ noch nicht bestätigt, dass kein anderes Tool hier Bestände pflegt. Beantworten Sie dort die Frage und bestätigen Sie; danach schalten Sie den Abgleich ein.',
+          : 'Bestandsaktualisierungen an diesen Kanal sind aus: Inhaber oder Manager haben auf der Seite „Kanalkonten“ noch nicht bestätigt, dass kein anderes Tool hier Bestände pflegt. Beantworten Sie dort die Frage und bestätigen Sie; danach schalten Sie den Abgleich ein.',
       },
       divergences: {
         title: 'Abweichungen: bei uns / im Kanal',
@@ -809,7 +811,7 @@ export const de: Messages = {
       noChannels: 'Noch kein Kanalkonto, und das Verbinden von Kanälen ist auf diesem Server noch nicht eingerichtet — das schaltet das Plattform-Team frei.', 
       title: 'Kanalkonten',
       intro: 'Sie verbinden einen Kanal selbst: der Knopf öffnet die Zustimmungsseite des Kanals, dort erlauben Sie den Zugriff, und der Kanal schickt Sie hierher zurück. Eine neue Verbindung beginnt im Schattenmodus — die Engine arbeitet vollständig und sendet nichts an Ihren Shop.',
-      noRight: 'Kanalkonten verbindet nur der Inhaber des Arbeitsbereichs.',
+      noRight: 'Kanalkonten verbinden nur Inhaber oder Manager des Arbeitsbereichs.',
       tokenNote: 'Den Zugriff des Kanals bewahren wir verschlüsselt auf und zeigen ihn nie — nicht hier, nicht in Briefen, nicht in Protokollen. Sie können ihn jederzeit im Kanal selbst zurückziehen; wir bemerken das und sagen es Ihnen.',
       /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
       /** Шаг 60 [Р-202]: внешние писатели канала — вопрос при подключении, запись количества по подтверждению владельца, внешние правки */
@@ -824,14 +826,14 @@ export const de: Messages = {
         answered: 'Antwort gespeichert.',
       },
       quantityWrites: {
-        off: 'Bestandsaktualisierungen an diesen Kanal: aus — der Inhaber muss bestätigen, dass kein anderes Tool hier Bestände pflegt.',
-        on: 'Bestandsaktualisierungen an diesen Kanal: an — vom Inhaber bestätigt.',
+        off: 'Bestandsaktualisierungen an diesen Kanal: aus — Inhaber oder Manager müssen bestätigen, dass kein anderes Tool hier Bestände pflegt.',
+        on: 'Bestandsaktualisierungen an diesen Kanal: an — von Inhaber oder Manager bestätigt.',
         answerFirst: 'Beantworten Sie zuerst die Frage oben.',
         otherToolManagesStock: 'Ein anderes Tool aktualisiert die Bestände in diesem Kanal: Würden wir ebenfalls Bestände senden, überschrieben sich beide gegenseitig. Bestandsaktualisierungen bleiben aus, bis das Tool abgeschaltet und die Antwort geändert ist.',
-        ownerOnly: 'Nur der Inhaber bestätigt Bestandsaktualisierungen.',
+        ownerOnly: 'Nur Inhaber oder Manager bestätigen Bestandsaktualisierungen.',
         hint: (id: string) => `Um zu bestätigen, dass kein anderes Tool Bestände in diesem Kanal pflegt, geben Sie die Kanalkonto-ID ein: ${id}`,
         submit: 'Bestätigen und Bestandsaktualisierungen erlauben',
-        confirmed: 'Bestätigt: Bestandsaktualisierungen an diesen Kanal sind erlaubt. Schalten Sie den Abgleich auf der Seite „Bestand“ ein.',
+        confirmed: 'Bestätigt: Bestandsaktualisierungen an diesen Kanal sind erlaubt. Schalten Sie den Abgleich auf der Seite „Lagerbestand“ ein.',
         revokeHint: (id: string) => `Zum Widerrufen die Kanalkonto-ID eingeben: ${id}`,
         revokeCaption: 'Übernimmt ein anderes Tool hier die Bestände? Bestandsaktualisierungen stoppen sofort, noch nicht gesendete werden verworfen, und wieder einschalten lässt es sich nur mit einer neuen Bestätigung.',
         revoke: 'Bestandsaktualisierungen widerrufen',
@@ -864,7 +866,7 @@ export const de: Messages = {
         shadow: (offers: number, decisions: number) => `${offers} Angebote gefunden; der Schattenmodus hat in den letzten 24 Stunden ${decisions} Entscheidungen getroffen.`,
         shadowWaiting: (offers: number) => `${offers} Angebote gefunden. Der Schattenmodus beginnt zu rechnen, sobald die Angebote Stückkosten, Grenzen und eine Strategie haben — weiter unter Einrichtung: ohne erklärte Stückkosten startet die Engine nicht, auch nicht im Schatten.`,
         live: (offers: number) => `${offers} Angebote im Kanal gefunden.`,
-        unmanaged: (unmanaged: number, writable: number) => `Davon können wir ${writable} ändern; ${unmanaged === 1 ? '1 ist' : `${unmanaged} sind`} für unsere Änderungen nicht offen (bei eBay: Angebote außerhalb der Inventory API, die nur der Inhaber migrieren kann, oder Auktionen, die nie geführt werden).`,
+        unmanaged: (unmanaged: number, writable: number) => `Davon können wir ${writable} ändern; ${unmanaged === 1 ? '1 ist' : `${unmanaged} sind`} für unsere Änderungen nicht offen (bei eBay: Angebote außerhalb der Inventory API, die nur Inhaber oder Manager migrieren können, oder Auktionen, die nie geführt werden).`,
         awaitingAccess: (what: string) => `Es fehlt: ${what}.`,
       },
       discovery: {
@@ -916,8 +918,8 @@ export const de: Messages = {
         // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
         badAnswer: 'Wählen Sie eine der Antworten.',
         accountNotFound: 'Dieses Kanalkonto ist in diesem PriceTrail-Arbeitsbereich nicht verbunden.',
-        answerConflictConfirmed: 'Bestandsaktualisierungen an diesen Kanal sind vom Inhaber bereits bestätigt: Pflegt hier ein anderes Tool die Bestände, überschreiben sich beide gegenseitig. Diese Antwort wird nicht angenommen.',
-        notOwner: 'Nur der Inhaber bestätigt oder widerruft Bestandsaktualisierungen an einen Kanal.',
+        answerConflictConfirmed: 'Bestandsaktualisierungen an diesen Kanal sind bereits bestätigt: Pflegt hier ein anderes Tool die Bestände, überschreiben sich beide gegenseitig. Diese Antwort wird nicht angenommen.',
+        notOwner: 'Nur Inhaber oder Manager bestätigen oder widerrufen Bestandsaktualisierungen an einen Kanal.',
         alreadyConfirmed: 'Bestandsaktualisierungen an diesen Kanal sind bereits bestätigt.',
         notConfirmedToRevoke: 'Bestandsaktualisierungen an diesen Kanal sind nicht bestätigt: es gibt nichts zu widerrufen.',
         confirmationMismatch: 'Der eingegebene Text stimmt nicht mit der Kanalkonto-ID überein. Geben Sie sie genau wie angezeigt ein.',
@@ -950,7 +952,7 @@ export const de: Messages = {
       period: (days: number) => `Letzte ${days} Tage`,
       liveButton: 'Senden der Preise einschalten',
       shadowButton: 'Zurück in den Schatten',
-      mfaHint: 'Ist es eingeschaltet, werden die Preise wirklich an Ihren Shop gesendet. Einschalten kann nur der Inhaber, und es braucht Ihren zweiten Faktor; zurück in den Schatten braucht beides nicht.',
+      mfaHint: 'Ist es eingeschaltet, werden die Preise wirklich an Ihren Shop gesendet. Einschalten können nur Inhaber oder Manager, und es braucht Ihren zweiten Faktor; zurück in den Schatten braucht beides nicht.',
       none: 'In diesem Zeitraum wurde nichts zurückgehalten: entweder sah die Preisautomatik keinen Grund für eine Änderung, oder die Angebote sind noch nicht eingeschaltet.',
       quantity: (n: number) => `${n} Stk.`,
       columns: { offer: 'Angebot', value: 'Wäre gesendet worden', when: 'Zurückgehalten am', why: 'Warum dieser Preis', account: 'Kanalkonto', mode: 'Modus', action: 'Senden der Preise' },
@@ -958,7 +960,7 @@ export const de: Messages = {
         live: 'Das Senden der Preise ist eingeschaltet: die nächsten Preisentscheidungen werden an Ihren Shop gesendet.',
         shadow: 'Zurück im Schatten: an Ihren Shop wird nichts mehr gesendet.',
         mfa: 'Um das Senden der Preise einzuschalten, braucht es Ihren zweiten Faktor. Melden Sie sich damit an und wiederholen Sie es.',
-        notOwner: 'Nur der Inhaber des Kontos schaltet das Senden der Preise ein.',
+        notOwner: 'Das Senden der Preise schalten nur Inhaber oder Manager ein.',
         noShadowRight: 'Nur der Inhaber oder ein Manager schaltet ein Konto zurück in den Schattenmodus.',
         confirmation: 'Der eingetippte Text stimmt nicht mit dem Kontonamen überein. Tippen Sie ihn genau so ab.',
         marketplacesInvisible: (list: string) => `Das Senden der Preise lässt sich nicht einschalten: dieses Konto nennt keine uns bekannte Storefront (${list || 'keiner genannt'}). Verbinden Sie seine Storefronts, sonst bleibt es im Schatten.`,
@@ -1026,7 +1028,7 @@ export const de: Messages = {
       digest: {
         subject: (tenant: string) => `PriceTrail: was die Preisautomatik diese Woche getan hätte (${tenant})`,
         intro: (tenant: string, accounts: number, zone: string) => `Ihr Arbeitsbereich „${tenant}“ betreibt ${accounts} Kanalkonto/-konten im Schattenmodus: die Preisautomatik arbeitet vollständig und sendet nichts an Ihren Shop. Das hätte sie in der letzten Woche (Montag bis Sonntag, ${zone}) getan. Die Seite Schattenmodus zählt die letzten sieben Tage bis jetzt, ihre Zahlen weichen daher von diesem Brief ab.`,
-        cta: 'Wenn diese Zahlen stimmen, schalten Sie in der Konsole das Senden der Preise an Ihren Shop ein — Bildschirm „Schattenmodus“. Das können nur Sie als Inhaber, und es braucht Ihren zweiten Faktor.',
+        cta: 'Wenn diese Zahlen stimmen, schalten Sie in der Konsole das Senden der Preise an Ihren Shop ein — Bildschirm „Schattenmodus“. Das können Inhaber oder Manager, mit zweitem Faktor.',
         previewIntro: (tenant: string, accounts: number) => `Ihr Arbeitsbereich „${tenant}“ betreibt ${accounts} Kanalkonto/-konten im Schattenmodus: die Engine arbeitet vollständig und sendet nichts an Ihren Shop. Das hätte sie in den letzten sieben Tagen getan.`,
         previewTitle: 'Wochen-E-Mail — Vorschau',
         previewSynthetic: 'Demo: synthetische Daten. Diese E-Mail erhält ein Verkäufer im Schattenmodus jeden Montag; die echte umfasst die Vorwoche, Montag bis Sonntag in Ihrer Zeitzone.',
@@ -1084,8 +1086,8 @@ export const de: Messages = {
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, etwa ${Number(d.steps)} Schritte zu höchstens ${n.percentBp(Number(d.stepLimitBp))}, höchstens ein Schritt alle ${Number(d.paceMinutes)} Minuten.`,
         },
         PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
-        QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'Bestandsänderungen eines Angebots sind blockiert: der Kanal hat eine Bestandsänderung abgelehnt, das Angebot wartet auf eine Person', step: 'Öffnen Sie in der Konsole die Seite „Bestand“, prüfen Sie das Angebot und die Antwort des Kanals und heben Sie die Blockade auf.' },
-        QUANTITY_WRITE_NOT_SENT: { what: 'Eine Bestandsänderung wurde nicht an den Kanal gesendet, der Kanal zeigt womöglich einen nicht beabsichtigten Bestand', step: 'Öffnen Sie in der Konsole die Seite „Bestand“ und prüfen Sie dieses Angebot: der Grund steht bei der Änderung. Wurden Bestandsaktualisierungen bewusst widerrufen, ist nichts weiter zu tun.' },
+        QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'Bestandsänderungen eines Angebots sind blockiert: der Kanal hat eine Bestandsänderung abgelehnt, das Angebot wartet auf eine Person', step: 'Öffnen Sie in der Konsole die Seite „Lagerbestand“, prüfen Sie das Angebot und die Antwort des Kanals und heben Sie die Blockade auf.' },
+        QUANTITY_WRITE_NOT_SENT: { what: 'Eine Bestandsänderung wurde nicht an den Kanal gesendet, der Kanal zeigt womöglich einen nicht beabsichtigten Bestand', step: 'Öffnen Sie in der Konsole die Seite „Lagerbestand“ und prüfen Sie dieses Angebot: der Grund steht bei der Änderung. Wurden Bestandsaktualisierungen bewusst widerrufen, ist nichts weiter zu tun.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'Die Angebotssuche hat ihre Seitengrenze erreicht, bevor der Kanal alle Angebote geliefert hat', step: 'Angebote jenseits der Grenze sind noch nicht im Katalog. Melden Sie sich bei uns mit dem Ereigniscode — die Grenze wird für Ihren Katalog angepasst.' },
         INBOUND_SOURCE_SILENT: { what: 'Ihr Bestandssystem hat seit einem Tag nach der Bestätigung einer versandten Bestellung keinen Bestand gesendet — wir ziehen die versandten Stücke weiter ab, damit die Kanäle nicht zeigen, was schon weg ist', step: 'Prüfen Sie, ob Ihr System den Bestand noch über die Inbound-API sendet. Sobald ein Bestand nach der Bestellbestätigung eintrifft, endet der Abzug von selbst.' },
         ORDER_LINES_FIRST_WINDOW_CAPPED: { what: 'das erste Lesen der Bestellungen eines neu verbundenen Kontos reichte nicht bis zum Zeitpunkt der Verbindung zurück — gelesen wurde nur der letzte Tag', step: 'Frühere Bestellungen sollten bereits in Ihrer Bestandsquelle enthalten sein. Hat eine ältere Bestellung den Bestand verändert, korrigieren Sie ihn in der Quelle; wiederholt sich der Hinweis, melden Sie sich mit dem Ereigniscode.' },
@@ -1620,9 +1622,9 @@ export const de: Messages = {
       intro: 'Bildschirme und E-Mails dieses Arbeitsbereichs verwenden diese Sprache, Zeiten werden in dieser Zeitzone gezeigt. Im System selbst werden alle Zeiten in UTC geführt.',
       language: 'Sprache', timeZone: 'Zeitzone',
       timeZoneHint: 'Zeiten auf allen Seiten und in allen E-Mails dieses Arbeitsbereichs werden in dieser Zeitzone gezeigt.', timeZoneFromStorefront: (zone: string) => `Von Ihrer ersten Storefront — ${zone}`,
-      save: 'Speichern', saved: 'Gespeichert.', readOnly: 'Nur der Inhaber dieses Arbeitsbereichs kann diese Einstellungen ändern.',
+      save: 'Speichern', saved: 'Gespeichert.', readOnly: 'Nur Inhaber oder Manager dieses Arbeitsbereichs können diese Einstellungen ändern.',
       timeZoneDefault: (zone: string) => `Jetzt ${zone} — die Vorgabe Ihrer ersten Storefront; wählen Sie eine Zeitzone, um eine eigene festzulegen.`,
-      invalid: 'Diese Einstellungen lassen sich nicht speichern: Wählen Sie Englisch oder Deutsch und eine Zeitzone aus der Liste.',
+      invalid: 'Diese Einstellungen lassen sich nicht speichern: Wählen Sie eine Sprache und eine Zeitzone aus der Liste.',
       timeZoneUnknown: 'Diese Zeitzone ist unbekannt. Wählen Sie eine aus der Liste.',
     },
     compliance: {
@@ -1699,7 +1701,7 @@ export const de: Messages = {
       kinds: {
         HUMAN: { title: 'Stopp durch eine Person', holds: 'Alle Preise', setBy: 'Inhaber oder Manager, mit Notiz', release: 'Inhaber oder Manager, mit Notiz; der gesamte Arbeitsbereich — mit zweitem Faktor' },
         SYSTEM_HALT: { title: 'Anhalten der Storefront', holds: 'Nur Preise aus Wettbewerbsdaten', setBy: 'System: fehlerhafte Eingangsdaten', release: 'Frische Stichprobe, wo der Kanal sie erlaubt, sonst eine Person' },
-        CHANNEL_DISTRUST: { title: 'Misstrauen gegenüber dem Kanal', holds: 'Alle Preise und die Kanal-Preisschwelle', setBy: 'System: der Kanal ändert unsere Zahlen', release: 'Nur eine Person: der Inhaber, zweiter Faktor, Notiz' },
+        CHANNEL_DISTRUST: { title: 'Misstrauen gegenüber dem Kanal', holds: 'Alle Preise und die Kanal-Preisschwelle', setBy: 'System: der Kanal ändert unsere Zahlen', release: 'Nur eine Person: Inhaber oder Manager, zweiter Faktor, Notiz' },
       },
       running: 'Läuft', stopped: 'Gestoppt', stoppedAt: (when: string) => `gestoppt ${when}`, coveredBy: (label: string, since: string) => `Gestoppt durch: ${label} seit ${since}`,
       stopTenant: 'Gesamten Arbeitsbereich stoppen', stopTarget: 'Stoppen', resume: 'Fortsetzen', release: 'Aufheben',
@@ -1720,7 +1722,7 @@ export const de: Messages = {
       roleChanged: (member: string | null, from: string, to: string) => (member ? `${member}: ${from} → ${to}` : `${from} → ${to}`),
       system: 'System',
       confirmTitle: (label: string) => `Alle Preisänderungen stoppen: ${label}?`,
-      confirmTenant: (impact: string) => `${impact}. Der Stopp gilt auch für später verbundene Kanalkonten. Nur der Inhaber kann ihn fortsetzen.`,
+      confirmTenant: (impact: string) => `${impact}. Der Stopp gilt auch für später verbundene Kanalkonten. Inhaber oder Manager können ihn mit zweitem Faktor fortsetzen.`,
       confirmChannel: (impact: string) => `${impact}. Inhaber oder Manager können ihn mit Notiz fortsetzen.`,
     },
   },

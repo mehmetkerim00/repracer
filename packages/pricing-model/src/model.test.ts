@@ -177,7 +177,7 @@ test('Р-69, Р-70, Р-73: stop coverage, roles and dangerous changes', () => {
   assert.equal(stopCovers({ scope: 'TENANT', channelAccountId: null, marketplace: null }, 'any-account', 'de'), true);
   assert.equal(stopCovers({ scope: 'STOREFRONT', channelAccountId: 'a', marketplace: 'de' }, 'a', 'at'), false);
   assert.equal(stopCovers({ scope: 'CHANNEL_ACCOUNT', channelAccountId: 'a', marketplace: null }, 'a', 'at'), true);
-  assert.deepEqual([can('OWNER', 'RESUME_TENANT_STOP'), can('OPERATOR', 'RESUME_TENANT_STOP'), can('OPERATOR', 'STOP_PRICING'), can('VIEWER', 'STOP_PRICING')], [true, false, true, false]);
+  assert.deepEqual([can('OWNER', 'RESUME_TENANT_STOP'), can('OPERATOR', 'RESUME_TENANT_STOP'), can('OPERATOR', 'STOP_PRICING'), can('GUEST', 'STOP_PRICING')], [true, false, true, false]);
   // OQ-129: администратор возобновляет тенант, менеджер цен останавливает, менеджер остатков — нет
   assert.deepEqual([can('ADMIN', 'RESUME_TENANT_STOP'), can('PRICING_MANAGER', 'STOP_PRICING'), can('PRICING_MANAGER', 'RESUME_TENANT_STOP'), can('INVENTORY_MANAGER', 'STOP_PRICING')], [true, true, false, false]);
   assert.equal(boundDeviationBp(3830, 2500), 5320);

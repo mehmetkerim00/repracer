@@ -87,11 +87,11 @@
   },
   "steps": [
     {
-      "id": "viewer-cannot-stop",
+      "id": "inventory-manager-cannot-stop",
       "kind": "pricingStop",
       "op": "stop",
       "scope": "TENANT",
-      "membershipId": "membership-viewer",
+      "membershipId": "membership-inventory-manager",
       "note": "Synthetic stand check of the kill switch",
       "expect": {
         "status": "FORBIDDEN"

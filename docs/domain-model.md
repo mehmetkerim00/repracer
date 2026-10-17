@@ -328,7 +328,7 @@ AuditEvent  → любая сущность своего тенанта (append-
 | Поле | Описание |
 |---|---|
 | `id`, `tenant_id`, `user_id` | |
-| `role` | `OWNER \| ADMIN \| OPERATOR \| PRICING_MANAGER \| INVENTORY_MANAGER \| VIEWER`; `OPERATOR` — остановка и возобновление цен (кроме остановки тенанта), снятие системной остановки, включение репрайсинга [OQ-125] |
+| `role` | `OWNER \| MANAGER \| GUEST \| ADMIN \| OPERATOR \| PRICING_MANAGER \| INVENTORY_MANAGER` (шаг 98, Р-222: для людей — Owner и Manager; VIEWER удалён; GUEST — техническая роль гостя демо, только у гостевого членства); `OPERATOR` — остановка и возобновление цен (кроме остановки тенанта), снятие системной остановки, включение репрайсинга [OQ-125] |
 | `status` | `INVITED \| ACTIVE \| REVOKED` |
 | `invited_by`, `created_at`, `revoked_at` | |
 

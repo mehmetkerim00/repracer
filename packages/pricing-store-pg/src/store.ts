@@ -1630,11 +1630,11 @@ export class PgPricingStore implements PricingStore {
    * Шаг 69 (K1, K4): язык и пояс показа тенанта. Язык — `tenant.locale` (Р-161), пояс — заданный тенантом или пояс первой его витрины,
    * иначе UTC (`tenant_data.display_time_zone`, 0173). Только показ: внутри системы времена в UTC
    */
-  async tenantDisplay(tenantId: string): Promise<{ locale: 'de' | 'en'; timeZone: string; timeZoneSet: boolean }> {
+  async tenantDisplay(tenantId: string): Promise<{ locale: 'de' | 'en' | 'es' | 'fr'; timeZone: string; timeZoneSet: boolean }> {
     return inTenant(this.admin('tenantDisplay'), tenantId, async (tx) => {
       const { rows: [r] } = await tx.query(
         `SELECT t.locale, t.time_zone, tenant_data.display_time_zone(t.tenant_id) AS tz FROM tenant_data.tenant t WHERE t.tenant_id = $1`, [tenantId]);
-      return { locale: r?.locale === 'en' ? 'en' : 'de', timeZone: String(r?.tz ?? 'UTC'), timeZoneSet: r?.time_zone !== null && r?.time_zone !== undefined };
+      return { locale: (['en', 'es', 'fr'] as const).find((l) => l === r?.locale) ?? 'de', timeZone: String(r?.tz ?? 'UTC'), timeZoneSet: r?.time_zone !== null && r?.time_zone !== undefined };
     });
   }
 
@@ -1642,7 +1642,7 @@ export class PgPricingStore implements PricingStore {
    * Шаг 69 (K1, K4): язык и пояс показа меняет администратор тенанта — административной записью с автором и аудитом (страж 0066,
    * действие MANAGE_TENANT). `timeZone: null` — вернуть пояс по умолчанию (пояс витрины). Неизвестный пояс отклоняет база (0173)
    */
-  async setTenantDisplay(tenantId: string, change: { locale?: 'de' | 'en'; timeZone?: string | null }, actor: { userId: string; mfa: boolean }):
+  async setTenantDisplay(tenantId: string, change: { locale?: 'de' | 'en' | 'es' | 'fr'; timeZone?: string | null }, actor: { userId: string; mfa: boolean }):
     Promise<{ status: 'SAVED' } | { status: 'TIME_ZONE_UNKNOWN' | 'LOCALE_UNKNOWN' | 'FORBIDDEN' }> {
     try {
       await inTenant(this.admin('setTenantDisplay'), tenantId, async (tx) => {
@@ -2774,8 +2774,8 @@ export class PgPricingStore implements PricingStore {
    * транзакции. Значения идут в текст литералами, поэтому идентификаторы и время проверяются здесь же. До Р-182 список из
    * 50 тенантов стоил 452 обращения.
    */
-  async worldSummaries(tenantIds: readonly string[], now: Instant): Promise<Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en'; timeZone: string }>> {
-    const out = new Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en'; timeZone: string }>();
+  async worldSummaries(tenantIds: readonly string[], now: Instant): Promise<Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en' | 'es' | 'fr'; timeZone: string }>> {
+    const out = new Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en' | 'es' | 'fr'; timeZone: string }>();
     if (tenantIds.length === 0) return out;
     if (!tenantIds.every((t) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t))) throw new Error('tenant ids must be UUIDs');
     const at = new Date(now);

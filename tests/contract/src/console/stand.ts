@@ -44,7 +44,7 @@ export const STAND_AUDIENCE = 'repracer-console-stand';
  * адреса и журнал аудита не меняются — меняется только показ
  */
 const STAND_NAMES: Readonly<Record<string, string>> = {
-  'membership-owner': 'Alex Porter', 'membership-manager': 'Jamie Lee', 'membership-viewer': 'Riley Chen',
+  'membership-owner': 'Alex Porter', 'membership-manager': 'Jamie Lee', 'membership-inventory-manager': 'Riley Chen',
   'membership-admin': 'Sam Ortiz', 'membership-operator': 'Casey Nguyen', 'membership-pricing-manager': 'Morgan Diaz',
 };
 
@@ -132,7 +132,7 @@ export interface LiveWorld {
    * один тенант на всех гостей публичного демо, и язык у него — язык ГОСТЯ (кука, переключатель), а пояс — демо
    * (`followsRequestLocale`)
    */
-  display?(): Promise<{ locale: 'de' | 'en'; timeZone: string; timeZoneSet?: boolean; followsRequestLocale?: boolean }>;
+  display?(): Promise<{ locale: 'de' | 'en' | 'es' | 'fr'; timeZone: string; timeZoneSet?: boolean; followsRequestLocale?: boolean }>;
 }
 
 function accountsOf(scenario: Scenario): StandAccount[] {

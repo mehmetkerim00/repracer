@@ -53,19 +53,21 @@ export function stopCovers(stop: Pick<StopRef, 'scope' | 'channelAccountId' | 'm
 // Роли [OQ-125, шаг 12; OQ-129, шаг 13]
 // ---------------------------------------------------------------------------
 
-export const MEMBER_ROLES = ['OWNER', 'MANAGER', 'VIEWER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER'] as const;
+export const MEMBER_ROLES = ['OWNER', 'MANAGER', 'GUEST', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER', 'INVENTORY_MANAGER'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 
 /**
  * Шаг 88 [Р-213]: у человека в рабочем пространстве ровно одна роль (одно членство на тенант и пользователя — база, 0002, 0185).
- * Видимых ролей три: владелец — всё, менеджер — ежедневная работа, наблюдатель — только чтение. Прежние роли не удалены: их
+ * Шаг 98 [Р-222] (решение владельца): ролей для людей две — владелец и менеджер, права одинаковые во всём, кроме денег (биллинг — только
+ * владелец, ADR-0057). Наблюдателя нет. GUEST — не роль продукта: техническая роль гостя публичного демо [Р-160], только чтение; людям не
+ * назначается и не показывается (база: GUEST — тогда и только тогда, когда членство гостевое, 0191). Прежние роли не удалены: их
  * назначения работают, а консоль показывает администратора и оператора только с флагом развёртывания «расширенные роли»
  * (`REPRACER_EXTENDED_ROLES=on`); менеджер цен и менеджер остатков — роли прежних назначений, новых им не предлагается.
  */
-export const VISIBLE_ROLES: readonly MemberRole[] = ['OWNER', 'MANAGER', 'VIEWER'];
+export const VISIBLE_ROLES: readonly MemberRole[] = ['OWNER', 'MANAGER'];
 export const EXTENDED_ROLES: readonly MemberRole[] = [...VISIBLE_ROLES, 'ADMIN', 'OPERATOR'];
 
-/** Роли, которые консоль предлагает (вход стенда, описания ролей): три видимые или пять с флагом расширенных ролей */
+/** Роли, которые консоль предлагает (вход стенда, описания ролей): две видимые или четыре с флагом расширенных ролей */
 export function offeredRoles(extended: boolean): readonly MemberRole[] {
   return extended ? EXTENDED_ROLES : VISIBLE_ROLES;
 }
@@ -74,12 +76,13 @@ export type PricingAction = 'VIEW_PRICING' | 'STOP_PRICING' | 'RESUME_TENANT_STO
   | 'RETURN_TO_SHADOW' | 'MANAGE_PRICING' | 'MANAGE_CATALOG' | 'MANAGE_TENANT' | 'GIVE_MIGRATION_CONSENT';
 
 /**
- * Права на цены (шаг 13, OQ-129; шаг 88, Р-213). Стоп-кран — у каждого, кто отвечает за цены. Менеджер (MANAGER) — ежедневная
- * работа: цены, границы, стратегии, остатки, импорт себестоимости, массовые операции, стоп-кран и перевод аккаунта обратно в тень
- * (снятие недоверия каналу — владельцу, шаг 89); управление людьми и
- * аккаунтами каналов (MANAGE_TENANT) — у владельца (и прежнего администратора). Только владельцу база отдаёт и то, чего в матрице
- * нет отдельной строкой: перевод в бой [Р-170], подтверждение и отзыв записи количества [Р-202]. Менеджер остатков и наблюдатель
- * только смотрят на цены. Матрица дублирована в БД (`security.pricing_permission`, 0185) — совпадение проверяет тест.
+ * Права на цены (шаг 13, OQ-129; шаг 88, Р-213; шаг 98, Р-222). Стоп-кран — у каждого, кто отвечает за цены. Менеджер (MANAGER) с шага 98
+ * держит ВСЁ, что держит владелец: цены, границы, стратегии, остатки, массовые операции, стоп-кран, недоверие каналу, люди и аккаунты
+ * каналов (MANAGE_TENANT), согласие на миграцию eBay; база отдаёт обоим и то, чего в матрице нет отдельной строкой: перевод в бой
+ * [Р-170], подтверждение и отзыв записи количества [Р-202], перепривязку входа [Р-98]. Различие одно и не в матрице: роль и вход
+ * ВЛАДЕЛЬЦА выдаёт, снимает и перепривязывает только владелец (иначе «биллинг — только Owner» обходился бы одним действием). Второй
+ * фактор и заметки — у обоих. Менеджер остатков и гость демо только смотрят на цены. Матрица дублирована в БД
+ * (`security.pricing_permission`, 0191) — совпадение проверяет тест.
  */
 export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly MemberRole[]>> = {
   VIEW_PRICING: MEMBER_ROLES,
@@ -87,18 +90,17 @@ export const PRICING_PERMISSIONS: Readonly<Record<PricingAction, readonly Member
   RESUME_TENANT_STOP: ['OWNER', 'MANAGER', 'ADMIN'],
   RESUME_CHANNEL_STOP: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
   RELEASE_CHANNEL_HALT: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
-  // Р-118: канал искажает наши цены — снять недоверие значит снова поверить каналу. Шаг 89 (ADR-0054, решение владельца): только
-  // владелец (и прежний администратор), не менеджер
-  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'ADMIN'],
+  // Р-118: канал искажает наши цены — снять недоверие значит снова поверить каналу. Шаг 89 — только владелец; шаг 98 [Р-222] — и менеджер
+  RELEASE_CHANNEL_DISTRUST: ['OWNER', 'MANAGER', 'ADMIN'],
   ENABLE_REPRICING: ['OWNER', 'MANAGER', 'ADMIN', 'OPERATOR', 'PRICING_MANAGER'],
-  // Шаг 89 (ADR-0054, решение владельца): обратно в тень — безопасная сторона, и у менеджера; в бой — только владелец, свой страж базы [Р-170]
+  // Шаг 89 (ADR-0054): обратно в тень — безопасная сторона; в бой — свой страж базы [Р-170] (с шага 98 — владелец или менеджер)
   RETURN_TO_SHADOW: ['OWNER', 'MANAGER', 'ADMIN'],
   // Шаг 18 [Р-100]: административная запись проверяет роль, а не только членство (security.admin_write_action, 0068)
   MANAGE_PRICING: ['OWNER', 'MANAGER', 'ADMIN', 'PRICING_MANAGER'],
   MANAGE_CATALOG: ['OWNER', 'MANAGER', 'ADMIN', 'INVENTORY_MANAGER'],
-  MANAGE_TENANT: ['OWNER', 'ADMIN'],
-  // Р-101: согласие на необратимую миграцию eBay — только владелец (и только от своего имени, со вторым фактором — в БД)
-  GIVE_MIGRATION_CONSENT: ['OWNER'],
+  MANAGE_TENANT: ['OWNER', 'MANAGER', 'ADMIN'],
+  // Р-101: согласие на необратимую миграцию eBay — от своего имени, со вторым фактором (в БД); шаг 98 [Р-222] — владелец или менеджер
+  GIVE_MIGRATION_CONSENT: ['OWNER', 'MANAGER'],
 };
 
 export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_PRICING', 'RESUME_TENANT_STOP', 'RESUME_CHANNEL_STOP', 'RELEASE_CHANNEL_HALT', 'RELEASE_CHANNEL_DISTRUST', 'ENABLE_REPRICING',
@@ -106,6 +108,16 @@ export const PRICING_ACTIONS: readonly PricingAction[] = ['VIEW_PRICING', 'STOP_
 
 export function can(role: MemberRole, action: PricingAction): boolean {
   return PRICING_PERMISSIONS[action].includes(role);
+}
+
+/**
+ * Шаг 98 [Р-222]: действия, которые база отдаёт владельцу и менеджеру без отдельной строки матрицы, — перевод аккаунта в бой [Р-170],
+ * подтверждение и отзыв записи количества [Р-202], перепривязка входа [Р-98] (стражи 0191). Одно место в коде: экраны не предлагают
+ * формы тем, кому база откажет, и хранилища в памяти отказывают так же
+ */
+export const OWNER_LEVEL_ROLES: readonly MemberRole[] = ['OWNER', 'MANAGER'];
+export function holdsOwnerActions(role: string | null | undefined): boolean {
+  return (OWNER_LEVEL_ROLES as readonly string[]).includes(role ?? '');
 }
 
 export function resumeActionFor(scope: StopScope): PricingAction {

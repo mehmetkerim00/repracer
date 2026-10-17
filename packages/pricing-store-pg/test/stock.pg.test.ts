@@ -197,10 +197,11 @@ test('Р-6: правило публикуемого количества в SQL 
   assert.deepEqual([sent.get('syn-prod-1'), sent.get('syn-prod-2')], [0, 5], 'записи в канал (правило в SQL): те же порог и потолок');
 });
 
-test('Р-97, Р-100: остатки ведёт человек с правом на каталог — зритель получает отказ, каждая запись остатков в аудите', async () => {
-  const [viewer] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'VIEWER'`)).rows);
-  assert.ok(viewer, 'в мире посева есть зритель');
-  const actor = { membershipId: viewer.membership_id as string, userId: viewer.user_id as string, mfa: true };
+test('Р-97, Р-100: остатки ведёт человек с правом на каталог — оператор (права на каталог нет) получает отказ, каждая запись остатков в аудите', async () => {
+  // Шаг 98 [Р-222]: наблюдателя нет — участник без права на каталог в мире посева — оператор
+  const [operator] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'OPERATOR'`)).rows);
+  assert.ok(operator, 'в мире посева есть оператор');
+  const actor = { membershipId: operator.membership_id as string, userId: operator.user_id as string, mfa: true };
   assert.deepEqual(await store.createStockSource(world.tenantId, { mode: 'INTERNAL_POOL', name: 'x' }, actor), { status: 'FORBIDDEN' });
   assert.deepEqual(await store.enableStockSync(world.tenantId, world.ids.dbId(KAUFLAND), { bufferUnits: 1, maxQuantity: null, minQuantityToList: 0, acknowledgeSideEffects: false }, actor), { status: 'FORBIDDEN' });
   // Аудит: каждая административная запись остатков — событием [Р-97]
@@ -631,9 +632,9 @@ test('step 59 (Р-199): a returned order line becomes a return the person puts b
   assert.deepEqual([byLine('a').status, byLine('a').quantity, byLine('b').status, byLine('c').status], ['PENDING', 2, 'PENDING', 'INFO_ONLY']);
   assert.equal(list[0]!.status, 'PENDING', 'pending returns come first');
 
-  // Зритель не решает — права у базы
-  const [viewer] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'VIEWER'`)).rows);
-  assert.deepEqual(await store.decideReturn(world.tenantId, byLine('a').orderReturnId, { accept: true, note: null }, { membershipId: viewer.membership_id, userId: viewer.user_id, mfa: true }),
+  // Участник без права на каталог (оператор) не решает — права у базы
+  const [operator] = await inTenant(admin, world.tenantId, async (tx) => (await tx.query(`SELECT membership_id, user_id FROM tenant_data.membership WHERE role = 'OPERATOR'`)).rows);
+  assert.deepEqual(await store.decideReturn(world.tenantId, byLine('a').orderReturnId, { accept: true, note: null }, { membershipId: operator.membership_id, userId: operator.user_id, mfa: true }),
     { status: 'FORBIDDEN' });
   // Владелец принимает на склад: пул +2 движением RETURN с автором, событие в аудите
   const onHand = (await stockOf('syn-prod-1'))[0];

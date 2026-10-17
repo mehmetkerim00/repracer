@@ -99,8 +99,8 @@ async function html(module: string, component: string, props: Record<string, unk
 test('Р-78: no password and no session — every request carries a provider token; missing, forged, expired, foreign or unlinked tokens are refused alike', async () => {
   assert.equal((await handle({ method: 'GET', url: '/api/worlds', body: undefined })).status, 401);
   const session = (await handle({ method: 'GET', url: '/api/session?locale=en', body: undefined })).body as SessionView;
-  // Шаг 88 [Р-213]: вход предлагает три видимые роли; остальные — за флагом расширенных ролей (тест шага 88 ниже)
-  assert.deepEqual([session.user, session.simulator?.map((a) => a.role)], [null, ['OWNER', 'MANAGER', 'VIEWER']]);
+  // Шаг 98 [Р-222]: вход предлагает две роли для людей; остальные — за флагом расширенных ролей (тест шага 88 ниже)
+  assert.deepEqual([session.user, session.simulator?.map((a) => a.role)], [null, ['OWNER', 'MANAGER']]);
 
   const owner = await login('OWNER');
   // Шаг 93: сессия называет человека именем от поставщика (утверждение `name`), адрес остаётся рядом
@@ -128,11 +128,12 @@ test('Р-78: no password and no session — every request carries a provider tok
 });
 
 test('stand API serves every screen of every world in German and English and refuses unknown addresses', async () => {
-  const auth = await login('VIEWER');
+  // Шаг 98: наблюдателя нет — экраны читает менеджер остатков (у прежней роли только чтение цен и каталог)
+  const auth = await login('INVENTORY_MANAGER');
   const list = await get<WorldSummary[]>(auth, '/api/worlds');
   assert.deepEqual(list.map((w) => w.id).sort(), [...WORLDS].sort());
   // OQ-204: `every` истинно на пустом списке — сперва утверждается, что списку есть что проверять
-  assert.ok(list.length > 0 && list.every((w) => w.role === 'Viewer'), `миры зрителя: ${JSON.stringify(list.map((w) => w.role))}`);
+  assert.ok(list.length > 0 && list.every((w) => w.role === 'Inventory manager'), `миры менеджера остатков: ${JSON.stringify(list.map((w) => w.role))}`);
   for (const locale of ['de', 'en'] as const) {
     for (const w of list) {
       const q = `?locale=${locale}`;
@@ -250,7 +251,7 @@ test('screens render from the dictionary: sign-in, products with the effective f
   assert.ok(!loginView.includes('type="password"'), 'no password field (Р-78)');
 });
 
-test('step 88 (Р-213): sign-in offers three roles, five with the extended roles flag; earlier roles still sign in; the manager runs the stop crane but not people or channel accounts; a role change is in the audit log', async () => {
+test('step 88 (Р-213), step 98 (Р-222): sign-in offers two roles, four with the extended roles flag; earlier roles still sign in; the manager runs the stop crane but not people or channel accounts; a role change is in the audit log', async () => {
   const id = 'kaufland/pipeline/happy-path';
   const identity = {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(worlds) }),
@@ -258,36 +259,39 @@ test('step 88 (Р-213): sign-in offers three roles, five with the extended roles
   };
   const extended = createStandApi(worlds, identity, { extendedRoles: true });
   const offered = ((await extended({ method: 'GET', url: '/api/session?locale=en', body: undefined })).body as SessionView).simulator?.map((a) => [a.role, a.label]);
-  assert.deepEqual(offered, [['OWNER', 'Owner'], ['MANAGER', 'Manager'], ['VIEWER', 'Viewer'], ['ADMIN', 'Admin'], ['OPERATOR', 'Operator']]);
+  assert.deepEqual(offered, [['OWNER', 'Owner'], ['MANAGER', 'Manager'], ['ADMIN', 'Admin'], ['OPERATOR', 'Operator']]);
   // Прежние назначения работают и без флага: роль, которой нет в списке входа, входит и видит свои права
   const legacy = await login('PRICING_MANAGER');
   assert.equal((await get<StopView>(legacy, api(id, 'stop'))).permissions.canStop, true);
 
   const manager = await login('MANAGER');
   const stop = await get<StopView>(manager, api(id, 'stop'));
-  // Шаг 89 (ADR-0054, решение владельца): снова поверить каналу — только владелец; стоп-кран и возобновление — у менеджера
-  assert.deepEqual([stop.permissions.canStop, stop.permissions.canResumeTenant, stop.permissions.canReleaseDistrust], [true, true, false], 'the manager owns the stop crane, not the channel distrust');
-  assert.equal((await get<ConnectionsView>(manager, api(id, 'connections'))).canManage, false, 'channel accounts stay with the owner');
+  // Шаг 98 [Р-222]: менеджер держит всё, что владелец, — стоп-кран, снятие недоверия каналу, аккаунты каналов
+  assert.deepEqual([stop.permissions.canStop, stop.permissions.canResumeTenant, stop.permissions.canReleaseDistrust], [true, true, true], 'the manager owns the stop crane and the channel distrust');
+  assert.equal((await get<ConnectionsView>(manager, api(id, 'connections'))).canManage, true, 'the manager manages channel accounts');
   const target = { kind: 'TENANT' };
   assert.equal((await call(manager, 'POST', api(id, 'stop'), { target, note: 'Manager pulls the stop crane', confirmed: true })).status, 200);
   const stopId = (await get<StopView>(manager, api(id, 'stop'))).stops.active[0]!.stopId;
   assert.equal((await call(manager, 'POST', api(id, 'stops', stopId, 'resume'), { note: 'Manager checked and resumes', confirmed: true })).status, 200);
 
-  // Смена роли — событие журнала: кто, когда, прежняя → новая. Менеджер ролей не меняет, без второго фактора не меняет никто
+  // Смена роли — событие журнала: кто, когда, прежняя → новая. Оператор ролей не меняет, без второго фактора не меняет никто; менеджер
+  // меняет (шаг 98), но роль владельца не выдаёт
   const live = liveOf(id);
-  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'MANAGER', { userId: 'user-manager', mfa: true }), { status: 'FORBIDDEN' });
-  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'MANAGER', { userId: 'user-owner', mfa: false }), { status: 'MFA_REQUIRED' });
-  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'MANAGER', { userId: 'user-owner', mfa: true }), { status: 'CHANGED' });
-  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, 'membership-viewer', 'VIEWER', { userId: 'user-owner', mfa: true }), { status: 'CHANGED' });
+  const member = 'membership-inventory-manager';
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, member, 'MANAGER', { userId: 'user-operator', mfa: true }), { status: 'FORBIDDEN' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, member, 'MANAGER', { userId: 'user-owner', mfa: false }), { status: 'MFA_REQUIRED' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, member, 'OWNER', { userId: 'user-manager', mfa: true }), { status: 'FORBIDDEN' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, member, 'MANAGER', { userId: 'user-manager', mfa: true }), { status: 'CHANGED' });
+  assert.deepEqual(await live.store.changeMemberRole(live.tenantId, member, 'INVENTORY_MANAGER', { userId: 'user-owner', mfa: true }), { status: 'CHANGED' });
   const owner = await login('OWNER');
   const audit = (await get<StopView>(owner, api(id, 'stop'))).audit.filter((a) => a.action === 'Role changed');
-  assert.deepEqual(audit.map((a) => [a.actor, a.scope]), [['Owner (you)', 'Manager → Viewer'], ['Owner (you)', 'Viewer → Manager']], 'newest first, author and old → new');
+  assert.deepEqual(audit.map((a) => [a.actor, a.scope]), [['Owner (you)', 'Manager → Inventory manager'], ['Manager', 'Inventory manager → Manager']], 'newest first, author and old → new');
 });
 
-test('Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operator and the pricing manager cannot resume a tenant stop, the admin can; every step is in the audit log', async () => {
+test('Р-69, Р-76, OQ-129: an inventory manager cannot stop; an operator stops; the operator and the pricing manager cannot resume a tenant stop, the admin can; every step is in the audit log', async () => {
   const id = 'kaufland/pipeline/happy-path';
   const target = { kind: 'TENANT' };
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   assert.equal((await get<StopView>(viewer, api(id, 'stop'))).permissions.canStop, false);
   assert.equal((await call(viewer, 'POST', api(id, 'stop'), { target, note: 'Synthetic kill switch', confirmed: true })).status, 403);
 
@@ -324,9 +328,9 @@ test('Р-69, Р-76, OQ-129: a viewer cannot stop; an operator stops; the operato
   ]);
 });
 
-test('Р-52: a system halt is released by an operator with a note; a viewer may not', async () => {
+test('Р-52: a system halt is released by an operator with a note; an inventory manager may not', async () => {
   const id = 'kaufland/pipeline/mass-shift-halt';
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const halt = (await get<StopView>(viewer, api(id, 'stop'))).halts.active[0];
   assert.ok(halt, 'the world has an active halt');
   assert.equal((await call(viewer, 'POST', api(id, 'halts', halt.haltId, 'release'), { note: 'Synthetic halt release', confirmed: true })).status, 403);
@@ -353,14 +357,14 @@ test('Р-131, G: without the declared cost the screen shows a requirement, not a
   assert.equal(dialog.includes('Trotzdem aktivieren'), false, dialog);
   const acknowledged = (await call(operator, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).body as EnableResult;
   assert.deepEqual([acknowledged.enabled, acknowledged.problems.map((p) => p.code)], [false, ['COST_REQUIRED']], 'acknowledging a warning does not declare a cost');
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   assert.equal((await call(viewer, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).status, 403);
 });
 
 test('Р-134, Р-135 (шаг 28): импорт себестоимости — предпросмотр до применения, несопоставленное перечислено, применение со вторым фактором', async () => {
   const id = 'kaufland/pipeline/happy-path';
   const owner = await login('OWNER', 'de');
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const products = await get<ProductListView>(owner, api(id, 'products'));
   const unit = products.rows[0]!.unit.externalUnitId;
   // Выгрузка продавца: разделитель «;», запятая в числе, одна строка про несуществующий оффер и одна без себестоимости
@@ -371,7 +375,7 @@ test('Р-134, Р-135 (шаг 28): импорт себестоимости — п
     `${unit};;EUR;15`,   // тот же оффер, но без себестоимости: строка не применяется и названа отдельно
   ].join('\n');
   const file = { fileName: 'kosten.csv', content: Buffer.from(csv, 'utf8').toString('base64') };
-  assert.equal((await call(viewer, 'POST', api(id, 'cost-import', 'plan'), file)).status, 403, 'у зрителя импорта нет');
+  assert.equal((await call(viewer, 'POST', api(id, 'cost-import', 'plan'), file)).status, 403, 'у менеджера остатков импорта себестоимости нет');
   const planned = await call(owner, 'POST', api(id, 'cost-import', 'plan'), file);
   assert.equal(planned.status, 200, JSON.stringify(planned.body));
   const view = planned.body as CostImportView;
@@ -467,7 +471,7 @@ test('finding 6: the sign-in mode of the stand is explicit — a partial OIDC co
 test('step 21: a strategy is saved only with the token of the preview shown; bounds are applied only with the token of the difference screen and a second factor for several offers', async () => {
   const id = 'kaufland/pipeline/happy-path';
   const owner = await login('OWNER');
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const draft = { name: 'Synthetic undercut', params: { type: 'MATCH_BUYBOX', undercutMinor: 10, holdWhenWinning: false, atBound: 'CAP' }, deadbandMinor: 0 };
   const list = await get<StrategyListView>(owner, api(id, 'strategies'));
   assert.equal(list.canEdit, true);
@@ -475,7 +479,7 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
   const bad = await call(owner, 'POST', api(id, 'strategies', 'preview'), { draft: { ...draft, deadbandMinor: 'x' }, writeScopeIds: ['ws-price-de-4101'] });
   assert.deepEqual([bad.status, (bad.body as { error: { code: string; message: string } }).error.message], [400, 'Threshold: an amount like 19.99 or a percentage like 12.5']);
   const { jobId: previewJobId, view } = await previewOf(viewer, id, { draft, writeScopeIds: ['ws-price-de-4101'] });
-  assert.equal(view.rows.length, 1, 'зритель вправе посчитать предпросмотр');
+  assert.equal(view.rows.length, 1, 'участник без права на цены вправе посчитать предпросмотр');
   assert.deepEqual([view.shown.rows, view.shown.of, view.sample.text], [1, 1, null], 'OQ-201: посчитано всё выбранное, а не выборка');
   const save = (auth: Auth, previewToken: string, confirmed = true, jobId: string | null = previewJobId) =>
     call(auth, 'POST', api(id, 'strategies'), { draft, writeScopeIds: ['ws-price-de-4101'], strategyId: null, previewJobId: jobId, previewToken, confirmed });
@@ -549,14 +553,14 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
 });
 
 test('step 21: the price feed and the report of dangerous changes stopped by the bounds (Р-73) are served and rendered in German and English', async () => {
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const feed = await get<PriceFeedView>(viewer, api('kaufland/pipeline/happy-path', 'feed'));
   assert.ok(feed.items.length >= 1);
   const report = await get<DangerousReportView>(viewer, `${api('kaufland/pipeline/above-max-price', 'dangerous')}?days=30`);
   assert.equal(report.count, 1);
   assert.equal((await call(viewer, 'GET', `${api('kaufland/pipeline/above-max-price', 'dangerous')}?days=5`)).status, 400);
   for (const locale of ['de', 'en'] as const) {
-    const auth = await login('VIEWER', locale);
+    const auth = await login('INVENTORY_MANAGER', locale);
     const r = await get<DangerousReportView>(auth, `${api('kaufland/pipeline/above-max-price', 'dangerous')}?days=7`);
     const markup = await html('/src/screens/Dangerous.tsx', 'DangerousScreenView', { view: r }, locale);
     assert.ok(markup.includes(r.headline));
@@ -632,7 +636,7 @@ test('step 23, C/F: offers the channel prices itself are listed before a strateg
 test('step 23, F: bounds edit is offered only with the right; the feed filters and pages on the server', async () => {
   const id = 'kaufland/pipeline/fx-usd-floor-eur-cost';
   const owner = await login('OWNER');
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const index = await get<BoundsIndexView>(owner, api(id, 'bounds'));
   assert.equal(index.canEdit, true);
   const viewerIndex = await get<BoundsIndexView>(viewer, api(id, 'bounds'));
@@ -672,7 +676,7 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
 
 test('step 24, OQ-169/170: an existing strategy version is assigned without a new version after its preview; a strategy is removed only with repricing off; versions show author and status', async () => {
   const owner = await login('OWNER');
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const id = 'kaufland/pipeline/fx-usd-floor-eur-cost';
   const list = await get<StrategyListView>(owner, api(id, 'strategies'));
   const original = list.strategies.find((x) => x.assignable)!;
@@ -721,7 +725,7 @@ test('step 24, OQ-169/170: an existing strategy version is assigned without a ne
 
 test('step 24, Р-123: a discount is checked before it is announced; a prior price above the 30-day lowest is refused; announced discounts are rechecked; the price evidence is a CSV with its checksum', async () => {
   const owner = await login('OWNER');
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   const id = 'kaufland/pipeline/happy-path';
   const live = worlds.find((w) => w.id === id)!;
   const view = await get<ComplianceView>(owner, api(id, 'compliance'));
@@ -988,26 +992,26 @@ test('Р-143, задача D: право на отмену чужого зада
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 
   // СВОЁ задание отменяет любой участник — в том числе тот, кому эта операция недоступна
-  for (const kind of KINDS) assert.equal(canCancelBulkJob('VIEWER', kind, true), true, `своё задание ${kind}`);
+  for (const kind of KINDS) assert.equal(canCancelBulkJob('INVENTORY_MANAGER', kind, true), true, `своё задание ${kind}`);
 
   /**
-   * Чужое: меняющее цены задание наблюдатель не отменяет, а чужую выгрузку — отменяет. Второе и есть разница, появившаяся на
+   * Чужое: меняющее цены задание участник без права на цены (менеджер остатков) не отменяет, а чужую выгрузку — отменяет. Второе и есть разница, появившаяся на
    * шаге 32: прежнее общее право «менять цены» запрещало бы и её.
    */
-  assert.equal(canCancelBulkJob('VIEWER', 'COST_IMPORT', false), false, 'чужой импорт себестоимости наблюдателю не отменить');
+  assert.equal(canCancelBulkJob('INVENTORY_MANAGER', 'COST_IMPORT', false), false, 'чужой импорт себестоимости без права на цены не отменить');
   assert.equal(canCancelBulkJob('OPERATOR', 'BOUNDS_EDIT', false), false, 'чужую массовую правку границ оператору не отменить');
-  assert.equal(canCancelBulkJob('VIEWER', 'PRICE_EVIDENCE', false), true, 'чужая выгрузка ничего не меняет — её отменяет любой участник');
+  assert.equal(canCancelBulkJob('INVENTORY_MANAGER', 'PRICE_EVIDENCE', false), true, 'чужая выгрузка ничего не меняет — её отменяет любой участник');
   assert.equal(canCancelBulkJob('PRICING_MANAGER', 'COST_IMPORT', false), true, 'у менеджера цен право на эту операцию есть');
   /**
    * Экран различий и предпросмотр — первая половина правки цен: применение ссылается на них и без них не проходит. Отменить
    * чужой экран различий значит сорвать чужую правку каталога, поэтому они НЕ идут по праву просмотра (находка 4 ревью
    * шага 32) — и потому список прав на отмену не совпадает со списком «ничего не меняющих» видов.
    */
-  assert.equal(canCancelBulkJob('VIEWER', 'BOUNDS_PLAN', false), false, 'чужой экран различий зритель не отменяет: это начатая правка цен');
-  assert.equal(canCancelBulkJob('VIEWER', 'STRATEGY_PREVIEW', false), false, 'чужой предпросмотр стратегии — тоже начатая операция с ценами');
+  assert.equal(canCancelBulkJob('INVENTORY_MANAGER', 'BOUNDS_PLAN', false), false, 'чужой экран различий без права на цены не отменить: это начатая правка цен');
+  assert.equal(canCancelBulkJob('INVENTORY_MANAGER', 'STRATEGY_PREVIEW', false), false, 'чужой предпросмотр стратегии — тоже начатая операция с ценами');
   // Шаг 34: включение движка — своё право; оператор включает, значит и чужое включение отменяет, а цены при этом не правит
   assert.equal(canCancelBulkJob('OPERATOR', 'REPRICING_ENABLE', false), true, 'оператор вправе включать — вправе и отменить чужое включение');
-  assert.equal(canCancelBulkJob('VIEWER', 'REPRICING_ENABLE', false), false, 'зритель включать не вправе — и отменять чужое включение тоже');
+  assert.equal(canCancelBulkJob('INVENTORY_MANAGER', 'REPRICING_ENABLE', false), false, 'без права включения нельзя и отменять чужое включение тоже');
 });
 
 /**
@@ -1046,7 +1050,7 @@ test('OQ-207: ждущее задание отменяется, идущее —
   const overflow = await call(owner, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' });
   assert.equal(overflow.status, 409, `очередь участника ограничена: ${JSON.stringify(overflow.body)}`);
   // Другой участник в это же время ставит СВОЁ задание: очередь тенанта им не занята
-  const viewer = await login('VIEWER');
+  const viewer = await login('INVENTORY_MANAGER');
   assert.equal((await call(viewer, 'POST', api(id, 'compliance', 'evidence'), { from: '2026-01-01', to: '2026-01-31' })).status, 200,
     'предел одного участника не закрывает очередь остальным');
   // Место освобождается отменой — ровно то, ради чего она и нужна

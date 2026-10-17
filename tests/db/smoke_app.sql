@@ -890,10 +890,10 @@ SELECT pg_temp.expect_fail('manual price intent in the name of another member (�
   VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:34+00', 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-0000000000ad', 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL') $q$,
   'in the name of the session user, not by the decision path');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
-SELECT pg_temp.expect_fail('manual price intent by a viewer (Р-107)', $q$
+SELECT pg_temp.expect_fail('manual price intent by an inventory manager (Р-107)', $q$
   INSERT INTO channel_data.price_intent (tenant_id, created_at, write_scope_id, created_by_membership_id, trigger_type, proposed_amount_minor, currency, price_basis, expires_at, rule_code)
   VALUES ('a0000000-0000-0000-0000-00000000000a', '2026-09-14 10:35+00', 'a6000000-0000-0000-0000-000000000001', 'a2000000-0000-0000-0000-0000000000a9', 'MANUAL', 1300, 'EUR', 'GROSS', '2026-09-14 11:00+00', 'MANUAL') $q$,
-  'role VIEWER may not set a manual price');
+  'role INVENTORY_MANAGER may not set a manual price');
 SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.ok('manual price approved while halted (Р-51)', $q$
   INSERT INTO channel_data.price_decision (tenant_id, price_decision_id, intent_created_at, price_intent_id, write_scope_id, outcome, final_amount_minor, rejection_reason, currency, price_basis, effective_floor_minor, min_price_ids, effective_ceiling_minor, max_price_ids, reason_params, explanation, sanity_ruleset, gate_profile)
@@ -912,9 +912,9 @@ SELECT pg_temp.expect_fail('channel distrust released without a second factor (�
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-00000000000a', release_note = 'price basis fixed in the channel'
    WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'requires a second factor');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true), set_config('app.auth_mfa', 'on', true) \gset
-SELECT pg_temp.expect_fail('channel distrust released by a viewer (Р-118)', $q$
+SELECT pg_temp.expect_fail('channel distrust released by an inventory manager (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-0000000000a9', release_note = 'price basis fixed in the channel'
-   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'role VIEWER may not RELEASE_CHANNEL_DISTRUST');
+   WHERE channel_distrust_id = 'ad230000-0000-4000-8000-000000000001' $q$, 'role INVENTORY_MANAGER may not RELEASE_CHANNEL_DISTRUST');
 SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.expect_fail('channel distrust released in the name of another member (Р-118)', $q$
   UPDATE channel_data.channel_distrust SET released_at = now(), released_by_membership_id = 'a2000000-0000-0000-0000-0000000000a9', release_note = 'price basis fixed in the channel'
@@ -1136,13 +1136,14 @@ UPDATE tenant_data.channel_account SET other_tools = 'PRICES' WHERE tenant_id = 
 SELECT pg_temp.expect_fail('quantity writes confirmed with a mistyped account (Р-202)', $q$
   INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID-typo', 'a2000000-0000-0000-0000-00000000000a') $q$, 'the typed confirmation does not name the channel account');
--- Администратор: право MANAGE_TENANT у него есть, поэтому отказывает именно правило «только владелец», а не страж административной записи
-SELECT pg_temp.expect_fail('quantity writes confirmed by a non-owner (Р-202)', $q$
+-- Администратор: право MANAGE_TENANT у него есть, поэтому отказывает именно правило «только владелец или менеджер» (шаг 98, Р-222), а не
+-- страж административной записи
+SELECT pg_temp.expect_fail('quantity writes confirmed by an admin (Р-202, Р-222)', $q$
   DO $d$ BEGIN
     PERFORM set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000ad', true);
     INSERT INTO tenant_data.channel_quantity_writes_confirmation (tenant_id, channel_account_id, typed_confirmation, confirmed_by_membership_id)
     VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000002', 'A2SPID', 'a2000000-0000-0000-0000-0000000000ad');
-  END $d$ $q$, 'only the owner confirms or revokes quantity writes');
+  END $d$ $q$, 'only the owner or a manager confirms or revokes quantity writes');
 SELECT set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.expect_fail('quantity writes switched on by a direct update (Р-202)', $q$
   UPDATE tenant_data.channel_account SET quantity_writes_confirmed = true WHERE channel_account_id = 'a4000000-0000-0000-0000-000000000002' $q$, 'not directly');

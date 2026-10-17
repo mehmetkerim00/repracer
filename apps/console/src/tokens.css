@@ -100,8 +100,8 @@
   /* Шаг 88 [Р-213]: менеджер — ежедневная работа, зелёный прежнего менеджера цен (их не показывают вместе) */
   --role-manager-bg: #caf7ca; /* primer: --label-green-bgColor-rest */
   --role-manager-fg: #2b6e3f; /* primer: --label-green-fgColor-rest */
-  --role-viewer-bg: #e8ecf2; /* primer: --label-gray-bgColor-rest */
-  --role-viewer-fg: #5c6570; /* primer: --label-gray-fgColor-rest */
+  --role-neutral-bg: #e8ecf2; /* primer: --label-gray-bgColor-rest */
+  --role-neutral-fg: #5c6570; /* primer: --label-gray-fgColor-rest */
 
   /* Шрифты: интерфейс — системный стек Primer; IBM Plex Mono — только денежные колонки таблиц (решение владельца, шаг 83) */
   --font: "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Backtick Fix", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"; /* primer: --fontStack-system */
@@ -216,8 +216,8 @@
     --role-inventory-fg: #1cb0ab; /* primer-dark: --label-teal-fgColor-rest */
     --role-manager-bg: #122117; /* primer-dark: --label-green-bgColor-rest */
     --role-manager-fg: #41b445; /* primer-dark: --label-green-fgColor-rest */
-    --role-viewer-bg: #1c1c1c; /* primer-dark: --label-gray-bgColor-rest */
-    --role-viewer-fg: #92a1b5; /* primer-dark: --label-gray-fgColor-rest */
+    --role-neutral-bg: #1c1c1c; /* primer-dark: --label-gray-bgColor-rest */
+    --role-neutral-fg: #92a1b5; /* primer-dark: --label-gray-fgColor-rest */
   }
 }
 
@@ -288,6 +288,6 @@
   --role-inventory-fg: #1cb0ab; /* primer-dark: --label-teal-fgColor-rest */
   --role-manager-bg: #122117; /* primer-dark: --label-green-bgColor-rest */
   --role-manager-fg: #41b445; /* primer-dark: --label-green-fgColor-rest */
-  --role-viewer-bg: #1c1c1c; /* primer-dark: --label-gray-bgColor-rest */
-  --role-viewer-fg: #92a1b5; /* primer-dark: --label-gray-fgColor-rest */
+  --role-neutral-bg: #1c1c1c; /* primer-dark: --label-gray-bgColor-rest */
+  --role-neutral-fg: #92a1b5; /* primer-dark: --label-gray-fgColor-rest */
 }

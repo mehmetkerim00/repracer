@@ -178,8 +178,8 @@ before(async () => {
   const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
   const { createPool } = await import('@repracer/pricing-store-pg');
   observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-onboarding-observer' });
-  // Остальные участники демо-тенанта заведены посевом: оператор и зритель входят своими токенами
-  const members = await observer.query(`SELECT role, user_id, membership_id FROM tenant_data.membership WHERE tenant_id = $1 AND role IN ('OPERATOR', 'VIEWER')`, [seeded.tenantId]);
+  // Остальные участники демо-тенанта заведены посевом: оператор и менеджер остатков (наблюдателя с шага 98 нет) входят своими токенами
+  const members = await observer.query(`SELECT role, user_id, membership_id FROM tenant_data.membership WHERE tenant_id = $1 AND role IN ('OPERATOR', 'INVENTORY_MANAGER')`, [seeded.tenantId]);
   const authOf = (role: string, subject: string) => {
     const row = members.rows.find((r) => r.role === role);
     assert.ok(row, `в демо-тенанте есть участник с ролью ${role}`);
@@ -188,7 +188,7 @@ before(async () => {
     return { authorization: `Bearer ${issuer.token(subject, { email: `${subject}@example.invalid`, amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=de' };
   };
   operator = authOf('OPERATOR', 'demo-operator');
-  viewerOnly = authOf('VIEWER', 'demo-viewer');
+  viewerOnly = authOf('INVENTORY_MANAGER', 'demo-viewer');
   emptyOwner = { authorization: `Bearer ${issuer.token('empty-owner', { email: 'new-seller@example.invalid', amr: ['pwd', 'otp'] })}`, cookie: 'repracer_locale=de' };
   const handle = createStandApi([demoLive, emptyLive], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
@@ -328,7 +328,7 @@ test('Р-149, Р-151: онбординг целиком на демо-тенан
   assert.equal(refusedNarrow.status, 403, `оператор не сужает набор — это право того, кто правит цены: ${refusedNarrow.text.slice(0, 120)}`);
   for (const action of ['narrow', 'enable']) {
     const refused = await call('POST', api(DEMO_WORLD, 'onboarding', action), {}, viewerOnly);
-    assert.equal(refused.status, 403, `зритель не делает «${action}»: ${refused.text.slice(0, 120)}`);
+    assert.equal(refused.status, 403, `менеджер остатков не делает «${action}»: ${refused.text.slice(0, 120)}`);
   }
   const operatorView = JSON.parse((await call('GET', api(DEMO_WORLD, 'onboarding'), undefined, operator)).text) as OnboardingView;
   assert.deepEqual([operatorView.canLead, operatorView.canEnable], [false, true], 'экран оператора: сужать нельзя, включать можно');

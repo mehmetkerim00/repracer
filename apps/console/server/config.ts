@@ -21,19 +21,19 @@ export interface ConsoleConfig {
   /** Каталог собранного интерфейса (`npm run build -w apps/console`) */
   distDir: string;
   /** Язык по умолчанию, пока браузер не выбрал свой [Р-72]; по умолчанию — первый язык профиля рынка */
-  locale: 'de' | 'en';
+  locale: 'de' | 'en' | 'es' | 'fr';
   /**
    * Шаг 87 [Р-214]: профиль рынка развёртывания (`REPRACER_MARKET_PROFILE`: us, eu, global; по умолчанию us) — какие каналы, витрины,
    * языки и правила консоль предлагает, и какое демо сеется: в us — американский продавец без Kaufland
    */
   market: MarketProfile;
   /**
-   * Шаг 88 [Р-213]: флаг «расширенные роли» (`REPRACER_EXTENDED_ROLES`: on или off, по умолчанию off) — консоль предлагает три роли
-   * (владелец, менеджер, наблюдатель) или пять (ещё администратор и оператор); назначенные роли работают в любом положении
+   * Шаг 88 [Р-213]: флаг «расширенные роли» (`REPRACER_EXTENDED_ROLES`: on или off, по умолчанию off) — консоль предлагает две роли
+   * (владелец и менеджер, шаг 98) или четыре (ещё администратор и оператор); назначенные роли работают в любом положении
    */
   extendedRoles: boolean;
   /**
-   * Р-160: публичный демо-режим. `on` — на странице входа есть кнопка «посмотреть демо», и гость получает НАБЛЮДАТЕЛЯ
+   * Р-160: публичный демо-режим. `on` — на странице входа есть кнопка «посмотреть демо», и гость получает техническую роль «только чтение» (GUEST, шаг 98: не роль продукта)
    * в демо-тенанте без регистрации. `off` — кнопки нет и маршрут гостя отвечает 404.
    */
   publicDemo: boolean;
@@ -91,7 +91,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
   let market: MarketProfile;
   try { market = marketProfileOf(env.REPRACER_MARKET_PROFILE); } catch (error) { throw new ConfigError(`CONFIG_INVALID: ${(error as Error).message}`); }
   const locale = env.REPRACER_CONSOLE_LOCALE ?? marketScope(market).locales[0]!;
-  if (locale !== 'de' && locale !== 'en') throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_LOCALE must be de or en');
+  if (locale !== 'de' && locale !== 'en' && locale !== 'es' && locale !== 'fr') throw new ConfigError('CONFIG_INVALID: REPRACER_CONSOLE_LOCALE must be de, en, es or fr');
   // Шаг 87: язык развёртывания — язык профиля; немецкий первый экран в профиле us без переключателя назад — противоречие конфигурации
   if (!marketScope(market).locales.includes(locale)) {
     throw new ConfigError(`CONFIG_INVALID: REPRACER_CONSOLE_LOCALE=${locale} is not a language of the market profile ${market} (${marketScope(market).locales.join(', ')})`);

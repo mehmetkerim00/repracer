@@ -124,6 +124,13 @@ SELECT pg_temp.expect_fail('forge an audit event (finding 5, Р-90)', $q$
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
 CREATE TEMP TABLE invited AS SELECT * FROM security.invite_member('a0000000-0000-0000-0000-00000000000a', 'invited-a@example.test', 'PRICING_MANAGER', sha256('smoke-invite'), interval '1 day');
 DO $$ BEGIN RAISE NOTICE 'PASS accept | owner with a second factor invites a member (Р-88)'; END $$;
+-- Шаг 98 [Р-222]: ролей для людей две — наблюдателя нет; техническая роль гостя демо людям не назначается
+SELECT pg_temp.expect_fail('an owner invites a member as a viewer (Р-222)', $q$
+  SELECT security.invite_member('a0000000-0000-0000-0000-00000000000a', 'viewer-gone@example.test', 'VIEWER', sha256('smoke-viewer'), interval '1 day') $q$,
+  'membership_role_check');
+SELECT pg_temp.expect_fail('an owner invites a person with the technical guest role (Р-222)', $q$
+  SELECT security.invite_member('a0000000-0000-0000-0000-00000000000a', 'guest-role@example.test', 'GUEST', sha256('smoke-guest-role'), interval '1 day') $q$,
+  'membership_guest_role');
 SELECT pg_temp.expect_fail('activate an invited membership without accepting the invitation (finding 3)', $q$
   UPDATE tenant_data.membership SET status = 'ACTIVE' WHERE membership_id = (SELECT membership_id FROM invited) $q$, 'becomes active only by accepting its invitation');
 
@@ -134,7 +141,7 @@ SELECT pg_temp.expect_fail('an admin promotes an operator to owner (finding 9)',
 SELECT pg_temp.expect_fail('an admin grants the admin role (finding 9)', $q$
   UPDATE tenant_data.membership SET role = 'ADMIN' WHERE membership_id = 'a2000000-0000-0000-0000-0000000000a0' $q$, 'an admin does not grant, remove or revoke the admin role');
 SELECT pg_temp.expect_fail('an admin demotes the owner (finding 9)', $q$
-  UPDATE tenant_data.membership SET role = 'VIEWER' WHERE membership_id = 'a2000000-0000-0000-0000-00000000000a' $q$, 'only an owner grants, removes or revokes the owner role');
+  UPDATE tenant_data.membership SET role = 'MANAGER' WHERE membership_id = 'a2000000-0000-0000-0000-00000000000a' $q$, 'only an owner grants, removes or revokes the owner role');
 SELECT pg_temp.ok('an admin changes an operator to pricing manager with a second factor (Р-88)', $q$
   UPDATE tenant_data.membership SET role = 'PRICING_MANAGER' WHERE membership_id = 'a2000000-0000-0000-0000-0000000000a0' $q$);
 SELECT set_config('app.auth_mfa', '', true) \gset
@@ -238,9 +245,9 @@ SELECT pg_temp.expect_fail('write scope status changed by the administrative ser
   UPDATE tenant_data.write_scope SET status = 'HELD' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$,
   'administrative change of tenant_data.write_scope without a person');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
-SELECT pg_temp.expect_fail('write scope status changed by a viewer (step 18 finding 1)', $q$
+SELECT pg_temp.expect_fail('write scope status changed by an inventory manager (step 18 finding 1)', $q$
   UPDATE tenant_data.write_scope SET status = 'HELD' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$,
-  'role VIEWER may not');
+  'role INVENTORY_MANAGER may not');
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true) \gset
 UPDATE tenant_data.write_scope SET status = 'HELD' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001';
 DO $$ BEGIN
@@ -309,9 +316,9 @@ SELECT pg_temp.expect_fail('system halt created by a person (step 18 finding 4)'
   INSERT INTO channel_data.pricing_halt (tenant_id, channel_account_id, channel, marketplace, reason_code, halted_at)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', NULL, 'CHANNEL_MASS_SHIFT', now()) $q$,
   'a person does not create a system halt');
--- Ревью шага 19, находка 3: наблюдения выборки остановки не записывает человек — иначе наблюдатель снимал бы остановку через проверку базы
+-- Ревью шага 19, находка 3: наблюдения выборки остановки не записывает человек — иначе участник без права снятия снимал бы остановку через проверку базы
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-0000000000a9', true) \gset
-SELECT pg_temp.expect_fail('halt sample observation recorded by a viewer in the administrative service (step 19 review finding 3)', $q$
+SELECT pg_temp.expect_fail('halt sample observation recorded by an inventory manager in the administrative service (step 19 review finding 3)', $q$
   INSERT INTO channel_data.pricing_halt_sample (tenant_id, pricing_halt_id, channel_product_ref, observed_at, verdict)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'ab000000-0000-0000-0000-000000000001', 'forged-ref', now(), 'ACCEPT') $q$,
   'a person does not record halt sample observations');

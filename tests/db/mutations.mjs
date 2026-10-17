@@ -113,7 +113,7 @@ export const R93_ROWS = [
       m(dropConstraint('pricing_halt_system_only', 'channel_data.pricing_halt'),
         node(T('step12.pg.test.ts'), 'Р-69: a system halt is only for broken channel data', 'Р-69: a person cannot create a system halt', 'resolved')),
       m(dropTrigger('aa_price_stop_role_guard', 'tenant_data.price_stop'),
-        node(T('step12.pg.test.ts'), 'Р-69, Р-70, OQ-125 in the database', ['OQ-129: a viewer does not stop pricing', 'OQ-125: an operator does not resume a tenant stop'], '^(STOPPED|RELEASED)$')),
+        node(T('step12.pg.test.ts'), 'Р-69, Р-70, OQ-125 in the database', ['OQ-129: an inventory manager does not stop pricing', 'OQ-125: an operator does not resume a tenant stop'], '^(STOPPED|RELEASED)$')),
       m(dropTrigger('ab_price_decision_stop_guard', 'channel_data.price_decision'), smoke('approval while the tenant is stopped by a person (Р-69)')),
       m(dropTrigger('bb_channel_write_stop_guard', 'tenant_data.channel_write'), smoke('dispatch while the tenant is stopped by a person (Р-69)')),
       m(dropTrigger('ca_pricing_halt_release_role_guard', 'channel_data.pricing_halt'), smoke('manual halt release without a second factor (finding 12, Р-88)')),
@@ -305,8 +305,8 @@ export const STEP17_ROWS = [
         'IF EXISTS (SELECT 1 FROM platform.external_identity_revocation rv WHERE rv.issuer = p_issuer AND rv.subject = p_subject) THEN', 'IF false THEN'),
         node(ID, 'Р-98', 'the revoked sign-in accepts nothing', 'resolved')),
       m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', 'IF NOT security.session_mfa() THEN', 'IF false THEN'), node(ID, 'Р-98', 'Р-98: a relink invitation without a second factor', 'resolved')),
-      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', "AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN", "AND m.status = 'ACTIVE') THEN"),
-        node(ID, 'Р-98', 'Р-98: only an active owner relinks', 'resolved')),
+      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)', "AND m.status = 'ACTIVE' AND m.role IN ('OWNER', 'MANAGER')) THEN", "AND m.status = 'ACTIVE') THEN"),
+        node(ID, 'Р-98', 'Р-98: only an active owner or manager relinks', 'resolved')),
       m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)',
         "IF NOT EXISTS (SELECT 1 FROM tenant_data.membership m WHERE m.tenant_id = p_tenant_id AND m.user_id = p_user_id AND m.status = 'ACTIVE') THEN", 'IF false THEN'),
         node(ID, 'Р-98', 'Р-98: a relink is issued only to a member of the tenant', 'resolved')),
@@ -369,7 +369,7 @@ export const STEP18_ROWS = [
     row: 'Р-100', critical: true, invariant: 'административная запись проверяет роль и административные столбцы',
     mutations: [
       m(replaceInFunction('security.require_person_for_admin_write()', "IF action <> 'OWN_GUARD' AND r IS NOT NULL AND NOT security.pricing_permission(r, action) THEN", 'IF false THEN'),
-        smoke('an operator lowers min_price (Р-100)'), smoke('eBay consent by an admin in their own name (Р-101)'), smoke('write scope status changed by a viewer (step 18 finding 1)'),
+        smoke('an operator lowers min_price (Р-100)'), smoke('eBay consent by an admin in their own name (Р-101)'), smoke('write scope status changed by an inventory manager (step 18 finding 1)'),
         smoke('consent revoked by an admin (Р-101)')),
       m(dropTrigger('a0_admin_write_person_update', 'tenant_data.write_scope'), smoke('pricing mode changed without a person (step 17 finding 1)'),
         verify('tenant_data\\.write_scope: administrative UPDATE without the person guard')),
@@ -472,7 +472,7 @@ export const STEP19_ROWS = [
       m(replaceInFunction('channel_data.price_intent_manual_guard()', 'IF mem.membership_id IS NULL OR NEW.created_by_membership_id IS DISTINCT FROM mem.membership_id THEN', 'IF false THEN'),
         smoke('manual price intent in the name of another member (Р-107)')),
       m(replaceInFunction('channel_data.price_intent_manual_guard()', "IF NOT security.pricing_permission(mem.role, 'ENABLE_REPRICING') THEN", 'IF false THEN'),
-        smoke('manual price intent by a viewer (Р-107)')),
+        smoke('manual price intent by an inventory manager (Р-107)')),
       m(replaceInFunction('channel_data.price_intent_manual_guard()', "NOT (NEW.trigger_type = 'MANUAL' OR coalesce(NEW.rule_code, '') = 'MANUAL' OR NEW.created_by_membership_id IS NOT NULL)",
         "NOT (NEW.trigger_type = 'MANUAL' AND NEW.created_by_membership_id IS NULL)"),
         smoke('path creates a manual price intent of the owner (Р-107)')),
@@ -483,7 +483,7 @@ export const STEP19_ROWS = [
     mutations: [
       m(replaceInFunction('channel_data.pricing_halt_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'), smoke('system halt created by a person (step 18 finding 4)')),
       m(replaceInFunction('channel_data.pricing_halt_sample_insert_guard()', 'IF security.admin_session() THEN', 'IF false THEN'),
-        smoke('halt sample observation recorded by a viewer in the administrative service (step 19 review finding 3)')),
+        smoke('halt sample observation recorded by an inventory manager in the administrative service (step 19 review finding 3)')),
       m(`DROP TRIGGER a00_pricing_halt_insert_guard ON channel_data.pricing_halt;
          CREATE TRIGGER a00_pricing_halt_insert_guard BEFORE INSERT ON channel_data.pricing_halt FOR EACH ROW WHEN (false) EXECUTE FUNCTION channel_data.pricing_halt_insert_guard()`,
         smoke('system halt created by a person (step 18 finding 4)'), verify('pricing_halt: trigger a00_pricing_halt_insert_guard has a WHEN condition that is not in the list')),
@@ -1075,7 +1075,7 @@ export const STEP30_ROWS = [
       m(dropTrigger('a_bulk_job_created_with_mfa', 'tenant_data.bulk_job'),
         smoke('the database sets the second factor of a bulk job, not the caller (Р-90)')),
       // Р-100: право — по тому, что задание делает; выгрузка доказательства доступна и зрителю
-      m(dropTrigger('zc_bulk_job_requires_right', 'tenant_data.bulk_job'), smoke('cost import job created by a viewer with a second factor (Р-100, Р-139)')),
+      m(dropTrigger('zc_bulk_job_requires_right', 'tenant_data.bulk_job'), smoke('cost import job created by an inventory manager with a second factor (Р-100, Р-139)')),
       // Аренда: чужую живую аренду не перехватить и не отпустить — иначе задание применилось бы дважды
       m(dropTrigger('a_bulk_job_lease_guard', 'tenant_data.bulk_job'),
         smoke('another process takes a live lease of a bulk job (Р-139)'),
@@ -1148,7 +1148,7 @@ export const STEP30_ROWS = [
        */
       m(replaceInFunction('security.read_only_job_kinds()', "ARRAY['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']",
         "ARRAY['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'COST_IMPORT']"),
-        smoke('cost import job created by a viewer with a second factor (Р-100, Р-139)')),
+        smoke('cost import job created by an inventory manager with a second factor (Р-100, Р-139)')),
       m(replaceInFunction('tenant_data.cost_import_requires_mfa()', "ARRAY['COST_IMPORT']", "ARRAY['COST_IMPORT', 'PRICE_EVIDENCE']"),
         verify('a bulk job kind that needs no second factor \\(PRICE_EVIDENCE\\) opens an operation that needs one')),
       // Страж широкого гардрейла требует второго фактора ЧЕЛОВЕКА: задание пол маржи всего тенанта не меняет [Р-139]
@@ -1266,8 +1266,11 @@ export const STEP37_ROWS = [
     mutations: [
       m(dropTrigger('b_membership_guest_demo_only', 'tenant_data.membership'),
         smoke('a guest of a tenant that is not a demo (Р-160)')),
-      m(dropTrigger('b_membership_guest_stays_guest', 'tenant_data.membership'),
-        smoke('a demo guest is promoted to a pricing manager (Р-160)')),
+      // Шаг 98 [Р-222]: «гость не повышается» держит ограничение «GUEST — тогда и только тогда, когда членство гостевое» (страж смены роли
+      // гостя стал его дублем и удалён, Р-104); то же ограничение не даёт назначить человеку техническую роль гостя
+      m(dropConstraint('membership_guest_role', 'tenant_data.membership'),
+        smoke('a demo guest is promoted to a pricing manager (Р-160)'), smoke('a demo guest is promoted to a manager (Р-160, Р-222)'),
+        smoke('an owner invites a person with the technical guest role (Р-222)')),
       m(dropTrigger('zz_bulk_job_no_guest', 'tenant_data.bulk_job'),
         smoke('a demo guest creates a price evidence job (Р-160)')),
       // Издатель гостя закреплён в базе: снимите проверку — и публичная кнопка заведёт привязку к настоящему поставщику
@@ -1370,7 +1373,7 @@ export const STEP34_ROWS = [
       // Право по виду [Р-143]: одно на создание и на отмену. Снять его у стража создания — значит пустить зрителя
       m(replaceInFunction('tenant_data.bulk_job_requires_right()', "needed := coalesce(security.bulk_job_cancel_action(NEW.kind), 'NO_DECLARED_RIGHT');",
         "needed := 'VIEW_PRICING';"),
-        smoke('a viewer creates a repricing enablement job (Р-143)')),
+        smoke('an inventory manager creates a repricing enablement job (Р-143)')),
       // Объявить включение «как всё остальное» — значит отнять его у оператора: он включает движок, но цен не правит
       m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'REPRICING_ENABLE' THEN 'ENABLE_REPRICING'", "WHEN p_kind = 'REPRICING_ENABLE' THEN 'MANAGE_PRICING'"),
         smoke('an operator creates a repricing enablement job (Р-143, Р-149)')),
@@ -1498,12 +1501,13 @@ export const STEP41_ROWS = [
     /**
      * Шаг 89 (ADR-0054, решение владельца): обратно в тень — право матрицы RETURN_TO_SHADOW (владелец, менеджер, прежний администратор).
      * До шага ту же границу держал и общий страж административной записи аккаунта (MANAGE_TENANT) — ветка журнала была дублем; теперь
-     * смену режима общий страж оставляет журналу (0186), и ветка — единственная, кто не пускает наблюдателя
+     * смену режима общий страж оставляет журналу (0186), и ветка — единственная, кто не пускает роль без права (с шага 98 наблюдателя нет —
+     * отказ проверяется на операторе)
      */
-    row: 'шаг 89 (ADR-0054)', invariant: 'обратно в тень переводит только роль с правом RETURN_TO_SHADOW: менеджер — да, наблюдатель — нет',
+    row: 'шаг 89 (ADR-0054)', invariant: 'обратно в тень переводит только роль с правом RETURN_TO_SHADOW: менеджер — да, оператор — нет',
     mutations: [
       m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', "ELSIF NOT security.pricing_permission(m.role, 'RETURN_TO_SHADOW') THEN", 'ELSIF false THEN'),
-        node(T('roles-step89.pg.test.ts'), 'a manager switches a live account back to shadow', 'step 89: a viewer does not switch an account back to SHADOW', '^SWITCHED$')),
+        node(T('roles-step89.pg.test.ts'), 'a manager switches a live account back to shadow', 'step 89: an operator does not switch an account back to SHADOW', '^SWITCHED$')),
     ],
   },
   {
@@ -1515,7 +1519,7 @@ export const STEP41_ROWS = [
       m(replaceInFunction('tenant_data.channel_write_mode_change_guard()',
         'IF NEW.from_mode IS DISTINCT FROM a.write_mode THEN', 'IF false THEN'),
         smoke('a mode change that names the wrong current mode (Р-170)')),
-      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', "IF m.role <> 'OWNER' THEN", 'IF false THEN'),
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', "IF m.role NOT IN ('OWNER', 'MANAGER') THEN", 'IF false THEN'),
         smoke('an admin switches the account to LIVE (Р-170)')),
       m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'),
         smoke('switching to LIVE without a second factor (Р-170)')),
@@ -1694,9 +1698,9 @@ export const STEP43_ROWS = [
         smoke('rewriting the state of a request (Р-177)')),
       m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.channel_authorization_request'),
         // Запись без человека отклоняет и журнал аудита (событие USER без пользователя); своя проверка стража — право роли
-        smoke('a viewer starts an authorization request (Р-175, Р-100)')),
+        smoke('an inventory manager starts an authorization request (Р-175, Р-100)')),
       m(dropTrigger('a0_admin_write_person_update', 'tenant_data.channel_authorization_request'),
-        smoke('a viewer closes an authorization request (Р-175, Р-100)')),
+        smoke('an inventory manager closes an authorization request (Р-175, Р-100)')),
       m(dropTrigger('zc_channel_authorization_request_audit', 'tenant_data.channel_authorization_request'),
         smoke('starting a request is written to the audit log (Р-97)')),
     ],
@@ -1752,7 +1756,7 @@ export const STEP43_ROWS = [
       m(replaceInFunction('tenant_data.channel_credential_before_insert()', 'coalesce(max(c.version), 0) + 1', '1'),
         smoke('a second authorization supersedes the first and is numbered by the database (Р-177)')),
       m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.channel_credential'),
-        smoke('a viewer stores a channel token (Р-177, Р-100)')),
+        smoke('an inventory manager stores a channel token (Р-177, Р-100)')),
       m(dropTrigger('zc_channel_credential_audit', 'tenant_data.channel_credential'),
         smoke('storing a token is written to the audit log without the token (Р-97, Р-177)')),
     ],
@@ -2156,8 +2160,8 @@ export const STEP60_ROWS = [
       m(dropTrigger('a3_write_scope_quantity_writes_confirmed', 'tenant_data.write_scope'), smoke('quantity sync on an account without the owner confirmation (Р-202)')),
       m(dropTrigger('b_channel_quantity_writes_confirmation_guard', 'tenant_data.channel_quantity_writes_confirmation'),
         smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
-      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF m.role IS DISTINCT FROM 'OWNER' THEN", 'IF false THEN'),
-        smoke('quantity writes confirmed by a non-owner (Р-202)'), smoke('quantity writes revoked by a non-owner (Р-202)')),
+      m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', "IF m.role IS DISTINCT FROM 'OWNER' AND m.role IS DISTINCT FROM 'MANAGER' THEN", 'IF false THEN'),
+        smoke('quantity writes confirmed by an admin (Р-202, Р-222)'), smoke('quantity writes revoked by an admin (Р-202, Р-222)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF a.other_tools IS NULL THEN', 'IF false THEN'),
         smoke('quantity writes confirmed before the answer about other tools (Р-202)')),
       m(replaceInFunction('tenant_data.channel_quantity_writes_confirmation_guard()', 'IF btrim(NEW.typed_confirmation) IS DISTINCT FROM a.external_account_id THEN', 'IF false THEN'),
@@ -2512,6 +2516,26 @@ export const STEP97_ROWS = [
         node(CDR, 'the competitor-derived rule list of the code equals the database', 'channel_data.price_intent.competitor_derived agrees with COMPETITOR_DERIVED_RULES', 'WIN_BUYBOX: database false')),
       m(replaceInFunction('channel_data.review_halt_by_sample(uuid,uuid,timestamp with time zone)', "'POSITION', 'WIN_BUYBOX')", "'POSITION')"),
         node(CDR, 'the competitor-derived rule list of the code equals the database', 'the halt review samples offers of every competitor-derived strategy type', '^(?!.*WIN_BUYBOX)')),
+    ],
+  },
+];
+
+/**
+ * Шаг 98 [Р-222]: ролей для людей две — владелец и менеджер, права одинаковые, кроме денег (0191). Наблюдателя нет; техническая роль
+ * гостя демо — только у гостевого членства (строка Р-160). Различие ролей одно — роль и вход ВЛАДЕЛЬЦА трогает только владелец: смену роли
+ * держит строка «находка 9» (страж смены ролей), перепривязку входа — строка ниже
+ */
+const R98 = T('roles-step98.pg.test.ts');
+export const STEP98_ROWS = [
+  {
+    row: 'шаг 98 (Р-222)', critical: false,
+    invariant: 'ролей для людей две: наблюдателя в базе нет; вход владельца перепривязывает только владелец',
+    mutations: [
+      m(dropConstraint('membership_role_check', 'tenant_data.membership'),
+        smoke('an owner invites a member as a viewer (Р-222)')),
+      m(replaceInFunction('security.invite_relink(uuid,uuid,bytea,interval)',
+        "AND EXISTS (SELECT 1 FROM tenant_data.membership m WHERE m.tenant_id = p_tenant_id AND m.user_id = p_user_id AND m.status = 'ACTIVE' AND m.role = 'OWNER') THEN", 'AND false THEN'),
+        node(R98, 'relinks the sign-in of a member, but not the sign-in of the owner', 'step 98: a manager does not relink the sign-in of the owner', '^"string"$')),
     ],
   },
 ];

@@ -533,7 +533,7 @@ export class PgStockStore implements StockStore {
       }, actor.userId, { mfa: actor.mfa });
     } catch (error) {
       const message = String((error as Error).message ?? '');
-      if (/only the owner confirms/.test(message)) return { status: 'NOT_OWNER' };
+      if (/only the owner (or a manager )?confirms/.test(message)) return { status: 'NOT_OWNER' };
       if (/are already confirmed/.test(message)) return { status: 'ALREADY_CONFIRMED' };
       if (/does not name the channel account/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
       if (/answer first whether another tool/.test(message)) return { status: 'ANSWER_FIRST' };
@@ -564,7 +564,8 @@ export class PgStockStore implements StockStore {
          */
         // Шаг 64 (ревью шага 63, находка 5): только действующее членство — как в формуле стража базы
         const { rows: [member] } = await tx.query(`SELECT role FROM tenant_data.membership WHERE tenant_id = $1 AND membership_id = $2 AND status = 'ACTIVE'`, [tenantId, actor.membershipId]);
-        const owner = member?.role === 'OWNER';
+        // Шаг 98 [Р-222]: отзывает владелец или менеджер — блокировку и счётчики берут оба
+        const owner = member?.role === 'OWNER' || member?.role === 'MANAGER';
         if (owner) await tx.query(`SELECT pg_advisory_xact_lock(202, hashtext($1::text))`, [channelAccountId]);
         const { rows: [c] } = owner ? await tx.query(
           `SELECT (SELECT count(*) FROM tenant_data.write_scope WHERE tenant_id = $1 AND channel_account_id = $2 AND field = 'QUANTITY' AND quantity_sync_enabled)::int AS scopes,
@@ -582,7 +583,7 @@ export class PgStockStore implements StockStore {
       }, actor.userId, { mfa: actor.mfa });
     } catch (error) {
       const message = String((error as Error).message ?? '');
-      if (/only the owner confirms or revokes/.test(message)) return { status: 'NOT_OWNER' };
+      if (/only the owner (or a manager )?confirms or revokes/.test(message)) return { status: 'NOT_OWNER' };
       if (/does not name the channel account/.test(message)) return { status: 'CONFIRMATION_MISMATCH' };
       if (/nothing to revoke/.test(message)) return { status: 'NOT_CONFIRMED' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };

@@ -259,7 +259,7 @@ test('Р-199: возврат внутреннего пула ждёт решен
   // INFO_ONLY называет, что остаток ведёт система продавца, — на обоих языках, а не пустую строку
   assert.match(stockReturnsView({ id: 'w', demo: false, viewer: { role: 'OWNER' } } as never, rows, en).items[1]!.text, /kept by your system/);
   assert.match(owner.items[1]!.text, /führt Ihr System/);
-  assert.equal(stockReturnsView({ id: 'w', demo: false, viewer: { role: 'VIEWER' } } as never, rows, de).canDecide, false, 'зритель видит, но не решает');
+  assert.equal(stockReturnsView({ id: 'w', demo: false, viewer: { role: 'OPERATOR' } } as never, rows, de).canDecide, false, 'оператор (без права на каталог) видит, но не решает');
 
   // Решение: права — у хранилища; повтор и сведения — NOT_PENDING; принятие поднимает остаток на количество возврата
   const forbidden = new InMemoryStockStore(offers, { canManage: () => false });
@@ -315,7 +315,7 @@ test('шаг 64: сумма в USD — $1,234.56 по-английски и 1.23
  * словарей (строки и шаблоны без подстановок, без комментариев и ключей): экраны и письма берут тексты только отсюда [Р-72]. Запрещённый
  * синоним — красная сборка; исключение одно: «listing» — слово eBay, оно допустимо в тексте, который говорит об eBay или Trading API.
  */
-export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pattern: RegExp; use: string }>>> = {
+export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', ReadonlyArray<{ pattern: RegExp; use: string }>>> = {
   en: [
     { pattern: /\btenants?\b/i, use: 'workspace' },
     { pattern: /\bseller accounts?\b/i, use: 'workspace (repracer) or channel account (channel)' },
@@ -348,6 +348,26 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de', ReadonlyArray<{ pa
     { pattern: /Snapshot|Momentaufnahme/, use: 'Wettbewerbsdaten (Plural; Zeitpunkt — „Wettbewerbsdaten vom …“)' },
     { pattern: /\brepracer\b/i, use: 'PriceTrail' },
     { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail (das Wortzeichen pricetrail ist klein geschrieben)' },
+  ],
+  // Шаг 98 [Р-223]: испанский и французский — тот же глоссарий (docs/console-glossary.md, раздел «Испанский и французский»)
+  es: [
+    { pattern: /\binquilinos?\b/i, use: 'espacio de trabajo' },
+    { pattern: /\bmarketplaces?\b/i, use: 'sitio (amazon.com) o canal (Amazon)' },
+    { pattern: /\bart[íi]culos?\b/i, use: 'producto' },
+    { pattern: /\blistados?\b|\blistings?\b/i, use: 'oferta; anuncio de eBay' },
+    { pattern: /snapshots?|instant[áa]neas?/i, use: 'datos de la competencia' },
+    { pattern: /\bcostes?\b/i, use: 'costo (español de los vendedores de EE. UU.)' },
+    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
+    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail' },
+  ],
+  fr: [
+    { pattern: /\blocataires?\b/i, use: 'espace de travail' },
+    { pattern: /places? de marché|\bmarketplaces?\b/i, use: 'site (amazon.com) ou canal (Amazon)' },
+    { pattern: /\barticles?\b/i, use: 'produit' },
+    { pattern: /\blistings?\b|\bfiches? produits?\b/i, use: 'offre ; annonce eBay' },
+    { pattern: /snapshots?|instantan[ée]s?/i, use: 'données de la concurrence' },
+    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
+    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail' },
   ],
 };
 const EBAY_LISTING = /\blistings?\b/i;
@@ -399,7 +419,7 @@ export function dictionaryTexts(source: string): string[] {
   return out;
 }
 
-export function glossaryViolations(lang: 'en' | 'de', texts: readonly string[]): string[] {
+export function glossaryViolations(lang: 'en' | 'de' | 'es' | 'fr', texts: readonly string[]): string[] {
   const hits: string[] = [];
   for (const text of texts) {
     // Строка из одного слова — ключ, код или значение перечисления, а не текст продавца
@@ -414,7 +434,7 @@ export function glossaryViolations(lang: 'en' | 'de', texts: readonly string[]):
   return hits;
 }
 
-test('шаг 69 (K9): словари EN и DE говорят терминами глоссария — запрещённых синонимов нет, «listing» — только об eBay', async () => {
+test('шаг 69 (K9), шаг 98 (Р-223): словари EN, DE, ES и FR говорят терминами глоссария — запрещённых синонимов нет, «listing» — только об eBay', async () => {
   const { readFileSync } = await import('node:fs');
   // Положительные контроли: каждое запрещённое слово правило видит, разрешённое — пропускает
   const en = (s: string) => glossaryViolations('en', [s]).length;
@@ -433,7 +453,15 @@ test('шаг 69 (K9): словари EN и DE говорят терминами 
   for (const ok of ['Kanalkonto verbinden', 'im Kanal-Backoffice prüfen', 'Ihre Stückkosten sind ein Betrag', 'Das Angebot steht still']) assert.equal(de(ok), 0, ok);
   // Разбор исходника: подстановки шаблона и комментарии не считаются текстом, тексты-функции — считаются
   assert.deepEqual(dictionaryTexts("/* tenant */ a: (t: string) => `Your ${t} tenant`, // tenant\n b: 'x y'"), ['Your   tenant', 'x y']);
-  for (const lang of ['en', 'de'] as const) {
+  // Шаг 98 [Р-223]: положительные контроли испанского и французского — каждое запрещённое слово видно, слово глоссария проходит
+  const es = (s: string) => glossaryViolations('es', [s]).length;
+  const fr = (s: string) => glossaryViolations('fr', [s]).length;
+  for (const bad of ['todo el inquilino', 'leído del marketplace', 'un artículo aquí', 'el listado del canal', 'una instantánea del canal', 'importar el coste unitario', 'fuera de repracer'])
+    assert.equal(es(bad), 1, bad);
+  for (const ok of ['todo el espacio de trabajo', 'el sitio amazon.com', 'los datos de la competencia', 'el costo unitario', 'un anuncio de eBay']) assert.equal(es(ok), 0, ok);
+  for (const bad of ['tout le locataire', 'la place de marché', 'un article ici', 'le listing du canal', 'un instantané du canal', 'hors de repracer']) assert.equal(fr(bad), 1, bad);
+  for (const ok of ['tout l’espace de travail', 'le site amazon.com', 'les données de la concurrence', 'une annonce eBay']) assert.equal(fr(ok), 0, ok);
+  for (const lang of ['en', 'de', 'es', 'fr'] as const) {
     const texts = dictionaryTexts(readFileSync(new URL(`./i18n/${lang}.ts`, import.meta.url), 'utf8'));
     assert.ok(texts.length > 1000, `${lang}: тексты словаря прочитаны — ${texts.length}`);
     assert.deepEqual(glossaryViolations(lang, texts), [], `${lang}: запрещённые синонимы глоссария`);
@@ -458,6 +486,10 @@ test('шаг 69 (K4): время в поясе продавца — летнее
   assert.equal(messagesFor('en', { timeZone: 'UTC' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'), 'UTC — прежний вид');
   // Ревью шага 69, находка 15: пояс, неизвестный среде, не роняет экран — время в UTC
   assert.equal(messagesFor('en', { timeZone: 'Mars/Olympus_Mons' }).when('2026-10-02T07:34:21Z'), messagesFor('en').when('2026-10-02T07:34:21Z'));
+  // Шаг 98 [Р-223]: имя пояса — на языке экрана (было: всё, кроме немецкого, по-английски); смещение и формат — прежние
+  const { zoneName } = await import('./i18n/shape.ts');
+  assert.deepEqual((['en', 'es', 'fr'] as const).map((l) => zoneName(l, 'America/New_York', '2026-10-02T07:34:21Z')),
+    ['Eastern Time (UTC−4)', 'Hora oriental (UTC−4)', 'Heure de l’Est nord-américain (UTC−4)']);
 });
 
 /** Шаг 73 [Р-208…Р-210]: подъём к полу словами — «after cost update», ступень с числом оставшихся шагов, одобрение ступени ниже пола */
@@ -526,4 +558,38 @@ test('step 84: the shadow summary as «metric — value» says what the sentence
   assert.equal(quiet.rows.find((r) => r.label === 'Would have used the external edit budget of the channel')!.value, '10');
   assert.ok(!quiet.rows.some((r) => r.label === 'Without the floor you would have sold cheaper by'));
   assert.deepEqual(quiet.notes, []);
+});
+
+/**
+ * Шаг 98 [Р-223]: правило браузерного смоука ловит английскую строку словаря на экране испанского или французского, но не видит строку,
+ * которую словарь языка оставил английской: она есть в обоих словарях. Такие совпадения — только из явного списка (имена, которые глоссарий
+ * не переводит, и французские слова, которые пишутся так же); новая непереведённая строка — красная сборка
+ */
+const SAME_AS_ENGLISH: Readonly<Record<'es' | 'fr', readonly string[]>> = {
+  es: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Demo', 'Deutsch', 'English', 'Español', 'Français',
+    'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com'],
+  fr: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Deutsch', 'English', 'Español', 'Français',
+    'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com',
+    // Французские слова, которые пишутся так же
+    'position', 'active', 'Stock', 'stock', 'Protections', 'Menu', 'Note', 'Sources', 'Source', 'Mode', 'urgent', 'attention', 'Attention', 'Type', 'Versions'],
+};
+test('step 98 (Р-223): a Spanish or French dictionary string equal to the English one is a name or a word spelled the same — from an explicit list', async () => {
+  const { messagesFor } = await import('./i18n/index.ts');
+  const strings = (v: unknown, path = '', out = new Map<string, string>()): Map<string, string> => {
+    if (typeof v === 'string') out.set(path, v);
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) strings(x, path ? `${path}.${k}` : k, out);
+    return out;
+  };
+  const en = strings(messagesFor('en'));
+  for (const lang of ['es', 'fr'] as const) {
+    const own = strings(messagesFor(lang));
+    assert.equal(own.size, en.size, `${lang}: the same keys as English`);
+    const same = [...en].filter(([k, v]) => own.get(k) === v && /[A-Za-z]{2}/.test(v)).map(([k, v]) => `${k}=${v}`);
+    assert.ok(same.length > 10, `${lang}: the rule sees the names that stay (${same.length})`);
+    assert.deepEqual(same.filter((x) => !SAME_AS_ENGLISH[lang].includes(x.slice(x.indexOf('=') + 1))), [], `${lang}: an English string left untranslated`);
+  }
+  // Положительный контроль [Р-94]: строка, оставленная английской, — находка
+  const leftEnglish = { ...messagesFor('es'), ui: { ...messagesFor('es').ui, settings: { ...messagesFor('es').ui.settings, title: messagesFor('en').ui.settings.title } } };
+  const same = [...en].filter(([k, v]) => strings(leftEnglish).get(k) === v && /[A-Za-z]{2}/.test(v)).map(([, v]) => v);
+  assert.ok(same.includes(messagesFor('en').ui.settings.title) && !SAME_AS_ENGLISH.es.includes(messagesFor('en').ui.settings.title));
 });

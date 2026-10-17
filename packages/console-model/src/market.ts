@@ -31,9 +31,9 @@ export interface MarketScope {
 
 const SCOPES: Readonly<Record<MarketProfile, MarketScope>> = {
   // Шаг 89: Walmart — канал рынка США; в профиле eu его нет (витрина одна — walmart.com)
-  us: { profile: 'us', channels: ['AMAZON', 'EBAY', 'WALMART'], locales: ['en'], omnibus: false, currencies: ['USD'] },
-  eu: { profile: 'eu', channels: ['KAUFLAND', 'AMAZON', 'EBAY'], locales: ['de', 'en'], omnibus: true, currencies: ['EUR'] },
-  global: { profile: 'global', channels: ['KAUFLAND', 'AMAZON', 'EBAY', 'WALMART'], locales: ['de', 'en'], omnibus: true, currencies: ['EUR', 'USD'] },
+  us: { profile: 'us', channels: ['AMAZON', 'EBAY', 'WALMART'], locales: ['en', 'es', 'fr'], omnibus: false, currencies: ['USD'] },
+  eu: { profile: 'eu', channels: ['KAUFLAND', 'AMAZON', 'EBAY'], locales: ['de', 'en', 'es', 'fr'], omnibus: true, currencies: ['EUR'] },
+  global: { profile: 'global', channels: ['KAUFLAND', 'AMAZON', 'EBAY', 'WALMART'], locales: ['de', 'en', 'es', 'fr'], omnibus: true, currencies: ['EUR', 'USD'] },
 };
 
 export function isMarketProfile(value: unknown): value is MarketProfile {

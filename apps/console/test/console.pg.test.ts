@@ -94,11 +94,12 @@ test('Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited
 
   // Роль меняется в базе — владелец в своей сессии со вторым фактором [Р-88]; следующий запрос с тем же токеном уже с новой ролью
   await inTenant(adminPool, world.identityTenantId, (tx) => tx.query(
-    `UPDATE tenant_data.membership SET role = 'VIEWER' WHERE membership_id = (SELECT actor_membership_id FROM audit.audit_event WHERE entity_type = 'price_stop' LIMIT 1)`),
+    `UPDATE tenant_data.membership SET role = 'INVENTORY_MANAGER' WHERE membership_id = (SELECT actor_membership_id FROM audit.audit_event WHERE entity_type = 'price_stop' LIMIT 1)`),
     memberUsers['membership-owner'], { mfa: true });
-  const asViewer = (await handle({ method: 'GET', url: api('stop'), body: undefined, ...operator })).body as StopView;
-  assert.equal(asViewer.permissions.canStop, false);
-  const stopId = asViewer.stops.active[0]!.stopId;
+  // Шаг 98: наблюдателя нет — роль без стоп-крана в базе — менеджер остатков
+  const asStockOnly = (await handle({ method: 'GET', url: api('stop'), body: undefined, ...operator })).body as StopView;
+  assert.equal(asStockOnly.permissions.canStop, false);
+  const stopId = asStockOnly.stops.active[0]!.stopId;
 
   const admin = await login('ADMIN');
   const resumed = await handle({ method: 'POST', url: api('stops', stopId, 'resume'), body: { note: 'Admin resumes after the check', confirmed: true }, ...admin });
@@ -110,7 +111,7 @@ test('Р-78, Р-76, finding 4 on PostgreSQL: the stop and the resume are audited
   ]);
   // Шаг 88 [Р-213]: смена роли в базе — в том же журнале: кто сменил, чья роль и как (время — часов базы, у остановок стенда — часов мира)
   assert.deepEqual(audit.filter((a) => a.action === 'Role changed').map((a) => [a.actor, a.scope]),
-    [['Owner', `${STAND_ACCOUNTS.find((a) => a.role === 'OPERATOR')!.email}: Operator → Viewer`]]);
+    [['Owner', `${STAND_ACCOUNTS.find((a) => a.role === 'OPERATOR')!.email}: Operator → Inventory manager`]]);
 });
 
 test('Р-74 on PostgreSQL: a NO_OP decision has no explanation in the database and the trace names the gap', async () => {

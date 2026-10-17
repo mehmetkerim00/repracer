@@ -2,6 +2,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
+
+/** Шаг 98 [Р-222]: запись количества подтверждают и отзывают владелец или менеджер — как страж базы (0191) и `OWNER_LEVEL_ROLES` модели */
+const OWNER_LEVEL: readonly string[] = ['OWNER', 'MANAGER'];
 import type {
   AnswerOtherToolsResult, ConfirmOrdersOutcome, ConfirmQuantityWritesResult, RevokeQuantityWritesResult, OtherTools, QuantityWritesState, CreateStockSourceResult, DecideReturnOutcome, EnableStockSyncInput, EnableStockSyncResult, InboundStockOutcome, InboundStockRow, OrderLinesOutcome, RecalculationOutcome,
   OrderReturnRow, StockActor, StockChannelRow, StockDivergenceRow, StockImportOutcome, StockImportRow, StockPage, StockPageQuery, StockRow, StockSourceMode, StockSourceRow, StockStore,
@@ -178,7 +181,8 @@ export class InMemoryStockStore implements StockStore {
   async confirmQuantityWrites(_tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<ConfirmQuantityWritesResult> {
     if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
     if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return { status: 'NOT_FOUND' };
-    if (this.roleOf(actor) !== 'OWNER') return { status: 'NOT_OWNER' };
+    // Шаг 98 [Р-222]: как страж базы (0191) — владелец или менеджер
+    if (!OWNER_LEVEL.includes(this.roleOf(actor) ?? '')) return { status: 'NOT_OWNER' };
     if (this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'ALREADY_CONFIRMED' };
     const answer = this.otherTools.get(channelAccountId);
     if (!answer) return { status: 'ANSWER_FIRST' };
@@ -193,7 +197,7 @@ export class InMemoryStockStore implements StockStore {
   async revokeQuantityWrites(_tenantId: string, channelAccountId: string, typedConfirmation: string, actor: StockActor): Promise<RevokeQuantityWritesResult> {
     if (!this.canManage(actor)) return { status: 'FORBIDDEN' };
     if (!this.offers.some((o) => o.channelAccountId === channelAccountId)) return { status: 'NOT_FOUND' };
-    if (this.roleOf(actor) !== 'OWNER') return { status: 'NOT_OWNER' };
+    if (!OWNER_LEVEL.includes(this.roleOf(actor) ?? '')) return { status: 'NOT_OWNER' };
     if (!this.quantityWritesConfirmed.has(channelAccountId)) return { status: 'NOT_CONFIRMED' };
     if (typedConfirmation.trim() !== this.externalAccountIdOf(channelAccountId)) return { status: 'CONFIRMATION_MISMATCH' };
     this.quantityWritesConfirmed.delete(channelAccountId);

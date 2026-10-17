@@ -140,7 +140,7 @@ BEGIN
 END $$;
 SELECT pg_temp.expect_fail('the operator creates a pilot in a language the dictionary does not have (Р-161)', $q$
   SELECT security.operator_create_tenant('ef000000-0000-4000-8000-000000000001', 'e0000000-4000-8000-0000-0000000000e2',
-    'Pilot FR', 'EU', 'e1000000-4000-8000-0000-0000000000e2', 'pilot-fr@example.test', 'fr') $q$,
+    'Pilot IT', 'EU', 'e1000000-4000-8000-0000-0000000000e2', 'pilot-it@example.test', 'it') $q$,
   'tenant_locale_known');
 SELECT pg_temp.ok('the operator invites the owner of the pilot (Р-167)', $q$
   SELECT security.operator_invite_owner('ef000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-0000000000e1',

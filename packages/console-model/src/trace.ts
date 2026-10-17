@@ -273,7 +273,7 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
       key: 'STRATEGY', title: t.titles.STRATEGY, status: 'OK',
       summary: st.intentClass === 'CHANGED' ? t.proposed(money(st.proposedMinor), m.change(st.currentMinor, st.proposedMinor), reason.text) : t.keep(reason.text),
       items: [
-        { label: t.strategy, value: `${label.label}: ${label.detail}` },
+        { label: t.strategy, value: `${label.label}${m.colon}${label.detail}` },
         { label: t.trigger, value: (m.ui.triggers as Record<string, string | undefined>)[st.trigger] ?? st.trigger },
         { label: t.before, value: money(st.currentMinor) },
         { label: t.boundsAtStrategy, value: `${money(st.boundsAtStrategy.minMinor)} – ${money(st.boundsAtStrategy.maxMinor)}` },

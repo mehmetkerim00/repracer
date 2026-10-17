@@ -92,7 +92,7 @@ async function timed<T>(step: string, fn: () => Promise<T>): Promise<T> {
   return out;
 }
 
-async function tokenFor(role: 'OWNER' | 'VIEWER'): Promise<{ authorization: string; cookie: string }> {
+async function tokenFor(role: 'OWNER' | 'OPERATOR'): Promise<{ authorization: string; cookie: string }> {
   const r = await fetch(`${origin}/api/stand-issuer/token?locale=en`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role }) });
   return { authorization: `Bearer ${((await r.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
 }
@@ -196,15 +196,15 @@ before(async () => {
   const directory = new MemoryIdentityDirectory();
   directory.link({ issuer: STAND_ISSUER, subject: 'connect-owner' }, seeded.userId);
   directory.addMembership(seeded.userId, { tenantId: seeded.tenantId, membershipId: seeded.ownerMembershipId, role: 'OWNER' });
-  // Наблюдатель: 403 у консоли, до базы; синтетический пользователь стенда
+  // Участник без права управлять пространством (оператор; наблюдателя с шага 98 нет): 403 у консоли, до базы; синтетический пользователь стенда
   const viewerUser = '1d000000-0000-4000-8000-000000000043';
   directory.link({ issuer: STAND_ISSUER, subject: 'connect-viewer' }, viewerUser);
-  directory.addMembership(viewerUser, { tenantId: seeded.tenantId, membershipId: '1e000000-0000-4000-8000-000000000043', role: 'VIEWER' });
+  directory.addMembership(viewerUser, { tenantId: seeded.tenantId, membershipId: '1e000000-0000-4000-8000-000000000043', role: 'OPERATOR' });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   server = createStandServer(createStandApi([live], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
     simulator: {
-      token: (account) => issuer.token(account.role === 'VIEWER' ? 'connect-viewer' : 'connect-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }),
+      token: (account) => issuer.token(account.role === 'OPERATOR' ? 'connect-viewer' : 'connect-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }),
       expiresInSeconds: 3600,
     },
   }, { connect: (worldId) => (worldId === WORLD ? connectService : null) }));
@@ -223,7 +223,7 @@ before(async () => {
     ],
   });
   owner = await tokenFor('OWNER');
-  viewer = await tokenFor('VIEWER');
+  viewer = await tokenFor('OPERATOR');
   const observerUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); observerUrl.pathname = `/${db.name}`;
   observer = createPool(observerUrl.toString(), { max: 1, applicationName: 'repracer-connect-observer' });
   await observer.query(`UPDATE tenant_data.tenant SET locale = 'en' WHERE tenant_id = $1`, [seeded.tenantId]);
@@ -248,8 +248,8 @@ test('Р-175, Р-176: от «Connect Amazon» до тени — продавец
   assert.deepEqual([ebay.state, ebay.canConnect], ['AWAITING_PLATFORM', false], 'eBay без ключей разработчика — ожидает доступа платформы, кнопки нет [Р-150]');
   assert.match(ebay.missingText ?? '', /developer keys/);
 
-  // Наблюдатель подключать не может — 403 консоли, а не 500 базы
-  const refused = await call<{ error: { code: string } }>('наблюдатель жмёт Connect', viewer, 'POST', api('connections', 'start'), { channel: 'AMAZON', marketplaces: [AMAZON_DE] });
+  // Оператор подключать не может — 403 консоли, а не 500 базы
+  const refused = await call<{ error: { code: string } }>('оператор жмёт Connect', viewer, 'POST', api('connections', 'start'), { channel: 'AMAZON', marketplaces: [AMAZON_DE] });
   assert.deepEqual([refused.status, refused.body.error.code], [403, 'FORBIDDEN']);
 
   const started = await call<{ consentUrl: string }>('Connect Amazon', owner, 'POST', api('connections', 'start'), { channel: 'AMAZON', marketplaces: [AMAZON_DE] });

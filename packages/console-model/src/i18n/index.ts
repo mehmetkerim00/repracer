@@ -1,14 +1,16 @@
 import { de } from './de.ts';
 import { en } from './en.ts';
+import { es } from './es.ts';
+import { fr } from './fr.ts';
 import { zonedTimeFormat } from './shape.ts';
 import type { Locale } from './types.ts';
 
-/** Словарь интерфейса [Р-72]: немецкий словарь обязан иметь ту же форму, что английский — пропуск ключа не компилируется */
+/** Словарь интерфейса [Р-72]: немецкий, испанский и французский словари обязаны иметь ту же форму, что английский — пропуск ключа не компилируется */
 export type Messages = typeof en;
 
-export const LOCALES: readonly Locale[] = ['de', 'en'];
+export const LOCALES: readonly Locale[] = ['de', 'en', 'es', 'fr'];
 
-const DICTIONARIES: Readonly<Record<Locale, Messages>> = { de, en };
+const DICTIONARIES: Readonly<Record<Locale, Messages>> = { de, en, es, fr };
 
 const ZONED = new Map<string, Messages>();
 

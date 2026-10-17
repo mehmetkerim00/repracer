@@ -10,8 +10,8 @@ import { addUsAccounts, channelPipeline, type DemoWorldPools } from './demo-worl
  *
  * Каждый продавец — своё пространство (тенант) с признаком демо [Р-151]: витрины amazon.com и ebay.com в ТЕНИ [Р-169], каталог —
  * функцией обнаружения, себестоимость, границы и стратегии — тем же модулем, что у главного демо (`demo-us.ts`). Владелец пространства —
- * синтетический продавец; владелец стенда (owner@stand) входит туда приглашением на роль: менеджером у одного, наблюдателем у
- * другого. Предложений у лёгких продавцов меньше, неделя тени — та же, что у главного демо: подготовка выросла на секунды (замер шага 91).
+ * синтетический продавец; владелец стенда (owner@stand) входит туда приглашением на роль менеджера (шаг 98 [Р-222]: ролей для
+ * людей две). Предложений у лёгких продавцов меньше, неделя тени — та же, что у главного демо: подготовка выросла на секунды (замер шага 91).
  * Данные синтетические.
  */
 
@@ -21,7 +21,7 @@ export interface DemoSellerSpec {
   /** Имя продавца — собственное имя, на всех языках одно */
   title: string;
   /** Слот членства стенда, через который владелец стенда входит в пространство, — и его роль (DEFAULT_MEMBERS) */
-  slot: 'membership-manager' | 'membership-viewer';
+  slot: 'membership-manager';
   /** Предложений у каждого из двух аккаунтов (amazon.com, ebay.com) */
   offers: number;
   /** С какого номера синтетического названия товара начинаются предложения каналов */
@@ -30,10 +30,10 @@ export interface DemoSellerSpec {
   owner: { name: string; mailbox: string };
 }
 
-/** Шаг 91: два лёгких продавца — Manager у одного, Viewer у другого (Р-213: одна роль на человека в пространстве) */
+/** Шаг 91: два лёгких продавца; шаг 98 [Р-222]: владелец стенда — менеджер у обоих (ролей для людей две, наблюдателя нет) */
 export const DEMO_SELLERS: readonly DemoSellerSpec[] = [
   { key: 'blue-ridge', title: 'Blue Ridge Trading', slot: 'membership-manager', offers: 6, titles: { amazon: 80, ebay: 90 }, owner: { name: 'Dana Whitfield', mailbox: 'dana.whitfield' } },
-  { key: 'lakeside', title: 'Lakeside Home Goods', slot: 'membership-viewer', offers: 5, titles: { amazon: 120, ebay: 130 }, owner: { name: 'Chris Holloway', mailbox: 'chris.holloway' } },
+  { key: 'lakeside', title: 'Lakeside Home Goods', slot: 'membership-manager', offers: 5, titles: { amazon: 120, ebay: 130 }, owner: { name: 'Chris Holloway', mailbox: 'chris.holloway' } },
 ];
 
 /** Шаг 91: сколько суток тени прожать у лёгкого продавца — по умолчанию неделя, как у главного демо (недельное письмо и график полные) */
@@ -59,7 +59,7 @@ export async function startDemoSellers(options: {
   standOwnerEmail: string;
   joinAs: NonNullable<Parameters<typeof import('@repracer/pricing-store-pg').seedPricingWorld>[1]['joinMember']>;
   pressDays?: number;
-  locale?: 'de' | 'en';
+  locale?: 'de' | 'en' | 'es' | 'fr';
   timeZone?: string | null;
   log?: (message: string) => void;
 }): Promise<RunningDemoSellers> {

@@ -11,8 +11,8 @@
 \set tA '''a0000000-0000-0000-0000-00000000000a'''
 \set owner '''a1000000-0000-0000-0000-00000000000a'''
 \set ownerM '''a2000000-0000-0000-0000-00000000000a'''
-\set viewer '''a1000000-0000-0000-0000-0000000000a9'''
-\set viewerM '''a2000000-0000-0000-0000-0000000000a9'''
+\set clerk '''a1000000-0000-0000-0000-0000000000a9'''
+\set clerkM '''a2000000-0000-0000-0000-0000000000a9'''
 \set j1 '''bf000000-0000-4000-8000-000000000001'''
 \set j2 '''bf000000-0000-4000-8000-000000000002'''
 \set j3 '''bf000000-0000-4000-8000-000000000003'''
@@ -35,10 +35,10 @@ SELECT pg_temp.ok('price evidence job created without a second factor (Р-123)',
 SELECT set_config('app.auth_mfa', 'on', false) \gset
 
 -- --------------------------------------------------------------- Р-100: право — по тому, что задание делает
-SELECT set_config('app.user_id', :viewer, false) \gset
-SELECT pg_temp.expect_fail('cost import job created by a viewer with a second factor (Р-100, Р-139)', format($q$
+SELECT set_config('app.user_id', :clerk, false) \gset
+SELECT pg_temp.expect_fail('cost import job created by an inventory manager with a second factor (Р-100, Р-139)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
-  VALUES (%L, 'COST_IMPORT', '{}'::jsonb, %L) $q$, :tA, :viewerM), 'does not have it');
+  VALUES (%L, 'COST_IMPORT', '{}'::jsonb, %L) $q$, :tA, :clerkM), 'does not have it');
 SELECT set_config('app.user_id', :owner, false) \gset
 
 -- --------------------------------------------------------------- признак второго фактора ставит база, а не вызывающий [Р-90]
@@ -117,7 +117,7 @@ INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_
 VALUES (:tA, 'bf000000-0000-4000-8000-000000000006', 'PRICE_EVIDENCE', '{}'::jsonb, :ownerM);
 INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
 VALUES (:tA, 'bf000000-0000-4000-8000-000000000007', 'BOUNDS_PLAN', '{}'::jsonb, :ownerM);
-SELECT set_config('app.user_id', :viewer, false) \gset
+SELECT set_config('app.user_id', :clerk, false) \gset
 SELECT pg_temp.expect_fail('a member cancels the bounds diff job of another member without the right to it (Р-143)', format($q$
   UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
    WHERE tenant_id = %L AND bulk_job_id = 'bf000000-0000-4000-8000-000000000007' $q$, :tA),
@@ -160,10 +160,10 @@ SELECT pg_temp.expect_fail('a member queues more bulk jobs than their own limit 
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
   VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :ownerM), 'member .* already has');
 -- Очередь тенанта при этом свободна: другой участник своё задание ставит
-SELECT set_config('app.user_id', :viewer, false) \gset
+SELECT set_config('app.user_id', :clerk, false) \gset
 SELECT pg_temp.ok('another member is not blocked by the queue of the first (OQ-207)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
-  VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :viewerM));
+  VALUES (%L, 'PRICE_EVIDENCE', '{}'::jsonb, %L) $q$, :tA, :clerkM));
 SELECT set_config('app.user_id', :owner, false) \gset
 
 \c - svc_bulk_worker

@@ -77,7 +77,7 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
                   <li key={i}>
                     <span className={`mark outcome-${item.outcome ?? 'INFO'}`}>{t.marks[item.outcome ?? 'INFO']}</span>{' '}
                     <span className="label">{item.label}</span>
-                    {item.value ? <span>: {item.value}</span> : null}
+                    {item.value ? <span>{m.colon}{item.value}</span> : null}
                     {item.reason ? <ReasonLine reason={item.reason} /> : null}
                   </li>
                 ))}

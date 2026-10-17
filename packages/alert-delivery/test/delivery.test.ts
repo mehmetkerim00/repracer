@@ -157,10 +157,25 @@ test('Р-161: язык письма — язык ТЕНАНТА из базы, �
 test('Р-161: язык, которого нет в словаре консоли, даёт умолчание, а не письмо из кодов', async () => {
   const h = harness();
   // База держит список языков ограничением (0124), но доставка не верит ему на слово: словарь — её собственность [Р-72]
-  h.store.tenants.set('t-1', { ...h.store.tenants.get('t-1')!, locale: 'fr' });
+  h.store.tenants.set('t-1', { ...h.store.tenants.get('t-1')!, locale: 'it' as never });
   h.store.add({ code: 'PRICING_STOPPED_BY_PERSON', severity: 'CRITICAL', raisedAt: ago(1) });
   await h.delivery.deliver();
   assert.match(h.mail.sent[0]!.text, /Die Preispflege wurde von einer Person gestoppt/);
+});
+
+test('шаг 98 (Р-223): письмо рабочего пространства — на испанском и французском, если это язык пространства', async () => {
+  const h = harness();
+  h.store.tenants.set('t-2', { name: 'Comercio Sintético', email: 'propietario@example.invalid', locale: 'es' });
+  h.store.tenants.set('t-3', { name: 'Commerce Synthétique', email: 'proprietaire@example.invalid', locale: 'fr' });
+  h.store.add({ tenantId: 't-2', code: 'PRICING_STOPPED_BY_PERSON', severity: 'CRITICAL', raisedAt: ago(2) });
+  h.store.add({ tenantId: 't-3', code: 'PRICING_STOPPED_BY_PERSON', severity: 'CRITICAL', raisedAt: ago(1) });
+  await h.delivery.deliver();
+  const es = h.mail.sent.find((x) => x.to === 'propietario@example.invalid')!;
+  const fr = h.mail.sent.find((x) => x.to === 'proprietaire@example.invalid')!;
+  assert.match(es.text, /Espacio de trabajo: Comercio Sintético/);
+  assert.match(es.text, /una persona detuvo los precios/);
+  assert.match(fr.text, /Espace de travail\s: Commerce Synthétique/);
+  assert.match(fr.text, /la tarification est arrêtée par une personne/);
 });
 
 test('Р-161: у каждого тенанта СВОЙ язык в одном заходе, и получатели читаются одним запросом', async () => {

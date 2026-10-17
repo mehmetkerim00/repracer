@@ -129,7 +129,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   COST_INPUTS_MISSING: (f) => `Strategy not evaluated: ${f.value('missing')} is missing.`,
   MARGIN_UNATTAINABLE: (f) => `The target margin ${f.bp('marginBp')} cannot be reached: fee ${f.bp('feeRateBp')}, fixed fee ${f.money('fixedFeeMinor')}, unit cost ${f.money('unitCostMinor')}${opt(f, 'vatRateBp', () => `, VAT ${f.bp('vatRateBp')}`)}.`,
   BOUNDS_INVALID: (f) => `Strategy not evaluated: the bounds ${f.money('minMinor')}–${f.money('maxMinor')} are invalid.`,
-  ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: the ${f.value('source')} is in ${f.raw('actual')}, the offer in ${f.raw('expected')}.`,
+  ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: ${f.value('source')} is in ${f.raw('actual')}, the offer in ${f.raw('expected')}.`,
   INVALID_STRATEGY_PARAMS: (f) => `Strategy not evaluated: the setting ${f.value('param')}${opt(f, 'settingMinor', () => ` ${f.money('settingMinor')}`)}${opt(f, 'settingBp', () => ` ${f.bp('settingBp')}`)} must be ${f.value('allowed')}.`,
 
   // Р-208: ступень лестницы ниже пола — одобрена как шаг к полу, а не «в границах»
@@ -184,7 +184,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Not sent: the daily edit budget is used up${f.has('used') && f.has('limit') ? ` (${f.count('used')} of ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` for ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; it renews at ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Not sent: this channel account is in shadow mode, so nothing is sent to your store. The engine keeps computing prices; to send them, start sending prices on the Shadow mode screen.`,
-  QUANTITY_WRITES_REVOKED: (f) => `Not sent: the owner revoked stock updates for the channel account ${f.raw('channelAccountId')}, so no stock is sent to your store. Stock sync switches on again only after a new confirmation that no other tool manages stock there.`,
+  QUANTITY_WRITES_REVOKED: (f) => `Not sent: stock updates for the channel account ${f.raw('channelAccountId')} were revoked, so no stock is sent to your store. Stock sync switches on again only after a new confirmation that no other tool manages stock there.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. This update was dropped; a new price decision is possible once the storefront time zone is confirmed.`,
   CHANNEL_DISTRUSTED: (f) => `All prices held (${f.value('stage')}): we do not trust how the channel applies our prices${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` since ${f.when('detectedAt')}`)}. A fixed or margin price would take the same broken path. Only a person can release this.`,
   CHANNEL_PRICE_BASIS_MISMATCH: (f) => `All prices on storefront ${f.raw('marketplace')} halted: we sent ${f.money('sentMinor')}, buyers see ${f.money('observedMinor')} — exactly the VAT rate ${f.bp('vatRateBp')} ${f.value('basisError')}. The channel uses a different price basis than ours; every further price would be wrong by the same share. Check the price settings of the channel account and release the distrust manually.`,
@@ -259,7 +259,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   DISPERSED_MARKET_EVENT: (f) => `different factors (spread above ${f.ratio('maxSpread')}) — market event`,
   SHIFT_BELOW_SHARE: (f) => `fewer products moved than a halt needs (${f.count('minProducts')} and ${f.ratio('share')} of them)`,
   NO_PLAUSIBILITY_ANCHOR: (f) => `Snapshot not used: nothing to check it against (unit cost ${f.get('costDeclared') ? 'declared' : 'missing'}). Declare the unit cost — it is the primary anchor.`,
-  OWN_PRICE_DEVIATION: (f) => `Warning: the ${f.value('field')} differed from our price ${f.money('ourPriceMinor')} by more than ${f.ratio('limit')}; the snapshot was accepted.`,
+  OWN_PRICE_DEVIATION: (f) => `Warning: ${f.value('field')} differed from our price ${f.money('ourPriceMinor')} by more than ${f.ratio('limit')}; the snapshot was accepted.`,
   SELF_OFFER_DIVERGENCE: (f) => `Our offer showed a different price in the channel than our price ${f.money('ourPriceMinor')} — a divergence case was opened.`,
   INTERNAL_OUTLIER_IGNORED: () => 'Warning: one offer was far from the median of the snapshot, but the strategy does not use it.',
   MARKET_SHIFT_DISPERSED: () => 'Market event: products moved with different factors; prices keep working.',
@@ -272,7 +272,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   WITHIN_DEADBAND: (f) => `The difference to the target was below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `The target was outside ${f.money('minMinor')}–${f.money('maxMinor')}; the strategy is set to keep the price.`,
   COMPETITOR_REQUIREMENT_NOT_MET: () => 'Strategy not evaluated: the channel data did not give what the strategy needs.',
-  ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: the ${f.value('source')} was in another currency than the offer (${f.raw('expected')}).`,
+  ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: ${f.value('source')} was in another currency than the offer (${f.raw('expected')}).`,
   DIVERGENCE_CASE_OPENED: (f) => `Divergence case opened: the channel showed another price than the ${f.money('expectedMinor')} we expect.`,
   // Отказ Gate у цены из данных конкурента: предложенная цена и отклонение выведены из цены конкурента [Р-85]; граница — наша
   BELOW_MIN_PRICE: (f) => `Rejected: the proposed price was below your minimum price ${f.money('minMinor')}.`,
@@ -329,7 +329,7 @@ const values: Record<ValueKey, string> = {
   REVIEW_CHANNEL_POLICY: 'Review the channel policy notice', CONTACT_CHANNEL_SUPPORT: 'Contact the channel support', REVIEW_OFFER_STATUS: 'Review the offer status',
   FEE_ESTIMATE_MISSING: 'the channel fee estimate is missing', VAT_RATE_MISSING: 'the product VAT rate is not set',
   CHANNEL: 'the channel',
-  OWNER: 'Owner', MANAGER: 'Manager', ADMIN: 'Admin', OPERATOR: 'Operator', PRICING_MANAGER: 'Pricing manager', INVENTORY_MANAGER: 'Inventory manager', VIEWER: 'Viewer',
+  OWNER: 'Owner', MANAGER: 'Manager', ADMIN: 'Admin', OPERATOR: 'Operator', PRICING_MANAGER: 'Pricing manager', INVENTORY_MANAGER: 'Inventory manager', GUEST: 'Demo guest',
   STRATEGY: 'the strategy', MIN_MARGIN: 'the minimum margin',
   VAT_INCLUDED: 'VAT included in the price (EU)', SALES_TAX_EXCLUDED: 'sales tax added at checkout (US)',
 };
@@ -372,6 +372,8 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
 
 export const en = {
   locale: 'en' as Locale,
+  /** Шаг 98 [Р-223]: разделитель подписи и значения («Source: …»); во французском — неразрывный пробел перед двоеточием */
+  colon: ': ',
   ...numberFormat('en', noValue),
   titles,
   reasons,
@@ -413,7 +415,7 @@ export const en = {
       /** Шаг 91 (вид преп-центра): лёгкий продавец рядом с главным демо — у него своё имя, описание общее */
       demoSellerDescription: 'Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, in shadow mode.',
       demoBadge: 'Demo', demoBanner: 'Demo workspace: synthetic data, real path. Every amount is made up.',
-      languages: { de: 'Deutsch', en: 'English' },
+      languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
       worlds: 'Your workspaces',
       worldsHint: 'Each workspace is one seller business with its own channel accounts.',
       backToWorlds: '← All workspaces',
@@ -479,15 +481,15 @@ export const en = {
         noSimulator: 'Sign-in goes through the identity provider, which is not connected yet.',
         /** Шаг 84: что может роль — строкой рядом с именем роли на входе (по матрице прав, policy.ts) */
         roleCan: {
-          OWNER: 'everything, plus people, channel accounts and starting to send prices',
-          MANAGER: 'prices, bounds, strategies, stock, unit cost import, bulk operations, stop pricing', ADMIN: 'manages the workspace, prices and stock, can stop pricing',
+          OWNER: 'everything: prices, stock, people, channel accounts and sending prices to your store; only an owner grants the owner role',
+          MANAGER: 'everything the owner does, except granting or removing the owner role', ADMIN: 'manages the workspace, prices and stock, can stop pricing',
           OPERATOR: 'can stop pricing and switch repricing on, does not edit prices', PRICING_MANAGER: 'edits prices, bounds and strategies, can stop pricing',
-          INVENTORY_MANAGER: 'manages products and stock, sees prices read-only', VIEWER: 'read-only',
+          INVENTORY_MANAGER: 'manages products and stock, sees prices read-only', GUEST: 'reads only (public demo)',
         },
-        roleMarks: { OWNER: 'Ow', MANAGER: 'Mg', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', VIEWER: 'Vw' }, asAccount: (role: string) => `Sign in as ${role}`,
+        roleMarks: { OWNER: 'Ow', MANAGER: 'Mg', ADMIN: 'Ad', OPERATOR: 'Op', PRICING_MANAGER: 'PM', INVENTORY_MANAGER: 'IM', GUEST: 'Gu' }, asAccount: (role: string) => `Sign in as ${role}`,
         signedIn: (name: string) => `Signed in: ${name}`,
         logout: 'Sign out',
-        noWorlds: 'You don’t have access to any workspace yet. Ask the workspace owner for an invitation.',
+        noWorlds: 'You don’t have access to any workspace yet. Ask the owner or a manager of the workspace for an invitation.',
         demoGuest: 'View the demo',
         /** Шаг 81: строка бренд-панели входа */
         tagline: 'Repricing you can audit',
@@ -651,7 +653,7 @@ export const en = {
       narrowed: (n: number) => `The path is narrowed to ${n} offers.`,
       widen: 'Undo narrowing',
       enable: (n: number) => `Enable repricing for ${n} offers`,
-      goTo: { CHANNEL: 'See channels', STOCK_SOURCE: 'Go to stock', STOCK_SYNC: 'Go to stock', COSTS: 'Go to import', BOUNDS: 'Go to bounds', STRATEGY: 'Go to strategies', ENABLE: 'Go to products' },
+      goTo: { CHANNEL: 'See channels', STOCK_SOURCE: 'Go to inventory', STOCK_SYNC: 'Go to inventory', COSTS: 'Go to import', BOUNDS: 'Go to bounds', STRATEGY: 'Go to strategies', ENABLE: 'Go to offers' },
       noRight: 'Narrowing the set of offers is for whoever may manage pricing.',
       noRightEnable: 'Your role may follow the setup path but not enable repricing.',
       result: {
@@ -793,7 +795,7 @@ export const en = {
         // Шаг 60 [Р-202]: запись количества выключена до подтверждения владельца на экране подключений
         notConfirmed: (otherToolManagesStock: boolean): string => otherToolManagesStock
           ? 'Stock updates to this channel are off: you told us on the Channel accounts screen that another tool updates stock here, and two tools sending stock overwrite each other. Switch that tool off and change the answer there first.'
-          : 'Stock updates to this channel are off: the owner has not yet confirmed on the Channel accounts screen that no other tool manages stock here. Answer the question there and confirm; then enable the synchronization.',
+          : 'Stock updates to this channel are off: the owner or a manager has not yet confirmed on the Channel accounts screen that no other tool manages stock here. Answer the question there and confirm; then enable the synchronization.',
       },
       divergences: {
         title: 'Divergences: ours vs channel',
@@ -846,7 +848,7 @@ export const en = {
       noChannels: 'No channel account yet, and connecting channels is not set up on this server yet — the platform team enables it.', 
       title: 'Channel accounts',
       intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and sends nothing to your store.',
-      noRight: 'Only the workspace owner connects channel accounts.',
+      noRight: 'Only the owner or a manager of the workspace connects channel accounts.',
       tokenNote: 'We keep the access of the channel encrypted and never show it — not here, not in emails, not in logs. You can withdraw it at any time in the channel itself; we notice that and tell you.',
       /** Шаг 49 [Р-190, E-21]: что мы на eBay в бою пока не видим — у каждого аккаунта eBay, словами */
       /** Шаг 60 [Р-202]: внешние писатели канала — вопрос при подключении, запись количества по подтверждению владельца, внешние правки */
@@ -862,14 +864,14 @@ export const en = {
         answered: 'Answer saved.',
       },
       quantityWrites: {
-        off: 'Stock updates to this channel: off — the owner has to confirm that no other tool manages stock here.',
-        on: 'Stock updates to this channel: on — confirmed by the owner.',
+        off: 'Stock updates to this channel: off — the owner or a manager has to confirm that no other tool manages stock here.',
+        on: 'Stock updates to this channel: on — confirmed by the owner or a manager.',
         answerFirst: 'Answer the question above first.',
         otherToolManagesStock: 'Another tool updates stock in this channel: if we sent stock too, the two would overwrite each other. Stock updates stay off until that tool is switched off and the answer is changed.',
-        ownerOnly: 'Only the owner confirms stock updates.',
+        ownerOnly: 'Only the owner or a manager confirms stock updates.',
         hint: (id: string) => `To confirm that no other tool manages stock in this channel, type the channel account ID: ${id}`,
         submit: 'Confirm and allow stock updates',
-        confirmed: 'Confirmed: stock updates to this channel are allowed. Enable the synchronization on the Stock screen.',
+        confirmed: 'Confirmed: stock updates to this channel are allowed. Enable the synchronization on the Inventory screen.',
         revokeHint: (id: string) => `To revoke, type the channel account ID: ${id}`,
         // Шаг 94: пояснение под полем отзыва — что будет, а не подпись в три предложения
         revokeCaption: 'Another tool starts managing stock here? Stock updates stop at once, unsent ones are dropped, and switching them on again needs a new confirmation.',
@@ -903,7 +905,7 @@ export const en = {
         shadow: (offers: number, decisions: number) => `Found ${offers} offers; the shadow made ${decisions} decisions in the last 24 hours.`,
         shadowWaiting: (offers: number) => `Found ${offers} offers. The shadow starts counting once the offers have costs, bounds and a strategy — continue in Setup: without a declared cost the engine does not start, not even in the shadow.`,
         live: (offers: number) => `${offers} offers found in the channel.`,
-        unmanaged: (unmanaged: number, writable: number) => `Of them we can update ${writable}; ${unmanaged === 1 ? '1 is' : `${unmanaged} are`} not open to our updates (for eBay: listings not under the Inventory API, which only the owner can migrate, or auctions, which are never managed).`,
+        unmanaged: (unmanaged: number, writable: number) => `Of them we can update ${writable}; ${unmanaged === 1 ? '1 is' : `${unmanaged} are`} not open to our updates (for eBay: listings not under the Inventory API, which only the owner or a manager can migrate, or auctions, which are never managed).`,
         awaitingAccess: (what: string) => `Missing: ${what}.`,
       },
       discovery: {
@@ -957,8 +959,8 @@ export const en = {
         // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
         badAnswer: 'Choose one of the answers.',
         accountNotFound: 'This channel account is not connected in this PriceTrail workspace.',
-        answerConflictConfirmed: 'Stock updates to this channel are already confirmed by the owner: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
-        notOwner: 'Only the owner confirms or revokes stock updates to a channel.',
+        answerConflictConfirmed: 'Stock updates to this channel are already confirmed: with another tool updating stock here, the two would overwrite each other. This answer is not accepted.',
+        notOwner: 'Only the owner or a manager confirms or revokes stock updates to a channel.',
         alreadyConfirmed: 'Stock updates to this channel are already confirmed.',
         notConfirmedToRevoke: 'Stock updates to this channel are not confirmed: there is nothing to revoke.',
         confirmationMismatch: 'The typed text does not match the channel account ID. Type it exactly as shown.',
@@ -993,7 +995,7 @@ export const en = {
       period: (days: number) => `Last ${days} days`,
       liveButton: 'Start sending prices',
       shadowButton: 'Back to shadow',
-      mfaHint: 'Once switched on, prices are really sent to your store. Only the owner can switch it on, and it needs your second factor; going back to shadow needs neither.',
+      mfaHint: 'Once switched on, prices are really sent to your store. Only the owner or a manager can switch it on, and it needs your second factor; going back to shadow needs neither.',
       none: 'Nothing was held in this period: either the engine found no reason to change a price, or the offers are not switched on yet.',
       quantity: (n: number) => `${n} pieces`,
       columns: { offer: 'Offer', value: 'Would have been sent', when: 'Held at', why: 'Why this price', account: 'Channel account', mode: 'Mode', action: 'Sending prices' },
@@ -1001,7 +1003,7 @@ export const en = {
         live: 'Sending prices is switched on: the next price decisions are sent to your store.',
         shadow: 'Back in the shadow: nothing is sent to your store any more.',
         mfa: 'Starting to send prices needs your second factor. Sign in again with it and repeat.',
-        notOwner: 'Only the owner of the account can start sending prices.',
+        notOwner: 'Only the owner or a manager can start sending prices.',
         /** Шаг 89: обратно в тень — право владельца и менеджера */
         noShadowRight: 'Only the owner or a manager switches an account back to shadow mode.',
         confirmation: 'The typed text does not match the account name. Type it exactly as shown.',
@@ -1076,7 +1078,7 @@ export const en = {
       digest: {
         subject: (tenant: string) => `PriceTrail: what the engine would have done this week (${tenant})`,
         intro: (tenant: string, accounts: number, zone: string) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and sends nothing to your store. Here is what it would have done last week (Monday to Sunday, ${zone}). The Shadow mode screen counts the last seven days up to now, so its numbers differ from this email.`,
-        cta: 'If these numbers look right, start sending prices to your store in the console — Shadow mode screen. Only you as the owner can do it, and it needs your second factor.',
+        cta: 'If these numbers look right, start sending prices to your store in the console — Shadow mode screen. The owner or a manager can do it, with a second factor.',
         previewIntro: (tenant: string, accounts: number) => `Your workspace "${tenant}" runs ${accounts} channel ${accounts === 1 ? 'account' : 'accounts'} in shadow mode: the engine works completely and sends nothing to your store. Here is what it would have done in the last seven days.`,
         previewTitle: 'Weekly email — preview',
         previewSynthetic: 'Demo: synthetic data. This is the email a seller in shadow mode receives every Monday; the real one covers the previous week, Monday to Sunday in your time zone.',
@@ -1135,8 +1137,8 @@ export const en = {
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, about ${Number(d.steps)} steps of at most ${n.percentBp(Number(d.stepLimitBp))} each, one step every ${Number(d.paceMinutes)} minutes at most.`,
         },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
-        QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'stock updates of an offer are blocked: the channel refused a stock update and the offer waits for a person', step: 'Open the Stock screen in the console, check the offer and the answer of the channel, then release the block.' },
-        QUANTITY_WRITE_NOT_SENT: { what: 'a stock update was not sent to the channel, so the channel may show a stock we did not intend', step: 'Open the Stock screen in the console and check this offer: the reason is shown next to the update. If stock updates were revoked on purpose, nothing else is needed.' },
+        QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'stock updates of an offer are blocked: the channel refused a stock update and the offer waits for a person', step: 'Open the Inventory screen in the console, check the offer and the answer of the channel, then release the block.' },
+        QUANTITY_WRITE_NOT_SENT: { what: 'a stock update was not sent to the channel, so the channel may show a stock we did not intend', step: 'Open the Inventory screen in the console and check this offer: the reason is shown next to the update. If stock updates were revoked on purpose, nothing else is needed.' },
         DISCOVERY_PAGE_LIMIT_REACHED: { what: 'offer discovery reached its page limit before the channel had returned every offer', step: 'Offers beyond the limit are not in the catalog yet. Contact us with the event code — the limit will be adjusted for your catalog.' },
         INBOUND_SOURCE_SILENT: { what: 'your stock system has not sent a stock figure for a day after confirming a shipped order — we keep subtracting the shipped pieces so the channels do not show what has left', step: 'Check that your system still sends stock through the Inbound API. Once it sends a figure newer than the order confirmation, the subtraction ends by itself.' },
         ORDER_LINES_FIRST_WINDOW_CAPPED: { what: 'the first reading of orders for a newly connected account did not go back to the moment of connection — only the last day was read', step: 'Orders placed earlier are expected to be in your stock source already. If an older order changed your stock, correct the stock in the source; contact us with the event code if this repeats.' },
@@ -1683,9 +1685,9 @@ export const en = {
       intro: 'Screens and emails of this workspace use this language, and times are shown in this time zone. Inside the system all times are kept in UTC.',
       language: 'Language', timeZone: 'Time zone',
       timeZoneHint: 'Times on every screen and in every email of this workspace are shown in this time zone.', timeZoneFromStorefront: (zone: string) => `From your first storefront — ${zone}`,
-      save: 'Save', saved: 'Saved.', readOnly: 'Only the owner of this workspace can change these settings.',
+      save: 'Save', saved: 'Saved.', readOnly: 'Only the owner or a manager of this workspace can change these settings.',
       timeZoneDefault: (zone: string) => `Now ${zone} — the default from your first storefront; choose a time zone to set your own.`,
-      invalid: 'These settings cannot be saved: choose English or Deutsch and a time zone from the list.',
+      invalid: 'These settings cannot be saved: choose a language and a time zone from the list.',
       timeZoneUnknown: 'This time zone is not known. Choose one from the list.',
     },
     compliance: {
@@ -1764,7 +1766,7 @@ export const en = {
       kinds: {
         HUMAN: { title: 'Stop by a person', holds: 'All prices', setBy: 'Owner or manager, with a note', release: 'Owner or manager, with a note; the whole workspace — with a second factor' },
         SYSTEM_HALT: { title: 'Storefront halt', holds: 'Only competitor-derived prices', setBy: 'System: broken input data', release: 'Fresh sample where the channel allows it, otherwise a person' },
-        CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: the owner, second factor, note' },
+        CHANNEL_DISTRUST: { title: 'Channel distrust', holds: 'All prices and the channel price threshold', setBy: 'System: the channel changes our numbers', release: 'Only a person: the owner or a manager, second factor, note' },
       },
       running: 'Running', stopped: 'Stopped', stoppedAt: (when: string) => `stopped ${when}`, coveredBy: (label: string, since: string) => `Stopped by: ${label} since ${since}`,
       stopTenant: 'Stop the whole workspace', stopTarget: 'Stop', resume: 'Resume', release: 'Release',
@@ -1787,7 +1789,7 @@ export const en = {
       roleChanged: (member: string | null, from: string, to: string) => (member ? `${member}: ${from} → ${to}` : `${from} → ${to}`),
       system: 'System',
       confirmTitle: (label: string) => `Stop all price changes: ${label}?`,
-      confirmTenant: (impact: string) => `${impact}. The stop also covers channel accounts connected later. Only the owner can resume it.`,
+      confirmTenant: (impact: string) => `${impact}. The stop also covers channel accounts connected later. The owner or a manager can resume it with a second factor.`,
       confirmChannel: (impact: string) => `${impact}. The owner or a manager can resume it with a note.`,
     },
   },

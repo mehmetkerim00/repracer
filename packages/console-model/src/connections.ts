@@ -1,4 +1,4 @@
-import { can, type MemberRole } from '@repracer/pricing-model';
+import { can, holdsOwnerActions, type MemberRole } from '@repracer/pricing-model';
 import type { ConnectionRow, PendingRequestRow } from '@repracer/pricing-store-pg';
 import type { Messages } from './i18n/index.ts';
 import { storefrontName } from './world.ts';
@@ -149,14 +149,14 @@ export function externalWritersView(
   const t = m.ui.connections;
   const answer = a.otherTools;
   const canAnswer = can(role, 'MANAGE_TENANT');
-  // Подтверждает только владелец — это проверяет база; экран не предлагает формы тому, у кого база откажет
-  const isOwner = role === 'OWNER';
+  // Подтверждает владелец или менеджер (шаг 98) — это проверяет база; экран не предлагает формы тому, у кого база откажет
+  const isOwner = holdsOwnerActions(role);
   const blockedText = a.quantityWritesConfirmed ? null
     : answer === null ? t.quantityWrites.answerFirst
     : managesStock(answer) ? t.quantityWrites.otherToolManagesStock
     : !isOwner ? t.quantityWrites.ownerOnly : null;
   const canConfirm = !a.quantityWritesConfirmed && isOwner && answer !== null && !managesStock(answer);
-  // Отзыв — у подтверждённого аккаунта и только владельцу: база откажет остальным той же причиной, что при выдаче
+  // Отзыв — у подтверждённого аккаунта, владельцу или менеджеру: база откажет остальным той же причиной, что при выдаче
   const canRevoke = a.quantityWritesConfirmed && isOwner;
   return {
     otherTools: {

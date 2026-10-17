@@ -213,9 +213,12 @@ test('шаг 69 (K1, K4): агентство видит каждый тенан�
   const saved = await post(us, { locale: 'en', timeZone: 'Asia/Tokyo' });
   assert.equal(saved.status, 200, JSON.stringify(saved.body));
   assert.deepEqual(saved.body, { locale: 'en', timeZone: 'Asia/Tokyo', timeZoneSet: true, canChange: true });
-  // Пояс, которого нет в базе поясов, — отказ своей причиной; язык вне списка — отказ
+  // Пояс, которого нет в базе поясов, — отказ своей причиной; язык вне списка профиля — отказ (немецкий в профиле us спрятан, Р-214)
   assert.equal((await post(us, { timeZone: 'Mars/Olympus_Mons' })).status, 400);
-  assert.equal((await post(us, { locale: 'fr' })).status, 400);
+  assert.equal((await post(us, { locale: 'it' })).status, 400);
+  // Шаг 98 [Р-223]: испанский и французский — языки профиля us
+  assert.equal((await post(us, { locale: 'fr' })).status, 200);
+  assert.equal((await post(us, { locale: 'en' })).status, 200);
   // Немецкий тенант — по умолчанию; у тенанта без витрин пояс показа — UTC
   const read = await handle({ method: 'GET', url: `/api/worlds/tenant-${de}/settings`, body: undefined, authorization: `Bearer ${token}`, cookie: 'repracer_locale=en' });
   assert.deepEqual(read.body, { locale: 'de', timeZone: 'UTC', timeZoneSet: false, canChange: true });

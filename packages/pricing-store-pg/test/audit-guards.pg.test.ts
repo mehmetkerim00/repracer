@@ -48,7 +48,7 @@ const buyboxScope = (n: number): MemorySeedScope => ({
 const reason = (e: unknown) => String((e as Error).message);
 const outcome = (p: Promise<unknown>) => p.then(() => 'accepted', reason);
 
-test('finding 1: a manual release review without the release, from a viewer, or for a released halt is refused; the real release is accepted', async () => {
+test('finding 1: a manual release review without the release, from an inventory manager, or for a released halt is refused; the real release is accepted', async () => {
   const w = await world([{ marketplace: 'de', haltedAt: ago(3_600_000) }]);
   const store = new PgPricingStore(pool, { adminPool: admin });
   const [halt] = await inTenant(pool, w.tenantId, async (tx) => (await tx.query('SELECT pricing_halt_id FROM channel_data.pricing_halt WHERE tenant_id = $1', [w.tenantId])).rows);
@@ -58,7 +58,7 @@ test('finding 1: a manual release review without the release, from a viewer, or 
 
   assert.match(await outcome(inTenant(admin, w.tenantId, review('membership-operator'), w.ids.dbId(standUserOf('membership-operator')), { mfa: true })), /did not happen/,
     'a release record without the release fails at commit');
-  assert.match(await outcome(inTenant(admin, w.tenantId, review('membership-viewer'), w.ids.dbId(standUserOf('membership-viewer')), { mfa: true })), /may not release/);
+  assert.match(await outcome(inTenant(admin, w.tenantId, review('membership-inventory-manager'), w.ids.dbId(standUserOf('membership-inventory-manager')), { mfa: true })), /may not release/);
   // Р-96: журнал аудита читает административный сервис
   const events = await inTenant(admin, w.tenantId, async (tx) => (await tx.query(`SELECT count(*)::int AS n FROM audit.audit_event WHERE tenant_id = $1 AND action = 'pricing.halt_released'`, [w.tenantId])).rows[0].n);
   assert.equal(events, 0, 'no audit event survives a refused release');

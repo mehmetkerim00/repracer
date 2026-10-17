@@ -112,7 +112,22 @@ export function numberFormat(locale: Locale, noValue: string): NumberFormat {
 const MONTHS: Record<Locale, readonly string[]> = {
   en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
   de: ['Jan.', 'Feb.', 'März', 'Apr.', 'Mai', 'Juni', 'Juli', 'Aug.', 'Sept.', 'Okt.', 'Nov.', 'Dez.'],
+  // Шаг 98 [Р-223]: месяцы — на языке экрана, порядок даты и числа — американские, как в профиле us (решение владельца: форматы не трогать)
+  es: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'],
+  fr: ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'],
 };
+/**
+ * Шаг 98 [Р-223]: язык НАЗВАНИЙ (месяцы, дни недели, пояса) — язык экрана; числа, деньги и порядок даты остаются американскими у всех
+ * языков, кроме немецкого (решение владельца: форматы не трогать)
+ */
+export function nameTag(locale: Locale): string {
+  return ZONE_NAME_TAG[locale];
+}
+/** «Oct 17» / «17. Okt.» / «oct 17» / «oct. 17» — месяц и день без года, теми же месяцами, что даты во фразах */
+export function monthDay(locale: Locale, mo: number, da: number): string {
+  const month = MONTHS[locale][mo - 1]!;
+  return locale === 'de' ? `${da}. ${month}` : `${month} ${da}`;
+}
 export function humanDate(locale: Locale, y: number, mo: number, da: number): string {
   const month = MONTHS[locale][mo - 1]!;
   return locale === 'de' ? `${da}. ${month} ${y}` : `${month} ${da}, ${y}`;
@@ -147,6 +162,9 @@ function utcOffsetLabel(timeZone: string, d: Date): string | null {
  * а не код IANA (`Europe/Berlin`). Название — родовое имя пояса на языке экрана; где его нет, — город из кода. Смещение — в момент
  * `at` (летнее и зимнее время различаются). Неизвестный пояс показывается как есть — подменять нечем.
  */
+/** Шаг 98 [Р-223]: язык имени пояса — язык экрана (испанский — как у продавцов США); числа и даты остаются американскими */
+const ZONE_NAME_TAG: Readonly<Record<Locale, string>> = { de: 'de-DE', en: 'en-US', es: 'es-US', fr: 'fr-FR' };
+
 export function zoneName(locale: Locale, timeZone: string, at: string): string {
   const d = new Date(Date.parse(at));
   if (Number.isNaN(d.getTime())) return timeZone;
@@ -155,11 +173,13 @@ export function zoneName(locale: Locale, timeZone: string, at: string): string {
   if (timeZone === 'UTC' || timeZone === 'Etc/UTC') return 'UTC';
   let generic: string | null = null;
   try {
-    generic = new Intl.DateTimeFormat(locale === 'de' ? 'de-DE' : 'en-US', { timeZone, timeZoneName: 'longGeneric' })
+    generic = new Intl.DateTimeFormat(ZONE_NAME_TAG[locale], { timeZone, timeZoneName: 'longGeneric' })
       .formatToParts(d).find((x) => x.type === 'timeZoneName')?.value ?? null;
   } catch { generic = null; }
   const city = timeZone.split('/').pop()!.replace(/_/g, ' ');
-  const name = generic && !/^(GMT|UTC)/.test(generic) ? generic : city;
+  const raw = generic && !/^(GMT|UTC)/.test(generic) ? generic : city;
+  // Испанское и французское имя пояса Intl даёт со строчной («hora oriental») — в списке и подписи оно начинает строку
+  const name = raw.charAt(0).toLocaleUpperCase(ZONE_NAME_TAG[locale]) + raw.slice(1);
   return `${name} (${offset})`;
 }
 

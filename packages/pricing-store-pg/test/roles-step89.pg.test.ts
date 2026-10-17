@@ -5,9 +5,10 @@ import { createPool, inTenant, PgPricingStore, PgShadowStore, seedPricingWorld }
 
 /**
  * Шаг 89 (ADR-0054, решение владельца) в базе — две строки матрицы прав, каждая проверкой с причиной отказа и разрешённым рядом:
- *  - обратно в тень — право RETURN_TO_SHADOW: менеджер переводит боевой аккаунт в тень, наблюдатель — нет (страж журнала режимов
- *    спрашивает матрицу, 0186);
- *  - снятие недоверия каналу — только владелец (и прежний администратор): менеджер получает отказ стража административной записи.
+ *  - обратно в тень — право RETURN_TO_SHADOW: менеджер переводит боевой аккаунт в тень, оператор — нет (страж журнала режимов
+ *    спрашивает матрицу, 0186; с шага 98 наблюдателя нет — отказ проверяется на роли без права);
+ *  - снятие недоверия каналу — шаг 89 отдавал его только владельцу; шаг 98 [Р-222] — и менеджеру. Отказ стража административной
+ *    записи проверяется на операторе, у которого права нет.
  * Данные синтетические.
  */
 const PG_URL = process.env.REPRACER_PG_URL;
@@ -26,20 +27,20 @@ const seed = (n: number) => seedPricingWorld(pool, {
   clock: new Date().toISOString(), seed: { scopes: [] }, provisioningPool: provisioning, adminPool: admin, writeMode: 'LIVE',
 });
 
-test('step 89 (ADR-0054): a manager switches a live account back to shadow, a viewer does not — the guard asks the permission matrix', async () => {
+test('step 89 (ADR-0054): a manager switches a live account back to shadow, an operator does not — the guard asks the permission matrix', async () => {
   const w = await seed(1);
   const shadow = new PgShadowStore({ adminPool: admin });
   const member = (alias: string) => ({ membershipId: w.ids.dbId(alias), userId: w.ids.dbId(standUserOf(alias)) });
   const back = (who: { membershipId: string; userId: string }) =>
     shadow.switchWriteMode(w.tenantId, { channelAccountId: w.channelAccountId, toMode: 'SHADOW', ...who, mfa: true });
-  assert.equal((await back(member('membership-viewer'))).status, 'NOT_OWNER', 'step 89: a viewer does not switch an account back to SHADOW');
+  assert.equal((await back(member('membership-operator'))).status, 'NOT_OWNER', 'step 89: an operator does not switch an account back to SHADOW');
   assert.equal((await back(member('membership-manager'))).status, 'SWITCHED', 'step 89: a manager switches an account back to SHADOW');
   const { rows: [a] } = await inTenant(admin, w.tenantId, (tx) => tx.query('SELECT write_mode FROM tenant_data.channel_account WHERE tenant_id = $1 AND channel_account_id = $2',
     [w.tenantId, w.channelAccountId]), w.userId);
   assert.equal(a!.write_mode, 'SHADOW');
 });
 
-test('step 89 (ADR-0054): only the owner releases a channel distrust — the manager is refused by the administrative write guard', async () => {
+test('step 89 (ADR-0054), step 98 (Р-222): the manager releases a channel distrust; an operator is refused by the administrative write guard', async () => {
   const w = await seed(2);
   // Недоверие ставит система (путь решения без человека), как при расхождении базы цены [Р-116, Р-118]
   const { rows: [d] } = await inTenant(pool, w.tenantId, (tx) => tx.query(
@@ -51,6 +52,6 @@ test('step 89 (ADR-0054): only the owner releases a channel distrust — the man
     membershipId: w.ids.dbId(alias), userId: w.ids.dbId(standUserOf(alias)), mfa: true, note: 'Checked the channel prices by hand', at: new Date().toISOString() as never,
   });
   const outcome = (p: Promise<unknown>) => p.then((r) => String(r), (e: unknown) => String(e instanceof Error ? e.message : e));
-  assert.match(await outcome(release('membership-manager')), /role MANAGER may not RELEASE_CHANNEL_DISTRUST/, 'step 89: a manager does not release a channel distrust');
-  assert.equal(await release('membership-owner'), 'RELEASED');
+  assert.match(await outcome(release('membership-operator')), /role OPERATOR may not RELEASE_CHANNEL_DISTRUST/, 'step 89: an operator does not release a channel distrust');
+  assert.equal(await release('membership-manager'), 'RELEASED', 'step 98: the manager releases a channel distrust');
 });

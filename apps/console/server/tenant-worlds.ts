@@ -25,7 +25,7 @@ export const TENANT_WORLD_PREFIX = 'tenant-';
  */
 export interface TenantWorldIndex {
   entries: ReadonlyArray<{ id: string; tenantId: string; title: string }>;
-  summaries(): Promise<Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en'; timeZone: string }>>;
+  summaries(): Promise<Map<string, WorldCounters & { awaitingAccess: number; locale: 'de' | 'en' | 'es' | 'fr'; timeZone: string }>>;
   open(worldId: string): Promise<LiveWorld | null>;
 }
 

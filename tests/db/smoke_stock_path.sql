@@ -82,7 +82,7 @@ SELECT pg_temp.ok('an inventory manager creates a stock source (Р-152)', format
 SELECT pg_temp.ok('an inventory manager creates a stock import job (Р-152)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, bulk_job_id, kind, params, created_by_membership_id)
   VALUES (%L, 'bf350000-0000-4000-8000-000000000001', 'STOCK_IMPORT', '{}'::jsonb, %L) $q$, :tA,
-  (SELECT membership_id FROM tenant_data.membership WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND role = 'INVENTORY_MANAGER')));
+  'a2000000-0000-0000-0000-0000000000a5'));
 -- Источник Inbound API и его ключ — тоже остаток: их заводит тот, кто ведёт каталог [Р-100, находка 16 ревью шага 35]
 SELECT pg_temp.ok('an inventory manager creates an inbound API stock source (Р-152)', format($q$
   INSERT INTO tenant_data.stock_source (tenant_id, stock_source_id, mode, name)
@@ -90,12 +90,12 @@ SELECT pg_temp.ok('an inventory manager creates an inbound API stock source (Р-
 SELECT pg_temp.ok('an inventory manager creates an inbound API key (Р-152)', format($q$
   INSERT INTO tenant_data.inbound_api_key (tenant_id, stock_source_id, key_prefix, key_sha256, created_by_membership_id)
   VALUES (%L, 'aa350000-0000-4000-8000-000000000001', 'rpk_35000001', decode(repeat('ab', 32), 'hex'), %L) $q$, :tA,
-  (SELECT membership_id FROM tenant_data.membership WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND role = 'INVENTORY_MANAGER')));
+  'a2000000-0000-0000-0000-0000000000a5'));
 -- Тот же человек цен не касается: право на каталог ≠ право на цены
 SELECT pg_temp.expect_fail('an inventory manager creates a cost import job (Р-143)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
   VALUES (%L, 'COST_IMPORT', '{}'::jsonb, %L) $q$, :tA,
-  (SELECT membership_id FROM tenant_data.membership WHERE tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND role = 'INVENTORY_MANAGER')),
+  'a2000000-0000-0000-0000-0000000000a5'),
   'needs the right MANAGE_PRICING');
 SELECT set_config('app.user_id', :operator, false) \gset
 -- Оператор ведёт цены, но не каталог: остатки — не его

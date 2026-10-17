@@ -90,6 +90,8 @@ test('Р-183: страница панели входит у поставщика
 test('шаг 69: язык нового тенанта по умолчанию — из развёртывания; вне списка — отказ при старте', () => {
   assert.equal(loadOperatorConfig(BASE, read).defaultLocale, 'de', 'без настройки — прежнее умолчание');
   assert.equal(loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'en' }, read).defaultLocale, 'en');
-  assert.throws(() => loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'fr' }, read),
-    (e: unknown) => e instanceof ConfigError && /REPRACER_OPERATOR_DEFAULT_LOCALE must be de or en/.test(e.message));
+  // Шаг 98 [Р-223]: испанский и французский — языки словаря
+  assert.equal(loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'fr' }, read).defaultLocale, 'fr');
+  assert.throws(() => loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'it' }, read),
+    (e: unknown) => e instanceof ConfigError && /REPRACER_OPERATOR_DEFAULT_LOCALE must be de, en, es or fr/.test(e.message));
 });

@@ -304,12 +304,12 @@ SELECT pg_temp.expect_fail('switching to LIVE with a confirmation that does not 
   VALUES (%L, %L, 'SHADOW', 'LIVE', %L, 'ja, bitte') $q$, :tA, :kAcc, :ownerM),
   'the typed confirmation does not name the channel account');
 
--- Администратор со вторым фактором и верным подтверждением — всё равно не владелец
+-- Администратор со вторым фактором и верным подтверждением — не владелец и не менеджер (шаг 98, Р-222)
 SELECT set_config('app.user_id', :adminU, false) \gset
 SELECT pg_temp.expect_fail('an admin switches the account to LIVE (Р-170)', format($q$
   INSERT INTO tenant_data.channel_write_mode_change (tenant_id, channel_account_id, from_mode, to_mode, changed_by_membership_id, typed_confirmation)
   VALUES (%L, %L, 'SHADOW', 'LIVE', %L, 'seller-A') $q$, :tA, :kAcc, :adminM),
-  'only the owner switches a channel account to LIVE');
+  'only the owner or a manager switches a channel account to LIVE');
 
 SELECT set_config('app.user_id', :ownerU, false) \gset
 SELECT pg_temp.ok('the owner switches the account to LIVE with a second factor and a typed confirmation (Р-170)', format($q$

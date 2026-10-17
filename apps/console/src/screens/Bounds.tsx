@@ -58,7 +58,7 @@ export function BoundsScreenView({ view }: { view: BoundsView }) {
         <h3>{b.costAndFees}</h3>
         {view.cost.unavailable ? <p className="gap-note">{view.cost.unavailable}</p> : (
           <ul className="plain cost-lines">
-            {view.cost.lines.map((l) => <li key={l.key}>{l.label}: <strong>{l.amount}</strong> <span className="small muted">({l.formula})</span></li>)}
+            {view.cost.lines.map((l) => <li key={l.key}>{l.label}{m.colon}<strong>{l.amount}</strong> <span className="small muted">({l.formula})</span></li>)}
           </ul>
         )}
         {view.feeEstimates.length > 0 ? (

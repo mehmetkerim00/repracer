@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from 'react';
-import { zoneName, type ConnectionAccountView, type ConnectionsView } from '@repracer/console-model';
+import { zoneName, type ConnectionAccountView, type ConnectionsView, type Locale } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, href, Load, MarketContext, useMessages, Intro } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FormActions } from '../forms.tsx';
@@ -109,10 +109,10 @@ function AccountSettings({ worldId }: { worldId: string }) {
   const m = useMessages();
   const market = useContext(MarketContext);
   const t = m.ui.settings;
-  type SettingsView = { locale: 'de' | 'en'; timeZone: string; timeZoneSet: boolean; canChange: boolean };
+  type SettingsView = { locale: 'de' | 'en' | 'es' | 'fr'; timeZone: string; timeZoneSet: boolean; canChange: boolean };
   const [view, setView] = useState<SettingsView | null>(null);
   const [zone, setZone] = useState('');
-  const [language, setLanguage] = useState<'de' | 'en'>('en');
+  const [language, setLanguage] = useState<Locale>('en');
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
     void requestJson<SettingsView>(worldPath(worldId, 'settings'), { locale: m.locale })
@@ -144,7 +144,7 @@ function AccountSettings({ worldId }: { worldId: string }) {
             {/* Шаг 87 [Р-214]: язык рабочего пространства — из языков профиля; при одном языке выбора нет */}
             {market.locales.length > 1 ? (
               <Field label={t.language}>
-                <select value={language} onChange={(e) => setLanguage(e.currentTarget.value === 'de' ? 'de' : 'en')}>
+                <select value={language} onChange={(e) => setLanguage(e.currentTarget.value as Locale)}>
                   {market.locales.map((l) => <option key={l} value={l}>{m.ui.app.languages[l]}</option>)}
                 </select>
               </Field>

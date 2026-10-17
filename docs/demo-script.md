@@ -34,7 +34,7 @@ PGHOST=127.0.0.1 PGPORT=5432 PGUSER=<суперпользователь PostgreS
   синтетические заказы amazon.com: первый через 2 минуты после запуска, дальше раз в 10 минут, отгрузка через час;
 - шаг 91 (вид преп-центра): рядом с главным демо — два лёгких продавца, **Blue Ridge Trading** (6 предложений на amazon.com и 6 на
   ebay.com) и **Lakeside Home Goods** (по 5): свои пространства с пометкой демо, оба в тени, неделя тени прожата так же. Владелец
-  стенда (строка «Owner» на входе) — менеджер у Blue Ridge и наблюдатель у Lakeside: у человека в пространстве одна роль [Р-213]
+  стенда (строка «Owner» на входе) — менеджер у обоих (шаг 98, Р-222: ролей для людей две): у человека в пространстве одна роль [Р-213]
   (`REPRACER_DEMO_SELLERS`, в профиле us по умолчанию включено);
 - поднимает интерфейс на `http://127.0.0.1:5173` и ждёт, пока он ответит;
 - ждёт первых решений и печатает запрос-доказательство для шага «а».
@@ -64,11 +64,11 @@ $24.99, а тот же товар «в другом месте» — $19.99, и 
 
 В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 92: по центру знак PriceTrail — линия цены, удержанная в конце, — и строчное имя **pricetrail**, под ними строка
 «Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
-ровно три роли: **Owner** «everything, plus people, channel accounts and starting to send prices» (шаг 96), **Manager** «prices, bounds, strategies, stock,
-unit cost import, bulk operations, stop pricing», **Viewer** «read-only») → строка **Owner** (переключателя языка в шапке нет —
-профиль us; шаг 96.1: справа в шапке — кнопка темы: солнце в светлой теме, луна в тёмной; нажатие переключает светлую ↔ тёмную и запоминает выбор в этом браузере, подсказка называет, куда переключит («Switch to dark theme»); пока выбора нет — тема системы; после входа там имя
+шаг 98 — ровно две роли: **Owner** «everything: prices, stock, people, channel accounts and sending prices to your store; only an owner grants
+the owner role», **Manager** «everything the owner does, except granting or removing the owner role») → строка **Owner** (в шапке —
+переключатель языка English · Español · Français, шаг 98; немецкого в профиле us нет; шаг 96.1: справа в шапке — кнопка темы: солнце в светлой теме, луна в тёмной; нажатие переключает светлую ↔ тёмную и запоминает выбор в этом браузере, подсказка называет, куда переключит («Switch to dark theme»); пока выбора нет — тема системы; после входа там имя
 человека **Alex Porter**, адрес — подсказкой при наведении) → три карточки (шаг 91): **Demo store (simulator)** — «Owner», **Blue Ridge Trading** — «Manager», **Lakeside Home Goods** —
-«Viewer», у всех пометка **Demo** → нажатие на «Demo store (simulator)» открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
+«Manager», у всех пометка **Demo** → нажатие на «Demo store (simulator)» открывает сразу **Shadow mode**. Перезагрузка страницы (F5) — выход: токен
 живёт только в памяти вкладки; снова строка «Owner», адрес экрана сохраняется.
 
 ### Что демо не показывает (сказать клиенту прямо)
@@ -91,7 +91,7 @@ unit cost import, bulk operations, stop pricing», **Viewer** «read-only») →
 **Экран — список миров («Your workspaces»):** три карточки (шаг 91). Первая — «Demo store (simulator)», описание «Synthetic American
 seller on the channel simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.», пометка **Demo**;
 под ними показатели (шаг 84) — **Offers** 36, **Decisions 24h** …, **Interventions 7d** … и подпись роли «Owner». Рядом — **Blue Ridge
-Trading** (Offers 12, роль «Manager») и **Lakeside Home Goods** (Offers 10, роль «Viewer»), описание «Synthetic American seller on the
+Trading** (Offers 12, роль «Manager») и **Lakeside Home Goods** (Offers 10, роль «Manager»), описание «Synthetic American seller on the
 channel simulator: offers on amazon.com and ebay.com, in shadow mode.»; их показ — раздел «ж». Пометка «test environment, synthetic data» в шапке — только здесь и на входе: внутри магазина её роль играет
 жёлтая полоса.
 
@@ -246,9 +246,8 @@ resume anytime with a note.» Ниже — таблица трёх видов о
 2. Поле «Note — why (at least 10 characters)» — заметка **не короче 10 символов** (кнопка «Yes, stop» до этого неактивна), например
    «Demo: checking the stop crane», → **«Yes, stop»**. Ответ: «Stopped. All prices of 12 offers stop changing.»
 3. Ниже — «Active stops»: карточка amazon.com с пилюлей «Stopped» и временем, «By: Owner (you)», «Note: “…”»; **«Audit log: stops, roles and channel events»** —
-   строка «Pricing stopped». Ниже в том же журнале уже есть строка с подготовки демо: **«Role changed»** · «Owner (you)» ·
-   «Jamie Lee: Viewer → Manager» (шаг 88: менеджер пришёл наблюдателем, владелец повысил его; у человека в пространстве одна
-   роль — новая заменила прежнюю; шаг 93: человек назван по имени, адрес — подсказкой при наведении). Новые решения по витрине — «Pricing stopped by a person».
+   строка «Pricing stopped» (шаг 98: менеджер в демо приходит менеджером — строки «Role changed» с подготовки больше нет; смена роли
+   по-прежнему пишется в этот журнал: кто, чья роль, прежняя → новая, человек назван по имени). Новые решения по витрине — «Pricing stopped by a person».
 4. На карточке остановки — **«Resume»** → окно «Resume pricing: amazon.com?» с заметкой → **«Yes, resume»** → «Pricing resumed.»; в
    журнале вторая строка, остановка уходит в «Resumed» со временем остановки и заметкой снятия. Весь шаг в проходе шага 87 — 1,5 с без
    ожиданий.
@@ -380,20 +379,20 @@ does not change the price for you here.» — событие канала ряд
 одна роль на человека в каждом [Р-9, Р-213].
 
 1. **«← All workspaces»** над меню → **«Your workspaces»**: три карточки, у каждой свои показатели и своя роль подписью —
-   «Demo store (simulator)» · Owner, «Blue Ridge Trading» · Manager, «Lakeside Home Goods» · Viewer (числа — прожатая неделя, порядок
+   «Demo store (simulator)» · Owner, «Blue Ridge Trading» · Manager, «Lakeside Home Goods» · Manager (числа — прожатая неделя, порядок
    замера шага 91: Offers 12, Decisions 24h ~80, Interventions 7d ~260 у Blue Ridge; 10, ~65, ~220 у Lakeside).
 2. Нажать **Blue Ridge Trading** → сразу **Shadow mode** этого продавца: в шапке меню «Blue Ridge Trading», аккаунты
    **Amazon · A1SYNSELLER…** и **eBay · syn_demo_ebay_us_…** в тени, плитки недели (Decisions, Price would change, Held back, Your floor
-   saved you from selling cheaper by) и график «Decisions per day». Кнопки «Start sending prices» нет — отправку цен включает владелец
-   пространства, а здесь вы менеджер.
+   saved you from selling cheaper by) и график «Decisions per day». Здесь вы менеджер — и можете всё, что владелец пространства, кроме
+   роли владельца (шаг 98, Р-222), в том числе включить отправку цен; бой база откроет только по готовой витрине [Р-172].
 3. **«← All workspaces»** → снова три карточки.
 
 Что сказать:
 
 - каждый продавец — своё пространство: его каналы, его цены, его остановки; данные пространств не смешиваются — это граница в базе, а
   не фильтр экрана;
-- в каждом пространстве у вас ровно одна роль, её назначает владелец пространства: у одного продавца вы ведёте цены (Manager), у другого
-  только смотрите (Viewer) — изменение там откажет и консоль, и база (проверено живым прогоном шага 91);
+- в каждом пространстве у вас ровно одна роль, её назначает владелец пространства (или его менеджер): ролей для людей две — Owner и
+  Manager, права одинаковые, кроме денег (биллинг — только владелец, шаг 98); роль владельца трогает только владелец — это держит база;
 - карточки списка считаются одним обращением к базе на весь список, а не по пространству: список агентства из 50 продавцов — 2 обращения
   (шаг 45, Р-182).
 

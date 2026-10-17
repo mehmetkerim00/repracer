@@ -185,7 +185,7 @@ export function buildEbayPipelineScenarios(): Array<{ file: string; scenario: Sc
     ['mandatory:pipeline-kill-switch'],
     world({ scopes: [scope(7, { strategy: fixed(7, 1500) })] }),
     [
-      { id: 'viewer-cannot-stop', kind: 'pricingStop', op: 'stop', scope: 'TENANT', membershipId: 'membership-viewer', note: 'Synthetic stand check of the kill switch', expect: { status: 'FORBIDDEN' } } as Step,
+      { id: 'inventory-manager-cannot-stop', kind: 'pricingStop', op: 'stop', scope: 'TENANT', membershipId: 'membership-inventory-manager', note: 'Synthetic stand check of the kill switch', expect: { status: 'FORBIDDEN' } } as Step,
       { id: 'operator-stops-tenant', kind: 'pricingStop', op: 'stop', scope: 'TENANT', membershipId: 'membership-operator', note: 'Synthetic stand check of the kill switch', expect: { status: 'STOPPED', stop: { scope: 'TENANT', channelAccountId: null } } } as Step,
       recompute('fixed-price-held-by-stop', 'ws-ebay-price-7', { decision: { outcome: 'HELD', rejectionReason: 'PRICING_STOPPED' } }),
       { id: 'operator-cannot-resume-tenant', kind: 'pricingStop', op: 'release', stopIndex: 0, membershipId: 'membership-operator', note: 'Operator tries to resume the tenant', expect: { status: 'FORBIDDEN' } } as Step,

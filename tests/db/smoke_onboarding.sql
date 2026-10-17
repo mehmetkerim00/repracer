@@ -8,8 +8,8 @@
 \set tA '''a0000000-0000-0000-0000-00000000000a'''
 \set owner '''a1000000-0000-0000-0000-00000000000a'''
 \set ownerM '''a2000000-0000-0000-0000-00000000000a'''
-\set viewer '''a1000000-0000-0000-0000-0000000000a9'''
-\set viewerM '''a2000000-0000-0000-0000-0000000000a9'''
+\set clerk '''a1000000-0000-0000-0000-0000000000a9'''
+\set clerkM '''a2000000-0000-0000-0000-0000000000a9'''
 \set operator '''a1000000-0000-0000-0000-0000000000a0'''
 \set operatorM '''a2000000-0000-0000-0000-0000000000a0'''
 
@@ -72,10 +72,10 @@ SELECT pg_temp.ok('the onboarding status derives the channel step from real acco
   END $x$ $q$, :tA));
 
 -- --------------------------------------------------------------- Р-149, Р-143: включение движка набора — задание с СВОИМ правом
-SELECT set_config('app.user_id', :viewer, false) \gset
-SELECT pg_temp.expect_fail('a viewer creates a repricing enablement job (Р-143)', format($q$
+SELECT set_config('app.user_id', :clerk, false) \gset
+SELECT pg_temp.expect_fail('an inventory manager creates a repricing enablement job (Р-143)', format($q$
   INSERT INTO tenant_data.bulk_job (tenant_id, kind, params, created_by_membership_id)
-  VALUES (%L, 'REPRICING_ENABLE', '{}'::jsonb, %L) $q$, :tA, :viewerM), 'needs the right ENABLE_REPRICING');
+  VALUES (%L, 'REPRICING_ENABLE', '{}'::jsonb, %L) $q$, :tA, :clerkM), 'needs the right ENABLE_REPRICING');
 SELECT set_config('app.user_id', :owner, false) \gset
 -- Очередь владельца заполнена предыдущим смоуком: продавец в такой ситуации отменяет своё ждущее задание [OQ-207]
 SELECT pg_temp.ok('the owner frees a slot by cancelling their own waiting job (OQ-207)', format($q$
@@ -100,8 +100,8 @@ SELECT pg_temp.expect_fail('an operator creates a bounds edit job (Р-143)', for
 SELECT pg_temp.ok('an operator cancels the enablement job of another member (Р-143)', format($q$
   UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
    WHERE tenant_id = %L AND bulk_job_id = 'bf340000-0000-4000-8000-000000000001' $q$, :tA));
-SELECT set_config('app.user_id', :viewer, false) \gset
-SELECT pg_temp.expect_fail('a viewer cancels the enablement job of another member (Р-143)', format($q$
+SELECT set_config('app.user_id', :clerk, false) \gset
+SELECT pg_temp.expect_fail('an inventory manager cancels the enablement job of another member (Р-143)', format($q$
   UPDATE tenant_data.bulk_job SET status = 'CANCELLED', finished_at = now()
    WHERE tenant_id = %L AND bulk_job_id = 'bf340000-0000-4000-8000-000000000002' $q$, :tA),
   'needs the right to that operation');

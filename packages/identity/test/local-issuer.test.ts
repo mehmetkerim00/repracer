@@ -18,7 +18,7 @@ const pem = () => generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privat
 
 const directory = new MemoryIdentityDirectory();
 directory.link({ issuer: ISSUER, subject: 'guest-1' }, 'u-1');
-directory.addMembership('u-1', { tenantId: 't-demo', membershipId: 'm-1', role: 'VIEWER' });
+directory.addMembership('u-1', { tenantId: 't-demo', membershipId: 'm-1', role: 'GUEST' });
 
 test('шаг 38: два процесса с ОДНИМ ключом принимают токены друг друга', async () => {
   const key = pem();
@@ -32,7 +32,7 @@ test('шаг 38: два процесса с ОДНИМ ключом приним
   const authenticator = createAuthenticator({ issuer: ISSUER, audience: AUDIENCE, jwks: staticJwks(second.jwks), directory });
   const principal = await authenticator.authenticate(`Bearer ${token}`);
   assert.ok(principal, 'вторая реплика приняла токен первой');
-  assert.equal(principal!.memberships[0]?.role, 'VIEWER', 'роль берётся из членства, как у продавца');
+  assert.equal(principal!.memberships[0]?.role, 'GUEST', 'роль берётся из членства, как у продавца');
 });
 
 test('шаг 38: РАЗНЫЕ ключи не принимают токены друг друга — и это то, что ломало гостя', async () => {

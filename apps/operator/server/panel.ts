@@ -28,7 +28,7 @@ export interface PanelDeps {
   invitationBaseUrl: string;
   invitationTtlHours: number;
   /** Шаг 69 (K1): язык нового тенанта, когда оператор его не назвал, — язык развёртывания региона */
-  defaultLocale?: 'de' | 'en';
+  defaultLocale?: 'de' | 'en' | 'es' | 'fr';
   /** Счётчики процесса: панель считает вызовы так же, как остальные процессы */
   count?: (name: string) => void;
   now?: () => Date;

@@ -116,7 +116,7 @@ SELECT pg_temp.expect_fail('path creates a user (Р-90)', $q$ INSERT INTO platfo
 SELECT pg_temp.expect_fail('path stops pricing as a person (Р-90)', $q$
   INSERT INTO tenant_data.price_stop (tenant_id, scope_type, stopped_by_membership_id, stop_note) VALUES ('a0000000-0000-0000-0000-00000000000a', 'TENANT', 'a2000000-0000-0000-0000-00000000000a', 'forged stop by the decision path') $q$, '^permission denied for table price_stop$');
 SELECT pg_temp.expect_fail('path invites a member (Р-90)', $q$
-  SELECT security.invite_member('a0000000-0000-0000-0000-00000000000a', 'x@example.test', 'VIEWER', sha256('x'), interval '1 day') $q$, '^permission denied for function invite_member$');
+  SELECT security.invite_member('a0000000-0000-0000-0000-00000000000a', 'x@example.test', 'MANAGER', sha256('x'), interval '1 day') $q$, '^permission denied for function invite_member$');
 SELECT pg_temp.expect_fail('path sets a notification loss verdict itself (Р-121)', $q$
   INSERT INTO channel_data.notification_loss_verdict (tenant_id, notification_loss_check_id, verdict, decided_at)
   VALUES (security.current_tenant_id(), gen_random_uuid(), 'LOSS_SUSPECTED', now()) $q$, '^permission denied for table notification_loss_verdict$');

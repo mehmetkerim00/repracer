@@ -223,16 +223,18 @@ test('D, F: the product list shows the effective floor with min_price as its par
   }
 });
 
-test('Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; only the owner resumes a tenant stop', async () => {
+test('Р-69, Р-70, OQ-125: the kill switch stops every price of the tenant; only the owner or a manager resumes a tenant stop', async () => {
   const w = live('kaufland/pipeline/happy-path');
-  const viewer = await w.view(user('VIEWER'));
+  // Шаг 98 [Р-222]: наблюдателя нет — участник без прав на цены в мире стенда — менеджер остатков
+  const viewer = await w.view(user('INVENTORY_MANAGER'));
   assert.deepEqual((await stopOf(w.store, viewer, en)).permissions, { canStop: false, canResumeTenant: false, canResumeChannel: false, canReleaseHalt: false, canReleaseDistrust: false });
   assert.equal(productList(viewer, en).rows.some((r) => r.canEnable), false);
 
   const operatorWorld = await w.view(user('OPERATOR'));
   const plan = planStop(operatorWorld, { kind: 'TENANT' }, en);
   assert.equal(plan.alreadyActive, false);
-  assert.match(plan.confirmText, /Only the owner can resume it\.$/);
+  // Возобновить остановку тенанта может владелец или менеджер (матрица с шага 88; текст окна говорил «только владелец» — шаг 98)
+  assert.match(plan.confirmText, /The owner or a manager can resume it with a second factor\.$/);
   const ctx = w.callContext(operatorWorld.accounts[0]!.channelAccountId);
   const stopped = await w.pipeline.stopPricing(ctx, {
     scope: 'TENANT', channelAccountId: null, marketplace: null, stoppedAt: w.clock.iso(), stoppedByMembershipId: user('OPERATOR').membershipId,

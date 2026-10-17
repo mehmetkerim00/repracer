@@ -201,7 +201,7 @@ export function WorldList({ worlds }: { worlds: readonly WorldSummary[] }) {
               <div><dt>{m.ui.app.metrics.decisions}</dt><dd>{nf.format(w.decisionsLastDay)}</dd></div>
               <div><dt>{m.ui.app.metrics.interventions}</dt><dd>{nf.format(w.interventionsLastWeek)}</dd></div>
             </dl>
-            <p className="small muted world-meta">{w.role}</p>
+            {w.role ? <p className="small muted world-meta">{w.role}</p> : null}
           </li>
         ))}
       </ul>
@@ -429,7 +429,9 @@ export function App() {
   const langSwitch = marketLocales.length > 1 ? (
     <span className="lang">
       {marketLocales.map((l) => (
-        <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} onClick={() => changeLocale(l)}>{m.ui.app.languages[l]}</button>
+        // Шаг 98 [Р-223]: на телефоне три-четыре имени языка не помещаются в шапку — видим код (EN · ES · FR), имя — для диктора и подсказкой
+        <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} aria-label={m.ui.app.languages[l]} title={m.ui.app.languages[l]} lang={l}
+          onClick={() => changeLocale(l)}><span className="lang-name">{m.ui.app.languages[l]}</span><span className="lang-code" aria-hidden="true">{l.toUpperCase()}</span></button>
       ))}
     </span>
   ) : null;

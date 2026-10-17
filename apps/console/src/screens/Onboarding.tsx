@@ -172,7 +172,7 @@ export function EnableResult({ result, onDismiss }: { result: EnableResultView; 
           <p className="notice">{t.skipped(result.skipped)}</p>
           <ul className="small">{result.byCode.map((c) => <li key={c.code}><strong>{c.title}</strong> — {c.count}</li>)}</ul>
           <ul className="small">
-            {result.examples.map((e) => <li key={e.writeScopeId}><strong>{e.label}</strong>: {e.reasons.join(' ')}</li>)}
+            {result.examples.map((e) => <li key={e.writeScopeId}><strong>{e.label}</strong>{m.colon}{e.reasons.join(' ')}</li>)}
           </ul>
           {result.skipped > result.examples.length ? <p className="small muted">{t.more(result.skipped - result.examples.length)}</p> : null}
         </>
@@ -193,7 +193,7 @@ export function NextStepCard({ worldId }: { worldId: string }) {
   const n = view.data.nextStep;
   return (
     <section className={`card next-step${n.waitsForOwner ? ' waits' : ''}`}>
-      <div className="next-step-head"><strong>{m.ui.onboarding.next.title}:</strong> {n.title}{n.progress ? <span className="muted"> ({n.progress})</span> : null}</div>
+      <div className="next-step-head"><strong>{m.ui.onboarding.next.title}{m.colon.trimEnd()}</strong> {n.title}{n.progress ? <span className="muted"> ({n.progress})</span> : null}</div>
       <p className="small">{n.hint}</p>
       {n.goTo ? <a className="row-link" href={href(worldId, n.goTo.screen, ...(n.goTo.param ? [n.goTo.param] : []))}>{n.goTo.label}</a> : null}
     </section>

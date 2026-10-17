@@ -61,8 +61,8 @@ test('Р-176, Р-177, Р-150: тень с прогрессом, бой, отзы
   assert.equal(by.awaiting!.canReconnect, false, 'аккаунт не из OAuth повторным согласием не чинится');
   const ebay = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ channel: 'EBAY', authStatus: 'REVOKED' })], pending: [] }, apps, m);
   assert.equal(ebay.accounts[0]!.canReconnect, false, 'eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт');
-  // Наблюдатель видит состояние, но кнопок у него нет
-  const viewer = connectionsView({ worldId: 'w', role: 'VIEWER', now: NOW }, { accounts: [row({ authStatus: 'REVOKED' })], pending: [] }, apps, m);
+  // Участник без права управлять пространством (оператор) видит состояние, но кнопок у него нет
+  const viewer = connectionsView({ worldId: 'w', role: 'OPERATOR', now: NOW }, { accounts: [row({ authStatus: 'REVOKED' })], pending: [] }, apps, m);
   assert.deepEqual([viewer.canManage, viewer.channels[0]!.canConnect, viewer.accounts[0]!.canReconnect], [false, false, false]);
   assert.ok(viewer.noRightText);
 });
@@ -170,7 +170,7 @@ test('шаг 60 [Р-202]: вопрос о других инструментах,
   for (const locale of ['de', 'en'] as const) {
     const m = messagesFor(locale);
     const t = m.ui.connections;
-    const account = (role: 'OWNER' | 'ADMIN' | 'VIEWER', over: Partial<ConnectionRow>) => connectionsView({ worldId: 'w', role, now: NOW }, { accounts: [row(over)], pending: [] }, [], m).accounts[0]!;
+    const account = (role: 'OWNER' | 'MANAGER' | 'ADMIN' | 'OPERATOR', over: Partial<ConnectionRow>) => connectionsView({ worldId: 'w', role, now: NOW }, { accounts: [row(over)], pending: [] }, [], m).accounts[0]!;
     // Не отвечено: вопрос задан, запись количества выключена, подтвердить нельзя — сначала ответ
     const fresh = account('OWNER', {});
     assert.deepEqual([fresh.otherTools.answer, fresh.otherTools.text, fresh.otherTools.options.map((o) => o.answer), fresh.otherTools.warning],
@@ -181,9 +181,10 @@ test('шаг 60 [Р-202]: вопрос о других инструментах,
     const none = account('OWNER', { otherTools: 'NONE' });
     assert.deepEqual([none.quantityWrites.canConfirm, none.quantityWrites.typeToConfirm, none.quantityWrites.blockedText], [true, 'A3SYN', null]);
     assert.ok(none.quantityWrites.confirmationHint!.includes('A3SYN'), none.quantityWrites.confirmationHint!);
-    // Не владелец формы не получает — база ему откажет; наблюдатель не отвечает на вопрос
+    // Шаг 98 [Р-222]: менеджер подтверждает, как владелец; администратор формы не получает — база ему откажет; оператор не отвечает на вопрос
+    assert.deepEqual([account('MANAGER', { otherTools: 'NONE' }).quantityWrites.canConfirm, account('MANAGER', { otherTools: 'NONE' }).otherTools.options.length], [true, 4]);
     assert.deepEqual([account('ADMIN', { otherTools: 'NONE' }).quantityWrites.canConfirm, account('ADMIN', { otherTools: 'NONE' }).quantityWrites.blockedText], [false, t.quantityWrites.ownerOnly]);
-    assert.deepEqual(account('VIEWER', {}).otherTools.options, []);
+    assert.deepEqual(account('OPERATOR', {}).otherTools.options, []);
     // Остатки ведёт другой инструмент: подтвердить нельзя, и сказано почему
     for (const answer of ['STOCK', 'STOCK_AND_PRICES'] as const) {
       const v = account('OWNER', { otherTools: answer });

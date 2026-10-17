@@ -54,7 +54,7 @@ let inboundKey = '';
 let stockStore: PgStockStore;
 /** Шаг 59 [Р-199]: конвейер мира — им прогон делает то, что после заказа делает работа `order-lines` (пересчёт и запись) */
 let worldStockPipeline: StockPipeline;
-/** Шаг 59 [Р-199]: наблюдатель тенанта — видит возвраты, но не решает (403 у консоли) */
+/** Шаг 59 [Р-199]: оператор тенанта (без права на каталог) — видит возвраты, но не решает (403 у консоли) */
 let viewerAuth: { authorization: string; cookie: string };
 /** Шаг 60 [Р-202]: администратор тенанта — управляет подключениями, но запись количества подтверждает только владелец (база) */
 let adminAuth: { authorization: string; cookie: string };
@@ -123,10 +123,10 @@ before(async () => {
   const directory = new MemoryIdentityDirectory();
   directory.link({ issuer: STAND_ISSUER, subject: 'demo-owner' }, seeded.userId);
   directory.addMembership(seeded.userId, { tenantId: seeded.tenantId, membershipId: seeded.ownerMembershipId, role: 'OWNER' });
-  // Шаг 59 [Р-199]: наблюдатель — синтетический пользователь стенда; 403 ему отвечает консоль, до базы
+  // Шаг 59 [Р-199]: участник без прав на каталог и пространство (оператор; наблюдателя с шага 98 нет) — синтетический пользователь стенда; 403 ему отвечает консоль, до базы
   const viewerUser = '1d000000-0000-4000-8000-000000000199';
   directory.link({ issuer: STAND_ISSUER, subject: 'demo-viewer' }, viewerUser);
-  directory.addMembership(viewerUser, { tenantId: seeded.tenantId, membershipId: '1e000000-0000-4000-8000-000000000199', role: 'VIEWER' });
+  directory.addMembership(viewerUser, { tenantId: seeded.tenantId, membershipId: '1e000000-0000-4000-8000-000000000199', role: 'OPERATOR' });
   /**
    * Шаг 60 [Р-202]: администратор — настоящий участник тенанта в базе (как агентство шага 45, вставкой суперпользователя в мир
    * прогона): консоль пропускает его к подтверждению записи количества, и отказ «только владелец» даёт база своим стражем
@@ -149,7 +149,7 @@ before(async () => {
   const decoy: LiveWorld = { ...live, id: 'demo/decoy', title: 'Приманка', tenantId: '10000000-0000-4000-8000-00000000d3c0' };
   const handle = createStandApi([decoy, live], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory }),
-    simulator: { token: (account) => issuer.token(account.role === 'VIEWER' ? 'demo-viewer' : account.role === 'ADMIN' ? 'demo-admin' : 'demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
+    simulator: { token: (account) => issuer.token(account.role === 'OPERATOR' ? 'demo-viewer' : account.role === 'ADMIN' ? 'demo-admin' : 'demo-owner', { email: 'owner@example.invalid', amr: ['pwd', 'otp'] }), expiresInSeconds: 3600 },
   }, {
     // Шаг 60 [Р-202]: экран подключений мира — аккаунты из базы тем же хранилищем, что в работе; подключать новые каналы нечем
     connect: (worldId) => (worldId === WORLD ? connectionsOnly(new PgChannelConnectStore(adminPool)) : null),
@@ -159,7 +159,7 @@ before(async () => {
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const token = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'OWNER' }) });
   owner = { authorization: `Bearer ${((await token.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
-  const viewerToken = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'VIEWER' }) });
+  const viewerToken = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'OPERATOR' }) });
   viewerAuth = { authorization: `Bearer ${((await viewerToken.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
   const adminToken = await fetch(`${origin}/api/stand-issuer/token?locale=de`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'ADMIN' }) });
   adminAuth = { authorization: `Bearer ${((await adminToken.json()) as StandToken).accessToken}`, cookie: 'repracer_locale=de' };
@@ -265,7 +265,7 @@ test('Р-152: путь «только остатки» — от выбора п�
   assert.deepEqual([connection.otherTools.answer, connection.otherTools.warning, connection.quantityWrites.canConfirm], ['NONE', null, true]);
   const typed = connection.quantityWrites.typeToConfirm!;
   assert.ok(connection.quantityWrites.confirmationHint!.includes(typed), 'экран показывает, что набрать');
-  // Не владелец: наблюдателю отказывает консоль, администратору — база («подтверждает только владелец»)
+  // Не владелец и не менеджер: оператору отказывает консоль, администратору — база («подтверждают только владелец или менеджер»)
   assert.deepEqual(codeOf(await confirm(typed, viewerAuth)), [403, 'FORBIDDEN']);
   assert.deepEqual(codeOf(await confirm(typed, adminAuth)), [403, 'NOT_OWNER']);
   assert.equal((await answer('администратор отвечает', 'NONE', adminAuth)).status, 200, 'ответ даёт тот, кто управляет подключениями');
@@ -353,7 +353,7 @@ test('шаг 60 [Р-202]: счётчик внешних правок на экр
 
 /**
  * Шаг 61 [Р-202, решение владельца]: отзыв подтверждения записи количества через консоль — тем же порядком, что выдача: владелец набирает
- * идентификатор аккаунта; наблюдателю отказывает консоль, администратору — база. Запись количества выключается сразу, и включение без
+ * идентификатор аккаунта; оператору отказывает консоль, администратору — база. Запись количества выключается сразу, и включение без
  * нового подтверждения снова отвечает 409. В конце — новое подтверждение и включение: следующим прогонам файла нужен работающий канал
  */
 test('шаг 61 [Р-202]: отзыв записи количества через консоль — сразу выключено, включить снова — только новым подтверждением', async () => {
@@ -367,7 +367,7 @@ test('шаг 61 [Р-202]: отзыв записи количества чере�
   const typed = connection.quantityWrites.typeToRevoke!;
   assert.ok(connection.quantityWrites.revokeHint!.includes(typed), 'экран показывает, что набрать для отзыва');
   assert.deepEqual(codeOf(await revoke(typed, viewerAuth)), [403, 'FORBIDDEN']);
-  assert.deepEqual(codeOf(await revoke(typed, adminAuth)), [403, 'NOT_OWNER'], 'администратору отказывает база: отзывает только владелец');
+  assert.deepEqual(codeOf(await revoke(typed, adminAuth)), [403, 'NOT_OWNER'], 'администратору отказывает база: отзывают только владелец или менеджер');
   assert.deepEqual(codeOf(await revoke(`${typed}x`)), [400, 'CONFIRMATION_MISMATCH']);
   const revoked = await step<{ revoked: boolean; disabledScopes: number; discardedWrites: number; inFlightWrites: number; message: string }>('отзыв записи количества владельцем', 'POST',
     api('connections', 'quantity-writes-revoke'), { channelAccountId: accountId, typedConfirmation: typed });
@@ -582,11 +582,11 @@ test('Р-157: склад подтверждает заказ по Inbound API �
 
 /**
  * Шаг 59 [Р-199], OQ-218: возврат по отгруженному заказу не возвращает остаток сам — товар мог вернуться повреждённым.
- * Строка возврата ждёт человека: наблюдатель её видит, но не решает; владелец «принимает на склад» — движение RETURN,
+ * Строка возврата ждёт человека: оператор её видит, но не решает; владелец «принимает на склад» — движение RETURN,
  * доступное растёт ровно на количество возврата, и новое количество уходит в канал; повторное решение — 409.
  * Заказ канала подставлен вызовом хранилища (как его приносит работа `order-lines`); всё, что делает продавец, — по HTTP.
  */
-test('Р-199: возврат внутреннего пула — ждёт решения; наблюдатель 403; «принять на склад» поднимает доступное и уходит в канал; повтор — 409', async () => {
+test('Р-199: возврат внутреннего пула — ждёт решения; оператор 403; «принять на склад» поднимает доступное и уходит в канал; повтор — 409', async () => {
   const productSku = 'syn-prod-de-340100005';
   const unitId = 100005;
   const [offer] = (await observer.query(
@@ -629,7 +629,7 @@ test('Р-199: возврат внутреннего пула — ждёт реш
   assert.match(item.text, /wartet auf Ihre Entscheidung/, 'строка названа на языке продавца');
   assert.deepEqual([(await rowOf('экран остатков после возврата')).available, unitAmount()], [11, 9], 'возврат сам в пул не попадает');
 
-  // Наблюдатель видит список, но решать не может — 403 от консоли, а в базе ничего не изменилось
+  // Оператор (без права на каталог) видит список, но решать не может — 403 от консоли, а в базе ничего не изменилось
   const viewerList = await call('GET', api('stock', 'returns'), undefined, viewerAuth);
   assert.equal(viewerList.status, 200, viewerList.text);
   assert.equal((JSON.parse(viewerList.text) as StockReturnsView).canDecide, false);

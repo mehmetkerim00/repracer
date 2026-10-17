@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { existsSync } from 'node:fs';
 import type { SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
-import { messagesFor, type DecisionListView, type DecisionTrace, type ProductListView } from '@repracer/console-model';
+import { type DecisionListView, type DecisionTrace, type ProductListView } from '@repracer/console-model';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
 
@@ -166,8 +166,8 @@ test('Р-160: гость проходит от кнопки «посмотрет
   assert.equal(worlds.body[0]!.demo, true, 'мир помечен как демо [Р-151]');
   // Шаг 76 (ревью, находка 3): демо развёрнутой консоли пишет в бой — экран тени у него пуст, и мир открывается товарами, а не тенью
   assert.equal(worlds.body[0]!.landing, 'products', 'демо в бою не открывается пустым экраном тени');
-  // Роль в списке миров — текст словаря на языке ответа: сравнивается со значением того же словаря, а не с буквой 'VIEWER'
-  assert.equal(worlds.body[0]!.role, messagesFor('de').values.VIEWER, 'роль гостя — наблюдатель, и её даёт членство из базы');
+  // Шаг 98 [Р-222]: у гостя техническая роль «только чтение», а не роль продукта — в списке миров подписи роли нет вовсе
+  assert.equal(worlds.body[0]!.role, null, 'роль гостя не показывается');
   worldId = worlds.body[0]!.id;
 
   const products = await walk<ProductListView>('products (товары)', 'GET', `/api/worlds/${encodeURIComponent(worldId)}/products`, { token: guest });
@@ -203,7 +203,7 @@ test('Р-160: гость проходит от кнопки «посмотрет
 
 test('Р-160: гость не может НИЧЕГО изменить — отказывает база, а не интерфейс', async () => {
   const w = encodeURIComponent(worldId);
-  // Остановка цен: право STOP_PRICING, которого у наблюдателя нет
+  // Остановка цен: право STOP_PRICING, которого у гостя нет
   const stop = await walk<{ error: { code: string } }>('stop (остановить цены)', 'POST', `/api/worlds/${w}/stop`,
     { token: guest, body: { target: { kind: 'TENANT' }, note: 'Gast versucht zu stoppen' } });
   assert.equal(stop.status, 403, stop.text);

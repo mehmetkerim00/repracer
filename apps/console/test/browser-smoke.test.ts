@@ -23,6 +23,45 @@ import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts'
 const root = fileURLToPath(new URL('..', import.meta.url));
 const en = messagesFor('en');
 const de = messagesFor('de');
+const es = messagesFor('es');
+const fr = messagesFor('fr');
+
+/** Шаг 98 [Р-223]: строки словаря — значения-строки (не функции) всех уровней */
+function dictionaryStrings(value: unknown, out = new Set<string>()): Set<string> {
+  if (typeof value === 'string') { const t = value.trim(); if (t) out.add(t); }
+  else if (value && typeof value === 'object') for (const v of Object.values(value)) dictionaryStrings(v, out);
+  return out;
+}
+/** Имена, которые не переводятся (глоссарий): бренд, каналы, Buy Box, Omnibus, Price Gate; коды — заглавными буквами и цифрами */
+const KEPT_NAMES = /^(PriceTrail|pricetrail|Kaufland|Amazon|eBay|Otto|Walmart|Buy Box|Omnibus|Price Gate)$/;
+/** Английские тексты словаря, которых нет в словаре языка: на его экране такой текст — непереведённая строка */
+function englishOnly(target: typeof en): string[] {
+  const own = dictionaryStrings(target);
+  return [...dictionaryStrings(en)].filter((t) => !own.has(t) && /[A-Za-z]{2}/.test(t) && !KEPT_NAMES.test(t) && !/^[A-Z0-9_./-]+$/.test(t));
+}
+/**
+ * Шаг 98 [Р-223]: правило «на экране испанского или французского нет английской строки словаря» — видимый текст (узлы текста целиком)
+ * и подписи для диктора, подсказки и заполнители полей. Исключения — только то, что глоссарий не переводит (бренд, каналы, коды)
+ */
+const UNTRANSLATED = (english: readonly string[]) => `(() => {
+  const english = new Set(${JSON.stringify(english)});
+  const out = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = (n.textContent || '').trim();
+    if (!t || !english.has(t)) continue;
+    const el = n.parentElement;
+    if (!el || el.closest('script, style, [hidden]') || el.getClientRects().length === 0) continue;
+    out.push(t);
+  }
+  for (const el of document.querySelectorAll('[aria-label], [title], [placeholder]')) {
+    for (const a of ['aria-label', 'title', 'placeholder']) {
+      const v = (el.getAttribute(a) || '').trim();
+      if (v && english.has(v)) out.push(a + ': ' + v);
+    }
+  }
+  return [...new Set(out)];
+})()`;
 let stand: ReturnType<typeof createStandServer> | null = null;
 let vite: ViteDevServer | null = null;
 let browser: Browser | null = null;
@@ -546,7 +585,7 @@ const CONSTANT_COLUMNS = `(() => {
   return out;
 })()`;
 
-test('step 86: every menu item and the heading of its page are the same words — English and German', async () => {
+test('step 86, step 98 (Р-223): every menu item and the heading of its page are the same words — English, German, Spanish and French; no English dictionary string on a Spanish or French screen', async () => {
   const b = browser!;
   await b.setViewport(1440, 900);
   await b.open(pageUrl);
@@ -558,11 +597,15 @@ test('step 86: every menu item and the heading of its page are the same words �
   // Шаг 93: правило — в обеих темах
   for (const scheme of ['light', 'dark'] as const) {
   await b.setColorScheme(scheme);
-  for (const m of [en, de]) {
-    if (m === de) {
-      await b.click(en.ui.app.languages.de, '.topbar .lang button');
-      await b.waitText(de.ui.app.screens.stock);
+  for (const m of [en, de, es, fr]) {
+    if (m !== en) {
+      // Имя языка в переключателе — его собственное (Deutsch, Español, Français) и одинаково во всех словарях
+      await b.click(en.ui.app.languages[m.locale], '.topbar .lang button');
+      await b.waitText(m.ui.app.screens.feed);
     }
+    // Шаг 98: непереведённая строка — один прогон на язык (светлая тема), на каждом экране меню
+    const english = scheme === 'light' && (m === es || m === fr) ? englishOnly(m) : null;
+    const untranslated: string[] = [];
     const links = await b.evaluate<Array<{ text: string; href: string }>>(
       `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
     // Шаг 95 [Р-217]: девять пунктов и Omnibus — у смоук-мира витрины ЕС
@@ -576,11 +619,20 @@ test('step 86: every menu item and the heading of its page are the same words �
       if (heading !== l.text) mismatches.push(`«${l.text}» → «${heading}»`);
       assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${m.locale} ${l.text}: content sticks out of its frame`);
       assert.deepEqual(await b.evaluate<string[]>(REPEATED_IN_ROWS), [], `${m.locale} ${l.text}: a service sentence repeats in the rows of a table`);
+      if (english) for (const t of await b.evaluate<string[]>(UNTRANSLATED(english))) untranslated.push(`${l.text}: ${t}`);
     }
     assert.deepEqual(mismatches, [], `${scheme} ${m.locale}: a menu item leads to a page with another heading`);
+    if (english) {
+      assert.ok(english.length > 500, `${m.locale}: the rule knows the English strings (${english.length})`);
+      assert.deepEqual(untranslated, [], `${m.locale}: an English dictionary string on the screen`);
+      // Положительный контроль [Р-94]: английская строка словаря, вставленная в экран этого языка, — находка правила
+      await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<p id="untranslated-control">' + ${JSON.stringify(en.ui.app.screens.feed)} + '</p><button id="untranslated-aria" aria-label=' + ${JSON.stringify(JSON.stringify(en.ui.app.screens.strategies))} + '>x</button>'), true)`);
+      assert.deepEqual(await b.evaluate<string[]>(UNTRANSLATED(english)), [en.ui.app.screens.feed, `aria-label: ${en.ui.app.screens.strategies}`], `${m.locale}: the control is seen`);
+      await b.evaluate(`(document.getElementById('untranslated-control').remove(), document.getElementById('untranslated-aria').remove(), true)`);
+    }
   }
-  await b.click(de.ui.app.languages.en, '.topbar .lang button');
-  await b.waitText(en.ui.app.screens.stock);
+  await b.click(fr.ui.app.languages.en, '.topbar .lang button');
+  await b.waitText(en.ui.app.screens.feed);
   }
   await b.setColorScheme(null);
   // Положительный контроль [Р-94]: таблица, растянутая за поля карточки, как была до шага 86, — выступ, и правило его видит
@@ -1127,7 +1179,9 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
     await b.setViewport(1440, 900);
     await b.open(pageUrl);
     await b.waitText(en.ui.app.login.roleCan.OWNER);
-    assert.equal(await b.evaluate<number>(`document.querySelectorAll('.lang button').length`), 0, 'us: no language switch on sign-in');
+    // Шаг 98 [Р-223]: в профиле us — английский, испанский и французский; немецкого нет (он за профилем ЕС)
+    assert.deepEqual(await b.evaluate<string[]>(`[...document.querySelectorAll('.lang button')].map((x) => x.getAttribute('aria-label'))`), ['English', 'Español', 'Français'],
+      'us: the language switch offers English, Spanish and French, not German');
     assert.equal(await europeOnPage(), null, 'us: sign-in');
     await b.click(owner);
     await b.waitText(en.ui.app.worlds);
@@ -1174,7 +1228,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   assert.ok(euMenu.includes(en.ui.app.screens.compliance), `eu: the same workspace has the Omnibus tab — ${euMenu.join(', ')}`);
 });
 
-test('step 88 (Р-213): sign-in offers three roles at 375 and 1440, five with the extended roles flag; the manager does not manage channel accounts; the audit log names roles', async () => {
+test('step 88 (Р-213), step 98 (Р-222): sign-in offers two roles at 375 and 1440, four with the extended roles flag; the manager manages channel accounts; the audit log names roles', async () => {
   const b = browser!;
   const rows = () => b.evaluate<string[]>(`[...document.querySelectorAll('.role-row .role-name')].map((e) => e.textContent.trim())`);
   const can = () => b.evaluate<string[]>(`[...document.querySelectorAll('.role-row .role-can')].map((e) => e.textContent.trim())`);
@@ -1184,16 +1238,16 @@ test('step 88 (Р-213): sign-in offers three roles at 375 and 1440, five with th
       await b.setViewport(width, 900);
       await b.open(pageUrl);
       await b.waitText(en.ui.app.login.roleCan.MANAGER);
-      assert.deepEqual(await rows(), ['Owner', 'Manager', 'Viewer'], `${width}: three visible roles`);
-      assert.deepEqual(await can(), [en.ui.app.login.roleCan.OWNER, en.ui.app.login.roleCan.MANAGER, en.ui.app.login.roleCan.VIEWER], `${width}: each role says what it may do`);
+      assert.deepEqual(await rows(), ['Owner', 'Manager'], `${width}: two roles for people`);
+      assert.deepEqual(await can(), [en.ui.app.login.roleCan.OWNER, en.ui.app.login.roleCan.MANAGER], `${width}: each role says what it may do`);
       assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll on sign-in`);
     }
     await b.setViewport(1440, 900);
-    // Положительный контроль флага: тот же стенд с расширенными ролями — пять строк, прежние роли за флагом живы
+    // Положительный контроль флага: тот же стенд с расширенными ролями — четыре строки, прежние роли за флагом живы
     currentApi = extendedApi;
     await b.open(pageUrl);
     await b.waitText(en.ui.app.login.roleCan.OPERATOR);
-    assert.deepEqual(await rows(), ['Owner', 'Manager', 'Viewer', 'Admin', 'Operator'], 'the extended roles flag adds admin and operator');
+    assert.deepEqual(await rows(), ['Owner', 'Manager', 'Admin', 'Operator'], 'the extended roles flag adds admin and operator');
     currentApi = usApi;
     await b.open(pageUrl);
     await b.waitText(en.ui.app.login.roleCan.MANAGER);
@@ -1202,8 +1256,9 @@ test('step 88 (Р-213): sign-in offers three roles at 375 and 1440, five with th
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
     await settled(b, 'manager connections');
     const connections = await b.evaluate<string>('document.body.innerText');
-    assert.ok(connections.includes(en.ui.connections.noRight), 'the manager reads that channel accounts are the owner’s');
-    assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('button')].filter((x) => /^Connect/.test(x.textContent.trim())).length`), 0, 'no connect button for the manager');
+    // Шаг 98 [Р-222]: аккаунты каналов, язык и пояс — и у менеджера (ролей для людей две, права одинаковые)
+    assert.ok(!connections.includes(en.ui.connections.noRight), 'the manager is not told that channel accounts are the owner’s');
+    assert.ok(await b.evaluate<number>(`[...document.querySelectorAll('button')].filter((x) => /^Connect/.test(x.textContent.trim())).length`) > 0, 'the manager connects a channel');
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/stop`)}, true)`);
     await settled(b, 'manager stop');
     assert.ok((await b.evaluate<string>('document.body.innerText')).includes(en.ui.stop.auditTitle), 'the audit log of stops and roles');

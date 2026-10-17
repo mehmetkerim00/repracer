@@ -49,6 +49,81 @@
 «Write» остаётся только в текстах для оператора платформы (алерты диспетчера) и в коде; в немецком «überschreiben» — обычное слово
 «перезаписать», не жаргон.
 
+## Испанский и французский (шаг 98, Р-223)
+
+Испанский — нейтральный латиноамериканский, как у продавцов США (обращение «usted», «costo», а не «coste»); французский — французский
+Франции (обращение «vous»). Валюта, числа и даты — американские, как в профиле `us` (решение владельца). Не переводятся: **PriceTrail**,
+**Buy Box** (имя собственное, род — «la Buy Box» в обоих языках), **Price Gate**, названия каналов и витрин, коды (SKU, EAN, FBA, FBM, CSV,
+XLSX). Одно понятие — одно слово по всему продукту, на экранах и в письмах.
+
+| Понятие | EN | ES | FR |
+|---|---|---|---|
+| Тенант | workspace | **espacio de trabajo** | **espace de travail** |
+| Канал | channel | **canal** | **canal** (мн. ч. canaux) |
+| Витрина | storefront | **sitio** («el sitio amazon.com») | **site** (« le site amazon.com ») |
+| Аккаунт канала | channel account, Amazon account | **cuenta del canal**, «cuenta de Amazon» | **compte du canal**, « compte Amazon » |
+| Кабинет продавца в канале | channel back office | **panel de vendedor del canal** | **espace vendeur du canal** |
+| Товар | product | **producto** | **produit** |
+| Предложение | offer | **oferta** | **offre** |
+| Листинг eBay | eBay listing | **anuncio de eBay** | **annonce eBay** |
+| Штуки | pieces | **unidades** | **pièces** |
+| Себестоимость | unit cost | **costo unitario** | **coût unitaire** |
+| Данные конкурентов на момент | snapshot | **datos de la competencia** | **données de la concurrence** |
+| Магазин продавца | store | **tienda** | **boutique** |
+| Тень | Shadow mode | **Modo sombra** | **Mode fantôme** |
+| Границы | bounds | **límites** | **limites** |
+| Пол | floor | **piso** («piso de precio») | **plancher** (« prix plancher ») |
+| Минимальная и максимальная цена | minimum / maximum price | **precio mínimo / precio máximo** | **prix minimum / prix maximum** |
+| Пол маржи | margin floor | **piso de margen** | **plancher de marge** |
+| Стратегия | strategy | **estrategia** | **stratégie** |
+| Удержано тенью | Held back | **Retenido** | **Retenu** |
+| Включить отправку | Start sending prices | **Empezar a enviar precios** | **Commencer à envoyer les prix** |
+| Квитанция решения | Why this price | **Por qué este precio** | **Pourquoi ce prix** |
+| Остановка всего | stop of the whole workspace | **detención de todo el espacio de trabajo** | **arrêt de tout l’espace de travail** |
+| Страница конкурентов | Competition | **Competencia** | **Concurrence** |
+| Стратегии по типу | Fixed price · Target margin · Match the Buy Box · Beat the lowest · Win the Buy Box | Precio fijo · Margen objetivo · Igualar la Buy Box · Superar el precio más bajo · Ganar la Buy Box | Prix fixe · Marge cible · S’aligner sur la Buy Box · Battre le prix le plus bas · Remporter la Buy Box |
+| Роли | Owner · Manager | **Propietario** · **Gerente** | **Propriétaire** · **Gestionnaire** |
+| Сервер | server | **servidor** | **serveur** |
+
+Меню (пункт = заголовок его страницы, правило браузерного смоука на EN, ES и FR):
+
+| EN | ES | FR |
+|---|---|---|
+| Overview · Pricing · Inventory · Workspace (разделы) | Resumen · Precios · Inventario · Espacio de trabajo | Aperçu · Prix · Stocks · Espace de travail |
+| Shadow mode | Modo sombra | Mode fantôme |
+| Price changes | Cambios de precio | Changements de prix |
+| Strategies | Estrategias | Stratégies |
+| Costs & floors | Costos y pisos | Coûts et planchers |
+| Protections | Protecciones | Protections |
+| Offers | Ofertas | Offres |
+| Inventory | Inventario | Stocks |
+| Channels | Canales | Canaux |
+| Stop pricing | Detener precios | Arrêter les prix |
+
+Период: Period · Last 24 hours · Last 7 days · Last 30 days · Custom · Apply · Cancel — **Período · Últimas 24 horas · Últimos 7 días ·
+Últimos 30 días · Personalizado · Aplicar · Cancelar** / **Période · Dernières 24 heures · 7 derniers jours · 30 derniers jours ·
+Personnalisé · Appliquer · Annuler**.
+
+Термины, выбранные при переводе (шаг 98; спорные — в отчёте шага, меняются здесь и в словаре вместе):
+
+| Понятие | EN | ES | FR |
+|---|---|---|---|
+| Автоматическое ценообразование | repricing | **precios automáticos** | **tarification automatique** |
+| Бой (отправка в магазин) | live | **en vivo** | **mode réel** |
+| Остановка человеком · системная · недоверие каналу | stop · halt · distrust | **detención** · **suspensión** · **desconfianza** (снять — «levantar») | **arrêt** · **suspension** · **défiance envers le canal** |
+| Удержание полом (Protections) | floor holds | **el piso contuvo el precio** | **le plancher a retenu le prix** |
+| Подрез | undercut | **quedar por debajo** (параметр — «Rebaja») | **écart à la baisse** |
+| Ступень лестницы, шаг подъёма | step | **paso** | **palier** |
+| Буфер канала | buffer | **colchón por canal** («reserva» — резервации) | **réserve par canal** |
+| Путь подключения | Setup | **Configuración inicial** | **Configuration** |
+| Аккаунты каналов (экран) | Channel accounts | **Cuentas de canal** | **Comptes des canaux** |
+| Массовые операции | Bulk operations | **Operaciones masivas** | **Opérations groupées** |
+| Брутто · нетто | gross · net | **bruto (IVA incluido) · neto** | **TTC · HT** |
+| Курс ЕЦБ | ECB rate | **tipo de cambio del BCE** | **taux de change de la BCE** |
+
+Даты — американского порядка, месяцы — на языке экрана («oct 17, 2026», «oct. 17, 2026»); поэтому перед датой переводы ставят двоеточие
+или скобки, а не предлог. Имена поясов — на языке экрана («Hora oriental (UTC−4)», «Heure de l’Est nord-américain (UTC−4)»).
+
 ## Меню рабочего пространства (шаг 95, Р-217; шаг 96)
 
 Девять пунктов в четырёх разделах (у раздела из одного пункта заголовок не показывается — шаг 96.1): **Overview** / **Überblick** — Shadow mode; **Pricing** / **Preise** — Price changes, Strategies, Costs &
@@ -72,20 +147,24 @@ Omnibus — десятым пунктом только у пространств
 Channel accounts, Why this price, Stopped changes, Dangerous changes, Bounds, Unit cost import, Bulk operations, Stock) живут заголовками
 разделов и страниц внутри новых пунктов; их адреса перенаправляются.
 
-## Роли (шаг 88, Р-213)
+## Роли (шаг 88, Р-213; шаг 98, Р-222)
 
-У человека в рабочем пространстве ровно одна роль; в разных пространствах — разные (агентство). Нужны права двух ролей — назначается
-одна старшая. Консоль предлагает три роли; администратор и оператор — только с флагом развёртывания «расширенные роли»
-(`REPRACER_EXTENDED_ROLES=on`), менеджер цен и менеджер остатков — роли прежних назначений, новым людям не предлагаются. Прежние
-назначения работают в любом положении флага. Права — матрица `packages/pricing-model/src/policy.ts`, в базе — `security.pricing_permission`.
+У человека в рабочем пространстве ровно одна роль; в разных пространствах — разные (агентство). Ролей для людей две — **владелец** и
+**менеджер**, права у них одинаковые во всём, кроме денег: биллинг — только владелец (его в продукте ещё нет, ADR-0057), и роль и вход
+владельца трогает только владелец. Наблюдателя (Viewer) нет. Администратор и оператор — только с флагом развёртывания «расширенные роли»
+(`REPRACER_EXTENDED_ROLES=on`), менеджер цен и менеджер остатков — роли прежних назначений, новым людям не предлагаются. Права — матрица
+`packages/pricing-model/src/policy.ts`, в базе — `security.pricing_permission`.
 
-| Роль | EN | DE | Что может |
-|---|---|---|---|
-| Владелец | **Owner** | **Inhaber** | Всё; только он — люди и роли, аккаунты каналов, перевод в бой [Р-170], подтверждение записи количества [Р-202], согласие на миграцию eBay [Р-101], язык и пояс пространства |
-| Менеджер | **Manager** | **Manager** | Ежедневная работа: цены, границы, стратегии, остатки, импорт себестоимости, массовые операции, стоп-кран целиком (с возобновлением всего пространства и снятием недоверия каналу — со вторым фактором) |
-| Наблюдатель | **Viewer** | **Betrachter** | Только чтение |
-| За флагом | Admin, Operator | Administrator, Operator | Прежние роли: администратор — как владелец, кроме согласия на миграцию eBay и действий только владельца; оператор — стоп-кран и включение репрайсинга |
-| Прежние назначения | Pricing manager, Inventory manager | Preismanager, Bestandsmanager | Не предлагаются; работают, пока назначены |
+| Роль | EN | DE | ES | FR | Что может |
+|---|---|---|---|---|---|
+| Владелец | **Owner** | **Inhaber** | **Propietario** | **Propriétaire** | Всё; роль владельца выдаёт и снимает, вход владельца перепривязывает только он; биллинг (когда появится) |
+| Менеджер | **Manager** | **Manager** | **Gerente** | **Gestionnaire** | Всё, что владелец, кроме роли владельца и биллинга: цены, остатки, стоп-кран, люди и роли, аккаунты каналов, перевод в бой [Р-170], подтверждение и отзыв записи количества [Р-202], снятие недоверия каналу, согласие на миграцию eBay [Р-101], язык и пояс пространства |
+| За флагом | Admin, Operator | Administrator, Operator | Administrador, Operador | Administrateur, Opérateur | Прежние роли: администратор — как владелец, кроме согласия на миграцию eBay, перевода в бой и записи количества; оператор — стоп-кран и включение репрайсинга |
+| Прежние назначения | Pricing manager, Inventory manager | Preismanager, Bestandsmanager | Gerente de precios, Gerente de inventario | Gestionnaire des prix, Gestionnaire des stocks | Не предлагаются; работают, пока назначены |
+
+Гость публичного демо [Р-160] — не роль продукта: у него внутренняя техническая роль «только чтение» (`GUEST`), людям она не назначается
+и не показывается (в списке пространств у гостя подписи роли нет). В словарях она есть только потому, что словарь называет каждое значение
+перечисления: **Demo guest** / **Demo-Gast** / **Invitado de la demo** / **Invité de la démo**.
 
 «Operator» — роль участника пространства; это не оператор платформы (панель оператора, Р-165): у оператора платформы ролей в пространстве нет.
 
@@ -100,7 +179,7 @@ Channel accounts, Why this price, Stopped changes, Dangerous changes, Bounds, Un
 - Неделя дайджеста тени считается с понедельника по воскресенье в поясе workspace; после смены пояса письмо за ту же неделю второй раз не уходит.
 - Итоги и файлы фоновых заданий — языком и в поясе workspace, а не браузера.
 - Публичное демо — один workspace на всех гостей: язык у него — гостя (переключатель в шапке), пояс — демо.
-- Меняет язык и пояс владелец (или прежний администратор) на экране «Channels» → «Language and time zone of this workspace». Пояс по
+- Меняет язык и пояс владелец или менеджер (и прежний администратор) на экране «Channels» → «Language and time zone of this workspace». Пояс по
   умолчанию экран называет отдельно и не превращает в заданный, пока его не правили.
 
 ## Блоки «Good to know about this screen» (K5)

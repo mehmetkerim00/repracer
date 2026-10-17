@@ -94,13 +94,13 @@ test('step 21: a bounds edit shows the differences first; applying needs the rig
 
 test('step 21: the price feed shows the write with the price it started from and its source; the report counts dangerous changes by period (Р-73)', async () => {
   const happyWorld = live('kaufland/pipeline/happy-path');
-  const happy = await happyWorld.view(user('VIEWER'));
+  const happy = await happyWorld.view(user('INVENTORY_MANAGER'));
   const feed = await feedOf(happyWorld.store, happy, en);
   assert.deepEqual(feed.items.map((i) => [i.from, i.to, i.change, i.status, i.source]), [['€18.50', '€17.75', '−4.1%', 'Applied', 'Buy Box']]);
   assert.deepEqual(feed.counts, { applied: 1, inFlight: 0, notSent: 0, superseded: 0, shadowHeld: 0 });
 
   const aboveWorld = live('kaufland/pipeline/above-max-price');
-  const above = await aboveWorld.view(user('VIEWER'));
+  const above = await aboveWorld.view(user('INVENTORY_MANAGER'));
   const report = await dangerousOf(aboveWorld.store, above, 30, en);
   // Р-117 (шаг 22): главное число — удержания полом; отклонения Gate — второй раздел
   assert.equal(report.headline, 'The floor did not have to hold a price in the last 30 days');

@@ -164,7 +164,7 @@ test('Р-69, Р-70, OQ-125 in the database: a tenant stop holds every price, cov
     note: 'Synthetic kill switch in the database', ...over,
   });
 
-  assert.equal((await store.stopPricing(w.tenantId, stop('membership-viewer'))).status, 'FORBIDDEN', 'OQ-129: a viewer does not stop pricing');
+  assert.equal((await store.stopPricing(w.tenantId, stop('membership-inventory-manager'))).status, 'FORBIDDEN', 'OQ-129: an inventory manager does not stop pricing');
   const stopped = await store.stopPricing(w.tenantId, stop('membership-operator'));
   assert.ok(stopped.status === 'STOPPED');
   assert.equal((await store.stopPricing(w.tenantId, stop('membership-owner'))).status, 'ALREADY_ACTIVE');
