@@ -68,7 +68,8 @@ after(async () => {
 test('шаг 64, 87: новый браузер без куки видит язык развёртывания; в профиле us немецкого нет — и кука его не включает', async () => {
   const first = (await (await fetch(`${origin}/api/session`)).json()) as { locale: string; market: { profile: string; locales: string[]; omnibus: boolean } };
   assert.equal(first.locale, 'en', 'первый экран консоли региона США — английский');
-  assert.deepEqual(first.market, { profile: 'us', locales: ['en'], omnibus: false }, 'профиль us: один язык (без переключателя), без Omnibus');
+  // Шаг 98 [Р-223]: в профиле us — английский, испанский и французский; немецкого нет
+  assert.deepEqual(first.market, { profile: 'us', locales: ['en', 'es', 'fr'], omnibus: false }, 'профиль us: английский, испанский и французский, без Omnibus');
   // Шаг 87: немецкий словарь остаётся в репозитории, но профиль us его не предлагает — кука «de» не делает экран немецким
   const chosen = (await (await fetch(`${origin}/api/session`, { headers: { cookie: 'repracer_locale=de' } })).json()) as { locale: string };
   assert.equal(chosen.locale, 'en', 'кука de в профиле us — английский экран');
