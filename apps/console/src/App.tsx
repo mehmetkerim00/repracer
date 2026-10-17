@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
@@ -249,7 +249,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         <button type="button" className="nav-close ghost" aria-label={m.ui.app.closeMenu} onClick={() => setOpen(false)}><Icon name="x" size={20} /></button>
         <div className="workspace">
           <div className="name">{world.title}</div>
-          <a href="#/">{m.ui.app.backToWorlds}</a>
+          {/* Шаг 100 (A): «All workspaces» — только когда есть из чего выбирать */}
+          {worlds.length > 1 ? <a href="#/">{m.ui.app.backToWorlds}</a> : null}
         </div>
         <nav className="tabs-nav" aria-label={world.title}>
           {NAV_GROUPS.map(([group, keys]) => {
@@ -308,6 +309,16 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   );
 }
 
+/**
+ * Шаг 100 (A): одно рабочее пространство — выбирать не из чего: после входа сразу в него, заменой адреса (кнопка «назад» не возвращает
+ * на пустой выбор). Список — только при двух и больше
+ */
+function OnlyWorld({ world }: { world: WorldSummary }) {
+  const m = useMessages();
+  useEffect(() => { window.location.replace(href(world.id, world.landing)); }, [world.id, world.landing]);
+  return <p className="loading" role="status">{m.ui.app.loading(8)}</p>;
+}
+
 function SignedIn({ route }: { route: Route }) {
   const m = useMessages();
   const [worlds, retry] = useResource<WorldSummary[]>('/api/worlds', m.locale);
@@ -315,8 +326,68 @@ function SignedIn({ route }: { route: Route }) {
   if (callback) return <ConnectCallback onDone={() => setCallback(false)} />;
   return (
     <Load resource={worlds} retry={retry}>
-      {(list) => (route.worldId === null ? <WorldList worlds={list} /> : <WorldScreen route={{ ...route, worldId: route.worldId }} worlds={list} />)}
+      {(list) => (route.worldId === null ? (list.length === 1 ? <OnlyWorld world={list[0]!} /> : <WorldList worlds={list} />)
+        : <WorldScreen route={{ ...route, worldId: route.worldId }} worlds={list} />)}
     </Load>
+  );
+}
+
+/**
+ * Шаг 100 (C): язык — одно меню вместо трёх ссылок: глобус и код текущего («EN ▾»); по нажатию — языки на их родных именах и галочка
+ * у текущего. То же в шапке, на входе и на телефоне (прежде «EN · ES · FR»). Клавиатура и aria — шаблон WAI-ARIA «кнопка меню»:
+ * Enter, пробел и стрелка вниз открывают меню на текущем языке, стрелка вверх — на последнем, стрелки ходят по пунктам по кругу,
+ * Home и End — к краям, Esc закрывает и возвращает фокус на кнопку, Tab и нажатие мимо закрывают
+ */
+function LanguageMenu({ locales, current, onChange }: { locales: readonly Locale[]; current: Locale; onChange: (locale: Locale) => void }) {
+  const m = useMessages();
+  const t = m.ui.app;
+  const menuId = `${useId()}-languages`;
+  const [open, setOpen] = useState(false);
+  const [focusIndex, setFocusIndex] = useState<number | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const itemsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) { setOpen(false); setFocusIndex(null); } };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
+  useEffect(() => { if (open && focusIndex !== null) itemsRef.current[focusIndex]?.focus(); }, [open, focusIndex]);
+  const currentIndex = Math.max(0, locales.indexOf(current));
+  const openAt = (index: number) => { setOpen(true); setFocusIndex(index); };
+  const close = (restore: boolean) => { setOpen(false); setFocusIndex(null); if (restore) buttonRef.current?.focus(); };
+  const label = `${t.languageMenu}${m.colon}${t.languages[current]}`;
+  const onButtonKey = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAt(currentIndex); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); openAt(locales.length - 1); }
+  };
+  const onItemKey = (e: ReactKeyboardEvent<HTMLButtonElement>, i: number) => {
+    const last = locales.length - 1;
+    const to: Record<string, number> = { ArrowDown: i === last ? 0 : i + 1, ArrowUp: i === 0 ? last : i - 1, Home: 0, End: last };
+    if (e.key in to) { e.preventDefault(); setFocusIndex(to[e.key]!); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'Tab') close(false);
+  };
+  return (
+    <div className="lang" ref={rootRef}>
+      <button ref={buttonRef} type="button" className="lang-button" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
+        aria-label={label} title={label} onClick={() => (open ? close(false) : openAt(currentIndex))} onKeyDown={onButtonKey}>
+        <Octicon name="globe" size={16} /><span className="lang-current" aria-hidden="true">{current.toUpperCase()}</span><Octicon name="triangle-down" size={16} />
+      </button>
+      {open ? (
+        <ul className="lang-menu" role="menu" id={menuId} aria-label={t.languageMenu}>
+          {locales.map((l, i) => (
+            <li key={l} role="none">
+              <button type="button" role="menuitemradio" aria-checked={l === current} lang={l} tabIndex={-1} ref={(el) => { itemsRef.current[i] = el; }}
+                onClick={() => { close(true); if (l !== current) onChange(l); }} onKeyDown={(e) => onItemKey(e, i)}>
+                <span className="lang-check" aria-hidden="true">{l === current ? <Octicon name="check" size={16} /> : null}</span>{t.languages[l]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -426,15 +497,8 @@ export function App() {
    */
   const marketLocales: readonly Locale[] = session.state === 'ready' ? session.data.market.locales : [];
   const market = { locales: session.state === 'ready' ? session.data.market.locales : LOCALES, omnibus: session.state === 'ready' ? session.data.market.omnibus : false };
-  const langSwitch = marketLocales.length > 1 ? (
-    <span className="lang">
-      {marketLocales.map((l) => (
-        // Шаг 98 [Р-223]: на телефоне три-четыре имени языка не помещаются в шапку — видим код (EN · ES · FR), имя — для диктора и подсказкой
-        <button key={l} type="button" className={l === locale ? 'active' : ''} aria-pressed={l === locale} aria-label={m.ui.app.languages[l]} title={m.ui.app.languages[l]} lang={l}
-          onClick={() => changeLocale(l)}><span className="lang-name">{m.ui.app.languages[l]}</span><span className="lang-code" aria-hidden="true">{l.toUpperCase()}</span></button>
-      ))}
-    </span>
-  ) : null;
+  // Шаг 100 (C): одно меню языков вместо ссылок — в шапке, на входе и в выдвижной панели телефона
+  const langSwitch = marketLocales.length > 1 ? <LanguageMenu locales={marketLocales} current={locale} onChange={changeLocale} /> : null;
   // Шаг 93: тема — свойство устройства: системная, светлая или тёмная; выбор хранится в браузере
   const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
   /**

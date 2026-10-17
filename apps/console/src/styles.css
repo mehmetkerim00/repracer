@@ -52,14 +52,26 @@ td.cur .note, td.cur .muted, td.cur .small, td.cur a, td.cur .badge, td.cur .flo
 .topbar .brand-mark-end { fill: var(--header-mark-end); }
 .topbar .env { font-size: var(--font-size-xs); color: var(--header-fg); padding: 0 var(--space-2); border: var(--border-width) solid var(--header-divider); border-radius: var(--radius-pill); }
 .topbar .user { font-size: var(--font-size-sm); color: var(--header-fg); }
-.lang { display: inline-flex; padding: var(--space-1) 0; }
-.lang button { border: 0; border-radius: var(--radius); padding: var(--space-1) var(--space-3); background: transparent; color: var(--text-2); font-size: var(--font-size-sm); box-shadow: none; }
-.lang button.active { background: var(--nav-selected); color: var(--text); font-weight: var(--weight-heading); }
-/* шаг 98: код языка — только на телефоне, где имена не помещаются в шапку */
-.lang .lang-code { display: none; }
-.topbar .lang button { color: var(--header-fg); }
-.topbar .lang button:hover { color: var(--header-fg-logo); background: transparent; }
-.topbar .lang button.active { color: var(--header-fg-logo); background: transparent; text-decoration: underline; text-underline-offset: var(--space-1); }
+/* шаг 100 (C): язык — кнопка меню «глобус · EN ▾» и меню языков на их родных именах с галочкой у текущего (Primer ActionMenu) */
+.lang { position: relative; display: inline-flex; }
+.lang-button { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); font-size: var(--font-size-sm); }
+.lang-button .lang-current { font-weight: var(--weight-heading); letter-spacing: 0; }
+.topbar .lang-button { border-color: transparent; background: transparent; box-shadow: none; color: var(--header-fg); }
+.topbar .lang-button:hover, .topbar .lang-button[aria-expanded="true"] { color: var(--header-fg-logo); background: transparent; }
+.lang-menu {
+  position: absolute; top: calc(100% + var(--space-1)); right: 0; z-index: 20; min-width: var(--base-size-128); margin: 0; padding: var(--space-2) 0;
+  list-style: none; background: var(--surface); color: var(--text); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+}
+.lang-menu li { margin: 0; }
+.lang-menu button {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--control-h); padding: 0 var(--space-3); border: 0; border-radius: 0;
+  background: transparent; box-shadow: none; color: var(--text); font-size: var(--font-size); text-align: left; white-space: nowrap;
+}
+.lang-menu button:hover, .lang-menu button:focus-visible { background: var(--control-bg-hover); box-shadow: none; }
+.lang-menu .lang-check { display: inline-flex; width: var(--space-4); color: var(--text); }
+.lang-menu button[aria-checked="true"] { font-weight: var(--weight-heading); }
+/* в выдвижной панели телефона меню раскрывается под кнопкой у левого края */
+.sidebar-extras .lang-menu { left: 0; right: auto; }
 /* шаг 93: выбор темы — в шапке прозрачный, цветом шапки; в выдвижной панели — обычный контрол */
 /* шаг 94: тема — кнопкой-иконкой рядом с именем и выходом; на узком экране — 44×44 */
 .theme-button { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); min-height: var(--control-h); padding: 0; }
@@ -903,7 +915,7 @@ p.notice.live-blocked { margin: 0; }
   .nav-group a { display: flex; }
   button.role-row { min-height: var(--touch-target); }
   .theme-button { min-width: var(--touch-target); min-height: var(--touch-target); }
-  .periods button, .segmented button, .lang button { min-height: var(--touch-target); }
+  .periods button, .segmented button, .lang-button, .lang-menu button { min-height: var(--touch-target); }
   /* шаг 96: «что делать» у пилюли — цель касания телефона */
   details.what-to-do > summary { min-height: var(--touch-target); display: flex; align-items: center; }
   /* шаг 94: галочка стандарта — цель касания не ниже 44px */
@@ -992,12 +1004,6 @@ p.notice.live-blocked { margin: 0; }
   td .reason { min-width: 0; }
 }
 
-/* шаг 98 [Р-223]: на телефоне у переключателя языка — коды (EN · ES · FR), три-четыре имени выдвинули бы шапку за край экрана */
-@media (width < 34rem) {
-  .lang .lang-name { display: none; }
-  .lang .lang-code { display: inline; }
-  .lang button { padding: var(--space-1) var(--space-2); }
-}
 @media (width < 34rem) {
   /* плитки тени — одной колонкой */
   .stats { grid-template-columns: minmax(0, 1fr); }
@@ -1031,41 +1037,71 @@ p.notice.live-blocked { margin: 0; }
   padding: var(--space-4); background: var(--surface); color: var(--text); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
 }
-.drp-body { display: flex; gap: var(--space-4); }
-.drp-presets { display: flex; flex-direction: column; gap: var(--space-1); min-width: var(--base-size-96); }
-.drp-presets button { text-align: left; box-shadow: none; white-space: nowrap; }
-.drp-presets button.on { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text); }
+/* Шаг 100 (B): пресеты — компактный ряд сегментов над месяцами (как `.segmented`), выбранный — подложкой с рамкой */
+.drp-presets { display: inline-flex; align-self: flex-start; gap: 0; padding: var(--base-size-2); background: var(--track-bg); border-radius: var(--radius); }
+.drp-presets button {
+  min-height: 0; padding: var(--space-1) var(--space-3); border: var(--border-width) solid transparent; border-radius: var(--radius); background: transparent;
+  box-shadow: none; color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap;
+}
+.drp-presets button:hover { background: var(--control-bg-hover); color: var(--text); }
+.drp-presets button.on { background: var(--knob-bg); border-color: var(--border); color: var(--text); font-weight: var(--weight-heading); }
 .drp-calendar { position: relative; }
 .drp-nav { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; pointer-events: none; }
-.drp-nav button { pointer-events: auto; border-color: transparent; background: transparent; box-shadow: none; padding: 0 var(--space-2); }
+/* стрелки месяцев — кнопки-иконки с подложкой при наведении */
+.drp-nav .drp-arrow {
+  pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; width: var(--control-h); height: var(--control-h); min-height: 0; padding: 0;
+  border: var(--border-width) solid transparent; border-radius: var(--radius); background: transparent; box-shadow: none; color: var(--text-2);
+}
+.drp-nav .drp-arrow:hover:not(:disabled) { background: var(--control-bg-hover); color: var(--text); }
+.drp-nav .drp-arrow:disabled { opacity: 1; color: var(--text-3); }
 .drp-months { display: flex; gap: var(--space-5); }
 .drp-month-title { min-height: var(--control-h); display: flex; align-items: center; justify-content: center; font-weight: var(--weight-heading); }
 .drp-month table { width: auto; border-collapse: collapse; }
 .drp-month th, .drp-month td { padding: 0; border: 0; background: none; text-align: center; vertical-align: middle; }
-.drp-month th { position: static; height: var(--control-h); color: var(--text-2); font-size: var(--font-size-xs); font-weight: var(--weight-medium); }
-.drp-month tbody tr:hover td { background: none; }
+/* дни недели — мелко и приглушённо, без жирного */
+.drp-month th { position: static; height: var(--control-h); color: var(--text-2); font-size: var(--font-size-xs); font-weight: 400; }
+/* наведение строки таблицы консоли календарю не нужно; заливку диапазона оно не гасит (снимок шага 100: превью под курсором пропадало) */
+.drp-month tbody tr:hover td:not(.in-range) { background: none; }
 .drp-day {
-  width: var(--control-h); height: var(--control-h); min-height: 0; padding: 0; border: 0; border-radius: var(--radius); background: transparent; box-shadow: none;
-  color: var(--text); font-weight: 400; font-variant-numeric: tabular-nums;
+  width: var(--control-h); height: var(--control-h); min-height: 0; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; box-shadow: none;
+  color: var(--text); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums;
 }
 .drp-day:hover { background: var(--control-bg-hover); }
-.drp-day.inside { background: var(--accent-soft); border-radius: 0; }
+/* сегодня — тонкая обводка, а не подчёркивание */
+.drp-day.today { box-shadow: inset 0 0 0 var(--border-width) var(--accent-emphasis); }
+/* заливка диапазона — на ячейке во всю ширину: дни соединяются без зазоров; у концов — половина к диапазону, у краёв строки — скругление */
+.drp-month td.in-range { background: var(--accent-soft); }
+.drp-month td.in-range.range-start { background: linear-gradient(to right, transparent 50%, var(--accent-soft) 50%); }
+.drp-month td.in-range.range-end { background: linear-gradient(to left, transparent 50%, var(--accent-soft) 50%); }
+.drp-month td.in-range.row-start:not(.range-start) { border-top-left-radius: var(--radius-pill); border-bottom-left-radius: var(--radius-pill); }
+.drp-month td.in-range.row-end:not(.range-end) { border-top-right-radius: var(--radius-pill); border-bottom-right-radius: var(--radius-pill); }
+.drp-day.inside, .drp-day.inside:hover { background: transparent; }
 .drp-day.edge, .drp-day.edge:hover { background: var(--accent-emphasis); color: var(--on-emphasis); }
-.drp-day.today { font-weight: var(--weight-heading); text-decoration: underline; }
-.drp-day.disabled, .drp-day.disabled:hover { background: transparent; color: var(--text-3); cursor: not-allowed; }
+.drp-day.edge.today { box-shadow: inset 0 0 0 var(--focus-width) var(--surface); }
+/* недоступные дни (старше окна хранения и будущие) — заметно светлее и без наведения */
+.drp-day.disabled, .drp-day.disabled:hover { background: transparent; color: var(--text-3); font-weight: 400; cursor: not-allowed; }
 .drp-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-3); border-top: var(--border-width) solid var(--divider); }
+.drp-status { min-width: 0; }
 .drp-hint { margin: 0; font-size: var(--font-size-sm); }
+.drp-limit { margin: 0; color: var(--text-2); font-size: var(--font-size-xs); }
 .drp-foot .form-actions { margin: 0; flex: none; }
-.drp-title { display: none; }
+.drp-foot button.ghost { border-color: transparent; background: transparent; box-shadow: none; }
+.drp-foot button.ghost:hover { background: var(--control-bg-hover); }
+.drp-title, .drp-backdrop { display: none; }
 @media (width < 48rem) {
-  .drp-pop.sheet { position: fixed; inset: 0; z-index: 30; border: 0; border-radius: 0; overflow-y: auto; }
+  /* шаг 100 (B): на телефоне — нижняя панель во всю ширину над затемнением, один месяц; страница под ней не прокручивается */
+  .drp-backdrop { display: block; position: fixed; inset: 0; z-index: 29; background: var(--backdrop); }
+  .drp-pop.sheet {
+    position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 30; max-height: calc(100vh - var(--topbar-h)); overflow-y: auto;
+    border: 0; border-top: var(--border-width) solid var(--border); border-radius: 0; border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg);
+  }
   .drp-pop.sheet .drp-title { display: block; font-size: var(--font-size-md); font-weight: var(--weight-heading); }
-  /* лист во весь экран: страница под ним не прокручивается */
   body:has(.drp-pop.sheet) { overflow: hidden; }
-  .drp-pop.sheet .drp-body { flex-direction: column; }
-  .drp-pop.sheet .drp-presets { flex-direction: row; flex-wrap: wrap; }
-  .drp-pop.sheet .drp-presets button, .drp-pop.sheet .drp-nav button { min-height: var(--touch-target); }
+  .drp-pop.sheet .drp-presets { display: flex; align-self: stretch; }
+  .drp-pop.sheet .drp-presets button { flex: 1; min-height: var(--touch-target); }
+  .drp-pop.sheet .drp-nav .drp-arrow { width: var(--touch-target); height: var(--touch-target); }
   .drp-pop.sheet .drp-month-title { min-height: var(--touch-target); }
+  .drp-pop.sheet .drp-months { justify-content: center; }
   .drp-pop.sheet .drp-day { width: var(--touch-target); height: var(--touch-target); }
   .drp-pop.sheet .drp-foot { flex-direction: column; align-items: stretch; }
 }

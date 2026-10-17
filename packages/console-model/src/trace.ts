@@ -76,6 +76,8 @@ export interface DecisionListItem {
   price: string;
   reason: string;
   dangerous: boolean;
+  /** Шаг 100 (E): кто подвинул цену — короткий чип в колонке Reason; полная фраза — подсказкой */
+  trigger: { chip: string; full: string } | null;
 }
 
 const OUTCOME_TONE: Readonly<Record<string, Tone>> = { APPROVED: 'ok', NO_CHANGE: 'off', REJECTED: 'stop', HELD: 'warn' };
@@ -134,6 +136,19 @@ export function triggerPhrase(view: CompetitorView | null | undefined, currency:
   return tr.move === 'APPEARED' ? c.triggerAppeared(seller, money(tr.nowMinor))
     : tr.move === 'GONE' ? c.triggerGone(seller, money(tr.wasMinor))
       : c.trigger(seller, money(tr.wasMinor), money(tr.nowMinor));
+}
+
+/**
+ * Шаг 97 [Р-218]: чип «продавец, стрелка, цена» без длинных предложений (правила читаемости 96.2); полная фраза — подсказкой. Шаг 100 (E):
+ * один чип у строки записи и у строки решения журнала цен
+ */
+export function triggerChip(view: CompetitorView | null | undefined, currency: string, m: Messages): { chip: string; full: string } | null {
+  const tr = view?.trigger;
+  if (!tr) return null;
+  const c = m.ui.trace.competitors;
+  const seller = tr.seller ?? c.unnamedSeller;
+  const price = tr.move === 'GONE' ? m.money(tr.wasMinor ?? null, currency) : m.money(tr.nowMinor ?? null, currency);
+  return { chip: c.chip[tr.move](seller, price), full: triggerPhrase(view, currency, m)! };
 }
 
 function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messages): TraceCompetitors {
@@ -396,6 +411,7 @@ export function decisionItems(world: StandWorld, decisions: readonly ConsoleDeci
       outcome: (m.ui.outcomes as Record<string, string | undefined>)[d.outcome] ?? d.outcome, tone: OUTCOME_TONE[d.outcome] ?? 'unknown',
       // Находка 15: у NO_OP нет слепка — цена из столбца решения (предложенная цена intent) [Р-80]
       price: m.money(d.finalMinor ?? d.proposedMinor, d.currency), reason: kept ?? describe(reason, m).text, dangerous: isDangerous(d),
+      trigger: triggerChip(d.competitorView, d.currency, m),
     };
   });
 }

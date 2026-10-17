@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { LOCALES, messagesFor, PERIOD_PRESETS, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type UnitRef } from '@repracer/console-model';
+import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
 
@@ -30,11 +30,9 @@ export function errorText(error: unknown, m: Messages): string {
  * шаг 78) — во всплывающей подсказке. Строка не того вида показывается как есть
  */
 export function humanWhen(value: string, _locale: string): string {
-  const en = /^([A-Z][a-z]{2}) (\d{1,2}), \d{4}, (\d{2}:\d{2}) (UTC.*)$/.exec(value);
-  if (en) return `${en[1]} ${en[2]}, ${en[3]} · ${en[4]}`;
-  const de = /^(\d{1,2})\. (\S+) \d{4}, (\d{2}:\d{2}) (UTC.*)$/.exec(value);
-  if (de) return `${de[1]}. ${de[2]}, ${de[3]} · ${de[4]}`;
-  return value;
+  // Шаг 100 (D): один разбор для всех языков — испанский и французский месяц тоже («oct 17, 15:41 · UTC−4»)
+  const parts = tableWhenParts(value);
+  return parts ? `${parts.short} · ${parts.zone}` : value;
 }
 
 /**
@@ -101,11 +99,7 @@ export function DateTimeField({ value, onChange, withTime = true, id, 'aria-desc
 
 /** Шаг 78: момент во вторичной строке — без года и пояса («Oct 11, 04:45»; версия стратегии, не таблица) */
 export function shortWhen(value: string): string {
-  const en = /^([A-Z][a-z]{2}) (\d{1,2}), \d{4}, (\d{2}:\d{2}) UTC.*$/.exec(value);
-  if (en) return `${en[1]} ${en[2]}, ${en[3]}`;
-  const de = /^(\d{1,2})\. (\S+) \d{4}, (\d{2}:\d{2}) UTC.*$/.exec(value);
-  if (de) return `${de[1]}. ${de[2]}, ${de[3]}`;
-  return value;
+  return tableWhenParts(value)?.short ?? value;
 }
 
 /** Шаг 84: пояс времени строки («UTC−7») — для шапки колонки */

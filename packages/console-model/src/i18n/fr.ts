@@ -417,6 +417,8 @@ export const fr: Messages = {
       demoSellerDescription: 'Vendeur américain synthétique sur le simulateur de canaux : offres sur amazon.com et ebay.com, en mode fantôme.',
       demoBadge: 'Démo', demoBanner: 'Espace de travail de démonstration : données synthétiques, parcours réel. Tous les montants sont fictifs.',
       languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
+      // Шаг 100 (C): кнопка меню языков — глобус и код текущего; подпись для диктора — «Language: English»
+      languageMenu: 'Langue',
       worlds: 'Vos espaces de travail',
       worldsHint: 'Chaque espace de travail correspond à l’activité d’un vendeur, avec ses propres comptes des canaux.',
       backToWorlds: '← Tous les espaces de travail',

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { BulkJobView, ImportCheckView, ImportHistoryView, ImportKind } from '@repracer/console-model';
 import { downloadFile, requestJson, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
-import { Badge, ErrorBox, errorText, FileDrop, useMessages } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, FileDrop, humanWhen, useMessages, When, WhenHead } from '../components.tsx';
 import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { JobProgress } from './Jobs.tsx';
 
@@ -28,7 +28,8 @@ function base64Of(bytes: Uint8Array): string {
  * таблица ошибок файла, где у всех строк одна причина, и журнал, где все запуски одного человека, не повторяют одно и то же в каждой строке
  */
 /** `card` — роль ячейки, когда ниже 768px строка таблицы становится карточкой (шаг 85): заголовок карточки или пилюля состояния */
-interface Column<T> { key: string; label: string; className?: string; card?: 'title' | 'status'; render: (row: T) => ReactNode; text: (row: T) => string }
+/** `head` — шапка колонки, когда в ней больше подписи (пояс колонки времени, шаг 100); `label` — подпись карточки телефона и подписи над таблицей */
+interface Column<T> { key: string; label: string; head?: ReactNode; className?: string; card?: 'title' | 'status'; render: (row: T) => ReactNode; text: (row: T) => string }
 function UniformTable<T>({ rows, columns, rowKey, className }: { rows: readonly T[]; columns: readonly Column<T>[]; rowKey: (row: T, i: number) => string; className?: string }) {
   const m = useMessages();
   const uniform = new Set(rows.length >= 3 ? columns.filter((c) => !c.className?.includes('num')).filter((c) => {
@@ -45,7 +46,7 @@ function UniformTable<T>({ rows, columns, rowKey, className }: { rows: readonly 
       ) : null}
       <div className="table-wrap">
         <table className={`cardify${className ? ` ${className}` : ''}`}>
-          <thead><tr>{shown.map((c) => <th key={c.key} className={c.className}>{c.label}</th>)}</tr></thead>
+          <thead><tr>{shown.map((c) => <th key={c.key} className={c.className}>{c.head ?? c.label}</th>)}</tr></thead>
           <tbody>{rows.map((r, i) => <tr key={rowKey(r, i)}>{shown.map((c) => (
             <td key={c.key} className={[c.className, c.card ? `card-${c.card}` : null].filter(Boolean).join(' ') || undefined} data-label={c.card ? undefined : c.label}>{c.render(r)}</td>
           ))}</tr>)}</tbody>
@@ -127,12 +128,15 @@ export function ImportCheck({ view, onMapping, onEncoding }: {
 export function ImportHistory({ view }: { view: ImportHistoryView }) {
   const m = useMessages();
   const t = m.ui.imports;
+  const zone = commonZone(view.items.map((r) => r.when));
   return (
     <section className="card import-history">
       <h4>{t.historyTitle}</h4>
       {view.items.length === 0 ? <p className="muted empty">{t.historyEmpty}</p> : (
         <UniformTable rows={view.items} rowKey={(r) => r.runId} className="import-history-table" columns={[
-          { key: 'when', label: t.historyColumns.when, card: 'title', render: (r) => r.when, text: (r) => r.when },
+          // Шаг 100 (D): как у прочих журналов — пояс один раз в шапке, в строке коротко («Oct 17, 08:16»)
+          { key: 'when', label: zone ? `${t.historyColumns.when} · ${zone}` : t.historyColumns.when, head: <WhenHead label={t.historyColumns.when} zone={zone} />, card: 'title',
+            render: (r) => <When value={r.when} zone={!zone} />, text: (r) => humanWhen(r.when, m.locale) },
           { key: 'who', label: t.historyColumns.who, render: (r) => r.who, text: (r) => r.who },
           { key: 'outcome', label: t.historyColumns.outcome, card: 'status', render: (r) => <><Badge tone={r.tone}>{r.outcome}</Badge>{r.reason ? <span className="small muted"> {r.reason}</span> : null}</>, text: (r) => `${r.outcome}${r.reason ? ` ${r.reason}` : ''}` },
           { key: 'file', label: t.historyColumns.file, render: (r) => <span title={t.checksum(r.sha256)}>{r.fileName} <span className="small muted mono">{r.shaShort}</span></span>, text: (r) => `${r.fileName} ${r.shaShort}` },

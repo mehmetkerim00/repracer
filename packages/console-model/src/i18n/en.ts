@@ -416,6 +416,8 @@ export const en = {
       demoSellerDescription: 'Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, in shadow mode.',
       demoBadge: 'Demo', demoBanner: 'Demo workspace: synthetic data, real path. Every amount is made up.',
       languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
+      // Шаг 100 (C): кнопка меню языков — глобус и код текущего; подпись для диктора — «Language: English»
+      languageMenu: 'Language',
       worlds: 'Your workspaces',
       worldsHint: 'Each workspace is one seller business with its own channel accounts.',
       backToWorlds: '← All workspaces',

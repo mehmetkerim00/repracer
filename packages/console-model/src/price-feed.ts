@@ -4,8 +4,7 @@ import type { Messages } from './i18n/index.ts';
 import { OFFER_CHOICES } from './compliance.ts';
 import { strategyLabel } from './products.ts';
 import { describe, type HumanReason } from './explain.ts';
-import type { CompetitorView } from '@repracer/pricing-model';
-import { explanationOf, triggerPhrase } from './trace.ts';
+import { explanationOf, triggerChip } from './trace.ts';
 import { catalogFirst, catalogTotal, gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
@@ -164,16 +163,6 @@ export function feedItemOf(world: StandWorld, m: Messages, item: FeedPageItem): 
     confirmation: w.status === 'APPLIED' && w.confirmedByOwnRecord ? m.ui.ownRecordConfirmation : null,
     trigger: triggerChip(decision?.competitorView ?? null, w.currency, m),
   };
-}
-
-/** Шаг 97 [Р-218]: чип «продавец, стрелка, цена» без длинных предложений (правила читаемости 96.2); полная фраза — подсказкой */
-function triggerChip(view: CompetitorView | null, currency: string, m: Messages): FeedItem['trigger'] {
-  const tr = view?.trigger;
-  if (!tr) return null;
-  const c = m.ui.trace.competitors;
-  const seller = tr.seller ?? c.unnamedSeller;
-  const price = tr.move === 'GONE' ? m.money(tr.wasMinor ?? null, currency) : m.money(tr.nowMinor ?? null, currency);
-  return { chip: c.chip[tr.move](seller, price), full: triggerPhrase(view, currency, m)! };
 }
 
 /**

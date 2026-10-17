@@ -131,6 +131,7 @@
   --base-size-6: 0.375rem; /* primer: --base-size-6 */
   --base-size-20: 1.25rem; /* primer: --base-size-20 */
   --base-size-96: 6rem; /* primer: --base-size-96 */
+  --base-size-128: 8rem; /* primer: --base-size-128 */
   --control-h: 2rem; /* primer: --control-medium-size */
   --badge-h: 1.25rem; /* primer: --base-size-20 */
   /* Шаг 85, адаптив: ширина выдвижной навигации (Primer Overlay small) и цель касания на узком экране (Primer, грубый указатель) */

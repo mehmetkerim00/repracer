@@ -27,7 +27,8 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
                   <td className="card-title">{d.unit?.label ?? m.ui.common.noValue}</td>
                   <td className="card-status"><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>
                   <td className="money cur" data-label={t.columns.price}>{d.price}</td>
-                  <td data-label={t.columns.reason}>{d.reason}</td>
+                  {/* Шаг 100 (E): решение, вызванное движением конкурента, называет его тем же чипом, что строка записи; полная фраза — подсказкой */}
+                  <td data-label={t.columns.reason}>{d.reason}{d.trigger ? <div><span className="trigger-chip" title={d.trigger.full}>{d.trigger.chip}</span></div> : null}</td>
                   <td className="num card-action"><a className="row-link" href={href(worldId, 'decisions', d.decisionId)}>{t.why}</a></td>
                 </tr>
               ))}

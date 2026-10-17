@@ -89,3 +89,22 @@ test('step 97.3: the receipt names the age of the reading; an older one says it 
   assert.equal(readingAgeText('2026-10-17T10:00:00.000Z', '2026-10-17T10:00:20.000Z', m), m.ui.trace.ageValue(0));
   assert.equal(readingAgeText('2026-10-17T10:00:00.000Z', '2026-10-17T10:22:00.000Z', m), m.ui.trace.ageQuiet(22));
 });
+
+/**
+ * Шаг 100 (E, вопрос владельца по скринам): чип «кто подвинул цену» шаг 97 поставил в журнал цен — но только в вид записей в канал.
+ * Вид «все решения» (Kind: All decisions) показывал в колонке Reason одну фразу Gate. Строка решения, вызванного движением конкурента,
+ * несёт тот же короткий чип; полная фраза — подсказкой и на квитанции
+ */
+test('step 100 (E): a decision row names the competitor move with the same short chip as a write row', async () => {
+  const { decisionItems, triggerPhrase } = await import('./trace.ts');
+  const m = messagesFor('en');
+  const world = { state: { scopes: [], explanationRulesets: [], strategies: [] } } as never;
+  const view = { currency: 'USD', trigger: { seller: 'North Ridge Supply', move: 'DOWN' as const, wasMinor: 1800, nowMinor: 1757 }, offers: [] };
+  const decision = (competitorView: unknown) => ({
+    decisionId: 'd-1', writeScopeId: 'ws-1', outcome: 'APPROVED', explanation: null, noChangeReason: null, reason: { code: 'APPROVED', params: {} },
+    currency: 'USD', finalMinor: 1756, proposedMinor: 1756, decidedAt: '2026-10-17T21:21:00Z', boundDeviationBp: null, competitorView,
+  }) as never;
+  const [moved, quiet] = decisionItems(world, [decision(view), decision(null)], m);
+  assert.deepEqual(moved!.trigger, { chip: 'North Ridge Supply ↓ $17.57', full: triggerPhrase(view, 'USD', m) });
+  assert.equal(quiet!.trigger, null, 'no competitor move — no chip');
+});

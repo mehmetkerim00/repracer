@@ -34,6 +34,8 @@ export interface Browser {
   setViewport(width: number, height: number): Promise<void>;
   /** Шаг 93: системная тема устройства (`prefers-color-scheme`) — эмуляцией CDP; null — как у машины прогона */
   setColorScheme(scheme: 'light' | 'dark' | null): Promise<void>;
+  /** Шаг 100 (B): настоящее движение мыши в точку окна — состояние :hover, которого синтетическое событие страницы не даёт */
+  mouseMove(x: number, y: number): Promise<void>;
   /** Исключения страницы и вызовы console.error с начала работы */
   errors(): string[];
   close(): Promise<void>;
@@ -102,6 +104,7 @@ export async function launchBrowser(): Promise<Browser> {
   return {
     async open(url) { await send('Page.navigate', { url }); },
     async setViewport(width, height) { await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); },
+    async mouseMove(x, y) { await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); },
     async setColorScheme(scheme) { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme ?? '' }] }); },
     text,
     async waitText(needle, timeoutMs = 60_000) {

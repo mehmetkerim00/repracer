@@ -395,6 +395,8 @@ export const de: Messages = {
       demoSellerDescription: 'Synthetischer US-Händler auf dem Kanalsimulator: Angebote auf amazon.com und ebay.com, im Schattenmodus.',
       demoBadge: 'Demo', demoBanner: 'Demo-Arbeitsbereich: synthetische Daten, echter Weg. Alle Beträge sind erfunden.',
       languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
+      // Шаг 100 (C): кнопка меню языков — глобус и код текущего; подпись для диктора — «Language: English»
+      languageMenu: 'Sprache',
       worlds: 'Ihre Arbeitsbereiche',
       worldsHint: 'Jeder Arbeitsbereich ist ein Verkäuferunternehmen mit eigenen Kanalkonten.',
       backToWorlds: '← Alle Arbeitsbereiche',

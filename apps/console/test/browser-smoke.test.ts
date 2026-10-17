@@ -75,6 +75,8 @@ let usApi: ReturnType<typeof createStandApi>;
 /** Шаг 88 [Р-213]: профиль us с флагом расширенных ролей — вход предлагает пять ролей */
 let extendedApi: ReturnType<typeof createStandApi>;
 let currentApi: ReturnType<typeof createStandApi>;
+/** Шаг 100 (A): стенд, где у входящего ровно одно рабочее пространство */
+let soloApi: ReturnType<typeof createStandApi>;
 /** Шаг 99: мир смоука — по нему исполняются задания импорта (исполнителя у смоука нет, задания зовутся из теста) */
 let smokeLive: LiveWorld;
 /** Шаг 96: подменённый ответ отчёта о поле (страницы по 50 и схлопывание повторов); null — настоящий ответ стенда */
@@ -133,6 +135,8 @@ function demoLikeRejected(worldId: string, dangerous = false) {
   };
 }
 let syntheticRejected: unknown = null;
+/** Шаг 100 (E): чип движения конкурента у первой строки настоящей страницы решений — в мире смоука у предложений один снимок, сравнивать не с чем */
+let decisionChip: { chip: string; full: string } | null = null;
 
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
 function syntheticShadow() {
@@ -202,10 +206,16 @@ before(async () => {
   euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
   usApi = createStandApi(all, identity, { market: 'us', connect, people: STAND_PEOPLE });
   extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true, people: STAND_PEOPLE });
+  soloApi = createStandApi([w0], identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
   currentApi = euApi;
   // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
   stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous })
-    : syntheticRejected && /\/rejected(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticRejected }) : currentApi(req)));
+    : syntheticRejected && /\/rejected(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticRejected })
+    : decisionChip && /\/decisions\?/.test(req.url) ? currentApi(req).then((r) => {
+      const body = r.body as { items?: Array<Record<string, unknown>> };
+      if (r.status === 200 && body.items?.length) body.items[0] = { ...body.items[0], trigger: decisionChip };
+      return r;
+    }) : currentApi(req)));
   await new Promise<void>((resolve) => stand!.listen(0, '127.0.0.1', resolve));
   const standPort = (stand.address() as { port: number }).port;
   vite = await createServer({
@@ -429,10 +439,10 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
     await checkPage('workspaces');
     if (narrow) {
       // Шаг 93: шапка телефона вне пространства — знак, язык, тема и выход; немецкие подписи длиннее («Abmelden»); шаг 94 — тема иконкой
-      await b.click(de.ui.app.languages.de, '.topbar .lang button');
+      await chooseLanguage(b, de.ui.app.languages.de);
       await b.waitText(de.ui.app.worlds);
       await checkPage('workspaces, German');
-      await b.click(de.ui.app.languages.en, '.topbar .lang button');
+      await chooseLanguage(b, de.ui.app.languages.en);
       await b.waitText(en.ui.app.worlds);
     }
     const world = (await b.evaluate<string>(`document.querySelector('h3 a').getAttribute('href')`)).split('/')[2]!;
@@ -552,6 +562,25 @@ const OUT_OF_BOX = `(() => {
   return out.slice(0, 5);
 })()`;
 
+
+/**
+ * Шаг 100 (D, находка по скринам владельца): пояс колонки времени — один раз в шапке («When · UTC−4»), строки — коротко, без года и
+ * пояса («Oct 17, 15:41»). В испанском и французском разбор месяца не срабатывал, и каждая строка несла полную дату с поясом в две
+ * строки. Правило — на каждом пункте меню, на четырёх языках: в колонке, у которой пояс в шапке, нет ни года, ни «UTC»
+ */
+const LONG_WHEN = `(() => {
+  const out = [];
+  for (const table of document.querySelectorAll('.world-content table')) {
+    const heads = [...table.querySelectorAll('thead th')];
+    const col = heads.findIndex((th) => th.querySelector('.th-zone'));
+    if (col < 0) continue;
+    for (const tr of table.querySelectorAll('tbody tr')) {
+      const text = (tr.children[col]?.innerText ?? '').trim();
+      if (/\\b\\d{4}\\b|UTC/.test(text)) { out.push(heads[col].innerText.trim() + ': ' + text); break; }
+    }
+  }
+  return out;
+})()`;
 /**
  * Шаг 96.1 [Р-146]: служебное предложение не повторяется в строках таблицы. Inventory повторял в каждой строке «to publish: N; held by shadow
  * mode: N would be sent (<время>) — nothing was sent; channel has not confirmed yet» — тот же класс, что лента чинила на шаге 84.1. Правило:
@@ -614,7 +643,7 @@ test('step 86, step 98 (Р-223): every menu item and the heading of its page are
   for (const m of [en, de, es, fr]) {
     if (m !== en) {
       // Имя языка в переключателе — его собственное (Deutsch, Español, Français) и одинаково во всех словарях
-      await b.click(en.ui.app.languages[m.locale], '.topbar .lang button');
+      await chooseLanguage(b, en.ui.app.languages[m.locale]);
       await b.waitText(m.ui.app.screens.feed);
     }
     // Шаг 98: непереведённая строка — один прогон на язык (светлая тема), на каждом экране меню
@@ -633,6 +662,7 @@ test('step 86, step 98 (Р-223): every menu item and the heading of its page are
       if (heading !== l.text) mismatches.push(`«${l.text}» → «${heading}»`);
       assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${m.locale} ${l.text}: content sticks out of its frame`);
       assert.deepEqual(await b.evaluate<string[]>(REPEATED_IN_ROWS), [], `${m.locale} ${l.text}: a service sentence repeats in the rows of a table`);
+      assert.deepEqual(await b.evaluate<string[]>(LONG_WHEN), [], `${m.locale} ${l.text}: a row of a time column carries the year or the zone`);
       if (english) for (const t of await b.evaluate<string[]>(UNTRANSLATED(english))) untranslated.push(`${l.text}: ${t}`);
     }
     assert.deepEqual(mismatches, [], `${scheme} ${m.locale}: a menu item leads to a page with another heading`);
@@ -645,10 +675,14 @@ test('step 86, step 98 (Р-223): every menu item and the heading of its page are
       await b.evaluate(`(document.getElementById('untranslated-control').remove(), document.getElementById('untranslated-aria').remove(), true)`);
     }
   }
-  await b.click(fr.ui.app.languages.en, '.topbar .lang button');
+  await chooseLanguage(b, fr.ui.app.languages.en);
   await b.waitText(en.ui.app.screens.feed);
   }
   await b.setColorScheme(null);
+  // Положительный контроль шага 100 (D): строка колонки с поясом в шапке, несущая полную дату, — находка правила
+  await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<table id="when-control"><thead><tr><th>Cuándo<span class="th-zone"> · UTC−4</span></th></tr></thead><tbody><tr><td>oct 17, 2026, 17:30 UTC−4</td></tr></tbody></table>'), true)`);
+  assert.deepEqual(await b.evaluate<string[]>(LONG_WHEN), ['Cuándo · UTC−4: oct 17, 2026, 17:30 UTC−4']);
+  await b.evaluate(`(document.getElementById('when-control').remove(), true)`);
   // Положительный контроль [Р-94]: таблица, растянутая за поля карточки, как была до шага 86, — выступ, и правило его видит
   await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<section class="card" id="out-control"><table style="margin: 0 -24px; width: calc(100% + 48px)"><tbody><tr><td>control</td></tr></tbody></table></section>'), true)`);
   assert.match((await b.evaluate<string[]>(OUT_OF_BOX)).join(' | '), /sticks out of section\.card by 7px/);
@@ -933,15 +967,11 @@ test('step 96.1: the period is one date-range control — dates on the button, t
   const dark = await edge();
   assert.ok(dark.bg === dark.accent && dark.bg !== light.bg, `dark: the accent of the dark theme — ${JSON.stringify({ light, dark })}`);
   await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
-  // телефон: лист во весь экран, один месяц, дни — цель касания 44 px
+  // телефон: шаг 100 (B) — нижняя панель во всю ширину (проверяет тест шага 100); здесь — один месяц и дни 44 px
   await b.setViewport(375, 812);
   await openIt();
-  // во весь экран — во всю видимую область окна (у безголового Chrome полоса прокрутки занимает её край)
-  const sheet = await b.evaluate<{ x: number; y: number; w: number; h: number; months: number; day: number; modal: string | null }>(`(() => { const r = document.querySelector('.drp-pop').getBoundingClientRect();
-    const d = document.querySelector('.drp-day').getBoundingClientRect(); const v = document.documentElement;
-    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) - v.clientWidth, h: Math.round(r.height) - v.clientHeight, months: document.querySelectorAll('.drp-month').length, day: Math.round(Math.min(d.width, d.height)), modal: document.querySelector('.drp-pop').getAttribute('aria-modal') }; })()`);
-  assert.deepEqual(sheet, { x: 0, y: 0, w: 0, h: 0, months: 1, day: 44, modal: 'true' }, 'a phone gets a full-screen sheet with one month and 44px days');
-  assert.ok(await b.evaluate<boolean>(`document.documentElement.clientWidth > 340`), 'the 375px phone viewport');
+  assert.deepEqual(await b.evaluate<number[]>(`[document.querySelectorAll('.drp-month').length, Math.round(Math.min(document.querySelector('.drp-day').getBoundingClientRect().width, document.querySelector('.drp-day').getBoundingClientRect().height))]`), [1, 44],
+    'a phone gets one month and 44px days');
   await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
   await b.setViewport(1440, 900);
   await b.setColorScheme(null);
@@ -1198,15 +1228,14 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
     await b.open(pageUrl);
     await b.waitText(en.ui.app.login.roleCan.OWNER);
     // Шаг 98 [Р-223]: в профиле us — английский, испанский и французский; немецкого нет (он за профилем ЕС)
-    assert.deepEqual(await b.evaluate<string[]>(`[...document.querySelectorAll('.lang button')].map((x) => x.getAttribute('aria-label'))`), ['English', 'Español', 'Français'],
-      'us: the language switch offers English, Spanish and French, not German');
+    assert.deepEqual(await languagesOffered(b), ['English', 'Español', 'Français'], 'us: the language switch offers English, Spanish and French, not German');
     assert.equal(await europeOnPage(), null, 'us: sign-in');
     await b.click(owner);
-    await b.waitText(en.ui.app.worlds);
-    const titles = await b.evaluate<string[]>(`[...document.querySelectorAll('h3 a')].map((a) => a.textContent.trim())`);
-    assert.deepEqual(titles, ['Empty workspace'], 'us: a workspace whose storefronts are all European is not offered; an empty one is');
-    await b.click('Empty workspace');
+    // Шаг 100 (A): у входящего в профиле us одно пространство — пустое (мир с витринами только ЕС не предлагается), и вход ведёт сразу в него
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'us: straight into the only workspace');
     await settled(b, 'us empty workspace');
+    assert.equal(decodeURIComponent((await b.evaluate<string>('location.hash')).split('/')[2]!), EMPTY_WORLD_ID,
+      'us: a workspace whose storefronts are all European is not offered; an empty one is');
     const links = await b.evaluate<Array<{ text: string; href: string }>>(
       `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
     assert.deepEqual(links.map((l) => l.href.split('/')[3]), MENU_US, `us: nine menu items, no Omnibus — ${links.map((l) => l.text).join(', ')}`);
@@ -1235,7 +1264,10 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
   await settled(b, 'eu connections');
   const eu = await europeOnPage();
-  assert.ok(eu !== null && /amazon\.de|Deutsch/.test(eu), `eu: the rule sees Europe — ${eu}`);
+  assert.ok(eu !== null, `eu: the rule sees Europe — ${eu}`);
+  // Шаг 100 (C): «Deutsch» — пункт меню языков, а не ссылка в шапке
+  assert.ok(/amazon\.de/.test(await b.evaluate<string>('document.body.innerText')), 'eu: the connections offer amazon.de');
+  assert.ok((await languagesOffered(b)).includes('Deutsch'), 'eu: the language menu offers Deutsch');
   // шаг 96.2: в профиле eu подпись файла остатков называет немецкие заголовки — и правило это видит; в us её не было (выше)
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/inventory`)}, true)`);
   await settled(b, 'eu inventory');
@@ -1270,7 +1302,8 @@ test('step 88 (Р-213), step 98 (Р-222): sign-in offers two roles at 375 and 14
     await b.open(pageUrl);
     await b.waitText(en.ui.app.login.roleCan.MANAGER);
     await b.click(en.ui.app.login.asAccount(en.values.MANAGER));
-    await b.waitText(en.ui.app.worlds);
+    // Шаг 100 (A): у менеджера в профиле us одно пространство — вход ведёт сразу в него
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'the manager goes straight into the only workspace');
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
     await settled(b, 'manager connections');
     const connections = await b.evaluate<string>('document.body.innerText');
@@ -1412,18 +1445,289 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
   await b.setViewport(1440, 900);
   await b.setColorScheme('light');
   for (const m of [es, fr]) {
-    await b.click(en.ui.app.languages[m.locale], '.topbar .lang button');
+    await chooseLanguage(b, en.ui.app.languages[m.locale]);
     await b.waitText(m.ui.app.screens.feed);
     const english = englishOnly(m);
     for (const route of ['costs', 'strategies', 'inventory']) {
       await visit(route);
       assert.deepEqual(await b.evaluate<string[]>(UNTRANSLATED(english)), [], `${m.locale} ${route}: an English dictionary string on an import page`);
+      // Шаг 100 (D): журнал импортов — пояс в шапке, строки коротко, и на испанском и французском
+      assert.deepEqual(await b.evaluate<string[]>(LONG_WHEN), [], `${m.locale} ${route}: a row of the import history carries the year or the zone`);
     }
-    await b.click(m.ui.app.languages.en, '.topbar .lang button');
+    await chooseLanguage(b, m.ui.app.languages.en);
     await b.waitText(en.ui.app.screens.feed);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
+
+test('step 100 (A): one workspace — straight into it after sign-in, no workspace list and no «All workspaces»; two or more — the list as before', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  const rootLinks = `[...document.querySelectorAll('.sidebar a')].filter((a) => a.getAttribute('href') === '#/').length`;
+  currentApi = soloApi;
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.OWNER);
+      await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+      await waitFor(b, `location.hash.startsWith('#/w/')`, `${width}: straight into the only workspace`);
+      await settled(b, `${width}: the only workspace`);
+      assert.equal(await b.evaluate<boolean>(`document.querySelector('.worlds-page') === null`), true, `${width}: no workspace list`);
+      assert.equal(await b.evaluate<number>(rootLinks), 0, `${width}: no «All workspaces» — nothing to choose from`);
+      // «#/» вручную — снова внутрь
+      await b.evaluate(`(location.hash = '#/', true)`);
+      await waitFor(b, `location.hash.startsWith('#/w/')`, `${width}: the root leads into the only workspace`);
+    }
+  } finally {
+    currentApi = euApi;
+  }
+  // Контроль: два пространства — список и ссылка «All workspaces», как прежде
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  assert.equal(await b.evaluate<number>(`document.querySelectorAll('.worlds-page h3 a').length`), 2);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'a workspace of two');
+  assert.equal(await b.evaluate<number>(rootLinks), 1, 'with two workspaces the way back is there');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+test('step 100 (B): the period calendar — presets as a segment row above the months, quiet weekdays, today outlined, round ends joined by an even fill, a hover preview, a quiet footer, Primer radius and shadow; a bottom sheet with one month on a phone', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed`)}, true)`);
+  await settled(b, 'feed');
+  const t = en.ui.period;
+  const token = (name: string, prop = 'color') => `(() => { const p = document.createElement('span'); p.style.${prop} = 'var(${name})'; document.body.append(p); const v = getComputedStyle(p).${prop}; p.remove(); return v; })()`;
+  const look = () => b.evaluate<Record<string, unknown>>(`(() => {
+    const pop = document.querySelector('.drp-pop'); const r = (e) => e.getBoundingClientRect();
+    const presets = [...document.querySelectorAll('.drp-presets button')].map(r);
+    const month = r(document.querySelector('.drp-month'));
+    const th = getComputedStyle(document.querySelector('.drp-month th'));
+    const today = getComputedStyle(document.querySelector('.drp-day.today') ?? document.body);
+    const edge = document.querySelector('.drp-day.edge') ?? document.body; const edgeStyle = getComputedStyle(edge);
+    const inside = [...document.querySelectorAll('.drp-month td.in-range')];
+    const gaps = inside.slice(1).map((td, k) => { const a = r(inside[k]); const z = r(td); return Math.abs(a.top - z.top) < 1 ? Math.round(z.left - a.right) : 0; });
+    const disabled = document.querySelector('.drp-day.disabled');
+    const foot = document.querySelector('.drp-foot'); const status = document.querySelector('.drp-status'); const actions = foot.querySelector('.form-actions');
+    const limit = document.querySelector('.drp-limit');
+    const cancel = [...foot.querySelectorAll('button')].find((x) => !x.classList.contains('primary'));
+    const apply = foot.querySelector('button.primary');
+    return {
+      presetsRow: presets.every((p) => Math.abs(p.top - presets[0].top) < 1), presetsAbove: presets.every((p) => p.bottom <= month.top),
+      thWeight: th.fontWeight, thColor: th.color, thSize: th.fontSize,
+      todayDecoration: today.textDecorationLine, todayRing: today.boxShadow !== 'none' || today.borderStyle !== 'none' && today.borderWidth !== '0px',
+      edgeRound: parseFloat(edgeStyle.borderTopLeftRadius) * 2 >= edge.getBoundingClientRect().width - 1,
+      inRange: inside.length, gaps: [...new Set(gaps)], fill: inside.length ? getComputedStyle(inside[Math.floor(inside.length / 2)]).backgroundColor : null,
+      disabledColor: disabled ? getComputedStyle(disabled).color : null,
+      statusLeft: !!status && !!actions && r(status).right <= r(actions).left, limit: limit?.textContent.trim() ?? null, limitColor: limit ? getComputedStyle(limit).color : null,
+      cancelGhost: !!cancel && cancel.classList.contains('ghost') && getComputedStyle(cancel).backgroundColor === 'rgba(0, 0, 0, 0)', applyPrimary: !!apply,
+      navIcons: [...document.querySelectorAll('.drp-nav button')].every((x) => x.querySelector('svg') && x.getAttribute('aria-label')),
+      radius: getComputedStyle(pop).borderRadius, shadow: getComputedStyle(pop).boxShadow,
+    };
+  })()`);
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    await b.evaluate(`(document.querySelector('.drp-trigger').click(), true)`);
+    await waitFor(b, `document.querySelector('.drp-pop') !== null`, 'the calendar opens');
+    const v = await look();
+    const want = {
+      text2: await b.evaluate<string>(token('--text-2')), text3: await b.evaluate<string>(token('--text-3')), soft: await b.evaluate<string>(token('--accent-soft', 'backgroundColor')),
+      radius: await b.evaluate<string>(token('--radius-lg', 'borderRadius')), shadow: await b.evaluate<string>(token('--shadow-lg', 'boxShadow')),
+    };
+    assert.deepEqual([v.presetsRow, v.presetsAbove], [true, true], `${scheme}: presets — one row of segments above the months`);
+    assert.deepEqual([v.thWeight, v.thColor], ['400', want.text2], `${scheme}: weekday heads — small and muted, not bold`);
+    assert.deepEqual([v.todayDecoration, v.todayRing], ['none', true], `${scheme}: today — a thin outline, not an underline`);
+    assert.equal(v.edgeRound, true, `${scheme}: the ends of the range are round`);
+    assert.ok((v.inRange as number) >= 5, `${scheme}: the days of the range carry the fill — ${String(v.inRange)}`);
+    assert.deepEqual([v.gaps, v.fill], [[0], want.soft], `${scheme}: the fill joins the days without gaps or steps`);
+    assert.equal(v.disabledColor, want.text3, `${scheme}: days beyond the kept window are lighter`);
+    // у журнала цен окно — 90 суток (шаг 96)
+    assert.deepEqual([v.statusLeft, v.limit, v.limitColor], [true, t.limit(90), want.text2], `${scheme}: the footer — the choice on the left, the limit short and grey`);
+    assert.ok(!/[()]/.test(String(v.limit)), 'the limit has no brackets');
+    assert.deepEqual([v.cancelGhost, v.applyPrimary, v.navIcons], [true, true, true], `${scheme}: Cancel is a ghost, Apply the primary, the month arrows icon buttons`);
+    assert.deepEqual([v.radius, v.shadow], [want.radius, want.shadow], `${scheme}: radius and shadow of the Primer scales`);
+    // Превью: после первого нажатия подсветка тянется за курсором до второй даты
+    const days = await b.evaluate<string[]>(`[...document.querySelectorAll('.drp-day:not(.disabled)')].map((x) => x.dataset.day)`);
+    const [first, hover] = [days[days.length - 6]!, days[days.length - 2]!];
+    await b.evaluate(`(document.querySelector('.drp-day[data-day="${first}"]').click(), true)`);
+    // Настоящий курсор (а не событие страницы): строка под ним в состоянии :hover — её заливка не гаснет (снимок шага нашёл ровно это)
+    const at = await b.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('.drp-day[data-day="${hover}"]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    await b.mouseMove(at.x, at.y);
+    await waitFor(b, `document.querySelectorAll('.drp-month td.in-range').length >= 3`, `${scheme}: the preview follows the pointer`);
+    assert.deepEqual(await b.evaluate<string[]>(`[...document.querySelectorAll('.drp-month td.preview button')].map((x) => x.dataset.day)`).then((x) => [x[0], x[x.length - 1]]), [first, hover],
+      `${scheme}: the preview runs from the first click to the pointer`);
+    const unfilled = await b.evaluate<string[]>(`[...document.querySelectorAll('.drp-month td.preview:not(.range-start):not(.range-end)')].filter((td) => getComputedStyle(td).backgroundColor !== ${JSON.stringify(want.soft)}).map((td) => td.querySelector('button').dataset.day)`);
+    assert.deepEqual(unfilled, [], `${scheme}: every day of the preview is filled, the row under the pointer too`);
+    await b.mouseMove(0, 0);
+    await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
+  }
+  // Телефон: один месяц, нижняя панель во всю ширину, дни — цель касания
+  await b.setColorScheme('light');
+  await b.setViewport(375, 812);
+  await b.evaluate(`(document.querySelector('.drp-trigger').click(), true)`);
+  await waitFor(b, `document.querySelector('.drp-pop') !== null`, 'the calendar opens on a phone');
+  const sheet = await b.evaluate<Record<string, number | string | null>>(`(() => { const r = document.querySelector('.drp-pop').getBoundingClientRect(); const v = document.documentElement;
+    const d = document.querySelector('.drp-day').getBoundingClientRect();
+    return { months: document.querySelectorAll('.drp-month').length, left: Math.round(r.left), width: Math.round(r.width) - v.clientWidth, bottom: Math.round(r.bottom) - v.clientHeight,
+      top: Math.round(r.top) > 0 ? 'below the top' : 'at the top', day: Math.round(Math.min(d.width, d.height)), modal: document.querySelector('.drp-pop').getAttribute('aria-modal') }; })()`);
+  assert.deepEqual(sheet, { months: 1, left: 0, width: 0, bottom: 0, top: 'below the top', day: 44, modal: 'true' }, 'a phone: one month in a full-width bottom sheet');
+  assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), 'no sideways scroll');
+  await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
+  await b.setViewport(1440, 900);
+  await b.setColorScheme(null);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+test('step 100 (C): the language is one menu — globe and «EN ▾», native names with a check at the current one, the keyboard of a menu; on sign-in, in the header and on a phone', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = usApi;
+  try {
+    await b.setViewport(1440, 900);
+    await b.setColorScheme('light');
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    const button = () => b.evaluate<Record<string, unknown>>(`(() => { const x = document.querySelector('.topbar .lang-button'); return x ? { text: x.innerText.trim(), popup: x.getAttribute('aria-haspopup'),
+      expanded: x.getAttribute('aria-expanded'), label: x.getAttribute('aria-label'), globe: !!x.querySelector('svg'), focused: document.activeElement === x,
+      plain: document.querySelectorAll('.topbar .lang > button:not(.lang-button)').length } : null; })()`);
+    const focused = () => b.evaluate<{ text: string; role: string | null; checked: string | null; check: boolean } | null>(`(() => { const a = document.activeElement;
+      return a?.getAttribute('role') === 'menuitemradio' ? { text: a.textContent.trim(), role: a.getAttribute('role'), checked: a.getAttribute('aria-checked'), check: !!a.querySelector('svg') } : null; })()`);
+    const key = (k: string) => b.evaluate(`(document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true })), true)`);
+    // Вход: одна кнопка-меню вместо трёх ссылок
+    assert.deepEqual(await button(), { text: 'EN', popup: 'menu', expanded: 'false', label: `${en.ui.app.languageMenu}: English`, globe: true, focused: false, plain: 0 }, 'sign-in: a menu button «globe · EN ▾»');
+    // Клавиатура: стрелка вниз открывает меню на текущем языке; стрелки по кругу; Home и End; Esc — закрыть и вернуть фокус
+    await b.evaluate(`(document.querySelector('.topbar .lang-button').focus(), true)`);
+    await key('ArrowDown');
+    await waitFor(b, `document.activeElement?.getAttribute('role') === 'menuitemradio'`, 'ArrowDown opens the menu on the current language');
+    assert.deepEqual(await focused(), { text: 'English', role: 'menuitemradio', checked: 'true', check: true }, 'the current language — checked, with a check mark');
+    assert.equal((await button())!.expanded, 'true');
+    assert.deepEqual(await b.evaluate<string[]>(`[...document.querySelectorAll('.topbar .lang-menu [role=menuitemradio]')].map((x) => x.getAttribute('aria-checked') + ' ' + x.textContent.trim() + ' ' + x.lang)`),
+      ['true English en', 'false Español es', 'false Français fr'], 'native names, the language of each item, one checked');
+    await key('ArrowDown');
+    assert.equal((await focused())!.text, 'Español');
+    await key('End');
+    assert.equal((await focused())!.text, 'Français');
+    await key('ArrowDown');
+    assert.equal((await focused())!.text, 'English', 'arrows go round');
+    await key('ArrowUp');
+    assert.equal((await focused())!.text, 'Français');
+    await key('Home');
+    assert.equal((await focused())!.text, 'English');
+    await key('Escape');
+    assert.deepEqual([await b.evaluate<boolean>(`document.querySelector('.lang-menu') === null`), (await button())!.focused, (await button())!.expanded], [true, true, 'false'],
+      'Escape closes the menu and gives the focus back to the button');
+    // Нажатие мимо закрывает
+    await b.evaluate(`(document.querySelector('.topbar .lang-button').click(), true)`);
+    await waitFor(b, `document.querySelector('.topbar .lang-menu') !== null`, 'the menu opens on a click');
+    await b.evaluate(`(document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), true)`);
+    await waitFor(b, `document.querySelector('.topbar .lang-menu') === null`, 'a click elsewhere closes the menu');
+    // Выбор языка — страница на нём, кнопка называет его кодом
+    await chooseLanguage(b, 'Español');
+    await b.waitText(es.ui.app.login.roleCan.OWNER);
+    assert.deepEqual([await b.evaluate<string>('document.documentElement.lang'), (await button())!.text, (await button())!.label], ['es', 'ES', `${es.ui.app.languageMenu}: Español`]);
+    await chooseLanguage(b, 'English');
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    // Телефон: та же кнопка на входе, меню целиком в экране; в пространстве — в выдвижной панели
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      await b.setViewport(375, 812);
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.OWNER);
+      assert.deepEqual([(await button())!.text, (await button())!.plain], ['EN', 0], `${scheme} 375: the menu button, not «EN · ES · FR»`);
+      await b.evaluate(`(document.querySelector('.topbar .lang-button').click(), true)`);
+      await waitFor(b, `document.querySelector('.topbar .lang-menu') !== null`, 'the menu opens on a phone');
+      const box = await b.evaluate<{ left: number; right: number; bg: string; surface: string }>(`(() => { const r = document.querySelector('.topbar .lang-menu').getBoundingClientRect();
+        const p = document.createElement('span'); p.style.background = 'var(--surface)'; document.body.append(p); const surface = getComputedStyle(p).backgroundColor; p.remove();
+        return { left: Math.round(r.left), right: Math.round(window.innerWidth - r.right), bg: getComputedStyle(document.querySelector('.topbar .lang-menu')).backgroundColor, surface }; })()`);
+      assert.ok(box.left >= 0 && box.right >= 0, `${scheme} 375: the menu stays on the screen — ${JSON.stringify(box)}`);
+      assert.equal(box.bg, box.surface, `${scheme}: the menu is a surface of its theme`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} 375: no sideways scroll`);
+      await key('Escape');
+    }
+    await b.setColorScheme('light');
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'into the workspace');
+    await settled(b, 'workspace on a phone');
+    await b.evaluate(`(document.querySelector('.menu-button').click(), true)`);
+    await waitFor(b, `document.querySelector('.sidebar-extras .lang-button') !== null`, 'the drawer holds the language menu');
+    await chooseLanguage(b, 'Français', '.sidebar-extras');
+    await waitFor(b, `document.documentElement.lang === 'fr'`, 'the language changes from the drawer');
+    await b.evaluate(`(document.querySelector('.menu-button').click(), true)`);
+    await chooseLanguage(b, 'English', '.sidebar-extras');
+    await waitFor(b, `document.documentElement.lang === 'en'`, 'back to English');
+  } finally {
+    currentApi = euApi;
+    await b.setViewport(1440, 900);
+    await b.setColorScheme(null);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+test('step 100 (E): a decision caused by a competitor move names it in the Reason column — a short chip on its own line, the full phrase as its title', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  decisionChip = { chip: 'North Ridge Supply ↓ €17.57', full: en.ui.trace.competitors.trigger('North Ridge Supply', '€18.00', '€17.57') };
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed/decisions`)}, true)`);
+      await settled(b, `${width}: feed, decisions`);
+      const row = await b.evaluate<{ chip: string; title: string | null; cell: string | null; ownLine: boolean; others: number } | null>(`(() => {
+        const chip = document.querySelector('.world-content tbody tr .trigger-chip'); if (!chip) return null;
+        const reason = chip.closest('td'); const text = [...reason.childNodes].find((n) => n.nodeType === 3);
+        return { chip: chip.textContent.trim(), title: chip.getAttribute('title'), cell: reason.getAttribute('data-label'),
+          ownLine: chip.parentElement !== reason && chip.parentElement.tagName === 'DIV', others: document.querySelectorAll('.world-content tbody tr .trigger-chip').length - 1 }; })()`);
+      assert.deepEqual(row, { chip: decisionChip.chip, title: decisionChip.full, cell: en.ui.trace.columns.reason, ownLine: true, others: 0 }, `${width}: the chip of the competitor move in the Reason column`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+    }
+  } finally {
+    decisionChip = null;
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 100 (C): язык выбирается в меню — кнопка «глобус · EN ▾» в шапке (или в выдвижной панели), пункт с родным именем языка
+ */
+async function chooseLanguage(b: Browser, name: string, scope = '.topbar'): Promise<void> {
+  await b.evaluate(`(document.querySelector(${JSON.stringify(`${scope} .lang-button`)}).click(), true)`);
+  await waitFor(b, `document.querySelector(${JSON.stringify(`${scope} .lang-menu`)}) !== null`, `the language menu of ${scope} opens`);
+  await b.click(name, `${scope} .lang-menu [role=menuitemradio]`);
+}
+
+/** Языки, которые предлагает меню шапки, — их родные имена; меню закрывается Esc */
+async function languagesOffered(b: Browser): Promise<string[]> {
+  await b.evaluate(`(document.querySelector('.topbar .lang-button').click(), true)`);
+  await waitFor(b, `document.querySelector('.topbar .lang-menu') !== null`, 'the language menu opens');
+  const names = await b.evaluate<string[]>(`[...document.querySelectorAll('.topbar .lang-menu [role=menuitemradio]')].map((x) => x.textContent.trim())`);
+  await b.evaluate(`(document.querySelector('.topbar .lang-menu [role=menuitemradio]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
+  return names;
+}
 
 async function waitFor(b: Browser, expression: string, what: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

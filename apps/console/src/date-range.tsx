@@ -7,7 +7,7 @@ import { Octicon } from './icons.tsx';
 /**
  * Шаг 96.1 (решение владельца): выбор периода «по-взрослому» — один контрол диапазона вместо родных полей дат. Кнопка показывает
  * диапазон («Oct 10 – Oct 16, 2026»); по нажатию — календарь: на широком экране два месяца рядом, на телефоне — лист во весь экран;
- * диапазон — двумя нажатиями, слева пресеты, внизу Apply / Cancel. Дни — в поясе пространства (`ZoneContext`): сервер считает окно в
+ * диапазон — двумя нажатиями, пресеты рядом сверху (шаг 100), внизу Apply / Cancel. Дни — в поясе пространства (`ZoneContext`): сервер считает окно в
  * нём же. Конец не раньше начала — живой подсказкой (`aria-live`), а не молча. Клавиатура: стрелки — день и неделя, Home / End — край
  * недели, PageUp / PageDown — месяц, Enter / пробел — выбрать, Esc — закрыть. Один компонент у Shadow mode, Protections и Price changes
  */
@@ -177,7 +177,9 @@ export function DateRangePicker({ id, value, onChange, maxDays = 30, 'aria-descr
     e.preventDefault();
     moveTo(go());
   };
-  const shown = hover && draft.from && !draft.to && hover >= draft.from ? { from: draft.from, to: hover } : draft.from ? { from: draft.from, to: draft.to ?? draft.from } : null;
+  // Шаг 100 (B): после первого нажатия подсветка тянется за курсором до второй даты — превью, светлее выбранного диапазона
+  const preview = !!(hover && draft.from && !draft.to && hover >= draft.from);
+  const shown = preview ? { from: draft.from!, to: hover! } : draft.from ? { from: draft.from, to: draft.to ?? draft.from } : null;
 
   const month = (start: Day, index: number) => {
     const lead = (new Date(utcOf(start)).getUTCDay() - weekStart + 7) % 7;
@@ -200,8 +202,15 @@ export function DateRangePicker({ id, value, onChange, maxDays = 30, 'aria-descr
                   const edge = !!shown && (day === shown.from || day === shown.to);
                   const inside = !!shown && day > shown.from && day < shown.to;
                   const cls = ['drp-day', edge ? 'edge' : '', inside ? 'inside' : '', day === today ? 'today' : '', disabled ? 'disabled' : ''].filter(Boolean).join(' ');
+                  /**
+                   * Шаг 100 (B): заливка диапазона — на ячейке, во всю её ширину, поэтому дни соединяются без зазоров; у концов — половина ячейки
+                   * к диапазону (круглый конец сливается с заливкой), у краёв строки и месяца — скругление: ступенек нет
+                   */
+                  const span = !!shown && shown.from !== shown.to && (edge || inside);
+                  const tdCls = span ? ['in-range', day === shown!.from ? 'range-start' : '', day === shown!.to ? 'range-end' : '', d === 0 || !week[d - 1] ? 'row-start' : '',
+                    d === 6 || !week[d + 1] ? 'row-end' : '', preview ? 'preview' : ''].filter(Boolean).join(' ') : undefined;
                   return (
-                    <td key={day} role="gridcell" aria-selected={edge || inside}>
+                    <td key={day} role="gridcell" aria-selected={edge || inside} className={tdCls}>
                       <button type="button" className={cls} data-day={day} tabIndex={day === focus ? 0 : -1} aria-disabled={disabled || undefined}
                         aria-label={dayLong.format(utcOf(day))} aria-current={day === today ? 'date' : undefined}
                         onClick={() => pick(day)} onKeyDown={(e) => onDayKey(e, day)} onMouseEnter={() => setHover(day)} onMouseLeave={() => setHover(null)}>
@@ -227,11 +236,14 @@ export function DateRangePicker({ id, value, onChange, maxDays = 30, 'aria-descr
         <span className="drp-range">{label}</span>
       </button>
       {open ? (
-        <div className={`drp-pop${wide ? '' : ' sheet'}`} role="dialog" aria-modal={wide ? undefined : true} aria-label={t.dialog}
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } }}>
-          {/* на телефоне лист во весь экран — со своим заголовком; на широком экране карточка стоит под полем «Period» и заголовок не нужен */}
-          <div className="drp-title" aria-hidden="true">{t.dialog}</div>
-          <div className="drp-body">
+        <>
+          {/* Шаг 100 (B): на телефоне — нижняя панель во всю ширину над затемнением; нажатие на затемнение закрывает без изменений */}
+          {wide ? null : <div className="drp-backdrop" aria-hidden="true" onClick={() => close()} />}
+          <div className={`drp-pop${wide ? '' : ' sheet'}`} role="dialog" aria-modal={wide ? undefined : true} aria-label={t.dialog}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } }}>
+            {/* на телефоне у панели свой заголовок; на широком экране карточка стоит под полем «Period» и заголовок не нужен */}
+            <div className="drp-title" aria-hidden="true">{t.dialog}</div>
+            {/* Шаг 100 (B): пресеты — рядом сегментов над месяцами, а не колонкой слева */}
             <div className="drp-presets" role="group" aria-label={t.label}>
               {PERIOD_PRESETS.map((p) => (
                 <button key={p} type="button" className={draft.preset === p ? 'on' : undefined} aria-pressed={draft.preset === p} onClick={() => choosePreset(p)}>{t.presetsLong[p]}</button>
@@ -239,20 +251,24 @@ export function DateRangePicker({ id, value, onChange, maxDays = 30, 'aria-descr
             </div>
             <div className="drp-calendar">
               <div className="drp-nav">
-                <button type="button" className="ghost" aria-label={t.prevMonth} disabled={months[0]! <= monthOf(min)} onClick={() => setAnchor(addMonths(anchor, -1))}><Octicon name="chevron-left" size={16} /></button>
-                <button type="button" className="ghost" aria-label={t.nextMonth} disabled={anchor >= monthOf(today)} onClick={() => setAnchor(addMonths(anchor, 1))}><Octicon name="chevron-right" size={16} /></button>
+                <button type="button" className="drp-arrow ghost" aria-label={t.prevMonth} disabled={months[0]! <= monthOf(min)} onClick={() => setAnchor(addMonths(anchor, -1))}><Octicon name="chevron-left" size={16} /></button>
+                <button type="button" className="drp-arrow ghost" aria-label={t.nextMonth} disabled={anchor >= monthOf(today)} onClick={() => setAnchor(addMonths(anchor, 1))}><Octicon name="chevron-right" size={16} /></button>
               </div>
               <div className="drp-months" ref={gridRef}>{months.map((start, i) => month(start, i))}</div>
             </div>
+            {/* Шаг 100 (B): футер — выбранный диапазон слева, предел окна коротко серым под ним; справа Cancel (ghost) и Apply (primary) */}
+            <div className="drp-foot">
+              <div className="drp-status">
+                <p className="drp-hint" aria-live="polite">{hint}</p>
+                <p className="drp-limit">{t.limit(maxDays)}</p>
+              </div>
+              <FormActions dialog>
+                <button type="button" className="ghost" onClick={() => close()}>{t.cancel}</button>
+                <button type="button" className="primary" disabled={!(draft.from && draft.to)} onClick={apply}>{t.applyRange}</button>
+              </FormActions>
+            </div>
           </div>
-          <div className="drp-foot">
-            <p className="drp-hint" aria-live="polite">{hint} <span className="muted">{t.limit(maxDays)}</span></p>
-            <FormActions dialog>
-              <button type="button" onClick={() => close()}>{t.cancel}</button>
-              <button type="button" className="primary" disabled={!(draft.from && draft.to)} onClick={apply}>{t.applyRange}</button>
-            </FormActions>
-          </div>
-        </div>
+        </>
       ) : null}
     </div>
   );
