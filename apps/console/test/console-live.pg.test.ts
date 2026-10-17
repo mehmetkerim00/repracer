@@ -547,8 +547,10 @@ test('Р-139: процесс убит на половине применения
   assert.equal(created.status, 200, created.text.slice(0, 300));
   const jobId = (JSON.parse(created.text) as JobCreatedResponse).jobId;
 
-  // Ждём, пока задание дойдёт до применения, и убиваем процесс ровно там
-  const applying = await pollJob(jobId, (j) => j.status === 'RUNNING' && j.headline.includes('Wird angewendet'));
+  // Ждём, пока задание дойдёт до применения, и убиваем процесс ровно там. Шаг 99.1: применение импорта — одна транзакция, экран
+  // в этой фазе говорит «в одном заходе» и крутит спиннер; ждём саму фазу, а не слово строки (CI 99.1 краснел на прежнем ожидании)
+  const applying = await pollJob(jobId, (j) => j.status === 'RUNNING' && j.indeterminate);
+  assert.equal(applying.headline, `${OFFERS} Zeilen werden in einem Zug angewendet — bis alle geschrieben sind, ändert sich nichts…`);
   assert.equal(applying.effect, 'In der Datenbank ist noch nichts geändert: der Vorgang wird vollständig oder gar nicht angewendet.');
   /**
    * Убийство должно прийтись на ОТКРЫТУЮ транзакцию применения, иначе «в базе ничего» верно и тогда, когда она ещё не
