@@ -5,7 +5,7 @@
   "description": "ECB daily reference rates (Р-61): strict parser of eurofxref-daily.xml, exact decimal to micro-units, immutable load into platform.fx_rate.",
   "type": "module",
   "exports": { ".": "./src/index.ts" },
-  "dependencies": { "@repracer/pricing-model": "0.1.0", "pg": "8.23.0" },
+  "dependencies": { "@repracer/pricing-model": "0.1.0", "pg": "8.23.1" },
   "devDependencies": { "@types/pg": "8.23.1" },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

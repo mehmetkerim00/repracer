@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@confluentinc/kafka-javascript": "1.10.1",
-    "pg": "8.23.0"
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"
