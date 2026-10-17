@@ -33,3 +33,19 @@ test('step 85: numbers above bars go to the tooltip when they do not fit their b
   assert.equal(barValuesFit(['1,243', '1,151', '1,149', '1,140', '1,138', '1,144', '1,132'], 260), false);
   assert.equal(barValuesFit(month, 2000), false, 'a month never shows numbers above bars');
 });
+
+/**
+ * Красный полный CI шага 97.1 (38975402936, `full`, смоук шага 85): на 375px в окне 360px подписи «Oct 15» и «Today» стояли в СОСЕДНИХ
+ * столбиках и раздвинули ряд до 411px. Восемь столбиков у «7 дней» бывают только в часть суток (неделя задевает восемь календарных
+ * дней) — скрытый вход «время суток». Предпоследняя подпись не стоит ближе целого шага к последней
+ */
+test('step 97.4 (CI 97.1): with eight days on a phone the label before today is not in the neighbour slot of today', () => {
+  const eight = ['Oct 9', 'Oct 10', 'Oct 11', 'Oct 12', 'Oct 13', 'Oct 14', 'Oct 15', 'Today'];
+  const width = 300;
+  const every = dayLabelStep(eight, width);
+  assert.equal(every, 2);
+  const shown = eight.map((_, i) => i).filter((i) => dayLabelled(i, eight.length, every));
+  assert.ok(shown.includes(7), 'today is labelled');
+  assert.ok(shown.every((i, k) => k === 0 || (i - shown[k - 1]!) * (width / eight.length) >= 7 * 'Oct 15'.length + 12),
+    `labels do not overlap: ${shown.join(', ')}`);
+});
