@@ -546,6 +546,8 @@ p.notice[role='status'] { background: var(--accent-soft); color: var(--accent-te
 @keyframes spin { to { transform: rotate(360deg); } }
 /* шаг 79: скелет загрузки по форме экрана — таблица, карточки, таймлайн, статистика */
 .loading-block .loading { padding: var(--space-2) 0 var(--space-3); }
+/* шаг 99: применение одной транзакцией — спиннер и секунды в карточке задания, без отступов экрана загрузки */
+.job .loading.job-busy { padding: var(--space-1) 0; }
 .sk-bar {
   display: block; height: var(--space-2); border-radius: var(--radius); margin: var(--space-2) 0; background: var(--track-bg);
 }

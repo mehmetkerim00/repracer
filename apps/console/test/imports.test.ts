@@ -224,3 +224,28 @@ test('step 99: an apply is the apply of one\'s own check — another member\'s c
   const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=en' };
   assert.equal(code(await apply(passwordOnly, 'COSTS', checked)), 'MFA_REQUIRED');
 });
+
+/**
+ * Решение владельца по шагу 99: применение себестоимости — одна транзакция, на 10 000 строк около 30 с, и ход до её конца не движется.
+ * «Applying: 0 of 10000» с полосой на нуле все эти секунды выглядит зависанием — экран говорит, что запись идёт целиком, и крутит спиннер с секундами
+ */
+test('step 99: an import apply in its one transaction is shown as busy — a spinner with seconds and «in one go», not «0 of N» on an empty bar', async () => {
+  const { bulkJobView } = await import('@repracer/console-model');
+  const m = messagesFor('en');
+  const job = (over: Record<string, unknown>) => bulkJobView({
+    jobId: '33333333-3333-4333-8333-333333333333', kind: 'COST_IMPORT', status: 'RUNNING', errorCode: null,
+    doneItems: 0, totalItems: 10_000, phase: 'APPLYING', attempts: 1, result: null, params: { checkJobId: 'c', checkToken: 't' },
+    createdAt: '2026-10-18T10:00:00.000Z', startedAt: '2026-10-18T10:00:01.000Z', finishedAt: null,
+    createdByMembershipId: 'm', createdByUserId: 'u', createdWithMfa: true, leaseExpired: false, ...over,
+  } as never, m);
+  const busy = job({});
+  assert.equal(busy.indeterminate, true, 'busy while the one transaction is open');
+  assert.equal(busy.progress, null, 'no bar stuck at zero');
+  assert.equal(busy.headline, m.ui.jobs.applyingInOneGo(10_000));
+  assert.ok(!busy.headline.includes('0 of'), busy.headline);
+  // Контроли: задание с настоящим ходом (правка границ каталога считает строки) и уже готовое — как прежде
+  const counted = job({ kind: 'BOUNDS_EDIT', params: {}, doneItems: 4_000 });
+  assert.deepEqual([counted.indeterminate, counted.progress], [false, 0.4]);
+  assert.equal(job({ status: 'SUCCEEDED', phase: 'APPLYING', doneItems: 10_000 }).indeterminate, false);
+  assert.equal(job({ status: 'PENDING', phase: null }).indeterminate, false, 'a queued job is not «applying»');
+});

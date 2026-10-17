@@ -1509,6 +1509,8 @@ export const es: Messages = {
       queued: 'En cola: la operación empieza en breve.',
       preparing: (done: number, total: number | null) => (total === null ? 'Preparando…' : `Preparando: ${done} de ${total}`),
       applying: (done: number, total: number | null) => (total === null ? 'Aplicando…' : `Aplicando: ${done} de ${total}`),
+      applyingInOneGo: (total: number) => `Aplicando ${total === 1 ? '1 fila' : `${total} filas`} de una sola vez: nada cambia hasta que todas estén escritas…`,
+      elapsed: (seconds: number) => `En curso desde hace ${seconds} s`,
       producing: (done: number, total: number | null) => (total === null ? 'Generando el archivo…' : `Generando el archivo: ${done} de ${total}`),
       interrupted: 'La operación se interrumpió y vuelve a empezar.',
       failed: (reason: string) => `No se realizó: ${reason}`,

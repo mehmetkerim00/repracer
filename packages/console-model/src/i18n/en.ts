@@ -1508,6 +1508,8 @@ export const en = {
       queued: 'Queued — the operation starts shortly.',
       preparing: (done: number, total: number | null) => (total === null ? 'Preparing…' : `Preparing: ${done} of ${total}`),
       applying: (done: number, total: number | null) => (total === null ? 'Applying…' : `Applying: ${done} of ${total}`),
+      applyingInOneGo: (total: number) => `Applying ${total === 1 ? '1 row' : `${total} rows`} in one go — nothing changes until all are written…`,
+      elapsed: (seconds: number) => `Working for ${seconds} s`,
       producing: (done: number, total: number | null) => (total === null ? 'Building the file…' : `Building the file: ${done} of ${total}`),
       interrupted: 'The operation was interrupted and starts again.',
       failed: (reason: string) => `Not carried out: ${reason}`,

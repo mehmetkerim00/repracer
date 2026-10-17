@@ -1453,6 +1453,8 @@ export const de: Messages = {
       queued: 'In der Warteschlange — der Vorgang beginnt gleich.',
       preparing: (done: number, total: number | null) => (total === null ? 'Wird vorbereitet…' : `Wird vorbereitet: ${done} von ${total}`),
       applying: (done: number, total: number | null) => (total === null ? 'Wird angewendet…' : `Wird angewendet: ${done} von ${total}`),
+      applyingInOneGo: (total: number) => `${total === 1 ? '1 Zeile wird' : `${total} Zeilen werden`} in einem Zug angewendet — bis alle geschrieben sind, ändert sich nichts…`,
+      elapsed: (seconds: number) => `Läuft seit ${seconds} s`,
       producing: (done: number, total: number | null) => (total === null ? 'Datei wird erstellt…' : `Datei wird erstellt: ${done} von ${total}`),
       interrupted: 'Der Vorgang wurde unterbrochen und beginnt von vorn.',
       failed: (reason: string) => `Nicht ausgeführt: ${reason}`,

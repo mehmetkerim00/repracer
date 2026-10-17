@@ -17,6 +17,21 @@ import { Badge, ErrorBox, errorText, useMessages } from '../components.tsx';
  */
 const POLL_MS = 2000;
 
+/**
+ * Шаг 99 (решение владельца): применение импорта — одна транзакция, счёт строк до её конца стоит на нуле, а 10 000 строк себестоимости
+ * пишутся около 30 с. Спиннер и секунды, идущие каждую секунду, говорят «работает», где пустая полоса «0 из N» выглядела бы зависанием
+ */
+function OneGo() {
+  const t = useMessages().ui.jobs;
+  const [startedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <p className="loading job-busy" role="status">{t.elapsed(Math.floor((now - startedAt) / 1000))}</p>;
+}
+
 export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; jobId: string; onFinished?: (job: BulkJobView) => void }) {
   const m = useMessages();
   const t = m.ui.jobs;
@@ -51,7 +66,7 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
     <section className="job card" aria-live="polite">
       <h4>{job.title} <Badge tone={job.tone}>{job.statusText}</Badge></h4>
       <p className="headline">{job.headline}</p>
-      {job.progress === null ? null : (
+      {job.indeterminate ? <OneGo /> : job.progress === null ? null : (
         <progress value={job.progress} max={1} aria-label={job.headline}>{Math.round(job.progress * 100)}%</progress>
       )}
       <p className="small muted">{job.effect}</p>

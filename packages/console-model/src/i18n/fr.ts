@@ -1509,6 +1509,8 @@ export const fr: Messages = {
       queued: 'En file d’attente — l’opération démarre sous peu.',
       preparing: (done: number, total: number | null) => (total === null ? 'Préparation…' : `Préparation : ${done} sur ${total}`),
       applying: (done: number, total: number | null) => (total === null ? 'Application…' : `Application : ${done} sur ${total}`),
+      applyingInOneGo: (total: number) => `Application de ${total === 1 ? '1 ligne' : `${total} lignes`} en une seule fois : rien ne change avant que toutes soient écrites…`,
+      elapsed: (seconds: number) => `En cours depuis ${seconds} s`,
       producing: (done: number, total: number | null) => (total === null ? 'Création du fichier…' : `Création du fichier : ${done} sur ${total}`),
       interrupted: 'L’opération a été interrompue et redémarre.',
       failed: (reason: string) => `Non effectuée : ${reason}`,

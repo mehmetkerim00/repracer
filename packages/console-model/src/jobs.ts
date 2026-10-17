@@ -60,6 +60,11 @@ export interface BulkJobView {
   headline: string;
   /** Доля хода, 0…1; null — пока неизвестно, сколько всего */
   progress: number | null;
+  /**
+   * Шаг 99 (решение владельца): идёт, но хода не видно — применение импорта пишет всё одной транзакцией [Р-134, Р-224], и счёт строк
+   * до её конца стоит на нуле. Экран показывает спиннер и идущие секунды, а не «0 из N» на пустой полосе: иначе 30 с выглядят зависанием
+   */
+  indeterminate: boolean;
   done: number;
   total: number | null;
   /** Что стало с данными: пока задание не завершилось успехом, в базе НИЧЕГО не изменено [Р-134] */
@@ -150,11 +155,15 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
   const title = t.kinds[job.kind];
   const abandoned = job.status === 'RUNNING' && job.leaseExpired;
   if (abandoned) job = { ...job, status: 'INTERRUPTED' };
+  // Применение импорта ссылается на свою примерку; его запись — одна транзакция, и счёт строк двинется только в её конце
+  const oneGo = job.status === 'RUNNING' && job.phase === 'APPLYING' && done === 0 && total !== null && total > 0
+    && typeof (job.params as { checkJobId?: unknown } | null)?.checkJobId === 'string';
   const headline = job.status === 'SUCCEEDED' ? outcomeText(job, m)
     : job.status === 'FAILED' ? t.failed(errorTextOf(job, m))
     : job.status === 'PENDING' ? t.queued
     : job.status === 'CANCELLED' ? t.cancelled
     : job.status === 'INTERRUPTED' ? t.interrupted
+    : oneGo ? t.applyingInOneGo(total!)
     : job.phase === 'APPLYING' ? t.applying(done, total)
     : job.phase === 'PRODUCING' ? t.producing(done, total)
     : t.preparing(done, total);
@@ -173,7 +182,8 @@ export function bulkJobView(job: BulkJobRow, m: Messages, artifact: { fileName: 
     jobId: job.jobId, kind: job.kind, status: job.status, title, headline,
     statusText: t.statusLabels[job.status], tone: STATUS_TONE[job.status],
     // Шаг 79 (ревью): готовое задание — полоса целиком; у предпросмотра по выборке «сделано» меньше каталога, и «Done» стоял на четверти
-    progress: job.status === 'SUCCEEDED' ? 1 : total === null || total === 0 ? null : Math.min(1, done / total),
+    progress: job.status === 'SUCCEEDED' ? 1 : oneGo || total === null || total === 0 ? null : Math.min(1, done / total),
+    indeterminate: oneGo,
     done, total, effect, active: ACTIVE.has(job.status), cancellable: job.status === 'PENDING',
     error: job.status === 'FAILED' ? errorTextOf(job, m) : null,
     artifact, result: screenResult(job),

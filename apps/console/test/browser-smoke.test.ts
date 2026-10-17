@@ -11,7 +11,8 @@ import { createTestIssuer } from '@repracer/identity/test-issuer';
 import type { ShadowPage } from '@repracer/pricing-store-pg';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 import { launchBrowser, type Browser } from './browser.ts';
-import { runPendingJobs } from './run-jobs.ts';
+import { runNextBulkJob } from '@repracer/bulk-jobs';
+import { handlersFor, runPendingJobs } from './run-jobs.ts';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts';
 
@@ -1364,7 +1365,31 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
   await upload(`sku,unit_cost,currency\n${unit},9.99,EUR\n`, 'costs.csv');
   await b.click(t.apply, '.import-costs button');
   await new Promise((x) => setTimeout(x, 300));
-  await runPendingJobs(smokeLive);
+  // Решение владельца: пока запись идёт одной транзакцией, экран занят видимо — спиннер, «in one go» и секунды, а не «0 of N» на пустой
+  // полосе. Запись задерживается внутри транзакции, пока браузер не увидит занятость
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const gated = new Proxy(smokeLive.store, {
+    get(target, prop, receiver) {
+      if (prop === 'importCosts') return async (...args: unknown[]) => { await gate; return (target.importCosts as (...a: unknown[]) => unknown).apply(target, args); };
+      const v = Reflect.get(target, prop, receiver) as unknown;
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+  const running = runNextBulkJob({ store: gated, tenantId: smokeLive.tenantId, owner: 'test-bulk-worker', handlers: handlersFor(smokeLive) });
+  // Провал проверки не оставляет запись задержанной: иначе исполнитель держит аренду и прогон не завершается никогда
+  try {
+    await waitFor(b, `document.querySelector('.import-costs .job .job-busy') !== null`, 'the one-transaction apply shows a spinner with seconds');
+    const busy = await b.evaluate<{ headline: string; bar: boolean; time: string }>(`(() => { const j = document.querySelector('.import-costs .job');
+      return { headline: j.querySelector('.headline').innerText.trim(), bar: j.querySelector('progress') !== null, time: j.querySelector('.job-busy').innerText.trim() }; })()`);
+    assert.equal(busy.headline, en.ui.jobs.applyingInOneGo(1), 'the card says the rows go in one go');
+    assert.equal(busy.bar, false, 'no bar stuck at zero');
+    assert.match(busy.time, /^Working for \d+ s$/);
+    await waitFor(b, `document.querySelector('.import-costs .job-busy').innerText.trim() !== ${JSON.stringify(busy.time)}`, 'the seconds move while the apply runs', 5_000);
+  } finally {
+    release();
+    await running;
+  }
   await waitFor(b, `document.querySelector('.import-costs .import-applied') !== null`, 'the applied notice');
   const applied = await b.evaluate<string>(`document.querySelector('.import-costs .import-applied').innerText.trim()`);
   assert.match(applied, /^Done: 1 row applied in \d+(\.\d)? s\.$/, `the time is named: ${applied}`);
