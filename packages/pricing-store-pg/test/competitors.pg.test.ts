@@ -47,7 +47,7 @@ after(async () => { await db?.drop(); });
 // Источник называет держателя Buy Box — как Kaufland /buybox (ранг 1)
 const adapter = {
   descriptor: { channel: 'KAUFLAND', scheduledRecomputeSeconds: 900, competitorSources: [{ source: 'KAUFLAND_BUYBOX', kind: 'PULL', completeness: { kind: 'TOP_N', n: 10 },
-    conditions: ['new'], hasBuyboxWinner: true, hasBuyboxPrice: true, hasOwnRank: true, hasShipping: true, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'PRIMARY' }] },
+    conditions: ['new'], hasBuyboxWinner: true, hasBuyboxPrice: true, hasFulfilment: false, hasOwnRank: true, hasShipping: true, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'PRIMARY' }] },
   async planDispatch(_ctx: unknown, writes: readonly FieldWrite[]) {
     return { batches: writes.map((w) => ({ batchId: `b:${w.channelWriteId}`, operation: 'TEST', items: [w], budgetCharges: [], requestCount: 1 })), rejected: [] };
   },

@@ -19,6 +19,7 @@ import { assessShift, DEFAULT_SANITY_CONFIG, evaluateSnapshot, SANITY_RULESET, t
 import { decide, GATE_PROFILE, repricingWarnings, resolveMarginFloor, validateRepricingEnablement } from '@repracer/price-gate';
 import {
   buildCompetitorView,
+  withCompetitorFilter,
   buildExplanation,
   isCompetitorDerived,
   sellerActionFor,
@@ -33,7 +34,7 @@ import {
   type TriggerType,
   type CompetitorView,
 } from '@repracer/pricing-model';
-import { runStrategy, strategyAvailability } from '@repracer/strategy-engine';
+import { competeWithOf, runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { planPollingTiers } from './polling.ts';
 import { PIPELINE_WRITE_FIELD, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
@@ -339,8 +340,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
     if (decision.alert) {
       effects.push({ kind: 'alert', code: decision.alert.code, severity: decision.alert.severity, details: { writeScopeId: scope.writeScopeId, reason: decision.reason.code } });
     }
-    // Шаг 97 [Р-218]: картина рынка — там же, где ссылка на снимок: цена из данных конкурентов и решение не «без изменения» (0187)
-    return { report, toCommit: { context: sc, intent, decision, snapshotRef: usesSnapshot ? source.snapshotRef : null, competitorView: usesSnapshot ? source.view ?? null : null }, invoked: 1 };
+    // Шаг 97 [Р-218]: картина рынка — там же, где ссылка на снимок: цена из данных конкурентов и решение не «без изменения» (0187).
+    // Шаг 101 [Р-226]: картина общая для товара, фильтр «Compete with» — у стратегии предложения: исключённые строки помечены, счёт — по снимку
+    const view = usesSnapshot && snapshot ? withCompetitorFilter(source.view ?? null, snapshot.offers, competeWithOf(scope.strategy.params)) : null;
+    return { report, toCommit: { context: sc, intent, decision, snapshotRef: usesSnapshot ? source.snapshotRef : null, competitorView: view }, invoked: 1 };
   }
 
   /** Отправка записей, уже переведённых в отправку транзакцией фиксации; итог — третья транзакция */

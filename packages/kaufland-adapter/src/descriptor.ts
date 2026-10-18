@@ -95,6 +95,8 @@ export const KAUFLAND_DESCRIPTOR: ChannelDescriptor = {
       conditions: ['new'],
       hasBuyboxWinner: true,
       hasBuyboxPrice: true,
+      // Шаг 101: у предложения уведомления поля исполнения в снимке нет
+      hasFulfilment: false,
       hasOwnRank: true,
       hasShipping: true,
       typicalStalenessSeconds: null,
@@ -109,6 +111,8 @@ export const KAUFLAND_DESCRIPTOR: ChannelDescriptor = {
         'refurbished', 'refurbished - as new', 'refurbished - very good', 'refurbished - good', 'refurbished - acceptable'],
       hasBuyboxWinner: true,
       hasBuyboxPrice: true,
+      // Шаг 101: fulfillment_type предложения ответа /buybox (необязательное — нет значения, исполнение неизвестно)
+      hasFulfilment: true,
       hasOwnRank: true,
       hasShipping: true,
       // Свежесть задаёт ярус опроса (Р-47)
@@ -123,6 +127,7 @@ export const KAUFLAND_DESCRIPTOR: ChannelDescriptor = {
       conditions: ['new', 'used'],
       hasBuyboxWinner: false,
       hasBuyboxPrice: false,
+      hasFulfilment: false,
       hasOwnRank: false,
       hasShipping: false,
       typicalStalenessSeconds: null,

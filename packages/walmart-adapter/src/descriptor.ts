@@ -89,6 +89,8 @@ export const WALMART_DESCRIPTOR: ChannelDescriptor = {
       conditions: ['new'],
       hasBuyboxWinner: true,
       hasBuyboxPrice: true,
+      // Шаг 101 [Р-226]: исполнения предложений источник не называет (W-05) — фильтр «Compete with» на Walmart недоступен
+      hasFulfilment: false,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,

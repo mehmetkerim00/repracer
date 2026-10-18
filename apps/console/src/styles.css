@@ -1144,6 +1144,10 @@ th .legend { display: block; color: var(--text-3); font-size: var(--font-size-xs
 /* подсветка нашей строки — слоем поверх фона карточки: закреплённая первая ячейка на телефоне непрозрачна и не пропускает прокрутку */
 table.competitors tr.self-row td { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface); }
 table.competitors tr.gone-row td { color: var(--text-3); }
+/* Шаг 101 [Р-226]: строка вне расчёта (фильтр «Compete with» или исполнение не названо) — приглушена, пометка под именем продавца */
+table.competitors tr.excluded-row td { color: var(--text-3); }
+table.competitors .excluded-note { display: block; color: var(--text-3); font-size: var(--font-size-xs); }
+details.competitors-at > p.competitors-filter { margin: var(--space-2) 0 0; color: var(--text-2); }
 table.competitors td.landed { white-space: nowrap; }
 table.competitors .was { color: var(--text-2); }
 .move { display: inline-flex; align-items: center; min-height: var(--badge-h); padding: 0 var(--space-1); border-radius: var(--radius-pill); font-size: var(--font-size-xs); font-weight: var(--weight-medium); }

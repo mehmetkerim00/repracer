@@ -1,8 +1,11 @@
 import type { CompetitorSnapshot, CompetitorSourceDescriptor, Instant, PriceBasis } from '@repracer/channel-port';
 import {
+  competitorExclusion,
+  filterCompetitors,
   fulfilmentKind,
   storefrontPriceForMarginBp,
   type AcceptedSnapshot,
+  type BUYBOX_UNUSED,
   type CompetitorRequirement,
   type CostInputs,
   type EngineReasonCode,
@@ -90,21 +93,41 @@ export type EngineResult =
 export { STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
 import { STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
 
+/** Шаг 101 [Р-226]: ориентир по умолчанию — прежнее поведение типа: «Beat the lowest» — самая низкая цена, «Win the Buy Box» — Buy Box */
+export function anchorOf(params: StrategyParams): 'BUYBOX' | 'LOWEST' | 'LOWER_OF_TWO' {
+  if (params.type === 'BEAT_LOWEST') return params.anchor ?? 'LOWEST';
+  if (params.type === 'WIN_BUYBOX') return params.anchor ?? 'BUYBOX';
+  return 'BUYBOX';
+}
+/** Шаг 101 [Р-226]: с кем соревноваться; нет поля — со всеми */
+export function competeWithOf(params: StrategyParams): 'ALL' | 'CHANNEL' | 'MERCHANT' {
+  return params.type === 'MATCH_BUYBOX' || params.type === 'BEAT_LOWEST' || params.type === 'WIN_BUYBOX' ? params.competeWith ?? 'ALL' : 'ALL';
+}
+
 export function requirementOf(params: StrategyParams): CompetitorRequirement {
+  /**
+   * Шаг 101 [Р-226]: фильтр «Compete with» — источник должен называть исполнение предложений; а где ориентир — только Buy Box («Match the Buy Box»,
+   * «Beat the lowest» с ориентиром Buy Box), фильтр проверяет и держателя: без держателя не понять, входит ли Buy Box в фильтр
+   */
+  const filtered = competeWithOf(params) !== 'ALL';
   switch (params.type) {
     case 'FIXED':
     case 'TARGET_MARGIN':
       return { kind: null, needsBuyboxWinner: false, needsBuyboxPrice: false, needsOwnRank: false, needsShipping: false, conditions: [], maxStalenessSeconds: null };
     // Шаг 97 [Р-221]: «Match the Buy Box» нужна цена Buy Box; держатель — только чтобы не подрезать самих себя, и без него цена держится
     case 'MATCH_BUYBOX':
-      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: false, needsBuyboxPrice: true, needsOwnRank: false, needsShipping: false, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
-    case 'BEAT_LOWEST':
-      return params.scope === 'MARKET'
-        ? { kind: 'CHEAPEST_ONLY', needsBuyboxWinner: false, needsBuyboxPrice: false, needsOwnRank: false, needsShipping: params.compareLanded, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS }
-        : { kind: 'TOP_N', minN: 1, needsBuyboxWinner: false, needsBuyboxPrice: false, needsOwnRank: false, needsShipping: params.compareLanded, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
+      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: filtered, needsBuyboxPrice: true, needsOwnRank: false, needsShipping: false, needsFulfilment: filtered, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
+    case 'BEAT_LOWEST': {
+      const onlyBuybox = anchorOf(params) === 'BUYBOX';
+      return {
+        kind: params.scope === 'MARKET' ? 'CHEAPEST_ONLY' : 'TOP_N', ...(params.scope === 'MARKET' ? {} : { minN: 1 }),
+        needsBuyboxWinner: onlyBuybox && filtered, needsBuyboxPrice: onlyBuybox, needsOwnRank: false, needsShipping: params.compareLanded, needsFulfilment: filtered,
+        conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS,
+      };
+    }
     // Шаг 97 [Р-219]: «Win the Buy Box» — держатель Buy Box (наш или чужой) и доставка: цель — от landed-цены победителя
     case 'WIN_BUYBOX':
-      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: true, needsBuyboxPrice: true, needsOwnRank: false, needsShipping: true, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
+      return { kind: 'TOP_N', minN: 1, needsBuyboxWinner: true, needsBuyboxPrice: true, needsOwnRank: false, needsShipping: true, needsFulfilment: filtered, conditions: ['new'], maxStalenessSeconds: STRATEGY_STALENESS_SECONDS };
   }
 }
 
@@ -152,6 +175,8 @@ export function strategyAvailability(
     if (req.needsBuyboxWinner && !s.hasBuyboxWinner) u.push('BUYBOX_WINNER');
     if (req.needsOwnRank && !s.hasOwnRank) u.push('OWN_RANK');
     if (req.needsShipping && !s.hasShipping) u.push('SHIPPING');
+    // Шаг 101 [Р-226]: фильтр «Compete with» — источник называет исполнение предложений (Walmart — нет, W-05)
+    if (req.needsFulfilment && !s.hasFulfilment) u.push('FULFILMENT');
     if (!req.conditions.every((c) => s.conditions.includes(c))) u.push('CONDITION');
     if (req.maxStalenessSeconds !== null && s.typicalStalenessSeconds !== null && s.typicalStalenessSeconds > req.maxStalenessSeconds) u.push('STALENESS');
     if (u.length === 0) return { available: true, via: s.source };
@@ -184,6 +209,21 @@ export const LADDER_PACE_TOLERANCE_SECONDS = 60;
 function raiseAfterMoves(after: FloorRaiseReason, marginBinding: boolean): boolean {
   if (after === 'FLOOR_RECHECK' || after === 'BOUNDS_UPDATE') return true;
   return marginBinding;
+}
+
+/**
+ * Шаг 101 [Р-226]: какой ориентир у «меньшей из двух» (у одиночного ориентира — он сам). Обе цены есть — меньшая, при равенстве — Buy Box (держатель
+ * Buy Box и есть самая низкая цена); одной нет — другая, и причина, почему Buy Box не участвовал. Хотя бы один ориентир есть — проверяет вызывающий
+ */
+function pickAnchor(bb: { minor: number } | { unused: (typeof BUYBOX_UNUSED)[number] }, lowest: number | null): {
+  anchorMinor: number;
+  params: { anchorUsed: 'BUYBOX' | 'LOWEST'; anchorMinor: number; otherAnchorMinor?: number; buyboxUnused?: (typeof BUYBOX_UNUSED)[number] };
+} {
+  if ('unused' in bb) return { anchorMinor: lowest!, params: { anchorUsed: 'LOWEST', anchorMinor: lowest!, buyboxUnused: bb.unused } };
+  if (lowest === null) return { anchorMinor: bb.minor, params: { anchorUsed: 'BUYBOX', anchorMinor: bb.minor } };
+  return bb.minor <= lowest
+    ? { anchorMinor: bb.minor, params: { anchorUsed: 'BUYBOX', anchorMinor: bb.minor, otherAnchorMinor: lowest } }
+    : { anchorMinor: lowest, params: { anchorUsed: 'LOWEST', anchorMinor: lowest, otherAnchorMinor: bb.minor } };
 }
 
 export function runStrategy(input: EngineInput): EngineResult {
@@ -283,10 +323,57 @@ export function runStrategy(input: EngineInput): EngineResult {
     if (foreign) return notEvaluated(r('ENGINE_CURRENCY_MISMATCH', { source: 'SNAPSHOT', actual: foreign.currency, expected: writeScope.currency }));
   }
 
+  /**
+   * Шаг 101 [Р-226]: фильтр «Compete with» — до расчёта: стратегия видит только прошедших фильтр, неизвестное исполнение исключено и
+   * посчитано. Никого после фильтра — «без изменения» NO_ELIGIBLE_COMPETITORS: к «всем» фильтр не откатывается
+   */
+  const competeWith = competeWithOf(params);
+  const pool = competeWith !== 'ALL' && snapshot && req.kind !== null ? filterCompetitors(snapshot.offers, competeWith) : null;
+  /** Предложение-держатель Buy Box: канал назвал его признаком держателя или продавцом Buy Box */
+  const holderOffer = () => snapshot!.offers.find((o) => !o.isSelf && o.holdsBuyBox === true)
+    ?? (snapshot!.buybox?.sellerRef ? snapshot!.offers.find((o) => !o.isSelf && o.sellerRef === snapshot!.buybox!.sellerRef) : undefined);
+  /** Держатель Buy Box под фильтром: проходит, вне фильтра или канал не назвал его исполнения */
+  const holderUnderFilter = (): 'OK' | 'EXCLUDED' | 'UNKNOWN' => {
+    if (pool === null) return 'OK';
+    const h = holderOffer();
+    if (!h) return 'UNKNOWN';
+    const why = competitorExclusion(h.fulfillment, competeWith);
+    return why === null ? 'OK' : why === 'FILTER' ? 'EXCLUDED' : 'UNKNOWN';
+  };
+  /** Чужие предложения, с которыми стратегия соревнуется: прошедшие фильтр или все */
+  const competitorsOf = () => (pool ? [...pool.eligible] : snapshot!.offers.filter((o) => !o.isSelf));
+  const noEligible = (buyboxHolder?: 'EXCLUDED' | 'UNKNOWN'): EngineResult => {
+    const why = r('NO_ELIGIBLE_COMPETITORS', { competeWith, offersTotal: pool!.total, offersUnknown: pool!.unknown, ...(buyboxHolder ? { buyboxHolder } : {}) });
+    return holdOrRaise(current ?? floorMinor, why, [why], null);
+  };
+  /**
+   * Шаг 101 [Р-226]: ориентир Buy Box (с доставкой, где стратегия сравнивает landed) или почему он не участвует: Buy Box нет, он наш, держатель
+   * неизвестен (под фильтром — исполнение не названо; без фильтра — цена равна нашей, и Buy Box, возможно, наш), держатель вне фильтра,
+   * доставка Buy Box не названа
+   */
+  const buyboxAnchor = (landed: boolean): { minor: number } | { unused: (typeof BUYBOX_UNUSED)[number] } => {
+    const bb = snapshot!.buybox;
+    if (!bb) return { unused: 'ABSENT' };
+    if (bb.isSelf === true) return { unused: 'SELF' };
+    if (bb.isSelf === null) {
+      if (pool !== null || (current !== null && current === bb.price.amountMinor)) return { unused: 'UNKNOWN' };
+    } else {
+      const h = holderUnderFilter();
+      if (h !== 'OK') return { unused: h };
+    }
+    if (!landed) return { minor: bb.price.amountMinor };
+    const ship = bb.shipping?.amountMinor ?? holderOffer()?.shipping?.amountMinor ?? null;
+    return ship === null ? { unused: 'NO_SHIPPING' } : { minor: bb.price.amountMinor + ship };
+  };
+
   const explanation: Reason[] = [];
   let target: number;
   let referenceMinor: number | null = null;
   let capable = false;
+  if (pool) {
+    if (pool.eligible.length === 0) return noEligible();
+    explanation.push(r('COMPETITORS_FILTERED', { competeWith, offersConsidered: pool.eligible.length, offersTotal: pool.total, offersUnknown: pool.unknown }));
+  }
 
   switch (params.type) {
     case 'FIXED': {
@@ -328,17 +415,20 @@ export function runStrategy(input: EngineInput): EngineResult {
        */
       if (bb.isSelf === null && current !== null && current === bb.price.amountMinor) {
         const unknown = r('BUYBOX_HOLDER_UNKNOWN', { buyboxMinor: bb.price.amountMinor, currentMinor: current, currency });
-        return holdOrRaise(current, unknown, [unknown], bb.price.amountMinor);
+        return holdOrRaise(current, unknown, [...explanation, unknown], bb.price.amountMinor);
       }
       if (bb.isSelf) {
         if (params.holdWhenWinning) {
-          return holdOrRaise(current ?? bb.price.amountMinor, r('ALREADY_WINNING_BUYBOX'), [r('ALREADY_WINNING_BUYBOX')], bb.price.amountMinor);
+          return holdOrRaise(current ?? bb.price.amountMinor, r('ALREADY_WINNING_BUYBOX'), [...explanation, r('ALREADY_WINNING_BUYBOX')], bb.price.amountMinor);
         }
-        // Не соревнуемся сами с собой: ориентир — лучшее чужое предложение по рангу
-        const next = snapshot!.offers.filter((o) => !o.isSelf).sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity))[0];
-        if (!next) return holdOrRaise(current ?? bb.price.amountMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
+        // Не соревнуемся сами с собой: ориентир — лучшее чужое предложение по рангу (под фильтром — среди прошедших его)
+        const next = competitorsOf().sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity))[0];
+        if (!next) return holdOrRaise(current ?? bb.price.amountMinor, r('NO_COMPETITOR_OFFERS'), [...explanation, r('NO_COMPETITOR_OFFERS')], null);
         referenceMinor = next.price.amountMinor;
       } else {
+        // Шаг 101 [Р-226]: под фильтром Buy Box — ориентир, только если его держатель проходит фильтр
+        const holder = holderUnderFilter();
+        if (holder !== 'OK') return noEligible(holder);
         referenceMinor = bb.price.amountMinor;
       }
       target = referenceMinor - params.undercutMinor;
@@ -350,22 +440,50 @@ export function runStrategy(input: EngineInput): EngineResult {
     case 'BEAT_LOWEST': {
       if (!Number.isSafeInteger(params.undercutMinor) || params.undercutMinor < 0) return invalidMoney('undercutMinor', params.undercutMinor, 'NON_NEGATIVE');
       capable = true;
-      const competitors = snapshot!.offers.filter((o) => !o.isSelf);
+      const anchor = anchorOf(params);
+      const competitors = competitorsOf();
+      const landed = competitors.map((o) => (params.compareLanded ? o.totalPrice?.amountMinor ?? o.price.amountMinor + (o.shipping?.amountMinor ?? 0) : o.price.amountMinor));
+      const lowest = landed.length > 0 ? Math.min(...landed) : null;
+      // Шаг 101 [Р-226]: ориентир Buy Box или меньшая из двух; самая низкая (умолчание) — прежний путь
+      const bbA = anchor === 'LOWEST' ? null : buyboxAnchor(params.compareLanded);
+      if (anchor === 'BUYBOX' && bbA && 'unused' in bbA) {
+        const bb = snapshot!.buybox;
+        if (bbA.unused === 'SELF') return holdOrRaise(current ?? bb!.price.amountMinor, r('ALREADY_WINNING_BUYBOX'), [...explanation, r('ALREADY_WINNING_BUYBOX')], bb!.price.amountMinor);
+        if (bbA.unused === 'UNKNOWN' && pool === null && current !== null) {
+          const unknown = r('BUYBOX_HOLDER_UNKNOWN', { buyboxMinor: bb!.price.amountMinor, currentMinor: current, currency });
+          return holdOrRaise(current, unknown, [...explanation, unknown], bb!.price.amountMinor);
+        }
+        if (bbA.unused === 'EXCLUDED' || bbA.unused === 'UNKNOWN') return noEligible(bbA.unused);
+        return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', { unmet: bbA.unused === 'NO_SHIPPING' ? 'SHIPPING' : 'BUYBOX_PRICE' }));
+      }
+      // Обоих ориентиров нет (или самой низкой — при ориентире «самая низкая») — прежняя страховка «канал не дал данных»
       // Шаг 75 (ревью шага 72, находка 10): без нынешней цены удержание — на полу стратегии (min_price или пол маржи), а не на min_price
-      if (competitors.length === 0) return holdOrRaise(current ?? floorMinor, r('NO_COMPETITOR_OFFERS'), [r('NO_COMPETITOR_OFFERS')], null);
+      if (lowest === null && (bbA === null || 'unused' in bbA)) {
+        return holdOrRaise(current ?? floorMinor, r('NO_COMPETITOR_OFFERS'), [...explanation, r('NO_COMPETITOR_OFFERS')], null);
+      }
       let ownShipping = 0;
       if (params.compareLanded) {
         const self = snapshot!.offers.find((o) => o.isSelf);
         if (!self?.shipping) return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', { unmet: 'OWN_SHIPPING' }));
         ownShipping = self.shipping.amountMinor;
       }
-      const landed = competitors.map((o) => (params.compareLanded ? o.totalPrice?.amountMinor ?? o.price.amountMinor + (o.shipping?.amountMinor ?? 0) : o.price.amountMinor));
-      referenceMinor = Math.min(...landed);
-      target = referenceMinor - params.undercutMinor - ownShipping;
-      const n = snapshot!.completeness.kind === 'TOP_N' ? snapshot!.completeness.n : null;
-      explanation.push(params.undercutMinor > 0
-        ? r('LOWEST_UNDERCUT', { lowestMinor: referenceMinor, undercutMinor: params.undercutMinor, targetMinor: target, scope: params.scope, n, currency })
-        : r('LOWEST_MATCH', { lowestMinor: referenceMinor, scope: params.scope, n, targetMinor: target, currency }));
+      if (bbA === null) {
+        referenceMinor = lowest!;
+        target = referenceMinor - params.undercutMinor - ownShipping;
+        const n = snapshot!.completeness.kind === 'TOP_N' ? snapshot!.completeness.n : null;
+        explanation.push(params.undercutMinor > 0
+          ? r('LOWEST_UNDERCUT', { lowestMinor: referenceMinor, undercutMinor: params.undercutMinor, targetMinor: target, scope: params.scope, n, currency })
+          : r('LOWEST_MATCH', { lowestMinor: referenceMinor, scope: params.scope, n, targetMinor: target, currency }));
+        break;
+      }
+      // Одиночный ориентир Buy Box — без пары: «какой победил» говорит только меньшая из двух
+      const pick = pickAnchor(bbA, anchor === 'LOWER_OF_TWO' ? lowest : null);
+      referenceMinor = pick.anchorMinor;
+      target = pick.anchorMinor - params.undercutMinor - ownShipping;
+      explanation.push(r('ANCHOR_UNDERCUT', {
+        strategyType: 'BEAT_LOWEST', anchorSetting: anchor, ...pick.params, undercutMinor: params.undercutMinor,
+        ...(params.compareLanded ? { ownShippingMinor: ownShipping } : {}), targetMinor: target, currency,
+      }));
       break;
     }
     case 'WIN_BUYBOX': {
@@ -386,7 +504,7 @@ export function runStrategy(input: EngineInput): EngineResult {
         // Buy Box наш: цену не снижаем (Keep when winning); подъём — только за флагом creepUp
         if (!params.creepUp || current === null || belowFloor) {
           const keep = r('ALREADY_WINNING_BUYBOX');
-          return holdOrRaise(current ?? bb.price.amountMinor, keep, [keep], bb.price.amountMinor);
+          return holdOrRaise(current ?? bb.price.amountMinor, keep, [...explanation, keep], bb.price.amountMinor);
         }
         if (paused) {
           const wait = r('CREEP_PAUSED', { currentMinor: current, pausedUntil: new Date(pausedUntilMs!).toISOString(), currency });
@@ -433,9 +551,34 @@ export function runStrategy(input: EngineInput): EngineResult {
         explanation.push(r('CREEP_STEP_BACK', { lostAtMinor: current, backToMinor: up.fromMinor, pausedUntil: until, currency }));
         break;
       }
+      const anchor = anchorOf(params);
+      if (anchor !== 'BUYBOX') {
+        // Шаг 101 [Р-226]: ориентир «самая низкая» или меньшая из двух — landed-цены прошедших фильтр; гандикап — по исполнению ориентира
+        const self = snapshot!.offers.find((o) => o.isSelf);
+        const competitors = competitorsOf();
+        const landedOf = (o: (typeof competitors)[number]) => o.totalPrice?.amountMinor ?? o.price.amountMinor + (o.shipping?.amountMinor ?? 0);
+        const cheapest = competitors.reduce<(typeof competitors)[number] | null>((best, o) => (best === null || landedOf(o) < landedOf(best) ? o : best), null);
+        const bbA = anchor === 'LOWER_OF_TWO' ? buyboxAnchor(true) : null;
+        if (cheapest === null && (bbA === null || 'unused' in bbA)) {
+          return holdOrRaise(current ?? floorMinor, r('NO_COMPETITOR_OFFERS'), [...explanation, r('NO_COMPETITOR_OFFERS')], null);
+        }
+        if (!self?.shipping) return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', { unmet: 'OWN_SHIPPING' }));
+        const pick = pickAnchor(bbA ?? { unused: 'ABSENT' }, cheapest === null ? null : landedOf(cheapest));
+        const anchoredKind = fulfilmentKind((pick.params.anchorUsed === 'BUYBOX' ? holderOffer() : cheapest)?.fulfillment);
+        const handicap = anchoredKind === 'CHANNEL' && fulfilmentKind(self.fulfillment) === 'MERCHANT' ? params.fulfillmentHandicapMinor : 0;
+        referenceMinor = pick.anchorMinor;
+        target = pick.anchorMinor - params.undercutMinor - handicap - self.shipping.amountMinor;
+        const { buyboxUnused, ...rest } = pick.params;
+        explanation.push(r('ANCHOR_UNDERCUT', {
+          strategyType: 'WIN_BUYBOX', anchorSetting: anchor, ...rest, ...(anchor === 'LOWER_OF_TWO' && buyboxUnused ? { buyboxUnused } : {}),
+          undercutMinor: params.undercutMinor, handicapMinor: handicap, ownShippingMinor: self.shipping.amountMinor, targetMinor: target, currency,
+        }));
+      } else {
+      // Шаг 101 [Р-226]: под фильтром Buy Box — ориентир, только если его держатель проходит фильтр; иначе не с кем соревноваться
+      const holder = holderUnderFilter();
+      if (holder !== 'OK') return noEligible(holder);
       // Цель — от landed-цены победителя: цена Buy Box и доставка победителя (у Buy Box или у предложения-держателя)
-      const winner = snapshot!.offers.find((o) => !o.isSelf && o.holdsBuyBox === true)
-        ?? (bb.sellerRef ? snapshot!.offers.find((o) => !o.isSelf && o.sellerRef === bb.sellerRef) : undefined);
+      const winner = holderOffer();
       const winnerShipping = bb.shipping?.amountMinor ?? winner?.shipping?.amountMinor ?? null;
       if (winnerShipping === null) return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', { unmet: 'SHIPPING' }));
       const self = snapshot!.offers.find((o) => o.isSelf);
@@ -450,6 +593,7 @@ export function runStrategy(input: EngineInput): EngineResult {
         winnerLandedMinor: winnerLanded, undercutMinor: params.undercutMinor, handicapMinor: handicap, ownShippingMinor: self.shipping.amountMinor,
         ...(winnerKind ? { winnerFulfilment: winnerKind } : {}), targetMinor: target, currency,
       }));
+      }
       // Пока идёт пауза, цена потери — потолок: выше неё не предлагаем
       if (paused && creep?.lastBack && target >= creep.lastBack.lostAtMinor) {
         const ceiling = creep.lastBack.lostAtMinor;

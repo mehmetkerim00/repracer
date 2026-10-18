@@ -23,6 +23,7 @@ const titles: Record<AnyReasonCode, string> = {
   ALREADY_WINNING_BUYBOX: 'Ya tiene la Buy Box', NO_COMPETITOR_OFFERS: 'Sin competidores', TARGET_OUTSIDE_BOUNDS_HOLD: 'Objetivo fuera de los límites — se mantiene',
   BUYBOX_WIN_TARGET: 'Ganar la Buy Box', CREEP_UP: 'Subido un paso mientras gana', CREEP_STEP_BACK: 'Buy Box perdida — vuelta al último precio ganador',
   CAPPED_AT_CREEP_CEILING: 'Por debajo del precio que perdió la Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Titular de la Buy Box no indicado — se mantiene',
+  ANCHOR_UNDERCUT: 'Precio según su referencia', COMPETITORS_FILTERED: 'Competidores filtrados por logística', NO_ELIGIBLE_COMPETITORS: 'Sin competidores tras su filtro — se mantiene',
   CREEP_PACED: 'Siguiente subida, más tarde', CREEP_PAUSED: 'Subidas en pausa tras perder la Buy Box', CREEP_AT_MAX: 'En su precio máximo — sin subida',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Datos del canal insuficientes', COST_INPUTS_MISSING: 'Faltan datos de costos', MARGIN_UNATTAINABLE: 'Margen inalcanzable',
   BOUNDS_INVALID: 'Límites no válidos', ENGINE_CURRENCY_MISMATCH: 'Monedas distintas', INVALID_STRATEGY_PARAMS: 'Ajuste de estrategia no válido',
@@ -52,6 +53,22 @@ const RAISE_AFTER_TEXT: Readonly<Record<FloorRaiseReason, string>> = {
 };
 const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ?? '') as FloorRaiseReason] ?? '';
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` en un ${f.bp('deviationBp')}`);
+
+/** Шаг 101 [Р-226]: фильтр «Compete with», ориентир и почему Buy Box не участвовал — словами */
+const COMPETE_WITH_TEXT: Readonly<Record<string, string>> = { CHANNEL: 'solo FBA', MERCHANT: 'solo FBM' };
+const competeWithText = (f: Fmt) => COMPETE_WITH_TEXT[String(f.get('competeWith'))] ?? noValue;
+const BUYBOX_UNUSED_TEXT: Readonly<Record<string, string>> = {
+  ABSENT: 'el canal no dio precio de Buy Box', SELF: 'la Buy Box es suya', UNKNOWN: 'el canal no indica su titular',
+  EXCLUDED: 'su titular queda excluido por su filtro', NO_SHIPPING: 'su precio de envío es desconocido',
+};
+const anchorLine = (f: Fmt): string => {
+  const [name, other] = f.get('anchorUsed') === 'BUYBOX' ? ['Buy Box', 'precio más bajo'] : ['precio más bajo', 'Buy Box'];
+  const note = f.has('otherAnchorMinor')
+    ? (f.get('otherAnchorMinor') === f.get('anchorMinor') ? ` (${other} ${f.money('otherAnchorMinor')}: igual)` : ` (menor que ${other} ${f.money('otherAnchorMinor')})`)
+    : f.has('buyboxUnused') ? ` (Buy Box no usada: ${BUYBOX_UNUSED_TEXT[String(f.get('buyboxUnused'))] ?? noValue})`
+    : f.get('anchorSetting') === 'LOWER_OF_TWO' ? ' (sin precio más bajo con que comparar)' : '';
+  return `Referencia: ${name} ${f.money('anchorMinor')}${note}`;
+};
 
 const reasons: Record<AnyReasonCode, Template> = {
   INVALID_AMOUNT: (f) => `Datos de la competencia rechazados: importe no válido en ${f.value('field')}${opt(f, 'offerRank', () => ` de la oferta n.º ${f.count('offerRank')}`)}${opt(f, 'valueMinor', () => `: ${f.money('valueMinor')}`)}.`,
@@ -121,6 +138,12 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_STEP_BACK: (f) => `La Buy Box se perdió en ${f.money('lostAtMinor')} justo después de una subida — vuelta a ${f.money('backToMinor')}, el último precio que la mantuvo; las subidas se pausan hasta ${f.when('pausedUntil')}.`,
   CAPPED_AT_CREEP_CEILING: (f) => `Mientras las subidas están en pausa, ${f.money('ceilingMinor')}, el precio con el que se perdió la Buy Box, es el tope: el objetivo ${f.money('targetMinor')} se mantiene por debajo.`,
   BUYBOX_HOLDER_UNKNOWN: (f) => `Este canal no indica quién tiene la Buy Box. Su precio ${f.money('currentMinor')} es igual al de la Buy Box (${f.money('buyboxMinor')}), así que la Buy Box puede ser suya; ponerse por debajo sería perseguir su propio precio a la baja. El precio se mantiene.`,
+  // Шаг 101 [Р-226]: ориентир, фильтр и «никого после фильтра»
+  ANCHOR_UNDERCUT: (f) => `${anchorLine(f)}; ${(f.get('undercutMinor') as number) > 0 ? `${f.money('undercutMinor')} por debajo` : 'igualado'}${(f.get('handicapMinor') as number) > 0 ? `, ${f.money('handicapMinor')} más porque el canal gestiona el envío de esa oferta y no el suyo` : ''}${(f.get('ownShippingMinor') as number) > 0 ? `, menos su envío de ${f.money('ownShippingMinor')}` : ''}: ${f.money('targetMinor')}.`,
+  COMPETITORS_FILTERED: (f) => `Competir con: ${competeWithText(f)} — ${f.get('offersConsidered') === 1 ? 'se consideró' : 'se consideraron'} ${f.count('offersConsidered')} de ${f.count('offersTotal')} ${f.get('offersTotal') === 1 ? 'oferta' : 'ofertas'}${(f.get('offersUnknown') as number) > 0 ? `; ${f.count('offersUnknown')} ${f.get('offersUnknown') === 1 ? 'excluida' : 'excluidas'}: logística desconocida` : ''}.`,
+  NO_ELIGIBLE_COMPETITORS: (f) => `Competir con: ${competeWithText(f)} — ${f.get('buyboxHolder') === 'EXCLUDED' ? 'el titular de la Buy Box queda excluido por su filtro y esta estrategia solo sigue la Buy Box'
+    : f.get('buyboxHolder') === 'UNKNOWN' ? 'el canal no indica la logística del titular de la Buy Box y esta estrategia solo sigue la Buy Box'
+    : `ningún competidor cumple su filtro (${f.count('offersTotal')} ${f.get('offersTotal') === 1 ? 'oferta' : 'ofertas'}${(f.get('offersUnknown') as number) > 0 ? `, ${f.count('offersUnknown')} con logística desconocida` : ''})`}. El precio se mantiene: su filtro sigue vigente y no se amplía a todos los competidores.`,
   CREEP_PACED: (f) => `Usted tiene la Buy Box en ${f.money('currentMinor')}; la siguiente subida llegará no antes de ${f.when('nextStepAt')} — un paso por cada recálculo programado.`,
   CREEP_PAUSED: (f) => `Usted tiene la Buy Box en ${f.money('currentMinor')}; las subidas están en pausa hasta ${f.when('pausedUntil')} porque la Buy Box se perdió tras una subida.`,
   CREEP_AT_MAX: (f) => `Usted tiene la Buy Box en ${f.money('currentMinor')}, que es su precio máximo (${f.money('maxMinor')}) — sin subida.`,
@@ -249,6 +272,10 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CREEP_STEP_BACK: (f) => `La Buy Box se perdió justo después de una subida — vuelta a ${f.money('backToMinor')}, el último precio que la mantuvo; subidas en pausa hasta ${f.when('pausedUntil')}.`,
   CAPPED_AT_CREEP_CEILING: () => 'Mientras las subidas estaban en pausa, el objetivo se mantuvo por debajo del precio con el que se perdió la Buy Box.',
   BUYBOX_HOLDER_UNKNOWN: (f) => `Este canal no indica quién tiene la Buy Box; su precio ${f.money('currentMinor')} era igual al de la Buy Box, así que podía ser suya — el precio se mantuvo.`,
+  // Шаг 101 [Р-226]: цены, число предложений, ориентир и фильтр — не вечные (ориентир и фильтр живут 18 месяцев рядом с подрезом)
+  ANCHOR_UNDERCUT: (f) => `Quedó por debajo de la referencia de su estrategia vista en ese momento (rebaja: ${step(f)}). ${keptNote}`,
+  COMPETITORS_FILTERED: () => `Solo se consideraron los competidores que cumplían su filtro de logística. ${keptNote}`,
+  NO_ELIGIBLE_COMPETITORS: () => 'Ningún competidor cumplía su filtro de logística y el precio se mantuvo; el filtro no se amplió a todos los competidores.',
   /**
    * Заметки и предупреждения проверки входов: их числа (сколько предложений, дней истории, какой продавец) — данные канала, и их нет ни
    * в вечном объяснении, ни в горячем намерении. Текст называет правило и его порог, а не пустое место
@@ -298,7 +325,7 @@ const values: Record<ValueKey, string> = {
   FIXED: 'precio fijo', TARGET_MARGIN: 'margen objetivo', MATCH_BUYBOX: 'igualar la Buy Box', BEAT_LOWEST: 'superar el precio más bajo', POSITION: 'posición', WIN_BUYBOX: 'ganar la Buy Box',
   VISIBLE_TOP_N: 'ofertas visibles', MARKET: 'todo el mercado',
   NO_COMPETITOR_SOURCE: 'ninguna fuente de datos de la competencia en este canal', NO_SNAPSHOT: 'datos de la competencia', COMPLETENESS: 'una lista completa de ofertas', BUYBOX_WINNER: 'el ganador de la Buy Box', OWN_RANK: 'nuestra posición', SHIPPING: 'los precios de envío de la competencia',
-  CONDITION: 'el estado del producto', STALENESS: 'datos recientes', OWN_SHIPPING: 'nuestro precio de envío',
+  CONDITION: 'el estado del producto', STALENESS: 'datos recientes', OWN_SHIPPING: 'nuestro precio de envío', FULFILMENT: 'quién gestiona el envío de cada oferta de la competencia (lo necesita el filtro «Competir con»)',
   TOP_N: 'mejores ofertas', CHEAPEST_ONLY: 'solo los precios más bajos', FULL: 'todas las ofertas',
   COST_PROFILE: 'el costo unitario', VAT_RATE: 'la tasa de IVA del producto', SNAPSHOT: 'datos de la competencia',
   deadbandMinor: 'umbral', priceMinor: 'precio fijo', targetMarginBp: 'margen objetivo', undercutMinor: 'rebaja', fulfillmentHandicapMinor: 'desventaja logística', creepStepBp: 'paso de subida', MERCHANT: 'el vendedor',
@@ -570,6 +597,7 @@ export const es: Messages = {
       winBuybox: 'Ganar la Buy Box', winLanded: 'frente al precio con envío del ganador',
       handicap: (amount: string) => `${amount} más cuando el canal gestiona los envíos del ganador y no los suyos`,
       creep: (pct: string) => `subir ${pct} por paso mientras gana`, noCreep: 'sin subidas mientras gana',
+      anchor: (text: string) => `referencia: ${text}`, competeWith: (text: string) => `competir con: ${text}`,
     },
     enabled: {
       off: 'Desactivado', offDetail: 'El precio no se cambia automáticamente', smart: 'Kaufland Smart Pricing', smartDetail: 'Nuestro motor está desactivado para esta oferta',
@@ -1299,6 +1327,9 @@ export const es: Messages = {
       // Шаг 97 [Р-218]: таблица конкурентов в шаге снимка и «кто подвинул цену»
       competitors: {
         title: 'Competidores en ese momento', you: 'Usted', unnamedSeller: 'vendedor sin nombre',
+        filterHead: (competeWith: string, considered: number, total: number) => `Competir con: ${competeWith} — ${considered === 1 ? 'se consideró' : 'se consideraron'} ${considered} de ${total} ${total === 1 ? 'oferta' : 'ofertas'}`,
+        filterUnknown: (n: number) => `${n} ${n === 1 ? 'excluida' : 'excluidas'}: logística desconocida`,
+        excluded: { FILTER: 'excluida por su filtro', UNKNOWN: 'logística desconocida — excluida' },
         trigger: (seller: string, from: string, to: string) => `Lo provocó ${seller}: ${from} → ${to}`,
         triggerAppeared: (seller: string, price: string) => `Lo provocó ${seller}: apareció con ${price}`,
         triggerGone: (seller: string, price: string) => `Lo provocó ${seller}: salió de la lista (estaba en ${price})`,
@@ -1449,14 +1480,18 @@ export const es: Messages = {
         fulfillmentHandicapMinor: 'Bajar esta cantidad adicional cuando el canal gestiona los envíos del ganador y no los suyos (por ejemplo, FBA). 0: sin paso adicional.',
         creepUp: 'Desactivado de forma predeterminada. Mientras tenga la Buy Box, el precio sube un paso por cada recálculo programado; si la pierde, vuelve atrás y se pausa.',
         creepStepBp: 'Cada subida, como porcentaje del precio; nunca más que su límite de paso.',
+        anchor: 'De qué precio de la competencia parte el objetivo. «El menor de los dos» toma el más bajo entre el precio de la Buy Box y el precio más bajo.',
+        competeWith: 'Qué ofertas de la competencia cuentan, según quién gestiona su envío. Una oferta cuya logística el canal no indica queda fuera y se cuenta. Walmart no indica quién gestiona el envío: allí el filtro no está disponible.',
       },
       pageTitle: 'Estrategias', inUse: 'Estrategias en uso', offers: 'Ofertas', draftTitle: 'Borrador', name: 'Nombre', type: 'Tipo',
       types: { FIXED: 'Precio fijo', TARGET_MARGIN: 'Margen objetivo', MATCH_BUYBOX: 'Igualar la Buy Box', BEAT_LOWEST: 'Superar el precio más bajo', WIN_BUYBOX: 'Ganar la Buy Box' },
       fields: { priceMinor: 'Precio', targetMarginBp: 'Margen, %', undercutMinor: 'Rebaja', deadbandMinor: 'Umbral', holdWhenWinning: 'Mantener al ganar', atBound: 'Fuera de límites', scope: 'Comparar con', compareLanded: 'Con envío incluido',
-        fulfillmentHandicapMinor: 'Desventaja logística', creepUp: 'Subir mientras gana', creepStepBp: 'Paso de subida, %' },
+        fulfillmentHandicapMinor: 'Desventaja logística', creepUp: 'Subir mientras gana', creepStepBp: 'Paso de subida, %', anchor: 'Referencia', competeWith: 'Competir con' },
       // Шаг 97 [Р-219]: что делает «Win the Buy Box» — карточка типа
       winBuyboxAbout: 'Si no tiene la Buy Box, el precio baja por debajo del precio con envío del ganador. Si la tiene, el precio se mantiene o, si lo activa, sube un paso por período hasta perder la Buy Box y luego vuelve atrás. Sus límites, su límite de paso y las revisiones siguen aplicándose; ganar no está garantizado.',
       atBound: { CAP: 'usar el límite', HOLD: 'mantener el precio' }, scopes: { VISIBLE_TOP_N: 'ofertas visibles', MARKET: 'todo el mercado' },
+      anchors: { BUYBOX: 'Precio de la Buy Box', LOWEST: 'Precio más bajo', LOWER_OF_TWO: 'El menor de los dos' }, competeWithOptions: { ALL: 'Todas', CHANNEL: 'Solo FBA', MERCHANT: 'Solo FBM' },
+      anchorsInline: { BUYBOX: 'precio de la Buy Box', LOWEST: 'precio más bajo', LOWER_OF_TWO: 'el menor de los dos' }, competeWithInline: { ALL: 'todas', CHANNEL: 'solo FBA', MERCHANT: 'solo FBM' },
       problems: { REQUIRED: 'obligatorio', NOT_A_WHOLE_AMOUNT: 'un importe como 19.99 o un porcentaje como 12.5', OUT_OF_RANGE: 'fuera de rango', UNKNOWN_TYPE: 'tipo desconocido', UNSUPPORTED_TYPE: 'el motor no lo calcula' },
       pick: 'Ofertas para la vista previa', preview: 'Vista previa con estas ofertas', save: 'Guardar y asignar', saveHint: 'Solo se puede guardar la vista previa mostrada: el servidor la vuelve a calcular y la rechaza si algo cambió.',
       columns: { offer: 'Oferta', asOf: 'Con fecha', current: 'Actual', proposed: 'Propuesto', final: 'Tras el Gate', change: 'Cambio', outcome: 'Resultado', reason: 'Por qué' },

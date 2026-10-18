@@ -207,7 +207,7 @@ test('step 97 [Р-221]: without a named holder, Win the Buy Box is not evaluated
 
 test('step 97 [Р-39]: availability — Win the Buy Box needs a named holder, Match the Buy Box only the price', () => {
   const amazon: CompetitorSourceDescriptor = { source: 'AMAZON_ANY_OFFER_CHANGED', kind: 'PUSH', completeness: { kind: 'TOP_N', n: 20 }, conditions: ['new'],
-    hasBuyboxWinner: false, hasBuyboxPrice: true, hasOwnRank: false, hasShipping: true, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'PRIMARY' };
+    hasBuyboxWinner: false, hasBuyboxPrice: true, hasFulfilment: false, hasOwnRank: false, hasShipping: true, typicalStalenessSeconds: null, availability: 'AVAILABLE', role: 'PRIMARY' };
   assert.deepEqual(strategyAvailability(win(), [amazon]), { available: false, unmet: { AMAZON_ANY_OFFER_CHANGED: ['BUYBOX_WINNER'] } });
   assert.deepEqual(strategyAvailability({ type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, [amazon]), { available: true, via: 'AMAZON_ANY_OFFER_CHANGED' });
   const walmart = { ...amazon, source: 'WALMART_BUY_BOX', kind: 'PULL' as const, hasBuyboxWinner: true };

@@ -68,6 +68,15 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
   // Р-91: подрез хранится 18 месяцев после замены версии стратегии; без него — «не хранится», а не «сравняться»
   const undercut = (u: number | undefined) => (u === undefined ? s.undercutNotKept : u > 0 ? s.undercut(money(u)) : s.match);
   const competitorDerived = COMPETITOR_DERIVED_RULES.has(p.type);
+  /** Шаг 101 [Р-226]: ориентир и фильтр — в описании, только если они не по умолчанию типа (у прежних версий описание прежнее) */
+  const choices = (anchor: string | undefined, fallback: string | null, competeWith: string | undefined): string => {
+    const t = m.ui.strategies;
+    const parts = [
+      ...(anchor && fallback && anchor !== fallback ? [s.anchor(t.anchorsInline[anchor as keyof typeof t.anchorsInline] ?? anchor)] : []),
+      ...(competeWith && competeWith !== 'ALL' ? [s.competeWith(t.competeWithInline[competeWith as keyof typeof t.competeWithInline] ?? competeWith)] : []),
+    ];
+    return parts.map((x) => `; ${x}`).join('');
+  };
   switch (p.type) {
     case 'FIXED':
       return { label: s.fixed, detail: `${money(p.priceMinor)}${tail}`, competitorDerived };
@@ -76,13 +85,13 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
     case 'MATCH_BUYBOX':
       return {
         label: s.buybox,
-        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}${p.holdWhenWinning ? `; ${s.holdWhenWinning}` : ''}; ${atBound(p.atBound)}${tail}`,
+        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}${p.holdWhenWinning ? `; ${s.holdWhenWinning}` : ''}${choices(undefined, null, p.competeWith)}; ${atBound(p.atBound)}${tail}`,
         competitorDerived,
       };
     case 'BEAT_LOWEST':
       return {
         label: s.lowest,
-        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}, ${p.scope === 'MARKET' ? s.marketScope : s.visibleScope}${p.compareLanded ? `, ${s.landed}` : ''}; ${atBound(p.atBound)}${tail}`,
+        detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)}, ${p.scope === 'MARKET' ? s.marketScope : s.visibleScope}${p.compareLanded ? `, ${s.landed}` : ''}${choices(p.anchor, 'LOWEST', p.competeWith)}; ${atBound(p.atBound)}${tail}`,
         competitorDerived,
       };
     // Шаг 97 [Р-219]: подрез и гандикап хранятся 18 месяцев после замены версии [Р-91]
@@ -91,7 +100,7 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
       return {
         label: s.winBuybox,
         detail: `${undercut((p as { undercutMinor?: number }).undercutMinor)} ${s.winLanded}${handicap ? `, ${s.handicap(money(handicap))}` : ''}; `
-          + `${p.creepUp ? s.creep(m.percentBp(p.creepStepBp)) : s.noCreep}; ${atBound(p.atBound)}${tail}`,
+          + `${p.creepUp ? s.creep(m.percentBp(p.creepStepBp)) : s.noCreep}${choices(p.anchor, 'BUYBOX', p.competeWith)}; ${atBound(p.atBound)}${tail}`,
         competitorDerived,
       };
     }

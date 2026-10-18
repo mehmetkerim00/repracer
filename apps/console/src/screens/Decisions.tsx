@@ -88,6 +88,10 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
             {step.competitors ? (step.competitors.rows.length > 0 ? (
               <details className="competitors-at" open>
                 <summary>{t.competitors.title} ({step.competitors.rows.length})</summary>
+                {/* Шаг 101 [Р-226]: с кем стратегия соревновалась — по всему снимку; исключённые строки остаются в таблице приглушёнными */}
+                {step.competitors.filter ? (
+                  <p className="competitors-filter">{step.competitors.filter.head}{step.competitors.filter.unknown ? <span className="muted"> · {step.competitors.filter.unknown}</span> : null}</p>
+                ) : null}
                 <CompetitorTable rows={step.competitors.rows} columns={step.competitors.columns} foot={[step.competitors.note]} />
               </details>
             ) : <p className="note">{step.competitors.note}</p>) : null}

@@ -33,12 +33,18 @@ export interface DraftForm {
   handicap: string;
   creepUp: boolean;
   creepStep: string;
+  /** Шаг 101 [Р-226]: ориентир («» — умолчание типа) и фильтр «Compete with» */
+  anchor: '' | 'BUYBOX' | 'LOWEST' | 'LOWER_OF_TWO';
+  competeWith: 'ALL' | 'CHANNEL' | 'MERCHANT';
 }
 
 export const EMPTY_DRAFT: DraftForm = {
   strategyId: null, baseVersion: null, name: '', type: 'MATCH_BUYBOX', price: '', targetMargin: '20', undercut: '0.05', deadband: '0',
   holdWhenWinning: true, atBound: 'CAP', scope: 'VISIBLE_TOP_N', compareLanded: false, handicap: '0', creepUp: false, creepStep: '1',
+  anchor: '', competeWith: 'ALL',
 };
+/** Шаг 101 [Р-226]: ориентир по умолчанию — прежнее поведение типа */
+const anchorDefault = (type: DraftForm['type']): 'BUYBOX' | 'LOWEST' => (type === 'BEAT_LOWEST' ? 'LOWEST' : 'BUYBOX');
 
 // Шаг 79 (ревью): суммы черновика — в формате языка экрана («0,05» по-немецки); разбор принимает и запятую, и точку
 const amountText = (minor: number | undefined, locale = 'en') => (minor === undefined ? '' : (minor / 100).toFixed(2).replace('.', locale === 'de' ? ',' : '.'));
@@ -61,15 +67,17 @@ export function formOf(item: StrategyListItem, locale = 'en'): DraftForm {
     compareLanded: p.compareLanded === true,
     handicap: amountText((p.fulfillmentHandicapMinor as number | undefined) ?? 0, locale), creepUp: p.creepUp === true,
     creepStep: percentText((p.creepStepBp as number | undefined) ?? 100, locale),
+    anchor: (p.anchor as DraftForm['anchor'] | undefined) ?? '', competeWith: (p.competeWith as DraftForm['competeWith'] | undefined) ?? 'ALL',
   };
 }
 
 export function draftOf(f: DraftForm): unknown {
   const params = f.type === 'FIXED' ? { type: f.type, priceMinor: minorOf(f.price) }
     : f.type === 'TARGET_MARGIN' ? { type: f.type, targetMarginBp: bpOf(f.targetMargin) }
-      : f.type === 'MATCH_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), holdWhenWinning: f.holdWhenWinning, atBound: f.atBound }
-        : f.type === 'WIN_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), fulfillmentHandicapMinor: minorOf(f.handicap), creepUp: f.creepUp, creepStepBp: bpOf(f.creepStep), atBound: f.atBound }
-        : { type: f.type, undercutMinor: minorOf(f.undercut), scope: f.scope, compareLanded: f.compareLanded, atBound: f.atBound };
+      : f.type === 'MATCH_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), holdWhenWinning: f.holdWhenWinning, atBound: f.atBound, competeWith: f.competeWith }
+        : f.type === 'WIN_BUYBOX' ? { type: f.type, undercutMinor: minorOf(f.undercut), fulfillmentHandicapMinor: minorOf(f.handicap), creepUp: f.creepUp, creepStepBp: bpOf(f.creepStep), atBound: f.atBound,
+          anchor: f.anchor || anchorDefault(f.type), competeWith: f.competeWith }
+        : { type: f.type, undercutMinor: minorOf(f.undercut), scope: f.scope, compareLanded: f.compareLanded, atBound: f.atBound, anchor: f.anchor || anchorDefault(f.type), competeWith: f.competeWith };
   return { name: f.name, params, deadbandMinor: minorOf(f.deadband) } satisfies Record<keyof StrategyDraft, unknown>;
 }
 
@@ -295,6 +303,19 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
             ) : null}
             <Field label={t.fields.deadbandMinor} caption={t.captions.deadbandMinor}><input inputMode="decimal" value={form.deadband} onChange={(e) => set('deadband', e.target.value)} /></Field>
           </FieldGrid>
+          {/* Шаг 101 [Р-226]: ориентир (у «Beat the lowest» и «Win the Buy Box») и фильтр «Compete with» (у всех трёх конкурентных) */}
+          {form.type === 'MATCH_BUYBOX' || form.type === 'BEAT_LOWEST' || form.type === 'WIN_BUYBOX' ? (
+            <FieldGrid cols={2}>
+              {form.type !== 'MATCH_BUYBOX' ? (
+                <Field label={t.fields.anchor} caption={t.captions.anchor}><select value={form.anchor || anchorDefault(form.type)} onChange={(e) => set('anchor', e.target.value as DraftForm['anchor'])}>
+                  {(['BUYBOX', 'LOWEST', 'LOWER_OF_TWO'] as const).map((k) => <option key={k} value={k}>{t.anchors[k]}</option>)}
+                </select></Field>
+              ) : null}
+              <Field label={t.fields.competeWith} caption={t.captions.competeWith}><select value={form.competeWith} onChange={(e) => set('competeWith', e.target.value as DraftForm['competeWith'])}>
+                {(['ALL', 'CHANNEL', 'MERCHANT'] as const).map((k) => <option key={k} value={k}>{t.competeWithOptions[k]}</option>)}
+              </select></Field>
+            </FieldGrid>
+          ) : null}
           {form.type === 'MATCH_BUYBOX' ? <CheckField label={t.fields.holdWhenWinning} caption={t.captions.holdWhenWinning} checked={form.holdWhenWinning} onChange={(v) => set('holdWhenWinning', v)} /> : null}
           {form.type === 'BEAT_LOWEST' ? <CheckField label={t.fields.compareLanded} caption={t.captions.compareLanded} checked={form.compareLanded} onChange={(v) => set('compareLanded', v)} /> : null}
           {form.type === 'WIN_BUYBOX' ? <CheckField label={t.fields.creepUp} caption={t.captions.creepUp} checked={form.creepUp} onChange={(v) => set('creepUp', v)} /> : null}

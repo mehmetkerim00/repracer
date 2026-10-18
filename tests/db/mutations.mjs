@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0194_verify_schema_invariants_v52.sql';
+const VERIFY = 'migrations/0196_verify_schema_invariants_v53.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2625,6 +2625,66 @@ export const STEP99_ROWS = [
         node(R99, 'an XLSX file of a job is checked by the bytes of the workbook', 'the checksum of the base64 text is not the checksum of the file', '^accepted$')),
       m(replaceInFunction('security.file_producing_job_kinds()', "ARRAY['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']", "ARRAY['IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT']"),
         node(R99, 'an XLSX file of a job is checked by the bytes of the workbook', 'the checksum of the workbook bytes is accepted', 'does not give the seller a file')),
+    ],
+  },
+];
+
+/**
+ * Шаг 101 [Р-226]: ориентир цены и фильтр «Compete with» — рядом с подрезом (0195): не в вечной версии стратегии, известные значения,
+ * неизменяемы, ориентир только у «Beat the lowest» и «Win the Buy Box»; фильтр — только там, где источник называет исполнение, и страж
+ * назначения видит его из таблицы подреза; пометки фильтра в картине рынка решения — только своего вида. Каждая — своей проверкой [Р-108]
+ */
+const R101 = T('anchor-filter-step101.pg.test.ts');
+const S101 = 'the anchor and the filter live with the undercut';
+const A101 = 'the filter needs a source that names fulfilment';
+const V101 = 'the database refuses a malformed filter on the competitor view';
+export const STEP101_ROWS = [
+  {
+    row: 'шаг 101 (Р-226, Р-91)', critical: false,
+    invariant: 'ориентир и фильтр — рядом с подрезом: не в вечной версии стратегии, известные значения, неизменяемы; ориентир — только у «Beat the lowest» и «Win the Buy Box»',
+    mutations: [
+      m(dropConstraint('pricing_strategy_choice_not_eternal', 'tenant_data.pricing_strategy'),
+        node(R101, S101, 'the anchor and the filter are not kept in the eternal strategy version', 'resolved')),
+      m(dropConstraint('pricing_strategy_undercut_anchor_known', 'channel_data.pricing_strategy_undercut'),
+        node(R101, S101, 'an unknown anchor is refused', 'resolved')),
+      m(dropConstraint('pricing_strategy_undercut_compete_with_known', 'channel_data.pricing_strategy_undercut'),
+        node(R101, S101, 'an unknown compete-with value is refused', 'resolved')),
+      // Без сравнения ориентира и фильтра строку держит следующий страж — «версия ещё закреплена», другой причиной
+      m(replaceInFunction('channel_data.pricing_strategy_undercut_guard()', 'NEW.anchor, NEW.compete_with, NEW.created_at)', 'OLD.anchor, OLD.compete_with, NEW.created_at)'),
+        node(R101, S101, ['the anchor of a version is not rewritten', 'the filter of a version is not rewritten'], 'still pinned')),
+      m(replaceInFunction('tenant_data.pricing_strategy_requires_undercut()', "IF NEW.type NOT IN ('BEAT_LOWEST', 'WIN_BUYBOX') AND EXISTS (", 'IF false AND EXISTS ('),
+        node(R101, S101, 'Match the Buy Box takes no anchor', 'resolved')),
+    ],
+  },
+  {
+    row: 'шаг 101 (Р-39, Р-226)', critical: false,
+    invariant: 'фильтр «Compete with» доступен только там, где источник называет исполнение; под фильтром ориентир «только Buy Box» требует держателя; страж назначения видит фильтр версии',
+    mutations: [
+      m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', "IF fulfilment AND NOT s.has_fulfilment THEN u := u || 'FULFILMENT'::text; END IF;", 'NULL;'),
+        node(R101, A101, 'a filter is unavailable where the channel does not name fulfilment', '^\\{\\}$')),
+      m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', 'bb_winner := bb_price AND filtered;', 'bb_winner := false;'),
+        node(R101, A101, 'under a filter a Buy Box anchor needs the holder', '^null$')),
+      m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', "req_kind := 'TOP_N'; bb_price := true; bb_winner := filtered;", "req_kind := 'TOP_N'; bb_price := true; bb_winner := false;"),
+        node(R101, A101, 'a filtered Match the Buy Box is not assigned where the holder is not named', 'resolved')),
+      m(replaceInFunction('tenant_data.write_scope_strategy_guard()', "|| jsonb_strip_nulls(jsonb_build_object('anchor', u.anchor, 'competeWith', u.compete_with))", ''),
+        node(R101, A101, 'a filtered Match the Buy Box is not assigned where the holder is not named', 'resolved')),
+    ],
+  },
+  {
+    row: 'шаг 101 (Р-218, Р-226)', critical: false,
+    invariant: 'картина рынка: пометка исключения — только FILTER или UNKNOWN; итог фильтра — FBA или FBM, поля списка, прошедших и неизвестных не больше, чем предложений',
+    mutations: [
+      m(replaceInFunction('channel_data.competitor_view_valid(jsonb)', "OR (o ? 'excluded' AND coalesce(o ->> 'excluded', '') NOT IN ('FILTER', 'UNKNOWN'))", ''),
+        node(R101, V101, 'an exclusion mark outside FILTER and UNKNOWN is refused', 'resolved')),
+      m(replaceInFunction('channel_data.competitor_view_valid(jsonb)', "AND channel_data.competitor_view_filter_valid(v -> 'filter')", ''),
+        node(R101, V101, ['a filter that considered more offers than the snapshot had is refused', 'a filter summary of all competitors is refused',
+          'a filter summary with a field outside the list is refused'], 'resolved')),
+      m(replaceInFunction('channel_data.competitor_view_filter_valid(jsonb)', "AND (f ->> 'considered')::numeric + (f ->> 'unknown')::numeric <= (f ->> 'total')::numeric", ''),
+        node(R101, V101, 'a filter that considered more offers than the snapshot had is refused', 'resolved')),
+      m(replaceInFunction('channel_data.competitor_view_filter_valid(jsonb)', "OR (f ->> 'competeWith') NOT IN ('CHANNEL', 'MERCHANT') THEN false", 'THEN false'),
+        node(R101, V101, 'a filter summary of all competitors is refused', 'resolved')),
+      m(replaceInFunction('channel_data.competitor_view_filter_valid(jsonb)', "WHEN EXISTS (SELECT 1 FROM jsonb_object_keys(f) k WHERE k <> ALL (ARRAY['competeWith', 'total', 'considered', 'unknown'])) THEN false", 'WHEN false THEN false'),
+        node(R101, V101, 'a filter summary with a field outside the list is refused', 'resolved')),
     ],
   },
 ];

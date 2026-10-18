@@ -45,7 +45,11 @@ export interface TraceCompetitors {
   rows: Array<{
     seller: string; self: boolean; landed: string; fulfilment: string | null; buyBox: boolean | null; rating: string | null;
     move: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was: string | null; landedKnown: boolean;
+    /** Шаг 101 [Р-226]: строка не участвовала в расчёте — словами («excluded by your filter»); строка остаётся, приглушённой */
+    excluded: string | null;
   }>;
+  /** Шаг 101 [Р-226]: шапка фильтра «Compete with» — «considered 3 of 5 offers» и отдельно исключённые с неизвестным исполнением */
+  filter: { head: string; unknown: string | null } | null;
   /** Правило таблиц 96.2: колонки из одного значения — подписью */
   columns: CompetitorColumns;
   /** Подпись честности: сколько хранятся детали, или что срок истёк */
@@ -151,10 +155,11 @@ export function triggerChip(view: CompetitorView | null | undefined, currency: s
   return { chip: c.chip[tr.move](seller, price), full: triggerPhrase(view, currency, m)! };
 }
 
-function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messages): TraceCompetitors {
+/** Шаг 97 [Р-218], шаг 101 [Р-226]: таблица конкурентов квитанции — строки, пометки фильтра и его шапка */
+export function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messages): TraceCompetitors {
   const c = m.ui.trace.competitors;
   const view = d.competitorView ?? null;
-  if (!view) return { trigger: null, rows: [], columns: competitorColumns([], m), note: c.expired };
+  if (!view) return { trigger: null, rows: [], columns: competitorColumns([], m), note: c.expired, filter: null };
   const channel = channelOf(world, scopeById(world, d.writeScopeId)?.channelAccountId ?? '');
   const channelName = (m.values as Record<string, string | undefined>)[channel] ?? channel;
   const money = (v: number | null | undefined) => (v === null || v === undefined ? null : m.money(v, view.currency));
@@ -165,10 +170,17 @@ function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messages): T
       buyBox: o.holdsBuyBox ?? null,
       rating: o.ratingPct !== undefined && o.ratingCount !== undefined ? m.ui.competition.rating(m.percentBp(Math.round(o.ratingPct * 100)), o.ratingCount) : null,
       move: o.move ?? null, was: money(o.wasMinor), landedKnown: o.landedMinor !== undefined && o.landedMinor !== null,
+      excluded: o.excluded ? c.excluded[o.excluded] : null,
     }));
+  // Шаг 101 [Р-226]: фильтр — по всему снимку, а не по строкам картины (картина — до 21 строки, снимок — сколько назвал канал)
+  const f = view.filter;
+  const filter = f ? {
+    head: c.filterHead(m.ui.strategies.competeWithInline[f.competeWith], f.considered, f.total),
+    unknown: f.unknown > 0 ? c.filterUnknown(f.unknown) : null,
+  } : null;
   // Повод — одной фразой сверху квитанции; никто не двигался — так и сказано в подписи таблицы, а не наверху
   const trigger = triggerPhrase(view, view.currency, m);
-  return { trigger, rows, columns: competitorColumns(rows, m), note: trigger ? c.kept : `${c.noTrigger} ${c.kept}` };
+  return { trigger, rows, columns: competitorColumns(rows, m), note: trigger ? c.kept : `${c.noTrigger} ${c.kept}`, filter };
 }
 
 export function isDangerous(d: ConsoleDecision): boolean {

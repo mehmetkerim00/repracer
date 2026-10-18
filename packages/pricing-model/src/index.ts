@@ -1,6 +1,8 @@
 export type {
   AcceptedSnapshot,
   BoundResolution,
+  CompeteWith,
+  CompetitorAnchor,
   CompetitorRequirement,
   CompletenessKind,
   CostInputs,
@@ -22,7 +24,7 @@ export type {
   StrategyType,
   TriggerType,
 } from './types.ts';
-export { COMPETITOR_DERIVED_RULES, fulfilmentKind, isCompetitorDerived, markAcceptedBySanity, STRATEGY_STALENESS_SECONDS } from './types.ts';
+export { COMPETE_WITH, COMPETITOR_ANCHORS, COMPETITOR_DERIVED_RULES, fulfilmentKind, isCompetitorDerived, markAcceptedBySanity, STRATEGY_STALENESS_SECONDS } from './types.ts';
 export * from './reasons.ts';
 export {
   EXPLANATION_FIELD_KINDS,

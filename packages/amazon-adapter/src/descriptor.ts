@@ -108,6 +108,8 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       // признака IsBuyBoxWinner в ней нет; цена Buy Box есть (Summary.BuyBoxPrices). Держатель — «неизвестен», а не «не наш»
       hasBuyboxWinner: false,
       hasBuyboxPrice: true,
+      // Шаг 101: IsFulfilledByAmazon — обязательное поле предложения в схеме уведомления снимка
+      hasFulfilment: true,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,
@@ -123,6 +125,7 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет [AMZ_C11]
       hasBuyboxWinner: false,
       hasBuyboxPrice: false,
+      hasFulfilment: false,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,

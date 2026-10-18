@@ -1,4 +1,4 @@
-import { DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type StrategyDefinition, type StrategyParams } from '@repracer/pricing-model';
+import { COMPETE_WITH, COMPETITOR_ANCHORS, DANGEROUS_DEVIATION_BP, STRATEGY_TYPES, type CompeteWith, type CompetitorAnchor, type StrategyDefinition, type StrategyParams } from '@repracer/pricing-model';
 import type { StrategyPreview } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
@@ -36,6 +36,18 @@ export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDra
   if (name.length === 0 || name.length > 80) problems.push({ field: 'name', code: name.length === 0 ? 'REQUIRED' : 'OUT_OF_RANGE' });
   const deadbandMinor = minor('deadbandMinor', r.deadbandMinor ?? 0, 0);
   const type = p.type;
+  /**
+   * Шаг 101 [Р-226]: ориентир и фильтр «Compete with». Умолчание типа не хранится — у версии без поля поведение прежнее; неизвестное
+   * значение — ошибка поля, а не молчаливое умолчание
+   */
+  const choice = <T extends string>(field: string, values: readonly T[], fallback: T): { [k: string]: T } => {
+    const v = p[field];
+    if (v === undefined || v === null || v === '' || v === fallback) return {};
+    if (!(values as readonly unknown[]).includes(v)) { problems.push({ field, code: 'OUT_OF_RANGE' }); return {}; }
+    return { [field]: v as T };
+  };
+  const competeWith = () => choice<CompeteWith>('competeWith', COMPETE_WITH, 'ALL') as { competeWith?: CompeteWith };
+  const anchor = (fallback: CompetitorAnchor) => choice<CompetitorAnchor>('anchor', COMPETITOR_ANCHORS, fallback) as { anchor?: CompetitorAnchor };
   let params: StrategyParams | null = null;
   if (!(STRATEGY_TYPES as readonly unknown[]).includes(type)) problems.push({ field: 'type', code: 'UNKNOWN_TYPE' });
   else if (type === 'FIXED') params = { type, priceMinor: minor('priceMinor', p.priceMinor, 1) };
@@ -44,11 +56,11 @@ export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDra
     if (bp >= 10_000) problems.push({ field: 'targetMarginBp', code: 'OUT_OF_RANGE' });
     params = { type, targetMarginBp: bp };
   } else if (type === 'MATCH_BUYBOX') {
-    params = { type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), holdWhenWinning: p.holdWhenWinning === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP' };
+    params = { type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), holdWhenWinning: p.holdWhenWinning === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP', ...competeWith() };
   } else if (type === 'BEAT_LOWEST') {
     params = {
       type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), scope: p.scope === 'MARKET' ? 'MARKET' : 'VISIBLE_TOP_N',
-      compareLanded: p.compareLanded === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP',
+      compareLanded: p.compareLanded === true, atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP', ...anchor('LOWEST'), ...competeWith(),
     };
   } else if (type === 'WIN_BUYBOX') {
     // Шаг 97 [Р-219]: подъём по умолчанию выключен; его шаг — базисные пункты, не больше 10 % (больший шаг урежет предел шага Gate)
@@ -57,7 +69,7 @@ export function parseStrategyDraft(raw: unknown): { ok: true; draft: StrategyDra
     if (creepUp && creepStepBp > 1000) problems.push({ field: 'creepStepBp', code: 'OUT_OF_RANGE' });
     params = {
       type, undercutMinor: minor('undercutMinor', p.undercutMinor ?? 0, 0), fulfillmentHandicapMinor: minor('fulfillmentHandicapMinor', p.fulfillmentHandicapMinor ?? 0, 0),
-      creepUp, creepStepBp: Math.max(1, Math.min(1000, creepStepBp)), atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP',
+      creepUp, creepStepBp: Math.max(1, Math.min(1000, creepStepBp)), atBound: p.atBound === 'HOLD' ? 'HOLD' : 'CAP', ...anchor('BUYBOX'), ...competeWith(),
     };
   } else problems.push({ field: 'type', code: 'UNSUPPORTED_TYPE' });
   return problems.length > 0 || !params ? { ok: false, problems } : { ok: true, draft: { name, params, deadbandMinor } };

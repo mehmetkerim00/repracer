@@ -227,6 +227,18 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 declared it)», «Minimum margin $6.85 — margin at least 12%», «Effective floor $14.00 — from your minimum price», в разбивке пола
 «Margin $6.90»; комиссия — «fee schedule: 15% + $0.00 (2026-10) — the floor is computed from this one» (версия тарифа — месяц действия).
 
+**С кем соревноваться** (шаг 101, Р-226, ~30 с). У товара amazon.com «Water bottle, …» (первый товар; название — в карточке стратегии
+**Beat the lowest FBA offer** на экране Strategies, «Show offers») лоукостер **Pine & Co** исполняет заказ сам (FBM) и Buy Box не держит,
+Buy Box у **Harbor Goods** (FBA) на $0.25 дороже. Стратегия — «только FBA»: в описании одной строкой «…; compete with: FBA only; …».
+Квитанция любой его записи (Price changes → поле Offer → название): над таблицей конкурентов «Compete with: FBA only — considered 1 of 2
+offers», строка Pine & Co приглушена с пометкой «excluded by your filter», повод — «Triggered by Harbor Goods», шаги расчёта — «Compete
+with: FBA only — considered 1 of 2 offers.» и цель от цены Harbor Goods, а не лоукостера. На экране Strategies в черновике «Beat the lowest»
+видны поля **Anchor** (Buy Box price / Lowest price / Lower of the two) и **Compete with**; подпись говорит, что у Walmart фильтр
+недоступен — Walmart не называет, кто исполняет предложение.
+
+Что сказать: фильтр — до расчёта; неизвестное исполнение не выбрасывается молча, а считается отдельно; если после фильтра никого — цена
+стоит («без изменения»), стратегия не переключается на «всех» сама. Пол, потолок и Gate — те же.
+
 ## в. Три стоп-крана (2 мин)
 
 **Экран «Stop pricing».** Первой строкой под подзаголовком (шаг 96, А10): «Pause is safe: current prices stay as they are, and you can

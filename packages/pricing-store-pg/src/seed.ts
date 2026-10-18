@@ -330,7 +330,8 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
         ids.alias(s.strategy.strategyId, strategyId);
         // Р-91: версия стратегии (вечная, архивируется с ядром) — без подреза; подрез — в таблице с 18-месячным сроком
         // Шаг 97: гандикап «Win the Buy Box» — рядом с подрезом, вне вечной версии стратегии [Р-91]
-        const { undercutMinor, fulfillmentHandicapMinor, ...stored } = s.strategy.params as Record<string, unknown>;
+        // Шаг 101 [Р-226]: ориентир и фильтр «Compete with» — тоже рядом с подрезом (0195)
+        const { undercutMinor, fulfillmentHandicapMinor, anchor, competeWith, ...stored } = s.strategy.params as Record<string, unknown>;
         for (let v = 1; v <= s.strategy.version; v++) {
           await tx.query(
             `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
@@ -339,8 +340,9 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
              JSON.stringify({ ...stored, deadbandMinor: s.strategy.deadbandMinor }), ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], membershipId],
           );
           if (undercutMinor !== undefined) {
-            await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor) VALUES ($1, $2, $3, $4, $5)`,
-              [tenantId, strategyId, v, undercutMinor, fulfillmentHandicapMinor ?? null]);
+            await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor, anchor, compete_with)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [tenantId, strategyId, v, undercutMinor, fulfillmentHandicapMinor ?? null, anchor ?? null, competeWith ?? null]);
           }
         }
       }

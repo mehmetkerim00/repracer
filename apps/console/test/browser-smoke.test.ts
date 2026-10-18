@@ -137,6 +137,8 @@ function demoLikeRejected(worldId: string, dangerous = false) {
 let syntheticRejected: unknown = null;
 /** Шаг 100 (E): чип движения конкурента у первой строки настоящей страницы решений — в мире смоука у предложений один снимок, сравнивать не с чем */
 let decisionChip: { chip: string; full: string } | null = null;
+/** Шаг 101 (C): таблица конкурентов квитанции под фильтром — у шага снимка настоящей квитанции (в мире смоука стратегий с фильтром нет) */
+let receiptCompetitors: unknown = null;
 
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
 function syntheticShadow() {
@@ -211,6 +213,12 @@ before(async () => {
   // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
   stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous })
     : syntheticRejected && /\/rejected(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticRejected })
+    : receiptCompetitors && /\/decisions\/[^/?]+(\?|$)/.test(req.url) ? currentApi(req).then((r) => {
+      const body = r.body as { steps?: Array<Record<string, unknown>> };
+      const step = r.status === 200 ? body.steps?.find((x) => x.key === 'SNAPSHOT') : undefined;
+      if (step) step.competitors = receiptCompetitors;
+      return r;
+    })
     : decisionChip && /\/decisions\?/.test(req.url) ? currentApi(req).then((r) => {
       const body = r.body as { items?: Array<Record<string, unknown>> };
       if (r.status === 200 && body.items?.length) body.items[0] = { ...body.items[0], trigger: decisionChip };
@@ -1706,6 +1714,89 @@ test('step 100 (E): a decision caused by a competitor move names it in the Reaso
     }
   } finally {
     decisionChip = null;
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+test('step 101 (C): the draft offers Anchor and Compete with where they mean something; the receipt dims the excluded offers and heads the table with the filter', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.strategies;
+  const c = en.ui.trace.competitors;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/strategies`)}, true)`);
+  await settled(b, 'strategies');
+  // Поля черновика: подписи над контролами, варианты — словами; у «Match the Buy Box» ориентира нет, у фиксированной цены нет обоих
+  const fields = () => b.evaluate<Array<{ label: string; options: string[]; caption: string }>>(`[...document.querySelectorAll('.draft-form .field')].map((f) => ({
+    label: f.querySelector('label, .field-label')?.textContent.trim() ?? '', options: [...f.querySelectorAll('option')].map((o) => o.textContent.trim()),
+    caption: f.querySelector('.field-caption, .caption')?.textContent.trim() ?? '' })).filter((f) => [${JSON.stringify(t.fields.anchor)}, ${JSON.stringify(t.fields.competeWith)}].includes(f.label))`);
+  const chooseType = (type: string) => b.evaluate(`(() => { const sel = [...document.querySelectorAll('.draft-form select')].find((x) => [...x.options].some((o) => o.value === 'FIXED'));
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(type)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const expected = {
+    anchor: { label: t.fields.anchor, options: [t.anchors.BUYBOX, t.anchors.LOWEST, t.anchors.LOWER_OF_TWO], caption: t.captions.anchor },
+    competeWith: { label: t.fields.competeWith, options: [t.competeWithOptions.ALL, t.competeWithOptions.CHANNEL, t.competeWithOptions.MERCHANT], caption: t.captions.competeWith },
+  };
+  assert.deepEqual(await fields(), [expected.competeWith], 'Match the Buy Box: only Compete with');
+  assert.match(expected.competeWith.caption, /Walmart does not say who fulfills an offer/, 'the honest caption names where the filter is unavailable');
+  for (const type of ['BEAT_LOWEST', 'WIN_BUYBOX']) {
+    await chooseType(type);
+    await new Promise((x) => setTimeout(x, 200));
+    assert.deepEqual(await fields(), [expected.anchor, expected.competeWith], `${type}: Anchor and Compete with`);
+  }
+  await chooseType('FIXED');
+  await new Promise((x) => setTimeout(x, 200));
+  assert.deepEqual(await fields(), [], 'a fixed price has neither');
+
+  // Квитанция: исключённые строки остаются — приглушённые, с пометкой; шапка — с кем соревновались и сколько предложений рассмотрено
+  receiptCompetitors = {
+    trigger: null, note: c.kept, columns: { fulfilment: true, rating: false, buyBox: true, landedKnown: true, uniform: [] },
+    filter: { head: c.filterHead(t.competeWithInline.CHANNEL, 1, 3), unknown: c.filterUnknown(1) },
+    rows: [
+      { seller: 'Prime Shelf', self: false, landed: '€18.41', fulfilment: 'Kaufland', buyBox: true, rating: null, move: null, was: null, landedKnown: true, excluded: null },
+      { seller: 'Budget Bin', self: false, landed: '€16.99', fulfilment: en.ui.competition.fulfilment.merchant, buyBox: false, rating: null, move: null, was: null, landedKnown: true, excluded: c.excluded.FILTER },
+      { seller: 'Quiet Lane', self: false, landed: '€17.50', fulfilment: null, buyBox: false, rating: null, move: null, was: null, landedKnown: true, excluded: c.excluded.UNKNOWN },
+      { seller: c.you, self: true, landed: '€19.50', fulfilment: en.ui.competition.fulfilment.merchant, buyBox: false, rating: null, move: null, was: null, landedKnown: true, excluded: null },
+    ],
+  };
+  try {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed/decisions`)}, true)`);
+    await settled(b, 'feed, decisions');
+    const receipt = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
+    assert.ok(receipt, 'the decision list links a receipt');
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`);
+        await settled(b, `${scheme} ${width}: receipt`);
+        const seen = await b.evaluate<{ head: string; excluded: Array<[string, string]>; dim: boolean; plain: boolean } | null>(`(() => {
+          const box = document.querySelector('details.competitors-at'); if (!box) return null;
+          const muted = getComputedStyle(document.documentElement).getPropertyValue('--text-3').trim();
+          const probe = document.createElement('span'); probe.style.color = muted; document.body.append(probe); const mutedRgb = getComputedStyle(probe).color; probe.remove();
+          const rows = [...box.querySelectorAll('tbody tr')];
+          const ex = rows.filter((r) => r.classList.contains('excluded-row'));
+          return { head: box.querySelector('p.competitors-filter')?.textContent.trim() ?? '',
+            excluded: ex.map((r) => [r.querySelector('td.seller').childNodes[0].textContent.trim(), r.querySelector('.excluded-note')?.textContent.trim() ?? '']),
+            dim: ex.every((r) => getComputedStyle(r.querySelector('td.landed')).color === mutedRgb),
+            plain: rows.filter((r) => !r.classList.contains('excluded-row')).every((r) => getComputedStyle(r.querySelector('td.landed')).color !== mutedRgb) }; })()`);
+        assert.deepEqual(seen, { head: `${c.filterHead(t.competeWithInline.CHANNEL, 1, 3)} · ${c.filterUnknown(1)}`,
+          excluded: [['Budget Bin', c.excluded.FILTER], ['Quiet Lane', c.excluded.UNKNOWN]], dim: true, plain: true }, `${scheme} ${width}: the excluded offers are dimmed and named, the head counts the snapshot`);
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out`);
+      }
+    }
+  } finally {
+    receiptCompetitors = null;
+    await b.setColorScheme(null);
     await b.setViewport(1440, 900);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');

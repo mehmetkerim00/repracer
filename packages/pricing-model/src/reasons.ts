@@ -106,6 +106,10 @@ export const ENGINE_REASON_CODES = [
   'BUYBOX_WIN_TARGET',
   'CREEP_UP',
   'CREEP_STEP_BACK',
+  // Шаг 101 [Р-226]: цель от ориентира не по умолчанию (Buy Box у «Beat the lowest», самая низкая у «Win the Buy Box», меньшая из двух)
+  'ANCHOR_UNDERCUT',
+  // Шаг 101 [Р-226]: фильтр «Compete with» — с кем стратегия соревновалась (шаг цепочки)
+  'COMPETITORS_FILTERED',
   // шаги расчёта
   'CAPPED_AT_MIN_PRICE',
   'CAPPED_AT_MAX_PRICE',
@@ -125,6 +129,8 @@ export const ENGINE_REASON_CODES = [
   'LADDER_PACED',
   'ALREADY_WINNING_BUYBOX',
   'NO_COMPETITOR_OFFERS',
+  // Шаг 101 [Р-226]: после фильтра «Compete with» конкурентов нет — цена держится; к «всем» фильтр не откатывается
+  'NO_ELIGIBLE_COMPETITORS',
   'TARGET_OUTSIDE_BOUNDS_HOLD',
   // Шаг 97 [Р-221]: «Match the Buy Box» — канал не называет держателя (Amazon, A-29), а наша цена равна цене Buy Box: возможно, Buy Box
   // наш, и подрезать самих себя нельзя — цена держится
@@ -297,8 +303,18 @@ export const STRATEGY_TYPES = ['FIXED', 'TARGET_MARGIN', 'MATCH_BUYBOX', 'BEAT_L
 export const LOWEST_SCOPES = ['VISIBLE_TOP_N', 'MARKET'] as const;
 /** Шаг 97: кто исполняет предложение — канал (Amazon FBA, Kaufland, Walmart WFS) или продавец; без значения — канал не назвал */
 export const FULFILMENT_KINDS = ['CHANNEL', 'MERCHANT'] as const;
+/** Шаг 101 [Р-226]: настройка ориентира стратегии и ориентир, который победил (у «меньшей из двух» — один из двух) */
+export const ANCHOR_SETTINGS = ['BUYBOX', 'LOWEST', 'LOWER_OF_TWO'] as const;
+export const ANCHOR_KINDS = ['BUYBOX', 'LOWEST'] as const;
+/** Шаг 101 [Р-226]: держатель Buy Box вне фильтра или его исполнение не названо — ориентир Buy Box под фильтром недоступен */
+export const BUYBOX_HOLDER_STATES = ['EXCLUDED', 'UNKNOWN'] as const;
+/**
+ * Шаг 101 [Р-226]: почему у «меньшей из двух» ориентир Buy Box не участвовал: Buy Box нет в снимке, он наш, держатель неизвестен (канал не
+ * назвал, а цена равна нашей, или под фильтром исполнение не названо), держатель вне фильтра, доставка Buy Box не названа (сравнение с доставкой)
+ */
+export const BUYBOX_UNUSED = ['ABSENT', 'SELF', 'UNKNOWN', 'EXCLUDED', 'NO_SHIPPING'] as const;
 /** Шаг 47: NO_COMPETITOR_SOURCE — у канала нет ни одного источника конкурентов (eBay, Р-39), как в channel_data.strategy_unmet (0082) */
-export const UNMET_REQUIREMENTS = ['NO_COMPETITOR_SOURCE', 'NO_SNAPSHOT', 'COMPLETENESS', 'BUYBOX_WINNER', 'OWN_RANK', 'SHIPPING', 'CONDITION', 'STALENESS', 'OWN_SHIPPING', 'BUYBOX_PRICE'] as const;
+export const UNMET_REQUIREMENTS = ['NO_COMPETITOR_SOURCE', 'NO_SNAPSHOT', 'COMPLETENESS', 'BUYBOX_WINNER', 'OWN_RANK', 'SHIPPING', 'CONDITION', 'STALENESS', 'OWN_SHIPPING', 'BUYBOX_PRICE', 'FULFILMENT'] as const;
 export const COMPLETENESS_KINDS = ['TOP_N', 'CHEAPEST_ONLY', 'FULL'] as const;
 export const COST_INPUTS = ['COST_PROFILE', 'VAT_RATE'] as const;
 export const CURRENCY_SOURCES = ['SNAPSHOT', 'COST'] as const;
@@ -424,6 +440,18 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
     winnerLandedMinor: money('CHANNEL'), undercutMinor: money('CHANNEL_DERIVED'), handicapMinor: money('CHANNEL_DERIVED'), ownShippingMinor: money('CHANNEL'),
     winnerFulfilment: oneOf(FULFILMENT_KINDS, 'CHANNEL', O), targetMinor: money('CHANNEL_DERIVED'), currency: currency(),
   },
+  /**
+   * Шаг 101 [Р-226]: цель от ориентира не по умолчанию — ориентир минус подрез (у «Win the Buy Box» — и гандикап, и наша доставка). Какой
+   * ориентир победил у «меньшей из двух», выводится из цен конкурентов [Р-85]; сама настройка ориентира, как и фильтр «Compete with», живёт
+   * рядом с подрезом 18 месяцев (решение владельца, как гандикап в 0189), поэтому в вечное ядро не идёт тоже
+   */
+  ANCHOR_UNDERCUT: {
+    strategyType: oneOf(STRATEGY_TYPES, 'TENANT'), anchorSetting: oneOf(ANCHOR_SETTINGS, 'CHANNEL_DERIVED'), anchorUsed: oneOf(ANCHOR_KINDS, 'CHANNEL_DERIVED'),
+    anchorMinor: money('CHANNEL'), otherAnchorMinor: money('CHANNEL', O), buyboxUnused: oneOf(BUYBOX_UNUSED, 'CHANNEL', O),
+    undercutMinor: money('CHANNEL_DERIVED'), handicapMinor: money('CHANNEL_DERIVED', O), ownShippingMinor: money('CHANNEL', O), targetMinor: money('CHANNEL_DERIVED'), currency: currency(),
+  },
+  /** Шаг 101 [Р-226]: с кем стратегия соревновалась — фильтр продавца (18 месяцев рядом с подрезом); счёт предложений — данные канала */
+  COMPETITORS_FILTERED: { competeWith: oneOf(FULFILMENT_KINDS, 'CHANNEL_DERIVED'), offersConsidered: count('CHANNEL'), offersTotal: count('CHANNEL'), offersUnknown: count('CHANNEL') },
   /** Шаг 97 [Р-219]: Buy Box наш — подъём на шаг: от нашей цены к нашей цене, шаг — настройка продавца (данные тенанта, Р-3) */
   CREEP_UP: { fromMinor: money('TENANT'), toMinor: money('TENANT'), creepStepBp: bp('TENANT'), currency: currency() },
   /**
@@ -447,6 +475,13 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   WITHIN_DEADBAND: { deltaMinor: money('CHANNEL_DERIVED'), deadbandMinor: money('TENANT'), currency: currency() },
   ALREADY_WINNING_BUYBOX: {},
   NO_COMPETITOR_OFFERS: {},
+  /**
+   * Шаг 101 [Р-226]: после фильтра не с кем соревноваться — цена держится. `buyboxHolder` — ориентир Buy Box под фильтром недоступен: держатель
+   * вне фильтра или канал не назвал его исполнения
+   */
+  NO_ELIGIBLE_COMPETITORS: {
+    competeWith: oneOf(FULFILMENT_KINDS, 'CHANNEL_DERIVED'), offersTotal: count('CHANNEL'), offersUnknown: count('CHANNEL'), buyboxHolder: oneOf(BUYBOX_HOLDER_STATES, 'CHANNEL', O),
+  },
   TARGET_OUTSIDE_BOUNDS_HOLD: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), maxMinor: money('TENANT'), currency: currency() },
   COMPETITOR_REQUIREMENT_NOT_MET: {
     unmet: listOf(UNMET_REQUIREMENTS, 'CHANNEL'), requiredCompleteness: oneOf(COMPLETENESS_KINDS, 'CONFIG', ON), requiredN: count('CONFIG', ON),

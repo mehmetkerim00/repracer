@@ -133,11 +133,29 @@ export interface CompetitorRequirement {
   needsBuyboxWinner: boolean;
   /** Шаг 97: нужна цена Buy Box — «Match the Buy Box»; держатель ей не обязателен (Amazon его не называет, A-29) */
   needsBuyboxPrice: boolean;
+  /**
+   * Шаг 101 [Р-226]: фильтр «Compete with» (не All) — источник должен называть исполнение предложений (кто исполняет: канал или продавец).
+   * Walmart его не называет (W-05) — фильтр там недоступен, как недоступна стратегия без нужных данных [Р-39]
+   */
+  needsFulfilment?: boolean;
   needsOwnRank: boolean;
   needsShipping: boolean;
   conditions: string[];
   maxStalenessSeconds: number | null;
 }
+
+/**
+ * Шаг 101 [Р-226]: ориентир цены конкурентной стратегии — цена Buy Box, самая низкая цена или меньшая из двух (landed, где стратегия сравнивает
+ * с доставкой). Умолчание — прежнее поведение типа: «Beat the lowest» — самая низкая, «Win the Buy Box» — Buy Box
+ */
+export const COMPETITOR_ANCHORS = ['BUYBOX', 'LOWEST', 'LOWER_OF_TWO'] as const;
+export type CompetitorAnchor = (typeof COMPETITOR_ANCHORS)[number];
+/**
+ * Шаг 101 [Р-226]: с кем соревноваться — со всеми, только с исполняемыми каналом (FBA, Kaufland, WFS) или только с исполняемыми продавцом (FBM).
+ * Фильтр применяется к снимку ДО расчёта; предложение с неизвестным исполнением при фильтре исключается и считается отдельно
+ */
+export const COMPETE_WITH = ['ALL', 'CHANNEL', 'MERCHANT'] as const;
+export type CompeteWith = (typeof COMPETE_WITH)[number];
 
 export type StrategyParams =
   | { type: 'FIXED'; priceMinor: number }
@@ -150,6 +168,8 @@ export type StrategyParams =
       holdWhenWinning: boolean;
       /** Цель вне границ: CAP — встать на границу, HOLD — не менять цену */
       atBound: 'CAP' | 'HOLD';
+      /** Шаг 101 [Р-226]: с кем соревноваться; нет поля — со всеми. Хранится рядом с подрезом (18 месяцев), не в вечной версии */
+      competeWith?: CompeteWith;
     }
   | {
       type: 'BEAT_LOWEST';
@@ -159,6 +179,9 @@ export type StrategyParams =
       /** Сравнивать цену с доставкой */
       compareLanded: boolean;
       atBound: 'CAP' | 'HOLD';
+      /** Шаг 101 [Р-226]: ориентир; нет поля — самая низкая цена (прежнее поведение) */
+      anchor?: CompetitorAnchor;
+      competeWith?: CompeteWith;
     }
   | {
       /**
@@ -179,6 +202,9 @@ export type StrategyParams =
       /** Шаг подъёма в базисных пунктах; не больше предела шага Gate (больший — урезается до предела) */
       creepStepBp: number;
       atBound: 'CAP' | 'HOLD';
+      /** Шаг 101 [Р-226]: ориентир; нет поля — Buy Box (прежнее поведение) */
+      anchor?: CompetitorAnchor;
+      competeWith?: CompeteWith;
     };
 
 export type StrategyType = StrategyParams['type'];

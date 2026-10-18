@@ -12,6 +12,8 @@ export interface CompetitorTableRow {
   seller: string; self: boolean; landed: string; landedKnown: boolean;
   shipping?: string | null; fulfilment: string | null; rating: string | null; buyBox: boolean | null;
   move?: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was?: string | null;
+  /** Шаг 101 [Р-226]: строка вне расчёта — приглушена, с пометкой словами */
+  excluded?: string | null;
 }
 
 export function CompetitorTable({ rows, columns, shipping = false, foot }: {
@@ -36,8 +38,8 @@ export function CompetitorTable({ rows, columns, shipping = false, foot }: {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={`${r.seller}-${i}`} className={`${r.self ? 'self-row' : ''}${r.move === 'GONE' ? ' gone-row' : ''}`}>
-              <td className="seller">{r.self ? <strong>{r.seller}</strong> : r.seller}</td>
+            <tr key={`${r.seller}-${i}`} className={`${r.self ? 'self-row' : ''}${r.move === 'GONE' ? ' gone-row' : ''}${r.excluded ? ' excluded-row' : ''}`}>
+              <td className="seller">{r.self ? <strong>{r.seller}</strong> : r.seller}{r.excluded ? <span className="excluded-note">{r.excluded}</span> : null}</td>
               <td className="num cur landed">
                 {r.move === 'UP' || r.move === 'DOWN'
                   ? <><span className="was">{r.was}</span> → <strong>{r.landed}</strong> <span className={`move move-${r.move.toLowerCase()}`} aria-label={t.moved[r.move]}>{r.move === 'DOWN' ? '↓' : '↑'}</span></>

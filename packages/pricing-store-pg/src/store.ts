@@ -106,12 +106,19 @@ const EU_STOREFRONTS_SQL = (tenant: string) => `EXISTS (SELECT 1 FROM tenant_dat
                  JOIN platform.marketplace pm ON pm.channel = a.channel AND pm.marketplace = ANY (a.marketplaces)
                 WHERE a.tenant_id = ${tenant} AND a.disconnected_at IS NULL AND pm.country IN (${EU_COUNTRIES.map((c) => `'${c}'`).join(', ')}))`;
 
+/** Шаг 101 [Р-226]: ориентир и фильтр «Compete with» версии — из строки подреза; NULL — умолчание типа, в параметрах поля нет */
+export function strategyChoice(r: { anchor?: string | null; compete_with?: string | null }): { anchor?: string; competeWith?: string } {
+  return { ...(r.anchor ? { anchor: r.anchor } : {}), ...(r.compete_with ? { competeWith: r.compete_with } : {}) };
+}
+
 const SCOPE_COLUMNS = `
   s.write_scope_id, s.product_id, s.channel_account_id, s.channel, m.marketplace, m.region, m.external_unit_id, m.external_sku, m.external_listing_id, m.external_offer_id, m.channel_product_ref, m.condition,
   s.scope_key, p.gtin, p.sku AS label_sku, CASE WHEN p.title_channel_read_at IS NULL THEN p.title END AS label_title, s.currency, s.price_basis, s.tax_regime, s.pricing_mode, s.status, s.pricing_strategy_id, s.pricing_strategy_version, s.created_at,
   CASE WHEN ud.undercut_minor IS NULL THEN ps.params ELSE ps.params || jsonb_build_object('undercutMinor', ud.undercut_minor)
        -- Шаг 97 [Р-91]: гандикап «Win the Buy Box» — там же, где подрез
-       || CASE WHEN ud.fulfillment_handicap_minor IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('fulfillmentHandicapMinor', ud.fulfillment_handicap_minor) END END AS strategy_params,
+       || CASE WHEN ud.fulfillment_handicap_minor IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('fulfillmentHandicapMinor', ud.fulfillment_handicap_minor) END
+       -- Шаг 101 [Р-226]: ориентир и фильтр «Compete with» — там же (решение владельца, 0195); NULL — умолчание типа
+       || jsonb_strip_nulls(jsonb_build_object('anchor', ud.anchor, 'competeWith', ud.compete_with)) END AS strategy_params,
   ss.latest_version_accepted, ss.last_sent_amount_minor,
   -- Шаг 64 (живой прогон продавца из США): предложение тени — только у аккаунта В ТЕНИ. После перевода в бой оно в строке остаётся, и
   -- движок считал цену «уже предложенной тенью» — фиксированная цена eBay в бою не уходила никогда
@@ -2234,7 +2241,7 @@ export class PgPricingStore implements PricingStore {
       return await inTenant(this.admin('assignStrategyVersion'), tenantId, async (tx) => {
         await PgPricingStore.assertExpected(tx, tenantId, input.expected);
         const { rows: [v] } = await tx.query(
-          `SELECT ps.version, ps.type, ps.params, u.undercut_minor, u.fulfillment_handicap_minor FROM tenant_data.pricing_strategy ps
+          `SELECT ps.version, ps.type, ps.params, u.undercut_minor, u.fulfillment_handicap_minor, u.anchor, u.compete_with FROM tenant_data.pricing_strategy ps
              LEFT JOIN channel_data.pricing_strategy_undercut u ON u.tenant_id = ps.tenant_id AND u.pricing_strategy_id = ps.pricing_strategy_id AND u.version = ps.version
             WHERE ps.tenant_id = $1 AND ps.pricing_strategy_id = $2 AND ps.version = $3`, [tenantId, input.strategyId, input.version]);
         if (!v) throw new RollbackWith<StrategySaveResult>({ status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' });
@@ -2249,7 +2256,8 @@ export class PgPricingStore implements PricingStore {
           strategy: {
             strategyId: input.strategyId, version: input.version, deadbandMinor: Number(deadbandMinor ?? 0),
             params: { ...params, type: v.type, ...(v.undercut_minor !== null ? { undercutMinor: Number(v.undercut_minor) } : {}),
-              ...(v.fulfillment_handicap_minor !== null ? { fulfillmentHandicapMinor: Number(v.fulfillment_handicap_minor) } : {}) } as unknown as StrategyDefinition['params'],
+              ...(v.fulfillment_handicap_minor !== null ? { fulfillmentHandicapMinor: Number(v.fulfillment_handicap_minor) } : {}),
+              ...strategyChoice(v) } as unknown as StrategyDefinition['params'],
           },
         } satisfies StrategySaveResult;
       }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
@@ -2298,15 +2306,17 @@ export class PgPricingStore implements PricingStore {
         }
         // Р-91: версия стратегии (вечная, архивируется с ядром) — без подреза; подрез — в таблице с 18-месячным сроком
         // Шаг 97: гандикап «Win the Buy Box» — там же, где подрез: вместе с ценой решения он раскрывал бы цену конкурента
-        const { undercutMinor, fulfillmentHandicapMinor, ...stored } = input.params as Record<string, unknown>;
+        // Шаг 101 [Р-226]: ориентир и фильтр «Compete with» — тоже рядом с подрезом (решение владельца, 0195)
+        const { undercutMinor, fulfillmentHandicapMinor, anchor, competeWith, ...stored } = input.params as Record<string, unknown>;
         await tx.query(
           `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
           [tenantId, strategyId, version, input.name.trim(), input.params.type, JSON.stringify({ ...stored, deadbandMinor: input.deadbandMinor }),
            ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], actor.membershipId]);
         if (undercutMinor !== undefined) {
-          await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor) VALUES ($1, $2, $3, $4, $5)`,
-            [tenantId, strategyId, version, undercutMinor, fulfillmentHandicapMinor ?? null]);
+          await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor, anchor, compete_with)
+                          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [tenantId, strategyId, version, undercutMinor, fulfillmentHandicapMinor ?? null, anchor ?? null, competeWith ?? null]);
         }
         if (input.assignTo.length > 0) {
           const { rowCount } = await tx.query(
@@ -2531,7 +2541,7 @@ export class PgPricingStore implements PricingStore {
        * Шаг 68 (K11): подрез версии — из своей таблицы, пока он там есть (18 месяцев после замены версии [Р-91]). Без него строка
        * стратегии «почему эта цена» говорила «подрез не хранится (18 месяцев после замены версии)» о ДЕЙСТВУЮЩЕЙ версии
        */
-      const strategies = (await q(`SELECT ps.pricing_strategy_id, ps.version, ps.params, u.undercut_minor, u.fulfillment_handicap_minor FROM tenant_data.pricing_strategy ps
+      const strategies = (await q(`SELECT ps.pricing_strategy_id, ps.version, ps.params, u.undercut_minor, u.fulfillment_handicap_minor, u.anchor, u.compete_with FROM tenant_data.pricing_strategy ps
                                      LEFT JOIN channel_data.pricing_strategy_undercut u
                                        ON u.tenant_id = ps.tenant_id AND u.pricing_strategy_id = ps.pricing_strategy_id AND u.version = ps.version
                                     WHERE ps.tenant_id = $1 ORDER BY ps.pricing_strategy_id, ps.version`))
@@ -2540,7 +2550,8 @@ export class PgPricingStore implements PricingStore {
           return {
             strategyId: r.pricing_strategy_id, version: r.version, deadbandMinor: Number(deadbandMinor ?? 0),
             params: { ...params, ...(r.undercut_minor === null ? {} : { undercutMinor: Number(r.undercut_minor) }),
-              ...(r.fulfillment_handicap_minor === null || r.fulfillment_handicap_minor === undefined ? {} : { fulfillmentHandicapMinor: Number(r.fulfillment_handicap_minor) }) } as unknown as StrategyDefinition['params'],
+              ...(r.fulfillment_handicap_minor === null || r.fulfillment_handicap_minor === undefined ? {} : { fulfillmentHandicapMinor: Number(r.fulfillment_handicap_minor) }),
+              ...strategyChoice(r) } as unknown as StrategyDefinition['params'],
           };
         });
       const strategyVersions = (await q(`SELECT pricing_strategy_id, version, name, status, created_at, created_by_membership_id

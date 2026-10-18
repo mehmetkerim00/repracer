@@ -59,3 +59,22 @@ test('step 97 (review): a snapshot with a Buy Box price but no offers gives no v
   assert.equal(buildCompetitorView(snap([], { buybox: { price: usd(1800), isSelf: false } }), snap([offer('Harbor Goods', 1800)])), null,
     'even when the previous reading had offers: what is gone is named only next to what is there');
 });
+
+/**
+ * Шаг 101 [Р-226], найдено снимком демо: под фильтром «Compete with» повод квитанции называл исключённого лоукостера FBM («Triggered by
+ * Pine & Co»), хотя стратегия соревновалась только с FBA и тот тоже двинулся. Повод — среди тех, с кем стратегия соревнуется; двинулись
+ * только исключённые — повод прежний (событие правда было)
+ */
+test('step 101: under a filter the trigger is a competitor the strategy competes with; only excluded ones moved — the trigger stays', async () => {
+  const { withCompetitorFilter } = await import('./competitor-view.ts');
+  const before = snap([offer('Pine & Co', 1475, { fulfillment: 'MFN' }), offer('Harbor Goods', 1500, { fulfillment: 'AFN' }), offer(null, 1850, { fulfillment: 'MFN' })]);
+  const both = snap([offer('Pine & Co', 1225, { fulfillment: 'MFN' }), offer('Harbor Goods', 1250, { fulfillment: 'AFN' }), offer(null, 1850, { fulfillment: 'MFN' })]);
+  const view = buildCompetitorView(both, before)!;
+  assert.equal(view.trigger?.seller, 'Pine & Co', 'without a filter the cheapest mover is the trigger');
+  const fba = withCompetitorFilter(view, both.offers, 'CHANNEL')!;
+  assert.deepEqual(fba.trigger, { seller: 'Harbor Goods', move: 'DOWN', wasMinor: 1500, nowMinor: 1250 }, 'FBA only: the trigger is the FBA seller that moved');
+  assert.equal(withCompetitorFilter(view, both.offers, 'MERCHANT')!.trigger?.seller, 'Pine & Co', 'FBM only: the FBM seller');
+  // Двинулся только исключённый — другого события не было, повод прежний
+  const onlyFbm = snap([offer('Pine & Co', 1225, { fulfillment: 'MFN' }), offer('Harbor Goods', 1500, { fulfillment: 'AFN' }), offer(null, 1850, { fulfillment: 'MFN' })]);
+  assert.equal(withCompetitorFilter(buildCompetitorView(onlyFbm, before), onlyFbm.offers, 'CHANNEL')!.trigger?.seller, 'Pine & Co');
+});

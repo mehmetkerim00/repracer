@@ -70,6 +70,11 @@ export interface CompetitorSourceDescriptor {
    * цену (Summary.BuyBoxPrices), но не держателя (A-29)
    */
   hasBuyboxPrice: boolean;
+  /**
+   * Шаг 101 [Р-226]: источник называет исполнение предложений (канал или продавец) — нужно фильтру «Compete with». Amazon ANY_OFFER_CHANGED —
+   * IsFulfilledByAmazon (обязательное поле схемы), Kaufland /buybox — fulfillment_type; Walmart — нет (W-05)
+   */
+  hasFulfilment: boolean;
   hasOwnRank: boolean;
   hasShipping: boolean;
   /** null — зависит от расписания опроса или не документировано */

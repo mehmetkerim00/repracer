@@ -1,5 +1,5 @@
 import type { CompetitorOffer, CompetitorSnapshot } from '@repracer/channel-port';
-import { fulfilmentKind } from './types.ts';
+import { fulfilmentKind, type CompeteWith } from './types.ts';
 
 /**
  * Шаг 97 [Р-218]: картина рынка в квитанции решения и «кто подвинул цену». Дифф — против ПРЕДЫДУЩЕГО ПРИНЯТОГО снимка того же предложения
@@ -25,6 +25,11 @@ export interface CompetitorViewRow {
   move?: CompetitorMove;
   /** Прежняя цена (UP, DOWN) или последняя известная (GONE) */
   wasMinor?: number;
+  /**
+   * Шаг 101 [Р-226]: предложение не участвовало в расчёте — исключено фильтром «Compete with» (FILTER) или его исполнение неизвестно
+   * (UNKNOWN). Строка остаётся в картине рынка: квитанция показывает её приглушённой, а не прячет
+   */
+  excluded?: CompetitorExclusion;
 }
 
 export interface CompetitorTrigger {
@@ -39,6 +44,77 @@ export interface CompetitorView {
   /** Кто подвинул цену; null — сравнивать не с чем (первый принятый снимок) или никто не двигался */
   trigger: CompetitorTrigger | null;
   offers: CompetitorViewRow[];
+  /**
+   * Шаг 101 [Р-226]: фильтр стратегии этого решения — по всему снимку, а не только по строкам картины: «considered 3 of 5 offers», и
+   * отдельно — с неизвестным исполнением. Нет поля — стратегия соревнуется со всеми
+   */
+  filter?: CompetitorFilterSummary;
+}
+
+export type CompetitorExclusion = 'FILTER' | 'UNKNOWN';
+
+export interface CompetitorFilterSummary {
+  competeWith: Exclude<CompeteWith, 'ALL'>;
+  /** Чужих предложений в снимке */
+  total: number;
+  /** Из них прошли фильтр и участвовали в расчёте */
+  considered: number;
+  /** Исключены, потому что канал не назвал исполнение */
+  unknown: number;
+}
+
+/**
+ * Шаг 101 [Р-226]: исключено ли предложение фильтром «Compete with». Исполнение — по значению канала (`fulfilmentKind`); неизвестное
+ * исполнение при фильтре — исключение отдельного вида: молча не выкидывается и считается
+ */
+export function competitorExclusion(fulfillment: string | null | undefined, competeWith: CompeteWith | undefined): CompetitorExclusion | null {
+  if (!competeWith || competeWith === 'ALL') return null;
+  const kind = fulfilmentKind(fulfillment);
+  if (kind === null) return 'UNKNOWN';
+  return kind === competeWith ? null : 'FILTER';
+}
+
+/** Чужие предложения снимка, прошедшие фильтр, и счёт исключённых — один расчёт у движка и у картины рынка решения */
+export function filterCompetitors<T extends Pick<CompetitorOffer, 'isSelf' | 'fulfillment'>>(offers: readonly T[], competeWith: CompeteWith | undefined): {
+  eligible: T[]; total: number; unknown: number; filtered: number;
+} {
+  const others = offers.filter((o) => !o.isSelf);
+  const eligible: T[] = [];
+  let unknown = 0;
+  let filtered = 0;
+  for (const o of others) {
+    const why = competitorExclusion(o.fulfillment, competeWith);
+    if (why === null) eligible.push(o);
+    else if (why === 'UNKNOWN') unknown += 1;
+    else filtered += 1;
+  }
+  return { eligible, total: others.length, unknown, filtered };
+}
+
+/**
+ * Шаг 101 [Р-226]: картина рынка решения со стратегией под фильтром — строки, не участвовавшие в расчёте, помечены, счёт — по всему снимку.
+ * Картина общая для товара (строится одна на снимок), фильтр — у стратегии каждого предложения: пометки — копия на решение
+ */
+export function withCompetitorFilter(view: CompetitorView | null, offers: readonly Pick<CompetitorOffer, 'isSelf' | 'fulfillment'>[], competeWith: CompeteWith | undefined): CompetitorView | null {
+  if (!view || !competeWith || competeWith === 'ALL') return view;
+  const counted = filterCompetitors(offers, competeWith);
+  const marked = view.offers.map((r) => {
+    if (r.self || r.move === 'GONE') return r;
+    const why = competitorExclusion(r.fulfilment ?? null, competeWith);
+    return why ? { ...r, excluded: why } : r;
+  });
+  /**
+   * Повод — среди тех, с кем стратегия соревнуется (найдено снимком демо: «Triggered by» называл исключённого лоукостера FBM); двинулись
+   * только исключённые — повод прежний: событие было, и квитанция не придумывает другого
+   */
+  const eligible = view.trigger ? triggerOf(marked.filter((r) => r.move !== 'GONE' && !r.excluded),
+    marked.filter((r) => r.move === 'GONE' && competitorExclusion(r.fulfilment ?? null, competeWith) === null)) : null;
+  return {
+    ...view,
+    trigger: eligible ?? view.trigger,
+    offers: marked,
+    filter: { competeWith, total: counted.total, considered: counted.eligible.length, unknown: counted.unknown },
+  };
 }
 
 /** Сколько строк хранится: топ по рангу, наше предложение и все, кто подвинулся или ушёл (ограничение 0187 — не больше 21) */

@@ -46,6 +46,10 @@ const DAY_MS = 24 * HOUR_MS;
 const COMPETITOR_STEP_MS = 2 * HOUR_MS;
 /** Ступени конкурента amazon.com: спуск ниже пола (14,00) и возврат, каждая не круче 20 % [Р-42] */
 const AMAZON_US_RAMP = [1800, 1500, 1250, 1050, 900, 1050, 1250, 1500] as const;
+/** Шаг 101 [Р-226]: товар amazon.com со стратегией «только FBA» и лоукостером FBM без Buy Box (номер среди товаров amazon.com) */
+const FBA_ONLY_PRODUCT = 0;
+/** Насколько лоукостер FBM дешевле держателя Buy Box FBA: меньше бонуса исполнения каналом модели ($0.50) — Buy Box остаётся у FBA */
+const FBM_DISCOUNT_MINOR = 25;
 /** Сколько суток вперёд у модели расписание конкурентов: демо живёт, пока жив процесс */
 const SCHEDULE_DAYS = 400;
 /** Ход настоящего времени после прожатой недели */
@@ -119,15 +123,18 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
       writeScopeId: r.write_scope_id, productId: r.product_id, channelAccountId: r.channel_account_id, marketplace: r.marketplace,
       channelProductRef: r.channel_product_ref, sku: r.external_sku,
     }));
-    const strategy = async (name: string, type: string, params: Record<string, unknown>, undercutMinor: number | null, handicapMinor: number | null = null) => {
+    const strategy = async (name: string, type: string, params: Record<string, unknown>, undercutMinor: number | null, handicapMinor: number | null = null,
+      choice: { anchor?: string; competeWith?: string } = {}) => {
       const { rows: [s] } = await tx.query(
         `INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, version, name, type, params, triggers, status, created_by_membership_id)
          VALUES ($1, gen_random_uuid(), 1, $2, $3, $4, $5, 'ACTIVE', $6) RETURNING pricing_strategy_id`,
         [a.tenantId, name, type, JSON.stringify({ ...params, deadbandMinor: 0 }), ['COMPETITOR_CHANGE', 'COST_CHANGE', 'SCHEDULE'], a.ownerMembershipId]);
       // Р-91: подрез — в таблице с 18-месячным сроком, а не в вечной версии стратегии
       if (undercutMinor !== null) {
-        await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor) VALUES ($1, $2, 1, $3, $4)`,
-          [a.tenantId, s!.pricing_strategy_id, undercutMinor, handicapMinor]);
+        // Шаг 101 [Р-226]: ориентир и фильтр «Compete with» — там же, где подрез
+        await tx.query(`INSERT INTO channel_data.pricing_strategy_undercut (tenant_id, pricing_strategy_id, version, undercut_minor, fulfillment_handicap_minor, anchor, compete_with)
+                        VALUES ($1, $2, 1, $3, $4, $5, $6)`,
+          [a.tenantId, s!.pricing_strategy_id, undercutMinor, handicapMinor, choice.anchor ?? null, choice.competeWith ?? null]);
       }
       return s!.pricing_strategy_id as string;
     };
@@ -139,6 +146,12 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
      * победителя с доставкой минус цент; поправка на исполнение каналом — 0 (исполнения модель Walmart не называет, W-05). Подрез и
      * поправка — в таблице с 18-месячным сроком [Р-91], не в вечной версии
      */
+    /**
+     * Шаг 101 [Р-226]: первый товар amazon.com — лоукостер Pine & Co исполняет заказ сам (FBM) и Buy Box не держит, Buy Box у Harbor Goods (FBA)
+     * на $0.25 дороже. Стратегия «только FBA» соревнуется с Harbor Goods: в квитанции Pine & Co — приглушённая строка «excluded by your filter»
+     */
+    const beatFba = await strategy('Beat the lowest FBA offer', 'BEAT_LOWEST',
+      { type: 'BEAT_LOWEST', scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP' }, 1, null, { competeWith: 'CHANNEL' });
     const winBuyBox = a.walmartAccountId ? await strategy('Win the Buy Box', 'WIN_BUYBOX', { type: 'WIN_BUYBOX', creepUp: true, creepStepBp: 100, atBound: 'CAP' }, 1, 0) : null;
     for (const s of scopes) {
       const ebay = s.channelAccountId === a.ebayAccountId;
@@ -174,7 +187,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
          VALUES ($1, $2, 'PRICE', $3, $4, $4, 'READBACK', 'IN_SYNC')`, [a.tenantId, s.writeScopeId, ebay ? 1999 : walmart ? WALMART_LISTING_MINOR(k) : 1850, validFrom]);
       await tx.query(
         `UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = $3, pricing_strategy_version = 1
-          WHERE tenant_id = $1 AND write_scope_id = $2`, [a.tenantId, s.writeScopeId, ebay ? margin : walmart && winBuyBox ? winBuyBox : beat]);
+          WHERE tenant_id = $1 AND write_scope_id = $2`, [a.tenantId, s.writeScopeId, ebay ? margin : walmart && winBuyBox ? winBuyBox : k === FBA_ONLY_PRODUCT ? beatFba : beat]);
     }
     return scopes;
   }, a.userId, { mfa: true });
@@ -193,7 +206,9 @@ export async function startDemoUsMarket(input: {
   titleOffsets?: DemoTitleOffsets;
 }): Promise<DemoUsMarket> {
   const { pools, store, accounts: a, log } = input;
-  const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US, LANDED_CHANNEL_BONUS, sellersFor } = await import('@repracer/contract-tests/simulator');
+  const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US, LANDED_CHANNEL_BONUS, SYNTHETIC_SELLERS, sellersFor } = await import('@repracer/contract-tests/simulator');
+  /** Шаг 101 [Р-226]: лоукостер товара «только FBA» — продавец пула, который исполняет заказ сам (FBM) */
+  const LOW_COST_FBM = SYNTHETIC_SELLERS.find((x) => x.name === 'Pine & Co' && !x.channelFulfilled)!;
   const realStart = systemClock.nowMs();
   const begin = realStart - input.pressDays * DAY_MS;
   /** Часы мира США: виртуальные, пока идёт прожатая неделя, затем настоящие */
@@ -233,13 +248,25 @@ export async function startDemoUsMarket(input: {
     // Шаг 97 [H]: победитель — по формуле (FBA −0,50), а уведомление держателя не называет (A-29) — экран Competition говорит это прямо
     buyBox: LANDED_CHANNEL_BONUS,
     skus: amazonScopes.map((s) => ({ sku: s.sku, asin: s.channelProductRef!, marketplaces: [AMAZON_US], priceMinor: 1850, quantity: 5 })),
-    competitors: amazonScopes.map((s, i) => ({
+    competitors: [...amazonScopes.map((s, i) => ({
       // Шаг 97 [H]: продавец пула — вымышленное имя, исполнение каналом (FBA) и рейтинг, как SellerFeedbackRating
       sellerRef: sellersFor(i)[0]!.name, channelFulfilled: sellersFor(i)[0]!.channelFulfilled,
       rating: { positivePct: sellersFor(i)[0]!.ratingPct, count: sellersFor(i)[0]!.ratingCount }, marketplace: AMAZON_US, asin: s.channelProductRef!, priceMinor: 1800,
       // Фаза ступени — своя у каждого предложения: в один момент рынок движется вразброс, а не единым сдвигом [Р-50]
       schedule: Array.from({ length: steps }, (_, k) => ({ atOffsetMs: (k + 1) * COMPETITOR_STEP_MS + i * 10 * MINUTE_MS, priceMinor: AMAZON_US_RAMP[(k + i) % AMAZON_US_RAMP.length]! })),
     })),
+    /**
+     * Шаг 101 [Р-226]: у первого товара — лоукостер FBM на $0.25 дешевле держателя: по правилу Buy Box модели (FBA −$0.50) Buy Box остаётся у
+     * Harbor Goods (FBA), самая низкая цена — у Pine & Co (FBM). На этом товаре видна разница «самая низкая / Buy Box / только FBA»
+     */
+    ...amazonScopes.slice(FBA_ONLY_PRODUCT, FBA_ONLY_PRODUCT + 1).map((s) => ({
+      sellerRef: LOW_COST_FBM.name, channelFulfilled: LOW_COST_FBM.channelFulfilled,
+      rating: { positivePct: LOW_COST_FBM.ratingPct, count: LOW_COST_FBM.ratingCount }, marketplace: AMAZON_US, asin: s.channelProductRef!, priceMinor: 1800 - FBM_DISCOUNT_MINOR,
+      schedule: Array.from({ length: steps }, (_, k) => ({
+        atOffsetMs: (k + 1) * COMPETITOR_STEP_MS + FBA_ONLY_PRODUCT * 10 * MINUTE_MS,
+        priceMinor: AMAZON_US_RAMP[(k + FBA_ONLY_PRODUCT) % AMAZON_US_RAMP.length]! - FBM_DISCOUNT_MINOR,
+      })),
+    }))],
   }, deps);
   const amazon = createPricingPipeline({ store: store as never, adapter: port, alerts, logger: deps.logger, now: nowIso as never });
   const ebay = createPricingPipeline({ store: store as never, adapter: consoleAdapter('EBAY'), alerts, logger: deps.logger, now: nowIso as never });
