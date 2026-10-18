@@ -135,8 +135,11 @@ INSERT INTO tenant_data.pricing_strategy (tenant_id, pricing_strategy_id, versio
 VALUES (:tA, 'a9000000-0000-0000-0000-000000000001', 1, 'smoke fixed', 'FIXED', '{"type":"FIXED","priceMinor":1000,"deadbandMinor":0}', ARRAY['SCHEDULE'], 'ACTIVE', :mA);
 -- Р-94, Р-131 (шаг 27): у тех же проверок объявлена и себестоимость — иначе отказ даёт страж себестоимости, а не проверяемая защита.
 -- Сама Р-131 проверяется ниже на отдельном товаре, у которого себестоимости нет
+-- Шаг 102 [Р-227]: безубыточность — всегда в полу. Себестоимость €8.00 с НДС 19 % — безубыточность €9.52, ниже min_price €10.00: защиты
+-- ниже проверяют min_price, а не её. Оценку комиссии этого предложения смоук-мир объявляет после проверок формы оценок (Р-138): те
+-- вставляют оценки этого же предложения, и занятая строка источника отказала бы уникальностью раньше проверяемого ограничения
 INSERT INTO tenant_data.cost_profile (tenant_id, product_id, version, valid_from, currency, purchase_cost_minor, source)
-VALUES (:tA, 'a5000000-0000-0000-0000-000000000001', 1, now() - interval '1 day', 'EUR', 900, 'MANUAL');
+VALUES (:tA, 'a5000000-0000-0000-0000-000000000001', 1, now() - interval '1 day', 'EUR', 800, 'MANUAL');
 SELECT pg_temp.expect_fail('ENGINE without min_price (Р-5)', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1 WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'has pricing_mode ENGINE but no active min_price');
 SELECT pg_temp.expect_fail('tenant-level min_price (Р-18)', $q$
@@ -181,6 +184,12 @@ INSERT INTO tenant_data.min_price (tenant_id, scope_type, product_id, currency, 
 VALUES (:tA, 'PRODUCT', 'a5000000-0000-0000-0000-000000000009', 'EUR', 'GROSS', 1000, 1, :mA);
 INSERT INTO tenant_data.max_price (tenant_id, scope_type, product_id, currency, price_basis, amount_minor, version, created_by_membership_id)
 VALUES (:tA, 'PRODUCT', 'a5000000-0000-0000-0000-000000000009', 'EUR', 'GROSS', 5000, 1, :mA);
+-- Шаг 102 [Р-227]: себестоимость этого товара объявит импорт ниже; без оценки комиссии и витрины (страна ставки НДС — из привязки
+-- предложения) его безубыточность не вычислялась бы (fail-closed)
+INSERT INTO tenant_data.offer_mapping (tenant_id, product_id, channel_account_id, channel, marketplace, channel_offer_key, external_unit_id, status, price_write_scope_id)
+VALUES (:tA, 'a5000000-0000-0000-0000-000000000009', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'U9@de', 'U9', 'ACTIVE', 'a6000000-0000-0000-0000-000000000009');
+INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
+VALUES (:tA, 'a6000000-0000-0000-0000-000000000009', 'FEE_SCHEDULE', '{"feeRateBp": 0, "fixedFeeMinor": 0}', '2026-09', now(), now() + interval '365 days');
 SELECT pg_temp.expect_fail('ENGINE without the declared unit cost (Р-131)', $q$
   UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = 'a9000000-0000-0000-0000-000000000001', pricing_strategy_version = 1
    WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000009' $q$, 'repricing needs the declared unit cost of the product');
@@ -360,6 +369,9 @@ SELECT pg_temp.expect_fail('a fee schedule estimate without its version (Р-32)'
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'FEE_SCHEDULE',
           '{"feeRateBp": 1500, "fixedFeeMinor": 0}'::jsonb, now(), now() + interval '30 days') $q$,
   'fee_estimate_schedule_version_iff');
+-- Шаг 102 [Р-227]: действующая оценка комиссии предложения — без неё безубыточность, а значит и пол, не вычисляются (fail-closed)
+INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, fee_schedule_version, computed_at, valid_until)
+VALUES (:tA, 'a6000000-0000-0000-0000-000000000001', 'FEE_SCHEDULE', '{"feeRateBp": 0, "fixedFeeMinor": 0}', '2026-09', now(), now() + interval '365 days');
 COMMIT;
 
 -- Ревью шага 28, находка 9: окно считает ПРЕДЛОЖЕНИЯ, а не строки. Продавец заводит офферы по одному, каждому — себестоимость и обе

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { systemClock } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/channel-port';
 import type { TenantWorldIndex } from './tenant-worlds.ts';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ import {
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
   BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor,
 } from '@repracer/console-model';
-import { DECISION_OUTCOME_GROUPS, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
+import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
 import { TABLE_ENCODINGS } from '@repracer/cost-import';
 import { APPLY_JOB_OF } from '@repracer/bulk-jobs/handlers';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
@@ -745,6 +745,32 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       });
       return { ids: matches.slice(0, limit).map((sc) => sc.writeScopeId), total: matches.length };
     };
+    /**
+     * Шаг 102 [Р-227]: страница пола одного предложения — с режимом распродажи: журнал режима с именами, остаток товара для «общего
+     * убытка» и «вернётся к полу примерно за N шагов (~X минут)» — арифметикой лестницы движка и периодом планового пересчёта канала
+     */
+    const boundsPage = async (writeScopeId: string) => {
+      const w = await load([writeScopeId]);
+      const scope = scopeById(w, writeScopeId);
+      if (!scope) return null;
+      const stockPieces = async (): Promise<number | null> => {
+        if (!scope.sku) return null;
+        try {
+          const page = await live.stock.stockPage(w.tenantId, { offset: 0, limit: 20, search: scope.sku });
+          const row = page.items.find((i) => i.productId === scope.productId);
+          return row ? row.available + (row.channelManaged ?? []).reduce((sum, c) => sum + c.quantity, 0) : null;
+        } catch {
+          return null;
+        }
+      };
+      const [state, pieces] = await Promise.all([live.store.clearanceOf(w.tenantId, writeScopeId), stockPieces()]);
+      const computed = effectiveFloor({ ...scope, clearance: null }, w).minor;
+      const paceMinutes = Math.round((descriptorOf(channelOf(w, scope.channelAccountId)).scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS) / 60);
+      const steps = computed !== null && scope.currentPriceMinor !== null ? ladderSteps(scope.currentPriceMinor, computed, scope.maxStepChangeBp ?? null) : 0;
+      return boundsView(w, writeScopeId, m, {
+        clearance: state, stockPieces: pieces, returnSteps: { steps, minutes: steps * paceMinutes }, canManage: can(viewer.role, 'MANAGE_PRICING'), people: w.people,
+      });
+    };
     /** Единицы среза вмешательств: решения, намерения, снятые записи — отчёты отклонённых и опасных изменений */
     const sliceScopeIds = (slice: InterventionSlice) => [...slice.decisions, ...slice.intents, ...slice.endedWrites].map((x) => x.writeScopeId);
     const screen = parts[3];
@@ -892,7 +918,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
               canEdit: can(viewer.role, 'MANAGE_PRICING'),
             } satisfies BoundsIndexView);
           }
-          const b = boundsView(await load([param]), param, m);
+          const b = await boundsPage(param);
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }
         case 'stop': return ok(await stopScreen());
@@ -1023,7 +1049,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
       || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
       || (screen === 'bounds' && param === 'apply') || screen === 'imports';
-    const oneUnit = screen === 'scopes' && param !== null && parts[5] === 'enable' ? [param]
+    const oneUnit = (screen === 'scopes' && param !== null && parts[5] === 'enable') || (screen === 'bounds' && param !== null && parts[5] === 'clearance') ? [param]
       : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId]
         : screen === 'feed' && param === 'export' ? [((body.query ?? {}) as Record<string, unknown>).writeScopeId] : null;
     const world = stopRoute ? await load([], { facts: await facts({ stopImpact: true }) })
@@ -1506,6 +1532,36 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }
       if (result.status !== 'UNASSIGNED') return fail(400, result.cause, s.badRequest);
       return ok({ message: m.ui.strategies.unassigned, strategies: await strategiesScreen(true) } satisfies StrategySaveResponse);
+    }
+
+    /**
+     * Шаг 102 [Р-227]: режим распродажи одного предложения. Включение — владелец или менеджер, со вторым фактором, подтверждением убытка
+     * и запиской («движение забора», исключение из Р-144); выключение — одним действием. Последнее слово — за базой (0197): её отказ
+     * хранилище переводит в причину, и экран называет её словами
+     */
+    if (screen === 'bounds' && param !== null && parts[5] === 'clearance') {
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const scope = scopeById(world, param);
+      if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+      const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
+      const texts = m.ui.bounds.clearance;
+      if (parts[6] === 'disable') {
+        const off = await live.store.disableClearance(world.tenantId, { writeScopeId: param, note: typeof body.note === 'string' ? body.note : null }, actor);
+        if (off.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+        if (off.status === 'NOT_ACTIVE') return fail(409, 'CLEARANCE_NOT_ACTIVE', texts.causes.NOT_ACTIVE);
+        const view = await boundsPage(param);
+        return ok({ message: texts.disabled, bounds: view });
+      }
+      if (parts[6] !== undefined) return fail(404, 'NOT_FOUND', s.notFound);
+      const floorMinor = typeof body.floorMinor === 'number' ? body.floorMinor : NaN;
+      const endsAt = typeof body.endsAt === 'string' && body.endsAt !== '' && Number.isFinite(Date.parse(body.endsAt)) ? new Date(body.endsAt).toISOString() : null;
+      const on = await live.store.enableClearance(world.tenantId, {
+        writeScopeId: param, floorMinor, currency: scope.currency, endsAt, note: typeof body.note === 'string' ? body.note : '', acknowledged: body.acknowledged === true,
+      }, actor);
+      if (on.status === 'FORBIDDEN') return fail(403, 'FORBIDDEN', s.forbidden);
+      if (on.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', texts.causes.MFA_REQUIRED);
+      if (on.status === 'INVALID') return fail(400, on.cause, texts.causes[on.cause]);
+      return ok({ message: texts.enabled, bounds: await boundsPage(param) });
     }
 
     /**

@@ -1,0 +1,270 @@
+{
+  "format": "repracer.contract-scenario/v1",
+  "id": "kaufland/pipeline/floor-above-ceiling",
+  "channel": "KAUFLAND",
+  "apiVersion": "2.44.0",
+  "title": "Безубыточность выше max_price: пол выше потолка, цены заморожены — и это видно",
+  "description": "Шаг 102 [Р-227]: безубыточность (маржа 0 %) всегда входит в пол, поэтому «пол выше потолка» стал законным состоянием. Стратегия целевой маржи 20 % (комиссия 15 %, НДС 19 %), минимальной маржи нет: при себестоимости 10.00 цена 19.15 одобрена и отправлена. Себестоимость выросла до 20.00 — безубыточность 28.98 выше max_price 25.00: ни одной цены без убытка нет. Gate отказывает не «цена выше потолка», а «пол выше потолка» (BOUND_UNRESOLVABLE, причина MARGIN_FLOOR_ABOVE_MAX_PRICE, граница — безубыточность), и CRITICAL-алерт несёт причину, предложение и витрину — письмо называет замороженное предложение и что сделать (поднять потолок или включить распродажу). Молча замороженный товар — будущий тикет поддержки. В канал ничего не уходит.",
+  "tags": [
+    "pipeline",
+    "price-gate"
+  ],
+  "provenance": {
+    "kind": "SYNTHETIC_FROM_DOCS",
+    "sources": [
+      "docs/decisions.md#Р-43",
+      "docs/decisions.md#Р-44"
+    ]
+  },
+  "world": {
+    "clock": "2026-09-14T10:00:00.000Z",
+    "tenantId": "10000000-0000-4000-8000-000000000001",
+    "channelAccountId": "20000000-0000-4000-8000-000000000001",
+    "account": {
+      "externalAccountId": "syn-seller-0001",
+      "marketplaces": [
+        "de",
+        "at"
+      ]
+    },
+    "credentials": {
+      "seller": {
+        "clientKey": "syn-seller-client-key-0001",
+        "secretKey": "syn-seller-secret-key-0001"
+      }
+    },
+    "secrets": [
+      "wh_tok_synthetic_0007"
+    ],
+    "pricing": {
+      "scopes": [
+        {
+          "writeScopeId": "ws-price-de-4101",
+          "productId": "prod-4101",
+          "channelAccountId": "20000000-0000-4000-8000-000000000001",
+          "marketplace": "de",
+          "externalUnitId": "4101",
+          "channelProductRef": "362000001",
+          "condition": "new",
+          "currency": "EUR",
+          "basis": "GROSS",
+          "pricingMode": "ENGINE",
+          "strategy": {
+            "strategyId": "st-margin",
+            "version": 1,
+            "params": {
+              "type": "TARGET_MARGIN",
+              "targetMarginBp": 2000
+            },
+            "deadbandMinor": 0
+          },
+          "currentPriceMinor": 1850,
+          "minPrice": {
+            "amountMinor": 1500,
+            "id": "min-4101"
+          },
+          "maxPrice": {
+            "amountMinor": 2500,
+            "id": "max-4101"
+          },
+          "cost": {
+            "currency": "EUR",
+            "costProfileId": "cp-4101-v1",
+            "unitCostMinor": 1000,
+            "fixedFeeMinor": 0,
+            "feeRateBp": 1500,
+            "tax": {
+              "regime": "VAT_INCLUDED",
+              "vatRateBp": 1900
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "cost-recompute-approved",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4101",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "MARGIN_TARGET",
+              "params": {
+                "targetMinor": 1915
+              }
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "APPROVED"
+          },
+          {
+            "stage": "WRITE_RECHECK",
+            "outcome": "PASS"
+          },
+          {
+            "stage": "DISPATCH_PLAN",
+            "outcome": "PLANNED"
+          },
+          {
+            "stage": "DISPATCH",
+            "outcome": "ACCEPTED"
+          }
+        ],
+        "decision": {
+          "outcome": "APPROVED",
+          "finalMinor": 1915
+        }
+      }
+    },
+    {
+      "id": "cost-doubles",
+      "kind": "pricingMutation",
+      "op": "setCost",
+      "writeScopeId": "ws-price-de-4101",
+      "value": {
+        "currency": "EUR",
+        "costProfileId": "cp-4101-v2",
+        "unitCostMinor": 2000,
+        "fixedFeeMinor": 0,
+        "feeRateBp": 1500,
+        "tax": {
+          "regime": "VAT_INCLUDED",
+          "vatRateBp": 1900
+        }
+      }
+    },
+    {
+      "id": "cost-recompute-floor-above-ceiling",
+      "kind": "pipelineRecompute",
+      "writeScopeId": "ws-price-de-4101",
+      "trigger": {
+        "type": "COST_CHANGE"
+      },
+      "expect": {
+        "stages": [
+          {
+            "stage": "STRATEGY",
+            "outcome": "CHANGED",
+            "reason": {
+              "code": "MARGIN_TARGET",
+              "params": {
+                "targetMinor": 3830
+              }
+            }
+          },
+          {
+            "stage": "GATE",
+            "outcome": "REJECTED",
+            "reason": {
+              "code": "BOUND_UNRESOLVABLE",
+              "params": {
+                "bound": "break_even",
+                "cause": "MARGIN_FLOOR_ABOVE_MAX_PRICE"
+              }
+            }
+          }
+        ],
+        "intent": {
+          "intentClass": "CHANGED",
+          "proposedMinor": 3830
+        },
+        "decision": {
+          "outcome": "REJECTED",
+          "decisionClass": "REJECTED_BY_GATE",
+          "rejectionReason": "BOUND_UNRESOLVABLE",
+          "finalMinor": null,
+          "checks": {
+            "$contains": [
+              {
+                "check": "MARGIN_FLOOR",
+                "passed": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "id": "patch-4101-1915",
+      "request": {
+        "method": "PATCH",
+        "path": "/v2/units/4101",
+        "query": {
+          "storefront": "de"
+        },
+        "body": {
+          "listing_price": 1915
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id_unit": 4101,
+            "storefront": "de",
+            "currency": "EUR",
+            "listing_price": 1915,
+            "price": 1915,
+            "amount": 5,
+            "id_offer": "SYN-OFFER-4101",
+            "is_live": true,
+            "date_lastchange_iso": "2026-09-14T10:00:00Z"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "alerts": [
+      {
+        "code": "PRICING_BOUND_UNRESOLVABLE",
+        "severity": "CRITICAL",
+        "count": 1,
+        "details": {
+          "reason": "BOUND_UNRESOLVABLE",
+          "cause": "MARGIN_FLOOR_ABOVE_MAX_PRICE",
+          "offer": "syn-prod-4101",
+          "marketplace": "de"
+        }
+      }
+    ],
+    "pipeline": {
+      "scopes": [
+        {
+          "currentPriceMinor": 1915
+        }
+      ],
+      "writes": [
+        {
+          "amountMinor": 1915,
+          "status": "APPLIED"
+        }
+      ],
+      "decisions": [
+        {
+          "outcome": "APPROVED"
+        },
+        {
+          "outcome": "REJECTED",
+          "rejectionReason": "BOUND_UNRESOLVABLE",
+          "decisionClass": "REJECTED_BY_GATE",
+          "reasonParams": {
+            "bound": "break_even",
+            "cause": "MARGIN_FLOOR_ABOVE_MAX_PRICE"
+          }
+        }
+      ]
+    }
+  }
+}

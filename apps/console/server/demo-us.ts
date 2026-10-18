@@ -48,6 +48,13 @@ const COMPETITOR_STEP_MS = 2 * HOUR_MS;
 const AMAZON_US_RAMP = [1800, 1500, 1250, 1050, 900, 1050, 1250, 1500] as const;
 /** Шаг 101 [Р-226]: товар amazon.com со стратегией «только FBA» и лоукостером FBM без Buy Box (номер среди товаров amazon.com) */
 const FBA_ONLY_PRODUCT = 0;
+/**
+ * Шаг 102 [Р-227]: товар amazon.com в режиме распродажи — себестоимость $11.00 (безубыточность $12.95 при комиссии 15 %), пол распродажи
+ * $10.00, записка «Clearing summer stock»: конкурент спускается до $9.00, и цена встаёт на пол распродажи — ниже безубыточности намеренно
+ */
+const CLEARANCE_PRODUCT = 1;
+const CLEARANCE_COST_MINOR = 1100;
+const CLEARANCE_FLOOR_MINOR = 1000;
 /** Насколько лоукостер FBM дешевле держателя Buy Box FBA: меньше бонуса исполнения каналом модели ($0.50) — Buy Box остаётся у FBA */
 const FBM_DISCOUNT_MINOR = 25;
 /** Сколько суток вперёд у модели расписание конкурентов: демо живёт, пока жив процесс */
@@ -161,7 +168,8 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
        * eBay: себестоимость от $6.00 до $11.50 — цена целевой маржи у дешёвых ниже `min_price` (пол держит $12.00), у дорогих выше нынешних
        * $19.99, и пол маржи ($8.43…$15.79) ниже нынешней цены у всех. amazon.com — $5.00: пол — `min_price` $14.00
        */
-      const costMinor = ebay ? 600 + k * 50 : 500;
+      const amazon = !ebay && !walmart;
+      const costMinor = ebay ? 600 + k * 50 : amazon && k === CLEARANCE_PRODUCT ? CLEARANCE_COST_MINOR : 500;
       const fee = ebay ? { feeRateBp: 1325, fixedFeeMinor: 30 } : { feeRateBp: 1500, fixedFeeMinor: 0 };
       await tx.query(
         `INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency, purchase_cost_minor, source, created_by_membership_id)
@@ -188,6 +196,12 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
       await tx.query(
         `UPDATE tenant_data.write_scope SET pricing_mode = 'ENGINE', pricing_strategy_id = $3, pricing_strategy_version = 1
           WHERE tenant_id = $1 AND write_scope_id = $2`, [a.tenantId, s.writeScopeId, ebay ? margin : walmart && winBuyBox ? winBuyBox : k === FBA_ONLY_PRODUCT ? beatFba : beat]);
+      // Шаг 102 [Р-227]: распродажу включает владелец от своего имени со вторым фактором, подтверждением и запиской — тем же журналом, что продавец
+      if (amazon && k === CLEARANCE_PRODUCT) {
+        await tx.query(
+          `INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action, floor_minor, currency, note, acknowledged, created_by_membership_id)
+           VALUES ($1, $2, 'ENABLE', $3, 'USD', 'Clearing summer stock', true, $4)`, [a.tenantId, s.writeScopeId, CLEARANCE_FLOOR_MINOR, a.ownerMembershipId]);
+      }
     }
     return scopes;
   }, a.userId, { mfa: true });

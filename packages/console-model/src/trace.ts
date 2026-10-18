@@ -67,6 +67,11 @@ export interface DecisionTrace {
   tone: Tone;
   /** Р-73: опасное изменение, остановленное границей */
   dangerous: boolean;
+  /**
+   * Шаг 102 [Р-227]: решение в режиме распродажи — пилюля в заголовке и строка «пол ниже безубыточности на X за штуку; включил, когда,
+   * записка». Пол и убыток — из объяснения решения (вечно), кто и зачем — из журнала режима
+   */
+  clearance: { pill: string; line: string } | null;
   steps: TraceStep[];
   gaps: Gap[];
 }
@@ -345,9 +350,17 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
     ? last?.status === 'APPLIED' ? t.headlineApplied(money(d.finalMinor)) : last ? t.headlineApproved(money(d.finalMinor), status(last.status)) : t.headlineNoWrite(money(d.finalMinor))
     : d.outcome === 'NO_CHANGE' ? t.headlineNoChange(e ? say(e.strategy.reason).text : kept ?? say(d.reason).text)
       : say(e?.gate.reason ?? d.reason).text;
+  const clearanceStep = [...(e?.strategy.steps ?? []), ...(detail.intent?.explanation ?? [])].find((r) => r.code === 'CLEARANCE_FLOOR') ?? null;
+  const cl = detail.clearance ?? null;
+  const clWho = cl ? cl.enabledByName ?? (cl.enabledByEmail ? world.people?.[cl.enabledByEmail] ?? cl.enabledByEmail : null)
+    ?? (m.values[world.state.members.find((x) => x.membershipId === cl.enabledByMembershipId)?.role as keyof typeof m.values] ?? m.ui.common.noValue) : null;
+  const clearance = clearanceStep || cl ? {
+    pill: t.clearancePill,
+    line: [clearanceStep ? say(clearanceStep).text : null, cl ? `${t.clearanceBy(clWho!, m.when(cl.enabledAt), cl.note)}.` : null].filter((x): x is string => x !== null).join(' '),
+  } : null;
   return {
     worldId: world.id, decisionId: d.decisionId, unit: scope ? unitOf(world, scope, m) : null, decidedAt: m.when(d.decidedAt), headline,
-    headlinePrice: d.outcome === 'APPROVED' ? money(d.finalMinor) : null,
+    headlinePrice: d.outcome === 'APPROVED' ? money(d.finalMinor) : null, clearance,
     tone: last?.status === 'APPLIED' ? 'ok' : last?.status === 'SHADOW_HELD' ? 'warn' : OUTCOME_TONE[d.outcome] ?? 'unknown', dangerous: isDangerous(d), steps,
     gaps: uniqueGaps([...gaps, ...steps.flatMap((s) => s.gaps)]),
   };

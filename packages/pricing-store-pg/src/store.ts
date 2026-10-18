@@ -48,7 +48,8 @@ import type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow,
-  BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult } from '@repracer/pricing-pipeline';
+  BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult,
+  ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded } from '@repracer/pricing-pipeline';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -312,6 +313,8 @@ function decisionRow(r: Row): ConsoleDecisionRow {
     proposedMinor: r.proposed_amount_minor,
     snapshotRef: r.competitor_snapshot_id ? { competitorSnapshotId: r.competitor_snapshot_id, source: r.ref_source, observedAt: iso(r.ref_observed_at) } : null,
     competitorView: r.competitor_view ?? null,
+    // Шаг 102 [Р-227]: решение в режиме распродажи называет строку включения
+    clearanceChangeId: r.clearance_change_id ?? null,
   };
 }
 
@@ -396,6 +399,10 @@ const SCOPE_JSON = `json_build_object(
                           today: `SELECT ($2::timestamptz AT TIME ZONE m.time_zone)::date FROM platform.marketplace m WHERE m.channel = sc.channel AND m.marketplace = sc.marketplace AND m.time_zone IS NOT NULL`,
                           renewed: false })}) x LIMIT 1),
   'bounds', (${BOUNDS_ROWS}),
+  -- Шаг 102 [Р-227]: действующий режим распродажи — пол распродажи заменяет весь пол. Часы базы, как у пола перед каждой отправкой (Р-83)
+  'clearance', (SELECT json_build_object('changeId', ac.clearance_change_id, 'floorMinor', ac.floor_minor, 'currency', ac.currency, 'endsAt', ac.ends_at,
+                       'note', ac.note, 'enabledAt', ac.created_at, 'enabledBy', ac.created_by_membership_id)
+                  FROM tenant_data.active_clearance($1, sc.write_scope_id, now()) ac),
   'halt', (${ACTIVE_HALT_JSON}),
   'distrust', (${ACTIVE_DISTRUST_JSON}),
   'stop', (${ACTIVE_STOP_JSON}),
@@ -571,7 +578,8 @@ SELECT (SELECT ${SCOPE_JSON} FROM sc) AS scope,
          WHERE cs.tenant_id = $1) AS state`;
 
 const VERSION_SQL = `
-SELECT sc.write_scope_id, sc.currency, sc.price_basis, (${BOUNDS_ROWS}) AS bounds, (${ACTIVE_HALT}) AS halt_id, (${ACTIVE_DISTRUST}) AS distrust_id, (${ACTIVE_STOP}) AS stop_id
+SELECT sc.write_scope_id, sc.currency, sc.price_basis, (${BOUNDS_ROWS}) AS bounds, (${ACTIVE_HALT}) AS halt_id, (${ACTIVE_DISTRUST}) AS distrust_id, (${ACTIVE_STOP}) AS stop_id,
+       (SELECT ac.clearance_change_id FROM tenant_data.active_clearance($1, sc.write_scope_id, now()) ac) AS clearance_id
   FROM (SELECT s.write_scope_id, s.product_id, s.currency, s.price_basis, s.channel_account_id, m.marketplace
           FROM tenant_data.write_scope s
           JOIN tenant_data.offer_mapping m ON m.tenant_id = s.tenant_id AND m.price_write_scope_id = s.write_scope_id AND m.status <> 'ENDED'
@@ -604,8 +612,31 @@ function toBounds(rows: Row[], currency: string, basis: 'GROSS' | 'NET'): PriceB
   return { currency, basis, min: resolve('min'), max: resolve('max') };
 }
 
-function contextVersion(bounds: Row[], haltId: string | null, distrustId: string | null, stopId: string | null): string {
-  return `${bounds.map((r) => `${r.bound}:${r.level}:${r.id}`).sort().join('|')}|halt:${haltId ?? '-'}|distrust:${distrustId ?? '-'}|stop:${stopId ?? '-'}`;
+/** Шаг 102 [Р-227]: строки журнала режима распродажи — новые первыми; с именами авторов, если читает административный сервис */
+async function clearanceChanges(tx: Tx, tenantId: string, by: { writeScopeId?: string; changeId?: string }, names = true): Promise<ClearanceChangeRow[]> {
+  const { rows } = await tx.query(
+    `SELECT c.clearance_change_id, c.action, c.floor_minor, c.currency, c.ends_at, c.note, c.created_by_membership_id, c.created_at
+            ${names ? ', u.display_name AS by_name, u.email AS by_email' : ', NULL::text AS by_name, NULL::text AS by_email'}
+       FROM tenant_data.clearance_change c
+       ${names ? `LEFT JOIN tenant_data.membership mb ON mb.tenant_id = c.tenant_id AND mb.membership_id = c.created_by_membership_id
+       LEFT JOIN platform.app_user u ON u.user_id = mb.user_id` : ''}
+      WHERE c.tenant_id = $1 AND ($2::uuid IS NULL OR c.write_scope_id = $2) AND ($3::uuid IS NULL OR c.clearance_change_id = $3)
+      ORDER BY c.seq DESC LIMIT 50`, [tenantId, by.writeScopeId ?? null, by.changeId ?? null]);
+  return rows.map((r) => ({
+    changeId: r.clearance_change_id, action: r.action, floorMinor: r.floor_minor === null ? null : Number(r.floor_minor), currency: r.currency ?? null,
+    endsAt: r.ends_at ? iso(r.ends_at) : null, note: r.note ?? null, membershipId: r.created_by_membership_id ?? null,
+    byName: r.by_name ?? null, byEmail: r.by_email ?? null, at: iso(r.created_at),
+  }));
+}
+
+function clearanceRefOf(c: ClearanceChangeRow): ClearanceRef {
+  return { changeId: c.changeId, floorMinor: c.floorMinor ?? 0, currency: c.currency ?? '', endsAt: c.endsAt, note: c.note ?? '', enabledAt: c.at,
+    enabledByMembershipId: c.membershipId, enabledByName: c.byName ?? null, enabledByEmail: c.byEmail ?? null };
+}
+
+function contextVersion(bounds: Row[], haltId: string | null, distrustId: string | null, stopId: string | null, clearanceId: string | null = null): string {
+  // Шаг 102 [Р-227]: режим распродажи — часть контекста: включённый или выключенный между чтением и фиксацией меняет пол решения
+  return `${bounds.map((r) => `${r.bound}:${r.level}:${r.id}`).sort().join('|')}|halt:${haltId ?? '-'}|distrust:${distrustId ?? '-'}|stop:${stopId ?? '-'}|clearance:${clearanceId ?? '-'}`;
 }
 
 /** Что изменилось в контексте решения между чтением и фиксацией — параметры BOUNDS_VERSION_CHANGED [Р-54] */
@@ -619,6 +650,7 @@ function contextChange(read: ScopeEvaluationContext, now: Row | undefined): Reas
   if ((now?.halt_id ?? null) !== (read.channelHalt?.haltId ?? null)) changed.push('CHANNEL_HALT');
   if ((now?.distrust_id ?? null) !== (read.channelDistrust?.distrustId ?? null)) changed.push('CHANNEL_DISTRUST');
   if ((now?.stop_id ?? null) !== (read.priceStop?.stopId ?? null)) changed.push('PRICING_STOP');
+  if ((now?.clearance_id ?? null) !== (read.clearance?.changeId ?? null)) changed.push('CLEARANCE');
   return {
     code: 'BOUNDS_VERSION_CHANGED',
     params: {
@@ -682,6 +714,8 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     return values.length ? f(...values) : null;
   };
   const minMarginBp = pick('min_margin_bp', Math.max);
+  // Шаг 102 [Р-227]: без минимальной маржи пол — безубыточность (маржа 0 %), если себестоимость объявлена; оценка комиссии — та же, что у базы
+  const floorMarginBp = minMarginBp ?? (c ? 0 : null);
   /**
    * Ревью шага 72, находка 1 (Р-141, Р-207): оценка комиссии для пола — та, что даёт НАИБОЛЬШИЙ пол маржи, как в базе
    * (`tenant_data.effective_price_floor`, 0106), а не наибольшая ставка: «0 % + 5 €» дороже «10 %» на цене ниже 50 €. До Р-207
@@ -691,11 +725,11 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
    */
   const estimates = ((c?.feeEstimates ?? []) as Row[])
     .filter((e) => Number.isSafeInteger(e.feeRateBp) && Number.isSafeInteger(e.fixedFeeMinor)) as Array<{ feeRateBp: number; fixedFeeMinor: number }>;
-  const floorBy = (e: { feeRateBp: number; fixedFeeMinor: number }) => (converted?.ok && minMarginBp !== null
+  const floorBy = (e: { feeRateBp: number; fixedFeeMinor: number }) => (converted?.ok && floorMarginBp !== null
     ? storefrontPriceForMarginBp({ currency: r.currency, costProfileId: 'floor', unitCostMinor: converted.amountMinor, fixedFeeMinor: e.fixedFeeMinor, feeRateBp: e.feeRateBp,
-      tax: r.tax_regime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: j.vatRateBp ?? null } }, minMarginBp)
+      tax: r.tax_regime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: j.vatRateBp ?? null } }, floorMarginBp)
     : null);
-  const byFloor = estimates.length > 0 && converted?.ok && minMarginBp !== null
+  const byFloor = estimates.length > 0 && converted?.ok && floorMarginBp !== null
     ? estimates.map((e) => ({ e, floor: floorBy(e)! })).reduce((best, x) => (!best.floor.ok ? best : !x.floor.ok ? x : x.floor.priceMinor > best.floor.priceMinor ? x : best)).e
     : null;
   const fee = (byFloor ?? c?.fee ?? null) as { feeRateBp?: unknown; fixedFeeMinor?: unknown } | null;
@@ -726,13 +760,19 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
   const priceStop: StopRef | null = stop
     ? { stopId: stop.stopId, scope: stop.scope, channelAccountId: stop.channelAccountId ?? null, marketplace: stop.marketplace ?? null, stoppedAt: iso(stop.stoppedAt), stoppedByMembershipId: stop.stoppedBy }
     : null;
+  const cl = j.clearance as Row | null;
+  const clearance: ClearanceRef | null = cl
+    ? { changeId: cl.changeId, floorMinor: Number(cl.floorMinor), currency: cl.currency, endsAt: cl.endsAt ? iso(cl.endsAt) : null, note: cl.note ?? '',
+        enabledAt: iso(cl.enabledAt), enabledByMembershipId: cl.enabledBy ?? null }
+    : null;
   return {
     scope,
     bounds: toBounds(bounds, scope.currency, scope.basis),
-    contextVersion: contextVersion(bounds, channelHalt?.haltId ?? null, channelDistrust?.distrustId ?? null, priceStop?.stopId ?? null),
+    contextVersion: contextVersion(bounds, channelHalt?.haltId ?? null, channelDistrust?.distrustId ?? null, priceStop?.stopId ?? null, clearance?.changeId ?? null),
     cost,
     unitCostMinor: converted?.ok ? converted.amountMinor : null,
-    costUnavailableCause: converted && !converted.ok ? converted.cause : null,
+    // Шаг 102 [Р-227]: себестоимость есть, оценки комиссии нет — безубыточность не вычисляется, Gate отказывает, как база (fail-closed)
+    costUnavailableCause: converted && !converted.ok ? converted.cause : c && !cost ? 'FEE_ESTIMATE_MISSING' : null,
     costMissingCause: !c ? 'COST_PROFILE_MISSING' : converted && !converted.ok ? converted.cause : !cost ? 'FEE_ESTIMATE_MISSING' : null,
     guardrails,
     channelHalt,
@@ -741,6 +781,7 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     blocking: blocking ? { errorCode: blocking.errorCode, since: iso(blocking.since) } : null,
     changesInLastHour: Number(j.changes ?? 0),
     ...(j.budgetExhausted ? { budgetExhausted: { resetsAt: (j.budgetExhausted as Row).resetsAt ?? null, budgetDay: (j.budgetExhausted as Row).budgetDay ?? null } } : {}),
+    clearance,
   };
 }
 
@@ -965,7 +1006,7 @@ export class PgPricingStore implements PricingStore {
           for (const d of input.decisions) {
             const id = d.context.scope.writeScopeId;
             const r = byScope.get(id);
-            if (!r || contextVersion(r.bounds, r.halt_id, r.distrust_id, r.stop_id) !== d.context.contextVersion) {
+            if (!r || contextVersion(r.bounds, r.halt_id, r.distrust_id, r.stop_id, r.clearance_id) !== d.context.contextVersion) {
               throw new RollbackWith<EvaluationCommitResult>({ status: 'CONTEXT_CHANGED', writeScopeId: id, reason: contextChange(d.context, r) });
             }
           }
@@ -1157,8 +1198,9 @@ export class PgPricingStore implements PricingStore {
       `INSERT INTO channel_data.price_decision
          (tenant_id, intent_created_at, price_intent_id, write_scope_id, decided_at, outcome, final_amount_minor, currency, price_basis,
           effective_floor_minor, effective_ceiling_minor, min_price_ids, max_price_ids, guardrail_ids, cost_profile_id, fee_inputs, violations,
-          rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile, ladder_from_minor, competitor_view)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+          rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile, ladder_from_minor, competitor_view,
+          clearance_change_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
        RETURNING price_decision_id`,
       [tenantId, intent.createdAt, intentId, scope.writeScopeId, decision.decidedAt, decision.outcome, decision.finalMinor, decision.currency, decision.basis,
        decision.effectiveFloorMinor, decision.effectiveCeilingMinor, decision.minPriceIds, decision.maxPriceIds, decision.guardrailIds,
@@ -1173,7 +1215,9 @@ export class PgPricingStore implements PricingStore {
        // Р-208: ступень лестницы к полу — запись ниже пола база пропустит только как ступень выше нынешней цены (0180)
        decision.sanityRuleset ?? null, decision.gateProfile ?? null, decision.ladderFromMinor ?? null,
        // Шаг 97 [Р-218]: картина рынка — данные канала, живёт с решением 30 суток; форму и место (только цена из данных конкурентов) держит база (0187)
-       d.competitorView ? JSON.stringify(d.competitorView) : null],
+       d.competitorView ? JSON.stringify(d.competitorView) : null,
+       // Шаг 102 [Р-227]: строка включения режима распродажи — пол решения база сверяет с действующим полом распродажи (0197)
+       decision.clearanceChangeId ?? null],
     );
     const decisionId: string = decisionRow!.price_decision_id;
     // Ссылка на полный снимок — данные канала, 18 месяцев [Р-38, Р-68]; та же транзакция
@@ -2464,6 +2508,8 @@ export class PgPricingStore implements PricingStore {
           // Шаг 99 [Р-225]: минимальная маржа уровня предложения и наибольшая из более широких — импорт маржи говорит, когда своя ничего не меняет
           ...marginLevelsOf(j.guardrails),
           lastApplied: j.lastApplied ? { amountMinor: Number((j.lastApplied as Row).amountMinor), acceptedAt: iso((j.lastApplied as Row).acceptedAt as string) } : null,
+          // Шаг 102 [Р-227]: действующий режим распродажи и предел шага — пилюля, пол распродажи и «вернётся к полу за N шагов»
+          clearance: ctx.clearance ?? null, maxStepChangeBp: ctx.guardrails.maxStepChangeBp,
           // Р-138: все действующие оценки комиссии с источниками — расхождение продавец должен видеть, а не угадывать
           feeEstimates: ((c?.feeEstimates ?? []) as Array<{ source: string; feeRateBp: number | null; fixedFeeMinor: number | null; scheduleVersion: string | null }>)
             .map((f) => ({ source: f.source, feeRateBp: f.feeRateBp ?? null, fixedFeeMinor: f.fixedFeeMinor ?? null, scheduleVersion: f.scheduleVersion ?? null })),
@@ -2817,7 +2863,10 @@ export class PgPricingStore implements PricingStore {
                     SELECT ${WRITE_HISTORY_COLUMNS} FROM tenant_data.channel_write_history h LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
                      WHERE h.tenant_id = $1 AND h.price_decision_id = $2) u ORDER BY version`, [tenantId, decisionId]),
       ]);
-      return { decision: decisionRow(d), intent: i ? intentRow(i) : null, writes: writes.map(writeRow) };
+      // Шаг 102 [Р-227]: решение в режиме распродажи — строка включения с автором для квитанции
+      const clearance = d.clearance_change_id ? (await clearanceChanges(tx, tenantId, { changeId: d.clearance_change_id }))[0] ?? null : null;
+      return { decision: decisionRow(d), intent: i ? intentRow(i) : null, writes: writes.map(writeRow),
+        clearance: clearance && clearance.action === 'ENABLE' ? clearanceRefOf(clearance) : null };
     });
   }
 
@@ -2855,11 +2904,13 @@ export class PgPricingStore implements PricingStore {
                            (rationale -> 'reason' ->> 'code' = 'TARGET_OUTSIDE_BOUNDS_HOLD'
                             OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MIN_PRICE"}]'::jsonb
                             OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb
-                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb) AS capped,
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_CLEARANCE_FLOOR"}]'::jsonb) AS capped,
                            coalesce(lag(rationale -> 'reason' ->> 'code' = 'TARGET_OUTSIDE_BOUNDS_HOLD'
                             OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MIN_PRICE"}]'::jsonb
                             OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MAX_PRICE"}]'::jsonb
-                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb)
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_MARGIN_FLOOR"}]'::jsonb
+                            OR rationale -> 'explanation' @> '[{"code": "CAPPED_AT_CLEARANCE_FLOOR"}]'::jsonb)
                               OVER (PARTITION BY write_scope_id ORDER BY created_at, price_intent_id), false) AS prev_capped
                       FROM channel_data.price_intent
                      WHERE tenant_id = $1 AND created_at > $2::timestamptz AND created_at <= $3::timestamptz) t
@@ -3347,6 +3398,70 @@ export class PgPricingStore implements PricingStore {
   }
 
   /** Р-118: снятие недоверия каналу — в сессии пользователя административного сервиса со вторым фактором; права и заметку сверяет база (0082) */
+  /**
+   * Шаг 102 [Р-227]: режим распродажи — строка журнала; кто, со вторым ли фактором, с подтверждением и запиской, в валюте ли единицы и не
+   * выше ли потолка — решает база (0197). Отказ базы переводится в причину, а не в исключение: экран называет, чего не хватает
+   */
+  async enableClearance(tenantId: string, input: ClearanceEnableInput, actor: AdminActor): Promise<ClearanceEnableResult> {
+    if (!input.acknowledged) return { status: 'INVALID', cause: 'ACK_REQUIRED' };
+    if (input.note.trim() === '') return { status: 'INVALID', cause: 'NOTE_REQUIRED' };
+    if (!Number.isSafeInteger(input.floorMinor) || input.floorMinor <= 0) return { status: 'INVALID', cause: 'FLOOR_INVALID' };
+    if (!actor.mfa) return { status: 'MFA_REQUIRED' };
+    try {
+      return await inTenant(this.admin('enableClearance'), tenantId, async (tx) => {
+        const { rows: [r] } = await tx.query(
+          `INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action, floor_minor, currency, ends_at, note, acknowledged, created_by_membership_id)
+           VALUES ($1, $2, 'ENABLE', $3, $4, $5, $6, $7, $8) RETURNING clearance_change_id`,
+          [tenantId, input.writeScopeId, input.floorMinor, input.currency, input.endsAt, input.note.trim(), input.acknowledged, actor.membershipId]);
+        return { status: 'ENABLED' as const, changeId: String(r.clearance_change_id) };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const m = (error as Error).message;
+      if (/acknowledg/.test(m)) return { status: 'INVALID', cause: 'ACK_REQUIRED' };
+      if (/note is required/.test(m)) return { status: 'INVALID', cause: 'NOTE_REQUIRED' };
+      if (/second factor/.test(m)) return { status: 'MFA_REQUIRED' };
+      if (/priced in/.test(m)) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
+      if (/must be positive and not above/.test(m)) return { status: 'INVALID', cause: 'FLOOR_INVALID' };
+      if (/not in the future/.test(m)) return { status: 'INVALID', cause: 'ENDS_IN_PAST' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  async disableClearance(tenantId: string, input: { writeScopeId: string; note: string | null }, actor: AdminActor): Promise<ClearanceDisableResult> {
+    try {
+      return await inTenant(this.admin('disableClearance'), tenantId, async (tx) => {
+        await tx.query(
+          `INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action, note, created_by_membership_id) VALUES ($1, $2, 'DISABLE', $3, $4)`,
+          [tenantId, input.writeScopeId, input.note?.trim() || null, actor.membershipId]);
+        return { status: 'DISABLED' as const };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      // Действующего режима нет — отказывает страж журнала (0197): выключать нечего
+      if (/is not active/.test((error as Error).message)) return { status: 'NOT_ACTIVE' };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  async clearanceOf(tenantId: string, writeScopeId: string): Promise<ClearanceState> {
+    // Имена авторов читает административный сервис (люди — его данные); без него — история без имён
+    const names = this.adminPool !== null;
+    return inTenant(this.adminPool ?? this.pool, tenantId, async (tx) => {
+      const { rows: [a] } = await tx.query(`SELECT clearance_change_id FROM tenant_data.active_clearance($1, $2, now())`, [tenantId, writeScopeId]);
+      const history = await clearanceChanges(tx, tenantId, { writeScopeId }, names);
+      const active = a ? history.find((h) => h.changeId === a.clearance_change_id) ?? null : null;
+      return { active: active ? clearanceRefOf(active) : null, history };
+    });
+  }
+
+  async expireClearances(tenantId: string, channelAccountId: string): Promise<ClearanceEnded[]> {
+    return inTenant(this.pool, tenantId, async (tx) => {
+      const { rows } = await tx.query('SELECT * FROM tenant_data.expire_clearance_floors($1)', [channelAccountId]);
+      return rows.map((r) => ({ writeScopeId: r.write_scope_id, floorMinor: Number(r.floor_minor), currency: r.currency, endsAt: iso(r.ends_at), note: r.note ?? '' }));
+    });
+  }
+
   async releaseDistrust(tenantId: string, distrustId: string, release: { membershipId: string; userId: string; mfa: boolean; note: string; at: Instant }): Promise<'RELEASED' | 'NOT_ACTIVE'> {
     return inTenant(this.admin('releaseDistrust'), tenantId, async (tx) => {
       const { rowCount } = await tx.query(

@@ -57,7 +57,9 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
         <span className="verdict-icon"><Icon name={VERDICT_ICON[trace.tone] ?? 'help'} size={22} /></span>
         <div className="verdict-body">
           {trace.headlinePrice ? <div className="verdict-price">{trace.headlinePrice}</div> : null}
-          <p className="headline">{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</p>
+          <p className="headline">{trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}{trace.clearance ? <> <Badge tone="warn">{trace.clearance.pill}</Badge></> : null}</p>
+          {/* Шаг 102 [Р-227]: пол ниже безубыточности намеренно — пол, убыток на штуку, кто включил, когда и зачем */}
+          {trace.clearance ? <p className="clearance-line">{trace.clearance.line}</p> : null}
           {/* Шаг 97 [C]: кто подвинул цену — одной фразой сверху; таблица — в шаге снимка конкурентов */}
           {competitors?.trigger ? <p className="trigger-line">{competitors.trigger}</p> : null}
         </div>

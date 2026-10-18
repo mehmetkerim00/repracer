@@ -39,6 +39,10 @@ export interface ProductRow {
   canEnable: boolean;
   /** Шаг 23: что канал делает с оффером сам — правило автоматического ценообразования [Р-120], выбытие из Featured Offer (PRICING_HEALTH) */
   channelNotes: ChannelNote[];
+  /** Шаг 102 [Р-227]: пилюля «Clearance» — у предложения включён режим распродажи (пол ниже безубыточности намеренно) */
+  clearance: string | null;
+  /** Шаг 102 [Р-227]: пол выше потолка — пилюля и «цены заморожены: поднимите потолок или включите распродажу» */
+  frozen: string | null;
 }
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
@@ -237,10 +241,14 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     const stat = statsById.get(scope.writeScopeId) ?? null;
     const floor = effectiveFloor(scope, world);
     const money = (v: number | null) => m.money(v, scope.currency);
-    const parts = floor.minMinor === null ? p.floorNoMin
-      : floor.marginFloorMinor !== null && floor.marginFloorMinor > floor.minMinor ? p.floorFromMargin(m.percentBp(floor.minMarginBp!), money(floor.marginFloorMinor), money(floor.minMinor))
+    // Шаг 102 [Р-227]: источник пола — распродажа, безубыточность, минимальная маржа или минимальная цена
+    const parts = floor.aboveCeiling ? p.frozenDetail
+      : floor.source === 'CLEARANCE' ? p.floorFromClearance
+      : floor.minMinor === null ? p.floorNoMin
         : floor.marginUnavailableCause ? p.floorMarginUnavailable(money(floor.minMinor), m.values[floor.marginUnavailableCause as keyof typeof m.values] ?? floor.marginUnavailableCause)
-          : p.floorFromMin(money(floor.minMinor));
+          : floor.source === 'BREAK_EVEN' ? p.floorFromBreakEven(money(floor.minMinor))
+            : floor.source === 'MARGIN' ? p.floorFromMargin(m.percentBp(floor.minMarginBp!), money(floor.marginFloorMinor), money(floor.minMinor))
+              : p.floorFromMin(money(floor.minMinor));
     return {
       unit: unitOf(world, scope, m),
       currentPrice: money(scope.currentPriceMinor),
@@ -257,6 +265,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       // Р-120 (ревью шага 23, находка 1): у предложения ценообразование канала — включение отклонит база, кнопки нет
       canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH'),
       channelNotes: channelNotes(world, scope, m),
+      clearance: scope.clearance ? p.clearancePill : null,
+      frozen: floor.aboveCeiling ? p.floorAboveCeiling : null,
     };
   });
   return {

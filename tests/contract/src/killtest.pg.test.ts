@@ -185,7 +185,7 @@ test('step 71: from a client file to a self-contained English report — numbers
   for (const d of decisions) {
     assert.match(d, /<h4>Why this price<\/h4>/);
     // Одобрено в границах — или отказ словами у товара, чей пол маржи выше допущенного максимума (себестоимость выше цены)
-    assert.match(d, /approved within \$[\d,]+\.\d\d–\$[\d,]+\.\d\d|Rejected: .*cannot be computed — the minimum-margin price is above the maximum price/, 'the Price Gate step is in words');
+    assert.match(d, /approved within \$[\d,]+\.\d\d–\$[\d,]+\.\d\d|Rejected: the minimum-margin floor is above the maximum price \(minimum margin [\d.]+%\) — no price fits, so prices are frozen\./, 'the Price Gate step is in words');
     // Находка 7: у «Units Ordered» нет периода в названии — период назван как период файла, а не «30 дней»
     assert.match(d, /units ordered in the period of your file/);
     assert.doesNotMatch(d, /assumed cost/, 'no assumed cost without --assume-cost-pct');

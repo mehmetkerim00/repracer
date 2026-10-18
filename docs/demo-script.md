@@ -239,6 +239,20 @@ with: FBA only — considered 1 of 2 offers.» и цель от цены Harbor 
 Что сказать: фильтр — до расчёта; неизвестное исполнение не выбрасывается молча, а считается отдельно; если после фильтра никого — цена
 стоит («без изменения»), стратегия не переключается на «всех» сама. Пол, потолок и Gate — те же.
 
+**Распродажа ниже безубыточности** (шаг 102, Р-227, ~40 с). Второй товар amazon.com — в Offers с пилюлей **Clearance**. Его страница пола
+(«Bounds and floor»): «Effective floor $10.00 — clearance floor: replaces your minimum price $14.00 and the margin floor while clearance is
+on», раздел «Clearance floor — allow selling below break-even»: «Clearance is on: $10.00», break-even $12.95, «Loss per piece −$2.95»,
+наибольший общий убыток при текущем остатке, «Enabled by …», «Note: “Clearing summer stock”». Квитанция его записи: пилюля Clearance в
+заголовке и строка «Clearance mode: floor $10.00 is below break-even $12.95 (−$2.95 per piece). Enabled by …, note: “Clearing summer
+stock”.» В Protections — отдельной строкой «The clearance floor held the price N times … — an intentional loss, not counted above».
+Чтобы показать включение: у другого товара на странице пола ввести пол — убыток на штуку считается сразу; кнопка «Enable clearance» без
+галочки «I understand: every sale below … loses money» и записки недоступна и говорит почему; включение требует второго фактора (гость
+демо его не включит — 403). «Turn clearance off» — одно нажатие, подсказка рядом: «The floor returns to $14.00 at once; the price climbs
+back to it in about N steps (~X minutes)».
+
+Что сказать: случайный убыток запрещён — без распродажи пол не ниже безубыточности, даже если min price ниже; намеренный — только явным
+режимом с запиской и вторым фактором, и всё это в журнале. Потолок, шаг и все проверки работают и в распродаже.
+
 ## в. Три стоп-крана (2 мин)
 
 **Экран «Stop pricing».** Первой строкой под подзаголовком (шаг 96, А10): «Pause is safe: current prices stay as they are, and you can

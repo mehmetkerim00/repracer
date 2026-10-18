@@ -105,8 +105,9 @@ test('step 21: the price feed shows the write with the price it started from and
   // Р-117 (шаг 22): главное число — удержания полом; отклонения Gate — второй раздел
   assert.equal(report.headline, 'The floor did not have to hold a price in the last 30 days');
   assert.equal(report.gateHeadline, 'Your bounds stopped 1 dangerous change in the last 30 days');
-  assert.deepEqual(report.prevented, [{ currency: 'EUR', minor: 1330, amount: '€13.30' }]);
-  assert.equal(report.worst?.deviation, '53.2%');
+  // Шаг 102 [Р-227]: себестоимость сценария выросла до €15.00 — цель €28.73, на €3.73 (14.92 %) выше потолка €25.00
+  assert.deepEqual(report.prevented, [{ currency: 'EUR', minor: 373, amount: '€3.73' }]);
+  assert.equal(report.worst?.deviation, '14.92%');
   assert.equal(report.truncated, false);
   // Шаг 96: глубже буфера решений (30 дней) период отрезается и экран это говорит — раньше это был «90 дней» и `truncated`
   const deep = await dangerousOf(aboveWorld.store, above, { from: new Date(Date.parse(above.now) - 90 * 86_400_000).toISOString().slice(0, 10), to: above.now.slice(0, 10) }, en);

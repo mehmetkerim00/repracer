@@ -31,12 +31,14 @@ export interface RejectedItem {
   intervention: BoundIntervention | null;
   reason: HumanReason;
   decisionId: string | null;
+  /** Шаг 102 [Р-227]: пол (безубыточность или пол маржи) выше потолка — цены предложения заморожены; своя категория счётчиков */
+  floorAboveCeiling?: boolean;
 }
 
 export interface RejectedView {
   worldId: string;
   headline: string;
-  summary: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number };
+  summary: { dangerous: number; corrected: number; unresolvable: number; floorAboveCeiling: number; limiterHolds: number; stops: number; inputRejects: number; halts: number };
   groups: Array<{ code: string; title: string; count: number }>;
   items: RejectedItem[];
   gaps: Gap[];
@@ -67,14 +69,15 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     // [Р-85]: берётся из горячего intent (3 дня, данные канала); intent уже удалён — цели нет, экран это показывает
     const hot = hotIntents.get(d.intentId) ?? null;
     for (const step of e?.strategy.steps ?? []) {
-      if (step.code !== 'CAPPED_AT_MIN_PRICE' && step.code !== 'CAPPED_AT_MAX_PRICE' && step.code !== 'CAPPED_AT_MARGIN_FLOOR') continue;
+      if (step.code !== 'CAPPED_AT_MIN_PRICE' && step.code !== 'CAPPED_AT_MAX_PRICE' && step.code !== 'CAPPED_AT_MARGIN_FLOOR' && step.code !== 'CAPPED_AT_CLEARANCE_FLOOR') continue;
       const hotTarget = hot?.explanation.find((x) => x.code === step.code)?.params.targetMinor;
       const target = typeof hotTarget === 'number' ? hotTarget : null;
-      const bound = Number(step.code === 'CAPPED_AT_MIN_PRICE' ? step.params.minMinor : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? step.params.floorMinor : step.params.maxMinor);
+      const bound = Number(step.code === 'CAPPED_AT_MIN_PRICE' ? step.params.minMinor : step.code === 'CAPPED_AT_MARGIN_FLOOR' || step.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? step.params.floorMinor : step.params.maxMinor);
       rows.push({
         kind: 'STRATEGY_CAP', tone: 'progress', at: m.when(d.decidedAt), sortAt: d.decidedAt, unit, productRef: null,
         proposed: money(target), current: money(e!.strategy.currentMinor), change: target === null ? null : m.change(e!.strategy.currentMinor, target),
-        limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? r.limitFloor(money(bound)) : r.limitMax(money(bound)),
+        limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? r.limitFloor(money(bound))
+          : step.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? r.limitClearance(money(bound)) : r.limitMax(money(bound)),
         set: money(bound), deviation: null, intervention: 'CORRECTED', reason: describe(step, m), decisionId: d.decisionId,
       });
     }
@@ -96,6 +99,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
           : code === 'ABOVE_MAX_PRICE' ? r.limitMax(money(params.maxMinor as number)) : null,
       // отказ Gate и остановка — цена осталась прежней
       set: e ? money(e.strategy.currentMinor) : null,
+      ...(code === 'BOUND_UNRESOLVABLE' && params.cause === 'MARGIN_FLOOR_ABOVE_MAX_PRICE' ? { floorAboveCeiling: true } : {}),
       deviation: d.boundDeviationBp === null ? null : m.percentBp(d.boundDeviationBp),
       // Ревью шага 68, находка 1: причина Gate — из строки решения (полные параметры, 30 суток), а не из слепка без сумм
       intervention, reason: describe(!e || e.gate.reason.code === d.reason.code ? d.reason : e.gate.reason, m), decisionId: d.decisionId,
@@ -139,7 +143,9 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     headline: r.headline(dangerous, corrected),
     summary: {
       dangerous, corrected,
-      unresolvable: items.filter((i) => i.reason.code === 'BOUND_UNRESOLVABLE').length,
+      unresolvable: items.filter((i) => i.reason.code === 'BOUND_UNRESOLVABLE' && !i.floorAboveCeiling).length,
+      // Шаг 102 [Р-227]: пол выше потолка — цены заморожены законно, но продавцу видно и названо отдельно, а не «границы не вычисляются»
+      floorAboveCeiling: items.filter((i) => i.floorAboveCeiling).length,
       limiterHolds: items.filter((i) => LIMITERS.has(i.reason.code)).length,
       stops: items.filter((i) => i.kind === 'STOP').length,
       inputRejects: items.filter((i) => i.kind === 'INPUT').length,

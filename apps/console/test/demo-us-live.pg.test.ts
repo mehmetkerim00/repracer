@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { existsSync } from 'node:fs';
-import { messagesFor, type ConnectionsView, type DecisionListView, type DecisionTrace, type PriceFeedView, type ShadowView, type UnitRef } from '@repracer/console-model';
+import { messagesFor, type BoundsView, type ConnectionsView, type DecisionListView, type DecisionTrace, type PriceFeedView, type ShadowView, type UnitRef } from '@repracer/console-model';
 import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
@@ -375,4 +375,37 @@ test('шаг 96: периоды и поиск через консоль — те
   for (const bad of ['shadow?period=5d', `decisions?period=7d&outcome=MAYBE`, `feed?from=${dateOf(now)}&to=${dateOf(now - 86_400_000)}`, 'dangerous?period=7d&days=7', 'rejected?from=2026-02-30&to=2026-03-01']) {
     assert.equal((await call('GET', `/api/worlds/${w}/${bad}`, token)).status, 400, bad);
   }
+});
+
+/**
+ * Шаг 102 (E) [Р-227]: в демо одно предложение amazon.com в режиме распродажи — себестоимость $11.00, безубыточность $12.95, пол
+ * распродажи $10.00, записка «Clearing summer stock». Страница пола называет безубыточность и убыток на штуку, квитанция — пол, убыток и
+ * записку; гость демо режим не включает и не выключает (право MANAGE_PRICING у него нет — отказывает и консоль, и база)
+ */
+test('шаг 102 (E): демо — предложение amazon.com в режиме распродажи: страница пола, квитанция с убытком на штуку, гость не трогает режим', async () => {
+  const issued = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const guest = ((await issued.json()) as StandToken).accessToken;
+  const demo = (await call<WorldSummary[]>('GET', '/api/worlds', guest)).body.find((w) => w.demo)!;
+  const w = encodeURIComponent(demo.id);
+  const found = await call<{ items: UnitRef[]; total: number }>('GET', `/api/worlds/${w}/offers?q=${encodeURIComponent('amazon.com')}`, guest);
+  const pages = await Promise.all(found.body.items.map(async (u) => ({ unit: u, view: (await call<BoundsView>('GET', `/api/worlds/${w}/bounds/${u.writeScopeId}`, guest)).body })));
+  const cleared = pages.filter((p) => p.view.clearance.pill !== null);
+  assert.equal(cleared.length, 1, 'one amazon.com offer of the demo is in clearance');
+  const { unit, view } = cleared[0]!;
+  const c = view.clearance;
+  assert.equal(JSON.stringify([c.pill, c.active?.floor, c.breakEven, c.active?.lossPerUnit, c.active?.note]), JSON.stringify(['Clearance', '$10.00', '$12.95', '$2.95', 'Clearing summer stock']));
+  assert.equal(view.effectiveFloor.amount, '$10.00', 'the clearance floor is the floor');
+  // Квитанция решения в режиме распродажи: пилюля и строка «пол ниже безубыточности на $2.95 за штуку; кто, когда, зачем»
+  const list = await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${unit.writeScopeId}`, guest);
+  const first = list.body.items[0];
+  assert.ok(first, 'the offer in clearance has decisions');
+  const trace = (await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${first.decisionId}`, guest)).body;
+  assert.equal(trace.clearance?.pill, 'Clearance');
+  assert.match(trace.clearance?.line ?? '', /^Clearance mode: floor \$10\.00 is below break-even \$12\.95 \(−\$2\.95 per piece\)\. Enabled by .+, note: “Clearing summer stock”\.$/);
+  // Гость демо не включает и не выключает режим
+  const other = pages.find((p) => p.view.clearance.pill === null)!;
+  const enable = await call<{ error: { code: string } }>('POST', `/api/worlds/${w}/bounds/${other.unit.writeScopeId}/clearance`, guest,
+    { floorMinor: 900, acknowledged: true, note: 'x', endsAt: null });
+  const disable = await call<{ error: { code: string } }>('POST', `/api/worlds/${w}/bounds/${unit.writeScopeId}/clearance/disable`, guest, {});
+  assert.equal(JSON.stringify([enable.status, disable.status]), JSON.stringify([403, 403]), 'the guest of the demo cannot touch clearance');
 });

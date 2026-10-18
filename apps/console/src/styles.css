@@ -1191,3 +1191,9 @@ p.notice.import-applied { background: var(--success-soft); color: var(--success)
 .import-history { margin-top: var(--space-3); }
 .import-history h4, .import-errors h4, .import-changes h4 { margin: 0 0 var(--space-2); }
 .mono { font-family: var(--font-mono); }
+
+/* Шаг 102 [Р-227]: режим распродажи — строка в квитанции и в Protections, состояние и форма на странице пола; цвет — attention Primer */
+.verdict-body > p.clearance-line, .summary-card > p.clearance-line { margin: var(--space-1) 0 0; color: var(--warning); }
+.clearance-state li { margin: var(--space-1) 0; }
+output.field-value { display: flex; align-items: center; min-height: var(--control-h); }
+.clearance-history { margin-top: var(--space-3); }

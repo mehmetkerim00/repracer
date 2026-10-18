@@ -289,3 +289,29 @@ test('step 74: the ladder start names the offer, the price, the floor and the st
   // У кода без подробности строки нет
   assert.equal(alertDetail({ code: 'PRICE_WRITE_SCOPE_BLOCKED', details: {} }, en), null);
 });
+
+/**
+ * Шаг 102 [Р-227]: безубыточность в полу делает «пол выше потолка» законным состоянием — рост себестоимости поднял пол выше
+ * max_price, и ни одна цена не уходит. Молча замороженный товар — будущий тикет поддержки: письмо называет предложение, суть и что
+ * сделать; прочие причины «границу не вычислить» подробной строки не получают (пустая подробность — не строка письма и дайджеста)
+ */
+test('step 102: «floor above ceiling» names the offer and what to do — in the letter and in the hourly digest', async () => {
+  const { alertDetail, digestMessage, immediateMessage } = await import('../src/index.ts');
+  const { LOCALES, messagesFor } = await import('@repracer/console-model');
+  const row = (cause: string, i: number): AlertRow => ({
+    tenantId: 't-1', alertId: `b-${i}`, code: 'PRICING_BOUND_UNRESOLVABLE', severity: 'CRITICAL', channelAccountId: null, channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'],
+    details: { writeScopeId: `ws-${i}`, reason: 'BOUND_UNRESOLVABLE', cause, offer: 'Plant pot, green', marketplace: 'ATVPDKIKX0DER' },
+    raisedAt: '2026-10-18T10:00:00.000Z', deliveryAttempts: 0,
+  });
+  const en = messagesFor('en');
+  assert.equal(alertDetail(row('MARGIN_FLOOR_ABOVE_MAX_PRICE', 1), en),
+    'Plant pot, green · amazon.com: floor above ceiling — prices frozen. Raise the maximum price or enable clearance.');
+  assert.match(immediateMessage(row('MARGIN_FLOOR_ABOVE_MAX_PRICE', 1), 'Synthetic seller', 'owner@example.invalid', en).text,
+    /\nPlant pot, green · amazon\.com: floor above ceiling — prices frozen\./);
+  for (const l of LOCALES) assert.ok((alertDetail(row('MARGIN_FLOOR_ABOVE_MAX_PRICE', 1), messagesFor(l)) ?? '').length > 40, `${l}: the frozen offer is named`);
+  // Другая причина — подробной строки нет, и в дайджесте пустой строки тоже нет
+  assert.equal(alertDetail(row('FEE_ESTIMATE_MISSING', 2), en) || null, null);
+  const digest = digestMessage([row('MARGIN_FLOOR_ABOVE_MAX_PRICE', 3), row('FEE_ESTIMATE_MISSING', 4)], 'Synthetic seller', 'owner@example.invalid', en).text;
+  assert.equal((digest.match(/prices frozen/g) ?? []).length, 1);
+  assert.doesNotMatch(digest, /\n\s*\n\s*\n/, 'an empty detail is not a line');
+});

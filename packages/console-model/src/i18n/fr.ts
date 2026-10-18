@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Pas de taux de change pour le contrôle entre canaux',
   FIXED_PRICE: 'Prix fixe', MARGIN_TARGET: 'Prix à marge cible', BUYBOX_MATCH: 'S’aligner sur la Buy Box', BUYBOX_UNDERCUT: 'Passer sous la Buy Box',
   LOWEST_MATCH: 'S’aligner sur le prix le plus bas', LOWEST_UNDERCUT: 'Passer sous le prix le plus bas', CAPPED_AT_MIN_PRICE: 'Cible ramenée à votre prix minimum',
-  CAPPED_AT_MAX_PRICE: 'Cible ramenée à votre prix maximum', CAPPED_AT_MARGIN_FLOOR: 'Cible ramenée au plancher de marge', RAISED_TO_FLOOR: 'Relevé au plancher', RAISED_TOWARD_FLOOR: 'Relevé d’un palier vers le plancher', ALREADY_AT_TARGET: 'Déjà à la cible', WITHIN_DEADBAND: 'Écart sous le seuil', SHADOW_ALREADY_PROPOSED: 'Déjà proposé en mode fantôme', LADDER_PACED: 'Prochain palier vers le plancher plus tard',
+  CAPPED_AT_MAX_PRICE: 'Cible ramenée à votre prix maximum', CAPPED_AT_MARGIN_FLOOR: 'Cible ramenée au plancher de marge', CLEARANCE_FLOOR: 'Mode déstockage', CAPPED_AT_CLEARANCE_FLOOR: 'Cible ramenée au plancher de déstockage', RAISED_TO_FLOOR: 'Relevé au plancher', RAISED_TOWARD_FLOOR: 'Relevé d’un palier vers le plancher', ALREADY_AT_TARGET: 'Déjà à la cible', WITHIN_DEADBAND: 'Écart sous le seuil', SHADOW_ALREADY_PROPOSED: 'Déjà proposé en mode fantôme', LADDER_PACED: 'Prochain palier vers le plancher plus tard',
   ALREADY_WINNING_BUYBOX: 'Buy Box déjà remportée', NO_COMPETITOR_OFFERS: 'Aucun concurrent', TARGET_OUTSIDE_BOUNDS_HOLD: 'Cible hors limites — prix maintenu',
   BUYBOX_WIN_TARGET: 'Remporter la Buy Box', CREEP_UP: 'Relevé d’un palier en tenant la Buy Box', CREEP_STEP_BACK: 'Buy Box perdue — retour au dernier prix gagnant',
   CAPPED_AT_CREEP_CEILING: 'Maintenu sous le prix qui a fait perdre la Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Détenteur de la Buy Box non indiqué — prix maintenu',
@@ -44,14 +44,19 @@ const titles: Record<AnyReasonCode, string> = {
 
 /** Р-209, Р-210: после чего поднята цена без наблюдения конкурентов */
 const RAISE_AFTER_TEXT: Readonly<Record<FloorRaiseReason, string>> = {
-  COST_UPDATE: ' après la mise à jour du coût',
+  // Шаг 102: рост себестоимости называет фраза впереди (costRaise), а не хвост «после чего»
+  COST_UPDATE: '',
   FLOOR_RECHECK: ' après le recalcul du plancher avant l’envoi (coût, commissions, taux de change et TVA actuels)',
   FX_UPDATE: ' après la variation du taux de change BCE',
   BOUNDS_UPDATE: ' après la modification de votre prix minimum ou maximum',
   GUARDRAIL_UPDATE: ' après la modification de votre marge minimale ou de votre limite de palier',
   VAT_UPDATE: ' après la modification du taux de TVA',
+  CLEARANCE_ENDED: ' après la fin du déstockage',
 };
 const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ?? '') as FloorRaiseReason] ?? '';
+/** Шаг 102 [Р-227]: рост себестоимости поднял пол — словами владельца, впереди фразы; граница пола — словами */
+const costRaise = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? 'Le coût unitaire a augmenté : le plancher monte. ' : '');
+const floorWord = (f: Fmt): string => ({ margin_floor: 'votre plancher de marge', break_even: 'votre seuil de rentabilité', clearance: 'votre plancher de déstockage' } as Record<string, string>)[String(f.get('bound'))] ?? 'votre prix minimum';
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` (écart de ${f.bp('deviationBp')})`);
 
 /** Шаг 101 [Р-226]: фильтр «Compete with», ориентир и почему Buy Box не участвовал — словами */
@@ -122,10 +127,17 @@ const reasons: Record<AnyReasonCode, Template> = {
   CAPPED_AT_MIN_PRICE: (f) => `La cible ${f.money('targetMinor')} est sous votre prix minimum — ramenée à ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `La cible ${f.money('targetMinor')} dépasse votre prix maximum — ramenée à ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `La cible ${f.money('targetMinor')} est sous votre plancher de marge ${f.money('floorMinor')} (marge ${f.bp('minMarginBp')}) — fixée au plancher de marge.`,
-  RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
+  // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
+  CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Mode déstockage : le plancher ${f.money('floorMinor')} est sous le seuil de rentabilité ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} par unité).` : f.has('breakEvenMinor') ? `Mode déstockage : plancher ${f.money('floorMinor')}, seuil de rentabilité ${f.money('breakEvenMinor')}.` : `Mode déstockage : plancher ${f.money('floorMinor')} — le seuil de rentabilité n’est pas calculable.`),
+  CAPPED_AT_CLEARANCE_FLOOR: (f) => `La cible ${f.money('targetMinor')} est sous votre plancher de déstockage ${f.money('floorMinor')} — fixée au plancher de déstockage.`,
+  RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
+    ? `Votre prix ${f.money('currentMinor')} était sous votre seuil de rentabilité — relevé à ${f.money('floorMinor')}${raiseAfter(f)}.`
+    : f.get('bound') === 'clearance'
+    ? `Votre prix ${f.money('currentMinor')} était sous votre plancher de déstockage — relevé à ${f.money('floorMinor')}${raiseAfter(f)}.`
+    : f.get('bound') === 'margin_floor'
     ? `Votre prix ${f.money('currentMinor')} était sous votre plancher de marge — relevé à votre plancher de marge ${f.money('floorMinor')}${raiseAfter(f)}${opt(f, 'minMarginBp', () => ` (marge ${f.bp('minMarginBp')})`)}.`
     : `Votre prix ${f.money('currentMinor')} était sous votre prix minimum — relevé à ${f.money('floorMinor')}${raiseAfter(f)}.`),
-  RAISED_TOWARD_FLOOR: (f) => `Votre prix ${f.money('currentMinor')} est sous ${f.get('bound') === 'margin_floor' ? 'votre plancher de marge' : 'votre prix minimum'} ${f.money('floorMinor')} — relevé d’un palier${raiseAfter(f)}, dans la limite de palier de ${f.bp('stepLimitBp')} ; encore environ ${f.count('stepsLeft')} ${f.get('stepsLeft') === 1 ? 'palier' : 'paliers'} jusqu’au plancher.`,
+  RAISED_TOWARD_FLOOR: (f) => costRaise(f) + `Votre prix ${f.money('currentMinor')} est sous ${floorWord(f)} ${f.money('floorMinor')} — relevé d’un palier${raiseAfter(f)}, dans la limite de palier de ${f.bp('stepLimitBp')} ; encore environ ${f.count('stepsLeft')} ${f.get('stepsLeft') === 1 ? 'palier' : 'paliers'} jusqu’au plancher.`,
   ALREADY_AT_TARGET: (f) => `Le prix est déjà égal à la cible ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `L’écart de ${f.money('deltaMinor')} est sous le seuil de ${f.money('deadbandMinor')} — le prix reste inchangé.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -161,10 +173,12 @@ const reasons: Record<AnyReasonCode, Template> = {
     ? `Palier jusqu’à ${f.money('finalMinor')} vers le plancher ${f.money('floorMinor')} approuvé ; le prix reste sous le plancher.`
     : `Prix ${f.money('finalMinor')} approuvé dans la fourchette ${f.money('floorMinor')}–${f.money('ceilingMinor')}.`),
   NO_CHANGE: () => 'Aucun changement de prix — la décision est enregistrée sans envoi.',
-  BELOW_MIN_PRICE: (f) => `Rejeté : ${f.money('proposedMinor')} est sous votre prix minimum ${f.money('minMinor')}${deviation(f)}.`,
+  BELOW_MIN_PRICE: (f) => f.get('floor') === 'CLEARANCE' ? `Rejeté : ${f.money('proposedMinor')} est sous votre plancher de déstockage ${f.money('minMinor')}${deviation(f)}.` : `Rejeté : ${f.money('proposedMinor')} est sous votre prix minimum ${f.money('minMinor')}${deviation(f)}.`,
   BELOW_MARGIN_FLOOR: (f) => `Rejeté : ${f.money('proposedMinor')} est sous le plancher de marge ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (marge ${f.bp('minMarginBp')})`)}${deviation(f)}.`,
   ABOVE_MAX_PRICE: (f) => `Rejeté : ${f.money('proposedMinor')} dépasse votre prix maximum ${f.money('maxMinor')}${deviation(f)}.`,
-  BOUND_UNRESOLVABLE: (f) => `Rejeté : impossible de calculer ${f.value('bound')} — ${f.value('cause')}${opt(f, 'boundCurrency', () => ` (limite ${f.raw('boundCurrency')} ${f.value('boundBasis')}, offre ${f.raw('scopeCurrency')} ${f.value('scopeBasis')})`)}${opt(f, 'minMarginBp', () => ` (marge minimale ${f.bp('minMarginBp')})`)}. Rien n’est envoyé.`,
+  BOUND_UNRESOLVABLE: (f) => f.get('cause') === 'MARGIN_FLOOR_ABOVE_MAX_PRICE'
+    ? `Rejeté : ${f.value('bound')} est au-dessus de votre prix maximum${opt(f, 'minMarginBp', () => ` (marge minimale ${f.bp('minMarginBp')})`)} — aucun prix ne convient, les prix sont gelés. Relevez le prix maximum ou activez le déstockage. Rien n’est envoyé.`
+    : `Rejeté : impossible de calculer ${f.value('bound')} — ${f.value('cause')}${opt(f, 'boundCurrency', () => ` (limite ${f.raw('boundCurrency')} ${f.value('boundBasis')}, offre ${f.raw('scopeCurrency')} ${f.value('scopeBasis')})`)}${opt(f, 'minMarginBp', () => ` (marge minimale ${f.bp('minMarginBp')})`)}. Rien n’est envoyé.`,
   STEP_LIMIT: (f) => `Retenu : le passage de ${f.money('currentMinor')} à ${f.money('proposedMinor')} représente ${f.bp('stepBp')}, le palier autorisé est de ${f.bp('limitBp')}.`,
   CHANGE_RATE_LIMIT: (f) => `Retenu : déjà ${f.count('changes')} changements au cours de la dernière heure, la limite est de ${f.count('limit')}.`,
   INTENT_EXPIRED: (f) => `Rejeté : le prix proposé a attendu ${f.seconds('waitedSeconds')} et a expiré à ${f.when('expiresAt')}.`,
@@ -296,6 +310,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MIN_PRICE: (f) => `La cible issue des prix concurrents était sous votre prix minimum — ramenée à ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `La cible issue des prix concurrents dépassait votre prix maximum — ramenée à ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `La cible issue des prix concurrents était sous votre plancher de marge — fixée au plancher de marge ${f.money('floorMinor')} (marge ${f.bp('minMarginBp')}).`,
+  CAPPED_AT_CLEARANCE_FLOOR: (f) => `La cible issue des prix concurrents était sous votre plancher de déstockage — fixée au plancher de déstockage ${f.money('floorMinor')}.`,
   ALREADY_AT_TARGET: () => 'Le prix était déjà égal à la cible.',
   WITHIN_DEADBAND: (f) => `L’écart avec la cible était sous le seuil de ${f.money('deadbandMinor')} — le prix reste inchangé.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `La cible était hors de ${f.money('minMinor')}–${f.money('maxMinor')} ; la stratégie est réglée pour maintenir le prix.`,
@@ -303,7 +318,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   ENGINE_CURRENCY_MISMATCH: (f) => `Stratégie non évaluée : autre devise que celle de l’offre (${f.raw('expected')}) pour ${f.value('source')}.`,
   DIVERGENCE_CASE_OPENED: (f) => `Dossier d’écart ouvert : le canal affichait un autre prix que ${f.money('expectedMinor')}, celui que nous attendons.`,
   // Отказ Gate у цены из данных конкурента: предложенная цена и отклонение выведены из цены конкурента [Р-85]; граница — наша
-  BELOW_MIN_PRICE: (f) => `Rejeté : le prix proposé était sous votre prix minimum ${f.money('minMinor')}.`,
+  BELOW_MIN_PRICE: (f) => f.get('floor') === 'CLEARANCE' ? `Rejeté : le prix proposé était sous votre plancher de déstockage ${f.money('minMinor')}.` : `Rejeté : le prix proposé était sous votre prix minimum ${f.money('minMinor')}.`,
   BELOW_MARGIN_FLOOR: (f) => `Rejeté : le prix proposé était sous le plancher de marge ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (marge ${f.bp('minMarginBp')})`)}.`,
   ABOVE_MAX_PRICE: (f) => `Rejeté : le prix proposé dépassait votre prix maximum ${f.money('maxMinor')}.`,
   STEP_LIMIT: (f) => `Retenu : le changement depuis ${f.money('currentMinor')} dépassait le palier autorisé de ${f.bp('limitBp')}.`,
@@ -330,7 +345,7 @@ const values: Record<ValueKey, string> = {
   COST_PROFILE: 'le coût unitaire', VAT_RATE: 'le taux de TVA du produit', SNAPSHOT: 'les données de la concurrence',
   deadbandMinor: 'seuil', priceMinor: 'prix fixe', targetMarginBp: 'marge cible', undercutMinor: 'écart à la baisse', fulfillmentHandicapMinor: 'handicap logistique', creepStepBp: 'palier de hausse', MERCHANT: 'le vendeur',
   POSITIVE: 'positif', NON_NEGATIVE: 'nul ou positif', MARGIN_BELOW_100_PERCENT: 'inférieur à 100% commissions comprises',
-  min: 'votre prix minimum', max: 'votre prix maximum', margin_floor: 'le plancher de marge', both: 'les limites de prix',
+  min: 'votre prix minimum', max: 'votre prix maximum', margin_floor: 'le plancher de marge', both: 'les limites de prix', break_even: 'le seuil de rentabilité',
   MISSING: 'non défini', CURRENCY_MISMATCH: 'dans une autre devise', BASIS_MISMATCH: 'sur une autre base de prix', INVALID_AMOUNT: 'montant invalide',
   MIN_ABOVE_MAX: 'votre prix minimum dépasse votre prix maximum', COST_PROFILE_MISSING: 'le coût unitaire n’est pas défini', COST_CURRENCY_MISMATCH: 'le coût unitaire est dans une autre devise',
   VAT_UNKNOWN: 'le taux de TVA du produit n’est pas défini', UNATTAINABLE: 'inatteignable avec les commissions actuelles', MARGIN_FLOOR_ABOVE_MAX_PRICE: 'le prix à marge minimale dépasse votre prix maximum',
@@ -351,7 +366,7 @@ const values: Record<ValueKey, string> = {
   UNSUPPORTED: 'non pris en charge par le canal', UNKNOWN: 'erreur inconnue', MAX_ATTEMPTS: 'nombre maximal de tentatives', NOT_APPLIED: 'non appliqué',
   SCOPE_HELD: 'offre retenue', SCOPE_CONTESTED: 'offre contestée', SCOPE_BLOCKED: 'offre bloquée', SCOPE_RETIRED: 'offre retirée',
   TRANSIENT: 'temporaire', PERMANENT: 'permanente', REQUIRES_HUMAN: 'requiert une personne',
-  MIN_PRICE: 'votre prix minimum', MAX_PRICE: 'votre prix maximum', CHANNEL_HALT: 'la suspension du site', CHANNEL_DISTRUST: 'la défiance envers le canal', PRICING_STOP: 'l’arrêt de la tarification',
+  MIN_PRICE: 'votre prix minimum', MAX_PRICE: 'votre prix maximum', CHANNEL_HALT: 'la suspension du site', CHANNEL_DISTRUST: 'la défiance envers le canal', PRICING_STOP: 'l’arrêt de la tarification', CLEARANCE: 'le mode déstockage',
   APPLIED: 'appliqué',
   RECONNECT_ACCOUNT: 'Reconnectez le compte du canal', CHECK_ACCOUNT_STATUS: 'Vérifiez le statut du compte du canal', CHECK_LISTING: 'Vérifiez l’offre sur le canal',
   REVIEW_CHANNEL_POLICY: 'Consultez l’avis du canal sur ses règles', CONTACT_CHANNEL_SUPPORT: 'Contactez le support du canal', REVIEW_OFFER_STATUS: 'Vérifiez le statut de l’offre',
@@ -1156,7 +1171,10 @@ export const fr: Messages = {
         PRICING_CHANNEL_RESUMED: { what: 'la suspension d’un site a été levée, les prix basés sur la concurrence fonctionnent de nouveau', step: 'Vérifiez dans la console les premiers changements de prix après la levée : ils montrent si les données de la concurrence sont de nouveau fiables.' },
         PRICING_CHANNEL_DISTRUSTED: { what: 'le canal affiche un autre prix que celui que nous avons envoyé', step: 'Ouvrez la console : les prix de ce canal sont bloqués jusqu’à ce qu’une personne lève la défiance. Comparez notre prix avec celui de l’espace vendeur du canal.' },
         PRICING_CHANNEL_TRUST_RESTORED: { what: 'la défiance envers le canal a été levée et les prix fonctionnent de nouveau', step: 'Vérifiez dans la console si le canal affiche les prochains prix exactement tels que nous les avons envoyés.' },
-        PRICING_BOUND_UNRESOLVABLE: { what: 'les limites de prix d’une offre ne peuvent pas être calculées', step: 'Ouvrez l’offre dans la console : il manque le prix minimum, le prix maximum ou une donnée servant au calcul de la marge minimale. Sans les deux limites, le prix reste inchangé.' },
+        PRICING_BOUND_UNRESOLVABLE: { what: 'les limites de prix d’une offre ne peuvent pas être calculées', step: 'Ouvrez l’offre dans la console : il manque le prix minimum, le prix maximum ou une donnée servant au calcul de la marge minimale. Sans les deux limites, le prix reste inchangé.',
+          // Шаг 102: пол выше потолка — суть словами: цены заморожены, что сделать
+          detail: (d: Readonly<Record<string, unknown>>) => (d.cause === 'MARGIN_FLOOR_ABOVE_MAX_PRICE' ? `${d.offer ? `${String(d.offer)} : ` : ''}plancher au-dessus du plafond — prix gelés. Relevez le prix maximum ou activez le déstockage.` : ''),
+        },
         PRICE_REJECTED_BY_BOUND: { what: 'un prix calculé a été rejeté par une limite', step: 'Ouvrez « Pourquoi ce prix » dans la console : vous y verrez quelle limite a tenu. Élargissez la limite si elle est trop serrée ; sinon, rien à faire.' },
         PRICE_GATE_INTERNAL_VIOLATION: { what: 'un contrôle interne a arrêté un prix juste avant l’envoi', step: 'Le prix n’a PAS été envoyé et vous n’avez rien à faire. Contactez-nous avec le code de l’événement : nous voyons aussi l’événement.' },
         CURRENT_PRICE_OUTSIDE_BOUNDS: { what: 'le prix actuel d’une offre est hors de vos limites', step: 'Ouvrez l’offre dans la console : soit le prix a été modifié à la main dans l’espace vendeur du canal, soit les limites ne correspondent plus au coût unitaire.' },
@@ -1166,6 +1184,12 @@ export const fr: Messages = {
           what: 'un prix inférieur à votre plancher est relevé vers celui-ci palier par palier',
           step: 'Rien à faire : chaque palier reste dans votre limite de palier. Pour atteindre le plancher plus vite, augmentez la limite de palier ; si le plancher semble trop haut, vérifiez le coût unitaire et la marge minimale dans la console.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)} : ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, environ ${Number(d.steps)} paliers de ${n.percentBp(Number(d.stepLimitBp))} au maximum chacun, au plus un palier toutes les ${Number(d.paceMinutes)} minutes.`,
+        },
+        // Шаг 102 [Р-227]: распродажа закончилась по дате — пол снова расчётный, цена вернётся к нему лестницей
+        CLEARANCE_ENDED: {
+          what: 'le déstockage d’une offre a pris fin à sa date — le plancher est de nouveau le plancher calculé',
+          step: 'Rien à faire : le prix remonte au plancher dans la limite de votre palier. Si la vente doit continuer, réactivez le déstockage sur la page du plancher de l’offre.',
+          detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)} : ${Number(d.steps) > 0 ? `le prix revient au plancher ${n.money(Number(d.floorMinor), String(d.currency))} en environ ${Number(d.steps)} ${Number(d.steps) === 1 ? 'palier' : 'paliers'} (~${Number(d.minutes)} minutes).` : 'le prix est déjà au plancher ou au-dessus.'}`,
         },
         PRICE_WRITE_NOT_SENT: { what: 'un changement de prix n’a pas été envoyé au canal', step: 'Ouvrez le journal des prix dans la console et vérifiez les offres de ce canal.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'les mises à jour du stock d’une offre sont bloquées : le canal a refusé une mise à jour du stock et l’offre attend une personne', step: 'Ouvrez l’écran Stocks dans la console, vérifiez l’offre et la réponse du canal, puis levez le blocage.' },
@@ -1263,6 +1287,10 @@ export const fr: Messages = {
       floorFromMin: (_min: string) => 'issu de votre prix minimum',
       floorFromMargin: (pct: string, _margin: string, min: string) => `issu de la marge minimale ${pct} (votre prix minimum ${min})`,
       floorMarginUnavailable: (min: string, cause: string) => `Votre prix minimum ${min} ; plancher de marge indisponible : ${cause}`,
+      // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
+      floorFromBreakEven: (min: string) => `du seuil de rentabilité (votre prix minimum ${min})`, floorFromClearance: 'du plancher de déstockage — sous le seuil de rentabilité à dessein', clearancePill: 'Déstockage',
+      // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
+      floorAboveCeiling: 'Plancher au-dessus du plafond', frozenDetail: 'prix gelés — relevez le prix maximum ou activez le déstockage',
     },
     outcomes: { APPROVED: 'Approuvé', NO_CHANGE: 'Aucun changement', REJECTED: 'Rejeté', HELD: 'Retenu' },
     rules: {
@@ -1324,6 +1352,8 @@ export const fr: Messages = {
       },
     },
     trace: {
+      // Шаг 102 [Р-227]: квитанция в режиме распродажи называет, кто включил, когда и зачем
+      clearanceBy: (who: string, when: string, note: string) => `Activé par ${who}, ${when}, note : « ${note} »`, clearancePill: 'Déstockage',
       // Шаг 97 [Р-218]: таблица конкурентов в шаге снимка и «кто подвинул цену»
       competitors: {
         title: 'Concurrents à ce moment', you: 'Vous', unnamedSeller: 'vendeur sans nom',
@@ -1398,7 +1428,7 @@ export const fr: Messages = {
       interventions: { DANGEROUS: 'dangereux', CORRECTED: 'corrigé' },
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
       stateStopped: 'arrêté', stateColumn: 'État', historyColumn: 'Prix', historyLegend: 'avant → voulu → fixé',
-      stats: { dangerous: 'Dangereux', corrected: 'Corrigés', unresolvable: 'Limite non calculable', limiterHolds: 'Limites de palier et de fréquence', stops: 'Arrêtés par une personne', inputRejects: 'Données de la concurrence rejetées', halts: 'Suspensions de site' },
+      stats: { dangerous: 'Dangereux', corrected: 'Corrigés', unresolvable: 'Limite non calculable', floorAboveCeiling: 'Plancher au-dessus du plafond', limiterHolds: 'Limites de palier et de fréquence', stops: 'Arrêtés par une personne', inputRejects: 'Données de la concurrence rejetées', halts: 'Suspensions de site' },
       statsLabel: 'Cette période par catégorie',
       filters: { label: 'Afficher une seule raison', clear: 'Afficher toutes les raisons' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -1406,7 +1436,7 @@ export const fr: Messages = {
       uniformState: 'Toutes les lignes ci-dessous :', uniformReason: (category: string) => `Raison de toutes les lignes ci-dessous : ${category}`, eachRepeat: (chip: string) => `${chip} chacune`,
       columns: { when: 'Quand', where: 'Où', kind: 'Arrêté par', proposed: 'Proposé', before: 'Avant', change: 'Variation', limit: 'Limite', deviation: 'Au-delà de la limite', reason: 'Raison' },
       path: 'Parcours de la décision',
-      limitMin: (amount: string) => `votre prix minimum ${amount}`, limitFloor: (amount: string) => `plancher de marge ${amount}`, limitMax: (amount: string) => `votre prix maximum ${amount}`,
+      limitMin: (amount: string) => `votre prix minimum ${amount}`, limitFloor: (amount: string) => `plancher de marge ${amount}`, limitClearance: (amount: string) => `plancher de déstockage ${amount}`, limitMax: (amount: string) => `votre prix maximum ${amount}`,
       productRef: (marketplace: string, ref: string) => `${marketplace} · produit ${ref}`,
     },
     // Шаг 94: почему кнопка формы недоступна — подсказкой при наведении и строкой под рядом кнопок
@@ -1437,8 +1467,8 @@ export const fr: Messages = {
       feeUsed: 'le plancher est calculé à partir de celle-ci (l’estimation la plus élevée)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source} : ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
       indexColumns: { offer: 'Offre', min: 'Prix minimum', max: 'Prix maximum', floor: 'Plancher' }, missingTitle: 'Offre introuvable', missingText: 'Ce lien ne mène à aucune offre de cet espace de travail. La liste montre les limites de chaque offre.', pageTitle: 'Limites et prix plancher', back: '← Coûts et planchers',
-      minPrice: 'Prix minimum', maxPrice: 'Prix maximum', minMargin: 'Marge minimale', marginNotSet: 'non définie — le plancher est égal à votre prix minimum',
-      marginAtLeast: (pct: string) => `marge d’au moins ${pct}`, effectiveFloor: 'Plancher effectif', costAndFees: 'Coût et commissions',
+      minPrice: 'Prix minimum', maxPrice: 'Prix maximum', minMargin: 'Marge minimale', marginNotSet: 'non définie — le plancher est au moins le seuil de rentabilité dès que le coût unitaire est déclaré',
+      marginAtLeast: (pct: string) => `marge d’au moins ${pct}`, marginSuspended: 'ne s’applique pas tant que le déstockage est actif', effectiveFloor: 'Plancher effectif', costAndFees: 'Coût et commissions',
       columns: { part: 'Composante', amount: (currency: string) => `Montant, ${currency}`, formula: 'Mode de calcul' },
       exactMargin: (text: string) => `Marge exacte : ${text}.`, balance: (ok: boolean): string => (ok ? 'Taxe, commissions, coût et marge correspondent au prix au centime près.' : 'Taxe, commissions, coût et marge NE correspondent PAS au prix — erreur de calcul.'),
       calculator: 'Vérifier avec le calculateur de commissions du canal',
@@ -1455,6 +1485,36 @@ export const fr: Messages = {
       marginUnavailable: (cause: string) => `non calculable : ${cause} — le Price Gate rejette chaque prix`,
       floorNoMin: 'Le prix minimum n’est pas défini — la tarification automatique ne peut pas être activée',
       floorFromMargin: (pct: string, min: string) => `marge minimale ${pct} : au-dessus de votre prix minimum ${min}`, floorFromMin: 'issu de votre prix minimum',
+      floorFromBreakEven: (min: string) => `seuil de rentabilité : au-dessus de votre prix minimum ${min}`,
+      floorFromClearance: (min: string) => `plancher de déstockage : remplace votre prix minimum ${min} et le plancher de marge tant que le déstockage est actif`,
+      frozen: (floor: string, max: string) => `Plancher au-dessus du plafond — prix gelés. Votre plancher ${floor} dépasse votre prix maximum ${max} : aucun prix ne convient et aucun changement de prix n’est envoyé. Relevez le prix maximum ou activez le déstockage.`,
+      // Шаг 102 [Р-227]: режим распродажи на странице пола
+      clearance: {
+        title: 'Plancher de déstockage — autoriser la vente sous le seuil de rentabilité',
+        intro: 'Pour le stock à écouler. Tant que le déstockage est actif, ce plancher remplace votre prix minimum et le plancher de marge ; le prix maximum, la limite de palier, la fréquence des changements et tous les contrôles restent.',
+        breakEven: 'Seuil de rentabilité', breakEvenUnknown: 'non calculable : le coût unitaire, la commission ou le taux de TVA manque',
+        floor: 'Plancher de déstockage', floorHint: 'Un plancher absolu : le prix ne descend jamais en dessous tant que le déstockage est actif.',
+        lossPerUnit: 'Perte par unité', noLoss: 'aucune — à ce plancher une vente couvre encore ses coûts',
+        maxLoss: 'Perte totale maximale', stock: (pieces: number) => `avec le stock actuel de ${pieces} ${pieces === 1 ? 'unité' : 'unités'}`, stockUnknown: 'stock inconnu — seule la perte par unité est affichée',
+        ack: (breakEven: string) => `Je comprends : chaque vente sous ${breakEven} fait perdre de l’argent`,
+        note: 'Pourquoi', noteHint: 'Obligatoire — conservé dans le journal d’audit avec votre nom.', notePlaceholder: 'Écouler le stock d’été',
+        endsAt: 'Terminer automatiquement', endsAtHint: 'Facultatif — après cette date, le plancher redevient le plancher calculé.',
+        enable: 'Activer le déstockage', mfaHint: 'Déplace le plancher : un second facteur est requis.', readOnly: 'Seul le propriétaire ou un responsable peut activer le déstockage.',
+        on: 'Le déstockage est actif', onBy: (who: string, when: string) => `Activé par ${who}, ${when}`, onNote: (note: string) => `Note : « ${note} »`, onEnds: (when: string) => `Se termine automatiquement ${when}`,
+        disable: 'Désactiver le déstockage',
+        returns: (floor: string, steps: number, minutes: number) => (steps === 0
+          ? `Le plancher revient à ${floor} immédiatement ; le prix est déjà au plancher ou au-dessus.`
+          : `Le plancher revient à ${floor} immédiatement ; le prix y remonte en environ ${steps} ${steps === 1 ? 'palier' : 'paliers'} (~${minutes} minutes).`),
+        enabled: 'Le déstockage est actif.', disabled: 'Le déstockage est désactivé.',
+        history: 'Journal du déstockage', columns: { when: 'Quand', what: 'Quoi', who: 'Qui', note: 'Note' }, system: 'automatiquement',
+        actions: { ENABLE: (floor: string) => `Activé, plancher ${floor}`, DISABLE: 'Désactivé', EXPIRE: 'Terminé à sa date' },
+        causes: {
+          ACK_REQUIRED: 'Cochez la case : chaque vente sous le seuil de rentabilité fait perdre de l’argent.', NOTE_REQUIRED: 'Indiquez pourquoi l’offre est déstockée.',
+          FLOOR_INVALID: 'Le plancher de déstockage doit être supérieur à zéro et ne pas dépasser votre prix maximum.', CURRENCY_MISMATCH: 'Le plancher de déstockage doit être dans la devise de l’offre.',
+          ENDS_IN_PAST: 'La date de fin doit être dans le futur.', MFA_REQUIRED: 'Le déstockage déplace le plancher : connectez-vous avec un second facteur et réessayez.',
+          NOT_ACTIVE: 'Le déstockage n’est pas actif pour cette offre.',
+        },
+      },
       unitCost: 'Coût unitaire', costProfile: (_id: string) => 'tel que vous l’avez déclaré', feeRate: 'Commission du canal', feeOfPrice: 'du prix sur le site', perSale: 'par vente',
       floorBreakdown: 'Détail du plancher effectif', currentBreakdown: 'Détail du prix actuel',
       calculatorSteps: (vat: boolean) => [
@@ -1791,6 +1851,8 @@ export const fr: Messages = {
         : `Le plancher a retenu le prix ${n} fois ${phrase}${amounts.length ? ` ; sans lui, vous auriez vendu ${amounts.join(' + ')} moins cher` : ''}${unknown ? ` (montant inconnu pour ${unknown})` : ''}`,
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
+      // Шаг 102 [Р-227]: удержания пола распродажи — отдельной строкой, в «пол удержал» не входят
+      clearanceHeld: (n: number, phrase: string) => `Le plancher de déstockage a maintenu le prix ${n} fois ${phrase} — une perte voulue, non comptée ci-dessus`, clearanceKind: 'plancher de déstockage',
       floorTitle: 'Maintiens au plancher', floorKinds: { CAPPED: 'fixé au plancher', HELD: 'maintenu inchangé' },
       // Шаг 96.2: «как удержано» — свойство секции, одной фразой; строка отмечает только вид, который отличается от остальных
       floorCaption: { CAPPED: 'Chaque maintien a fixé le prix à votre plancher.', HELD: 'Chaque maintien a gardé le prix inchangé à votre plancher.', MIXED: 'Chaque maintien a fixé le prix à votre plancher ; les lignes marquées « maintenu inchangé » l’y ont gardé.' },

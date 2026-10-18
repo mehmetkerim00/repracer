@@ -79,6 +79,10 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
                   <strong>{r.unit.label}</strong>
+                  {/* Шаг 102 [Р-227]: режим распродажи — пилюлей attention у названия */}
+                  {r.clearance ? <> <Badge tone="warn">{r.clearance}</Badge></> : null}
+                  {/* Шаг 102: пол выше потолка — цены заморожены законно, но не молча */}
+                  {r.frozen ? <> <Badge tone="stop">{r.frozen}</Badge></> : null}
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
                   {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
                   <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition && r.unit.condition.toLowerCase() !== 'new'

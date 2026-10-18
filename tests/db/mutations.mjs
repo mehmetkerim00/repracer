@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0196_verify_schema_invariants_v53.sql';
+const VERIFY = 'migrations/0198_verify_schema_invariants_v54.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2685,6 +2685,89 @@ export const STEP101_ROWS = [
         node(R101, V101, 'a filter summary of all competitors is refused', 'resolved')),
       m(replaceInFunction('channel_data.competitor_view_filter_valid(jsonb)', "WHEN EXISTS (SELECT 1 FROM jsonb_object_keys(f) k WHERE k <> ALL (ARRAY['competeWith', 'total', 'considered', 'unknown'])) THEN false", 'WHEN false THEN false'),
         node(R101, V101, 'a filter summary with a field outside the list is refused', 'resolved')),
+    ],
+  },
+];
+
+// Шаг 102 [Р-227]: режим распродажи — журнал, страж включения, пол базы с распродажей и безубыточностью, пометка удержаний, конец режима
+const R102 = T('clearance-step102.pg.test.ts');
+const D1_102 = 'the database refuses clearance without the acknowledgement';
+const D2_102 = 'no path puts the effective floor below break-even outside clearance';
+const D3_102 = 'after clearance is switched off the first recompute starts the climb';
+const D5_102 = 'holds of the clearance floor are marked and never counted';
+const G102 = 'the journal guard — own membership';
+const E102 = 'clearance ends by its date';
+export const STEP102_ROWS = [
+  {
+    row: 'шаг 102 (Р-227, Р-225)', critical: false,
+    invariant: 'режим распродажи включает человек от своего имени, со вторым фактором, подтверждением убытка и запиской; пол — в валюте предложения, не выше потолка, дата окончания — в будущем; выключить можно только действующий режим, закончить по дате — только наступившей; журнал только на добавление, в аудите, уходит с тенантом',
+    mutations: [
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF NOT NEW.acknowledged THEN', 'IF false THEN'),
+        node(R102, D1_102, 'no acknowledgement — refused by the database', '^accepted$')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', "IF btrim(coalesce(NEW.note, '')) = '' THEN", 'IF false THEN'),
+        node(R102, D1_102, 'no note — refused by the database', '^accepted$')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF NOT security.session_mfa() THEN', 'IF false THEN'),
+        node(R102, D1_102, 'no second factor — refused by the database', '^accepted$')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF active.clearance_change_id IS NULL THEN', 'IF false THEN'),
+        node(R102, D1_102, 'nothing to disable — refused by the database', 'DISABLED')),
+      // Без проверки «членство — того человека» строку держит внешний ключ — другой причиной
+      m(replaceInFunction('tenant_data.clearance_change_guard()',
+        'IF security.current_user_id() IS NOT NULL AND (m.user_id IS NULL OR m.user_id IS DISTINCT FROM security.current_user_id()) THEN', 'IF false THEN'),
+        node(R102, G102, 'enabled in the name of another membership', 'foreign key')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', "IF ws.field IS DISTINCT FROM 'PRICE' OR NEW.currency IS DISTINCT FROM ws.currency THEN", 'IF false THEN'),
+        node(R102, G102, 'a clearance floor in another currency than the offer', '^accepted$')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF NEW.floor_minor IS NULL OR NEW.floor_minor <= 0 OR ceiling IS NULL OR NEW.floor_minor > ceiling THEN', 'IF false THEN'),
+        node(R102, G102, 'a clearance floor above the max price', '^accepted$')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF NEW.ends_at IS NOT NULL AND NEW.ends_at <= now() THEN', 'IF false THEN'),
+        node(R102, G102, 'a clearance that ends in the past', '^accepted$')),
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF NOT EXISTS (SELECT 1 FROM tenant_data.active_clearance(NEW.tenant_id, NEW.write_scope_id', 'IF false AND NOT EXISTS (SELECT 1 FROM tenant_data.active_clearance(NEW.tenant_id, NEW.write_scope_id'),
+        node(R102, G102, 'an expiry before the date', '^accepted$')),
+      m(dropConstraint('clearance_change_action_known', 'tenant_data.clearance_change'), node(R102, G102, 'an unknown clearance action', '^accepted$')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.clearance_change'),
+        verify('tenant_data\\.clearance_change: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.clearance_change'),
+        verify('tenant_data\\.clearance_change: administrative INSERT is not written to the audit log')),
+      m(dropTrigger('zz_append_only', 'tenant_data.clearance_change'), smoke('append-only tenant_data.clearance_change')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.clearance_change'), smoke('truncate tenant_data.clearance_change')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.clearance_change', ", ''),
+        verify('tenant_data\\.clearance_change: tenant closure does not delete the table')),
+    ],
+  },
+  {
+    row: 'шаг 102 (Р-227, Р-83, Р-5)', critical: true,
+    invariant: 'пол перед каждой отправкой и пол решения: в режиме распродажи — пол распродажи вместо min_price и пола маржи; вне режима — не ниже безубыточности, если себестоимость объявлена',
+    mutations: [
+      m(replaceInFunction('tenant_data.effective_price_floor(uuid,uuid,timestamptz)', 'IF min_margin_bp IS NULL AND c IS NULL THEN', 'IF min_margin_bp IS NULL THEN'),
+        node(R102, D2_102, 'single edit: the floor stays at break-even', '^1000$')),
+      m(replaceInFunction('tenant_data.effective_price_floor(uuid,uuid,timestamptz)',
+        'SELECT ac.floor_minor INTO candidate FROM tenant_data.active_clearance(p_tenant_id, p_write_scope_id, p_at) ac;', 'candidate := NULL;'),
+        node(R102, D2_102, 'clearance: the floor is the clearance floor', '^1594$')),
+      // Пол решения без распродажи — min_price: решение на полу распродажи база отклоняет, и решений нет вовсе
+      m(replaceInFunction('channel_data.price_decision_floor_guard()',
+        'coalesce((SELECT ac.floor_minor FROM tenant_data.active_clearance(NEW.tenant_id, NEW.write_scope_id, now()) ac),', 'coalesce(NULL::bigint,'),
+        node(R102, D3_102, 'every decision in clearance names its clearance', 'false')),
+    ],
+  },
+  {
+    row: 'шаг 102 (Р-227, Р-117, Р-208)', critical: false,
+    invariant: 'удержание пола распродажи помечено и в «пол удержал» не входит; конец распродажи — запрос на переоценку, по дате — строкой EXPIRE системы с событием аудита',
+    mutations: [
+      m(replaceInFunction('channel_data.price_intent_record_floor_hold()',
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(NEW.rationale -> 'explanation', '[]'::jsonb)) y WHERE y ->> 'code' = 'CLEARANCE_FLOOR')", 'false'),
+        node(R102, D5_102, 'the clearance hold is marked', 'false\\]\\]$')),
+      m(replaceInFunction('channel_data.price_intent_record_floor_hold()', "'CAPPED_AT_MARGIN_FLOOR', 'CAPPED_AT_CLEARANCE_FLOOR', 'TARGET_OUTSIDE_BOUNDS_HOLD'", "'CAPPED_AT_MARGIN_FLOOR', 'TARGET_OUTSIDE_BOUNDS_HOLD'"),
+        node(R102, D5_102, 'the clearance hold is marked', 'false\\]\\]$')),
+      m(replaceInFunction('platform.shadow_floor_savings_between(uuid,timestamptz,timestamptz)', 'AND fh.shadow AND NOT fh.clearance', 'AND fh.shadow'),
+        node(R102, D5_102, '«saved you» counts only the regular floor', '^\\[2,')),
+      m(replaceInFunction('tenant_data.request_floor_raise()', "    why := 'CLEARANCE_ENDED';", '    RETURN NULL;'),
+        node(R102, D3_102, 'switching off asks for a re-evaluation', '^\\[\\]$')),
+      m(dropTrigger('zf_clearance_change_request_floor_raise', 'tenant_data.clearance_change'),
+        node(R102, D3_102, 'switching off asks for a re-evaluation', '^\\[\\]$')),
+      m(replaceInFunction('tenant_data.expire_clearance_floors(uuid)',
+        "INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action) VALUES (t, r.write_scope_id, 'EXPIRE');", 'NULL;'),
+        node(R102, E102, 'the database wrote the expiry', '^ENABLE$')),
+      m(dropTrigger('zb_clearance_expired_audit', 'tenant_data.clearance_change'),
+        node(R102, E102, 'the expiry is a system event in the audit log', '^0$')),
     ],
   },
 ];

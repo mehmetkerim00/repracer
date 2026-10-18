@@ -123,7 +123,8 @@ export function digestMessage(rows: readonly AlertRow[], tenant: string, to: str
     ...[...byCode.entries()].map(([code, x]) => m.ui.alerts.digestRow(code, alertText({ code }, m).what, x.count, m.when(x.last))),
     // Шаг 74: события с подробностью (старт лестницы к полу) — каждое своей строкой: группировка по коду теряла бы суммы
     ...(() => {
-      const details = rows.map((r) => alertDetail(r, m)).filter((d): d is string => d !== null);
+      // Пустая подробность (у кода она есть, но не для этой причины) — не строка письма
+      const details = rows.map((r) => alertDetail(r, m)).filter((d): d is string => Boolean(d));
       if (details.length === 0) return [];
       return ['', ...details.slice(0, DIGEST_DETAILS).map((d) => `  ${d}`),
         ...(details.length > DIGEST_DETAILS ? [`  ${m.ui.alerts.digestDetailsMore(details.length - DIGEST_DETAILS)}`] : [])];

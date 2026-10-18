@@ -33,12 +33,14 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
       {/* Шаг 79: итог периода — карточкой-сводкой */}
       <section className="card summary-card">
         <p className="headline">{view.headline}</p>
+        {/* Шаг 102 [Р-227]: пол распродажи — намеренный убыток, отдельной строкой; в «без пола … дешевле» не входит */}
+        {view.clearanceHeadline ? <p className="clearance-line">{view.clearanceHeadline}</p> : null}
         <p className="muted small">{view.from} – {view.to}</p>
       </section>
       {view.clipped ? <p className="notice">{m.ui.period.clipped(30)}</p> : null}
       {view.truncated ? <p className="notice">{d.truncated}</p> : null}
       <h3>{d.floorTitle}</h3>
-      {view.floorHolds.count === 0 ? <p className="muted empty">{d.none}</p> : (
+      {view.floorHolds.items.length === 0 ? <p className="muted empty">{d.none}</p> : (
         <>
         <p className="section-sub floor-caption">{caption}{holdReasons.caption ? <span className="uniform-reason"> {holdReasons.caption}</span> : null}</p>
         <div className="table-wrap">
@@ -48,7 +50,7 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
               {shownHolds.map(({ item: i, count }, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
                   <td className="nowrap" data-label={`${d.floorColumns.when}${holdZone ? ` · ${holdZone}` : ''}`}><When value={i.at} zone={!holdZone} /></td>
-                  <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}{i.clearance ? <> <Badge tone="warn">{i.clearance}</Badge></> : null}</td>
                   <td className="num cur" data-label={d.floorColumns.target}>{i.target ?? m.ui.common.noValue}</td>
                   <td className="num money cur" data-label={d.floorColumns.floor}>{i.floor}</td>
                   <td className="num cur" data-label={d.floorColumns.below}>{i.below ?? m.ui.common.noValue}</td>

@@ -4,7 +4,7 @@
   "channel": "KAUFLAND",
   "apiVersion": "2.44.0",
   "title": "Решение выше max_price: отклонено Gate и сохранено как REJECTED_BY_GATE",
-  "description": "Стратегия целевой маржи 20% (комиссия 15%, НДС 19%): при себестоимости 10.00 цена 19.15 одобрена и отправлена. Себестоимость выросла до 20.00 — для той же маржи нужна 38.30 при max_price 25.00. Стратегия маржи не округляет цель до границы, конфликт доходит до Gate: REJECTED с причиной ABOVE_MAX_PRICE, класс REJECTED_BY_GATE — так же, как отклонение по нижней границе [Р-44]; предупреждение продавцу, в канал ничего не уходит.",
+  "description": "Стратегия целевой маржи 20% (комиссия 15%, НДС 19%): при себестоимости 10.00 цена 19.15 одобрена и отправлена. Себестоимость выросла до 15.00 — для той же маржи нужна 28.73 при max_price 25.00 (шаг 102: рост себестоимости меньше прежних 20.00 — безубыточность 21.73 остаётся ниже потолка; при 20.00 безубыточность 28.98 выше потолка, и Gate отвечает «пол выше потолка» — это проверяет тест Gate). Стратегия маржи не округляет цель до границы, конфликт доходит до Gate: REJECTED с причиной ABOVE_MAX_PRICE, класс REJECTED_BY_GATE — так же, как отклонение по нижней границе [Р-44]; предупреждение продавцу, в канал ничего не уходит.",
   "tags": [
     "mandatory:pipeline-above-max",
     "pipeline",
@@ -134,7 +134,7 @@
       "value": {
         "currency": "EUR",
         "costProfileId": "cp-4101-v2",
-        "unitCostMinor": 2000,
+        "unitCostMinor": 1500,
         "fixedFeeMinor": 0,
         "feeRateBp": 1500,
         "tax": {
@@ -158,7 +158,7 @@
             "reason": {
               "code": "MARGIN_TARGET",
               "params": {
-                "targetMinor": 3830
+                "targetMinor": 2873
               }
             }
           },
@@ -168,7 +168,7 @@
             "reason": {
               "code": "ABOVE_MAX_PRICE",
               "params": {
-                "proposedMinor": 3830,
+                "proposedMinor": 2873,
                 "maxMinor": 2500
               }
             }
@@ -176,14 +176,14 @@
         ],
         "intent": {
           "intentClass": "CHANGED",
-          "proposedMinor": 3830
+          "proposedMinor": 2873
         },
         "decision": {
           "outcome": "REJECTED",
           "decisionClass": "REJECTED_BY_GATE",
           "rejectionReason": "ABOVE_MAX_PRICE",
           "finalMinor": null,
-          "effectiveFloorMinor": 1500,
+          "effectiveFloorMinor": 2173,
           "effectiveCeilingMinor": 2500,
           "maxPriceIds": [
             "max-4101"
@@ -263,7 +263,7 @@
           "rejectionReason": "ABOVE_MAX_PRICE",
           "decisionClass": "REJECTED_BY_GATE",
           "reasonParams": {
-            "proposedMinor": 3830,
+            "proposedMinor": 2873,
             "maxMinor": 2500
           }
         }

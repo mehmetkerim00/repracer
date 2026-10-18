@@ -499,6 +499,9 @@ SELECT pg_temp.expect_fail('truncate tenant_data.cost_import', $q$ TRUNCATE tena
 -- Шаг 99 [Р-224]: журнал импортов — append-only, и TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.import_run', $q$ TRUNCATE tenant_data.import_run $q$,
   'TRUNCATE of tenant_data.import_run is forbidden');
+-- Шаг 102 [Р-227]: журнал режима распродажи — доказательство намеренного убытка, TRUNCATE его не берёт
+SELECT pg_temp.expect_fail('truncate tenant_data.clearance_change', $q$ TRUNCATE tenant_data.clearance_change $q$,
+  'TRUNCATE of tenant_data.clearance_change is forbidden');
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$ TRUNCATE tenant_data.channel_write_mode_change $q$,
   'TRUNCATE of tenant_data.channel_write_mode_change is forbidden');
@@ -763,6 +766,12 @@ INSERT INTO tenant_data.import_run (tenant_id, kind, outcome, file_name, file_sh
                                    duration_ms, bulk_job_id, created_by_membership_id, created_by_user_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'COSTS', 'CHECKED', 'r103.csv', repeat('a', 64), 1, 1, 0, 0, 0,
         'bf000000-0000-4000-8000-000000000099', 'a2000000-0000-0000-0000-0000000000a9', 'a1000000-0000-0000-0000-0000000000a9');
+
+-- Шаг 102 [Р-227]: строка журнала режима распродажи — включение владельцем от своего имени, со вторым фактором, подтверждением и запиской
+SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true), set_config('app.auth_mfa', 'on', true) \gset
+INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action, floor_minor, currency, note, acknowledged, created_by_membership_id)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'ENABLE', 900, 'EUR', 'Clearing summer stock', true,
+        'a2000000-0000-0000-0000-00000000000a');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

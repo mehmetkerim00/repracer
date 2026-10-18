@@ -129,7 +129,7 @@ function demoLikeRejected(worldId: string, dangerous = false) {
   ];
   return {
     worldId, headline: `Your bounds stopped ${dangerous ? 1 : 0} dangerous changes and corrected 144`,
-    summary: { dangerous: dangerous ? 1 : 0, corrected: 144, unresolvable: 0, limiterHolds: 0, stops: 0, inputRejects: 0, halts: 0 },
+    summary: { dangerous: dangerous ? 1 : 0, corrected: 144, unresolvable: 0, floorAboveCeiling: 0, limiterHolds: 0, stops: 0, inputRejects: 0, halts: 0 },
     groups: [{ code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', count: 132 }, { code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', count: 12 + (dangerous ? 1 : 0) }],
     items, gaps: [],
   };
@@ -453,6 +453,8 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
       await chooseLanguage(b, de.ui.app.languages.en);
       await b.waitText(en.ui.app.worlds);
     }
+    // Гонка теста (шаг 102): заголовок списка появляется раньше карточек — карточка ждётся, а не читается сразу
+    await waitFor(b, `document.querySelector('h3 a') !== null`, 'the workspace cards render');
     const world = (await b.evaluate<string>(`document.querySelector('h3 a').getAttribute('href')`)).split('/')[2]!;
     // Шаг 97: страница Competition предложения — те же правила адаптива на каждой ширине и в обеих темах (адрес — из строки Offers)
     {
@@ -1069,7 +1071,9 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
     assert.equal(rows[23]!.reason, 'Below your minimum price', 'B: a single occurrence has no chip');
     // E: счётчики периода — чипами, все категории видны, ненулевые — акцентом
     const chips = await b.evaluate<Array<{ text: string; on: boolean }>>(`[...document.querySelectorAll('.stat-chips .stat-chip')].map((c) => ({ text: c.innerText.replace(/\\s+/g, ' ').trim(), on: c.classList.contains('on') }))`);
-    assert.equal(chips.length, 7, `E: seven categories, zeros too — ${JSON.stringify(chips)}`);
+    // Шаг 102: восьмая категория — «пол выше потолка» (уточнение владельца: замороженный товар виден, а не прячется в «границу не вычислить»)
+    assert.equal(chips.length, 8, `E: eight categories, zeros too — ${JSON.stringify(chips)}`);
+    assert.ok(chips.every((c) => /\s\d+$/.test(c.text)), `E: every category carries its number — ${JSON.stringify(chips)}`);
     assert.deepEqual(chips.filter((c) => c.on).map((c) => c.text), [`${r.stats.corrected} 144`], 'E: only non-zero chips are accented');
     // F: группы причин — фильтры таблицы
     const filters = () => b.evaluate<Array<{ text: string; pressed: string | null }>>(`[...document.querySelectorAll('.reason-filters button.reason-filter')].map((x) => ({ text: x.innerText.replace(/\\s+/g, ' ').trim(), pressed: x.getAttribute('aria-pressed') }))`);
@@ -1675,6 +1679,8 @@ test('step 100 (C): the language is one menu — globe and «EN ▾», native na
     await chooseLanguage(b, 'Français', '.sidebar-extras');
     await waitFor(b, `document.documentElement.lang === 'fr'`, 'the language changes from the drawer');
     await b.evaluate(`(document.querySelector('.menu-button').click(), true)`);
+    // Гонка теста (шаг 102): после смены языка страница перерисовывается — панель ждётся так же, как при первом открытии
+    await waitFor(b, `document.querySelector('.sidebar-extras .lang-button') !== null`, 'the drawer opens again');
     await chooseLanguage(b, 'English', '.sidebar-extras');
     await waitFor(b, `document.documentElement.lang === 'en'`, 'back to English');
   } finally {
@@ -1827,3 +1833,94 @@ async function waitFor(b: Browser, expression: string, what: string, timeoutMs =
     await new Promise((x) => setTimeout(x, 200));
   }
 }
+
+/**
+ * Шаг 102 (C) [Р-227]: страница пола — раздел режима распродажи: поле пола в стандарте полей, убыток на штуку считается при вводе, без
+ * подтверждения и записки кнопка недоступна и говорит почему; включение — пилюля «Clearance» цветом attention Primer у заголовка страницы
+ * пола и у предложения в Offers, обе темы, 1440 и 375 без прокрутки вбок; выключение — одним нажатием
+ */
+test('step 102 (C): the floor page enables clearance with the loss per piece; the Clearance pill is attention-coloured on the floor page and Offers; one click turns it off', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.bounds.clearance;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+  await settled(b, 'offers');
+  const boundsHref = await b.evaluate<string>(`document.querySelector('.world-content a[href*="/bounds/"]').getAttribute('href')`);
+  await b.evaluate(`(location.hash = ${JSON.stringify(boundsHref)}, true)`);
+  await settled(b, 'floor page');
+  await b.waitText(t.title);
+  const type = (selector: string, value: string) => b.evaluate(`(() => { const i = document.querySelector(${JSON.stringify(selector)});
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await type('section.clearance input[inputmode="decimal"]', '1.00');
+  await new Promise((x) => setTimeout(x, 200));
+  const form = await b.evaluate<{ loss: string; disabled: boolean; why: string }>(`(() => { const s = document.querySelector('section.clearance');
+    const outputs = [...s.querySelectorAll('output.field-value')].map((o) => o.textContent.trim());
+    const button = [...s.querySelectorAll('button')].find((x) => x.textContent.trim() === ${JSON.stringify(t.enable)});
+    return { loss: outputs[1] ?? '', disabled: button.disabled, why: button.title }; })()`);
+  assert.match(form.loss, /^−€\d+\.\d{2}$/, `the loss per piece is computed while typing — ${form.loss}`);
+  assert.deepEqual([form.disabled, form.why], [true, t.causes.ACK_REQUIRED], 'without the acknowledgement the button says why');
+  await b.evaluate(`(document.querySelector('section.clearance input[type=checkbox]').click(), true)`);
+  await type('section.clearance input[placeholder]', 'Clearing summer stock');
+  await new Promise((x) => setTimeout(x, 200));
+  await b.click(t.enable, 'section.clearance button');
+  await b.waitText(t.on);
+  const pillColour = `(() => { const pill = document.querySelector('h2 .badge.tone-warn'); if (!pill) return null;
+    const probe = document.createElement('span'); probe.style.color = 'var(--warning)'; document.body.append(probe); const attention = getComputedStyle(probe).color; probe.remove();
+    return { text: pill.textContent.trim(), attention: getComputedStyle(pill).color === attention }; })()`;
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await settled(b, `${scheme} ${width}: floor page`);
+      assert.deepEqual(await b.evaluate(pillColour), { text: en.ui.products.clearancePill, attention: true }, `${scheme} ${width}: the pill uses the attention token`);
+      const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+      assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: the floor page does not scroll sideways — ${fit.out.join('; ')}`);
+    }
+  }
+  await b.setColorScheme('light');
+  await b.setViewport(1440, 900);
+  // Offers: пилюля у названия предложения
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+  await settled(b, 'offers with clearance');
+  assert.equal(await b.evaluate<number>(`document.querySelectorAll('.world-content td.offer .badge.tone-warn').length`), 1, 'the offer in clearance carries the pill on Offers');
+  // Выключение — одним нажатием
+  await b.evaluate(`(location.hash = ${JSON.stringify(boundsHref)}, true)`);
+  await settled(b, 'floor page again');
+  await b.click(t.disable, 'section.clearance button');
+  await waitFor(b, `document.querySelector('h2 .badge.tone-warn') === null`, 'one click turns clearance off');
+  /**
+   * Уточнение владельца к шагу 102: «пол выше потолка» (безубыточность выросла выше max_price) теперь законное состояние — и видимое:
+   * пометка у предложения в Offers и плашка на странице пола с тем, что сделать. Себестоимость поднимается тем же путём, что сценарии
+   * стенда (`setCost` хранилища в памяти), и возвращается — следующие проверки видят мир прежним
+   */
+  const state = await smokeLive.view(STAND_USERS[0] as never) as { state: { scopes: Array<{ writeScopeId: string; cost: unknown; bounds: { max: { status: string; amountMinor?: number } } }> } };
+  const writeScopeId = decodeURIComponent(boundsHref.split('/').pop()!);
+  const scope = state.state.scopes.find((x) => x.writeScopeId === writeScopeId)!;
+  const store = smokeLive.store as unknown as { setCost(id: string, cost: unknown): void };
+  assert.equal(typeof store.setCost, 'function', 'the smoke world keeps its store in memory');
+  assert.equal(scope.bounds.max.status, 'RESOLVED');
+  const before102 = scope.cost;
+  store.setCost(writeScopeId, { ...(scope.cost as object), unitCostMinor: scope.bounds.max.amountMinor! * 2 });
+  try {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+    await settled(b, 'offers with a floor above the ceiling');
+    const frozen = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.offer .badge.tone-stop')].map((x) => x.textContent.trim())`);
+    assert.ok(frozen.includes(en.ui.products.floorAboveCeiling), `the frozen offer is marked on Offers — ${JSON.stringify(frozen)}`);
+    await b.evaluate(`(location.hash = ${JSON.stringify(boundsHref)}, true)`);
+    await settled(b, 'floor page with a floor above the ceiling');
+    const notice = await b.evaluate<string | null>(`document.querySelector('.notice.frozen')?.textContent.trim() ?? null`);
+    assert.match(notice ?? '', /^Floor above ceiling — prices frozen\. .*Raise the maximum price or enable clearance\.$/, 'the floor page says why prices stand and what to do');
+  } finally {
+    store.setCost(writeScopeId, before102);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});

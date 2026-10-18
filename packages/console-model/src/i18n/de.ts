@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Kein Wechselkurs für Kanalvergleich',
   FIXED_PRICE: 'Festpreis', MARGIN_TARGET: 'Preis für Zielmarge', BUYBOX_MATCH: 'Buy Box angleichen', BUYBOX_UNDERCUT: 'Buy Box unterbieten',
   LOWEST_MATCH: 'Niedrigsten Preis angleichen', LOWEST_UNDERCUT: 'Niedrigsten Preis unterbieten', CAPPED_AT_MIN_PRICE: 'Ziel auf Ihren Mindestpreis begrenzt',
-  CAPPED_AT_MAX_PRICE: 'Ziel auf Ihren Höchstpreis begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', RAISED_TOWARD_FLOOR: 'Einen Schritt zur Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen', LADDER_PACED: 'Nächster Schritt zur Untergrenze später',
+  CAPPED_AT_MAX_PRICE: 'Ziel auf Ihren Höchstpreis begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', CLEARANCE_FLOOR: 'Abverkaufsmodus', CAPPED_AT_CLEARANCE_FLOOR: 'Ziel auf die Abverkaufs-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', RAISED_TOWARD_FLOOR: 'Einen Schritt zur Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen', LADDER_PACED: 'Nächster Schritt zur Untergrenze später',
   ALREADY_WINNING_BUYBOX: 'Buy Box bereits gewonnen', NO_COMPETITOR_OFFERS: 'Keine Wettbewerber', TARGET_OUTSIDE_BOUNDS_HOLD: 'Ziel außerhalb der Grenzen — beibehalten',
   BUYBOX_WIN_TARGET: 'Buy Box gewinnen', CREEP_UP: 'Beim Gewinnen einen Schritt angehoben', CREEP_STEP_BACK: 'Buy Box verloren — zurück zum letzten Gewinnerpreis',
   CAPPED_AT_CREEP_CEILING: 'Unter dem Preis gehalten, bei dem die Buy Box verloren ging', BUYBOX_HOLDER_UNKNOWN: 'Buy-Box-Inhaber nicht genannt — beibehalten',
@@ -44,14 +44,19 @@ const titles: Record<AnyReasonCode, string> = {
 
 /** Р-209, Р-210: wonach der Preis ohne Wettbewerberbeobachtung angehoben wurde */
 const RAISE_AFTER_TEXT: Readonly<Record<FloorRaiseReason, string>> = {
-  COST_UPDATE: ' nach der Kostenänderung',
+  // Шаг 102: рост себестоимости называет фраза впереди (costRaise), а не хвост «после чего»
+  COST_UPDATE: '',
   FLOOR_RECHECK: ' nach der Neuberechnung der Untergrenze vor dem Senden (aktuelle Kosten, Gebühren, Wechselkurs und MwSt.)',
   FX_UPDATE: ' nach der Änderung des EZB-Wechselkurses',
   BOUNDS_UPDATE: ' nach der Änderung Ihres Mindest- oder Höchstpreises',
   GUARDRAIL_UPDATE: ' nach der Änderung Ihrer Mindestmarge oder Schrittgrenze',
   VAT_UPDATE: ' nach der Änderung des MwSt.-Satzes',
+  CLEARANCE_ENDED: ' nach dem Ende des Abverkaufs',
 };
 const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ?? '') as FloorRaiseReason] ?? '';
+/** Шаг 102 [Р-227]: рост себестоимости поднял пол — словами владельца, впереди фразы; граница пола — словами */
+const costRaise = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? 'Stückkosten gestiegen: Untergrenze angehoben. ' : '');
+const floorWord = (f: Fmt): string => ({ margin_floor: 'Ihrer Mindestmargen-Untergrenze', break_even: 'der Gewinnschwelle', clearance: 'Ihrer Abverkaufs-Untergrenze' } as Record<string, string>)[String(f.get('bound'))] ?? 'Ihrem Mindestpreis';
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` um ${f.bp('deviationBp')}`);
 
 /** Шаг 101 [Р-226]: фильтр «Compete with», ориентир и почему Buy Box не участвовал — словами */
@@ -122,10 +127,17 @@ const reasons: Record<AnyReasonCode, Template> = {
   CAPPED_AT_MIN_PRICE: (f) => `Ziel ${f.money('targetMinor')} liegt unter Ihrem Mindestpreis — begrenzt auf ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `Ziel ${f.money('targetMinor')} liegt über Ihrem Höchstpreis — begrenzt auf ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `Ziel ${f.money('targetMinor')} liegt unter Ihrer Mindestmargen-Untergrenze ${f.money('floorMinor')} (Marge ${f.bp('minMarginBp')}) — auf die Untergrenze gesetzt.`,
-  RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
+  // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
+  CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Abverkaufsmodus: Untergrenze ${f.money('floorMinor')} liegt unter der Gewinnschwelle ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} je Stück).` : f.has('breakEvenMinor') ? `Abverkaufsmodus: Untergrenze ${f.money('floorMinor')}, Gewinnschwelle ${f.money('breakEvenMinor')}.` : `Abverkaufsmodus: Untergrenze ${f.money('floorMinor')} — die Gewinnschwelle ist nicht berechenbar.`),
+  CAPPED_AT_CLEARANCE_FLOOR: (f) => `Ziel ${f.money('targetMinor')} liegt unter Ihrer Abverkaufs-Untergrenze ${f.money('floorMinor')} — auf die Abverkaufs-Untergrenze gesetzt.`,
+  RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
+    ? `Ihr Preis ${f.money('currentMinor')} lag unter der Gewinnschwelle — auf die Gewinnschwelle ${f.money('floorMinor')} angehoben${raiseAfter(f)}.`
+    : f.get('bound') === 'clearance'
+    ? `Ihr Preis ${f.money('currentMinor')} lag unter Ihrer Abverkaufs-Untergrenze — auf ${f.money('floorMinor')} angehoben${raiseAfter(f)}.`
+    : f.get('bound') === 'margin_floor'
     ? `Ihr Preis ${f.money('currentMinor')} lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} angehoben${raiseAfter(f)}${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}.`
     : `Ihr Preis ${f.money('currentMinor')} lag unter Ihrem Mindestpreis — auf ${f.money('floorMinor')} angehoben${raiseAfter(f)}.`),
-  RAISED_TOWARD_FLOOR: (f) => `Ihr Preis ${f.money('currentMinor')} liegt unter ${f.get('bound') === 'margin_floor' ? 'Ihrer Mindestmargen-Untergrenze' : 'Ihrem Mindestpreis'} ${f.money('floorMinor')} — einen Schritt angehoben${raiseAfter(f)}, so weit die Schrittgrenze von ${f.bp('stepLimitBp')} erlaubt; bis zur Untergrenze noch etwa ${f.count('stepsLeft')} ${f.get('stepsLeft') === 1 ? 'Schritt' : 'Schritte'}.`,
+  RAISED_TOWARD_FLOOR: (f) => costRaise(f) + `Ihr Preis ${f.money('currentMinor')} liegt unter ${floorWord(f)} ${f.money('floorMinor')} — einen Schritt angehoben${raiseAfter(f)}, so weit die Schrittgrenze von ${f.bp('stepLimitBp')} erlaubt; bis zur Untergrenze noch etwa ${f.count('stepsLeft')} ${f.get('stepsLeft') === 1 ? 'Schritt' : 'Schritte'}.`,
   ALREADY_AT_TARGET: (f) => `Der Preis entspricht bereits dem Ziel ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `Die Differenz ${f.money('deltaMinor')} liegt unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -160,10 +172,12 @@ const reasons: Record<AnyReasonCode, Template> = {
     ? `Schritt auf ${f.money('finalMinor')} zur Untergrenze ${f.money('floorMinor')} freigegeben; der Preis liegt noch unter der Untergrenze.`
     : `Preis ${f.money('finalMinor')} innerhalb von ${f.money('floorMinor')}–${f.money('ceilingMinor')} freigegeben.`),
   NO_CHANGE: () => 'Keine Preisänderung — die Entscheidung wird ohne Versand gespeichert.',
-  BELOW_MIN_PRICE: (f) => `Abgelehnt: ${f.money('proposedMinor')} liegt unter Ihrem Mindestpreis ${f.money('minMinor')}${deviation(f)}.`,
+  BELOW_MIN_PRICE: (f) => f.get('floor') === 'CLEARANCE' ? `Abgelehnt: ${f.money('proposedMinor')} liegt unter Ihrer Abverkaufs-Untergrenze ${f.money('minMinor')}${deviation(f)}.` : `Abgelehnt: ${f.money('proposedMinor')} liegt unter Ihrem Mindestpreis ${f.money('minMinor')}${deviation(f)}.`,
   BELOW_MARGIN_FLOOR: (f) => `Abgelehnt: ${f.money('proposedMinor')} liegt unter der Mindestmargen-Untergrenze ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}${deviation(f)}.`,
   ABOVE_MAX_PRICE: (f) => `Abgelehnt: ${f.money('proposedMinor')} liegt über Ihrem Höchstpreis ${f.money('maxMinor')}${deviation(f)}.`,
-  BOUND_UNRESOLVABLE: (f) => `Abgelehnt: ${f.value('bound')} ist nicht berechenbar — ${f.value('cause')}${opt(f, 'boundCurrency', () => ` (Grenze ${f.raw('boundCurrency')} ${f.value('boundBasis')}, Angebot ${f.raw('scopeCurrency')} ${f.value('scopeBasis')})`)}${opt(f, 'minMarginBp', () => ` (Mindestmarge ${f.bp('minMarginBp')})`)}. Es wird nichts gesendet.`,
+  BOUND_UNRESOLVABLE: (f) => f.get('cause') === 'MARGIN_FLOOR_ABOVE_MAX_PRICE'
+    ? `Abgelehnt: ${f.value('bound')} liegt über dem Höchstpreis${opt(f, 'minMarginBp', () => ` (Mindestmarge ${f.bp('minMarginBp')})`)} — kein Preis passt, die Preise sind eingefroren. Höchstpreis anheben oder Abverkauf einschalten. Es wird nichts gesendet.`
+    : `Abgelehnt: ${f.value('bound')} ist nicht berechenbar — ${f.value('cause')}${opt(f, 'boundCurrency', () => ` (Grenze ${f.raw('boundCurrency')} ${f.value('boundBasis')}, Angebot ${f.raw('scopeCurrency')} ${f.value('scopeBasis')})`)}${opt(f, 'minMarginBp', () => ` (Mindestmarge ${f.bp('minMarginBp')})`)}. Es wird nichts gesendet.`,
   STEP_LIMIT: (f) => `Zurückgehalten: die Änderung von ${f.money('currentMinor')} auf ${f.money('proposedMinor')} beträgt ${f.bp('stepBp')}, erlaubt sind ${f.bp('limitBp')}.`,
   CHANGE_RATE_LIMIT: (f) => `Zurückgehalten: bereits ${f.count('changes')} Änderungen in der letzten Stunde, Grenze ${f.count('limit')}.`,
   INTENT_EXPIRED: (f) => `Abgelehnt: der vorgeschlagene Preis hat ${f.seconds('waitedSeconds')} gewartet und ist am ${f.when('expiresAt')} abgelaufen.`,
@@ -281,13 +295,14 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MIN_PRICE: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrem Mindestpreis — begrenzt auf ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `Das Ziel aus Wettbewerbspreisen lag über Ihrem Höchstpreis — begrenzt auf ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} gesetzt (Marge ${f.bp('minMarginBp')}).`,
+  CAPPED_AT_CLEARANCE_FLOOR: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrer Abverkaufs-Untergrenze — auf die Abverkaufs-Untergrenze ${f.money('floorMinor')} gesetzt.`,
   ALREADY_AT_TARGET: () => 'Der Preis entsprach bereits dem Ziel.',
   WITHIN_DEADBAND: (f) => `Die Differenz zum Ziel lag unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `Das Ziel lag außerhalb von ${f.money('minMinor')}–${f.money('maxMinor')}; die Strategie behält den Preis bei.`,
   COMPETITOR_REQUIREMENT_NOT_MET: () => 'Strategie nicht berechnet: die Kanaldaten lieferten nicht, was die Strategie braucht.',
   ENGINE_CURRENCY_MISMATCH: (f) => `Strategie nicht berechnet: ${f.value('source')} war in einer anderen Währung als das Angebot (${f.raw('expected')}).`,
   DIVERGENCE_CASE_OPENED: (f) => `Abweichungsfall eröffnet: der Kanal zeigte einen anderen Preis als die erwarteten ${f.money('expectedMinor')}.`,
-  BELOW_MIN_PRICE: (f) => `Abgelehnt: der vorgeschlagene Preis lag unter Ihrem Mindestpreis ${f.money('minMinor')}.`,
+  BELOW_MIN_PRICE: (f) => f.get('floor') === 'CLEARANCE' ? `Abgelehnt: der vorgeschlagene Preis lag unter Ihrer Abverkaufs-Untergrenze ${f.money('minMinor')}.` : `Abgelehnt: der vorgeschlagene Preis lag unter Ihrem Mindestpreis ${f.money('minMinor')}.`,
   BELOW_MARGIN_FLOOR: (f) => `Abgelehnt: der vorgeschlagene Preis lag unter der Mindestmargen-Untergrenze ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (Marge ${f.bp('minMarginBp')})`)}.`,
   ABOVE_MAX_PRICE: (f) => `Abgelehnt: der vorgeschlagene Preis lag über Ihrem Höchstpreis ${f.money('maxMinor')}.`,
   STEP_LIMIT: (f) => `Zurückgehalten: die Änderung von ${f.money('currentMinor')} war größer als der erlaubte Schritt ${f.bp('limitBp')}.`,
@@ -315,7 +330,7 @@ const values: Record<ValueKey, string> = {
   COST_PROFILE: 'die Stückkosten', VAT_RATE: 'der USt.-Satz des Produkts', SNAPSHOT: 'Wettbewerbsdaten',
   deadbandMinor: 'Schwelle', priceMinor: 'Festpreis', targetMarginBp: 'Zielmarge', undercutMinor: 'Unterbietung', fulfillmentHandicapMinor: 'Versand-Ausgleich', creepStepBp: 'Anhebungsschritt', MERCHANT: 'der Verkäufer',
   POSITIVE: 'positiv', NON_NEGATIVE: 'null oder mehr', MARGIN_BELOW_100_PERCENT: 'einschließlich Gebühren unter 100 %',
-  min: 'der Mindestpreis', max: 'der Höchstpreis', margin_floor: 'die Mindestmargen-Untergrenze', both: 'die Preisgrenzen',
+  min: 'der Mindestpreis', max: 'der Höchstpreis', margin_floor: 'die Mindestmargen-Untergrenze', both: 'die Preisgrenzen', break_even: 'die Gewinnschwelle',
   MISSING: 'nicht gesetzt', CURRENCY_MISMATCH: 'in anderer Währung', BASIS_MISMATCH: 'auf anderer Preisbasis', INVALID_AMOUNT: 'ein ungültiger Betrag',
   MIN_ABOVE_MAX: 'der Mindestpreis liegt über dem Höchstpreis', COST_PROFILE_MISSING: 'die Stückkosten sind nicht gesetzt', COST_CURRENCY_MISMATCH: 'die Stückkosten sind in anderer Währung',
   VAT_UNKNOWN: 'der USt.-Satz des Produkts ist nicht gesetzt', UNATTAINABLE: 'mit den aktuellen Gebühren nicht erreichbar', MARGIN_FLOOR_ABOVE_MAX_PRICE: 'der Mindestmargen-Preis liegt über Ihrem Höchstpreis',
@@ -336,7 +351,7 @@ const values: Record<ValueKey, string> = {
   UNSUPPORTED: 'vom Kanal nicht unterstützt', UNKNOWN: 'unbekannter Fehler', MAX_ATTEMPTS: 'maximale Versuche', NOT_APPLIED: 'nicht übernommen',
   SCOPE_HELD: 'Angebot zurückgehalten', SCOPE_CONTESTED: 'Angebot umstritten', SCOPE_BLOCKED: 'Angebot blockiert', SCOPE_RETIRED: 'Angebot eingestellt',
   TRANSIENT: 'vorübergehend', PERMANENT: 'dauerhaft', REQUIRES_HUMAN: 'braucht eine Person',
-  MIN_PRICE: 'der Mindestpreis', MAX_PRICE: 'der Höchstpreis', CHANNEL_HALT: 'das Anhalten der Storefront', CHANNEL_DISTRUST: 'das Misstrauen gegenüber dem Kanal', PRICING_STOP: 'der Preisstopp',
+  MIN_PRICE: 'der Mindestpreis', MAX_PRICE: 'der Höchstpreis', CHANNEL_HALT: 'das Anhalten der Storefront', CHANNEL_DISTRUST: 'das Misstrauen gegenüber dem Kanal', PRICING_STOP: 'der Preisstopp', CLEARANCE: 'der Abverkaufsmodus',
   APPLIED: 'übernommen',
   RECONNECT_ACCOUNT: 'Verbinden Sie das Kanalkonto neu', CHECK_ACCOUNT_STATUS: 'Prüfen Sie den Status des Kanalkontos', CHECK_LISTING: 'Prüfen Sie das Angebot im Kanal',
   REVIEW_CHANNEL_POLICY: 'Prüfen Sie den Richtlinienhinweis des Kanals', CONTACT_CHANNEL_SUPPORT: 'Wenden Sie sich an den Kanal-Support', REVIEW_OFFER_STATUS: 'Prüfen Sie den Angebotsstatus',
@@ -1105,7 +1120,10 @@ export const de: Messages = {
         PRICING_CHANNEL_RESUMED: { what: 'Der Halt einer Storefront wurde aufgehoben, Preise aus Wettbewerbsdaten laufen wieder', step: 'Prüfen Sie in der Konsole die ersten Preisänderungen nach der Freigabe: Sie zeigen, ob die Wettbewerbsdaten wieder stimmen.' },
         PRICING_CHANNEL_DISTRUSTED: { what: 'Der Kanal zeigt einen anderen Preis als den gesendeten', step: 'Öffnen Sie die Konsole: Die Preise dieses Kanals stehen still, bis eine Person das Misstrauen aufhebt. Vergleichen Sie unseren Preis mit dem Preis im Kanal-Backoffice.' },
         PRICING_CHANNEL_TRUST_RESTORED: { what: 'Das Misstrauen gegen den Kanal wurde aufgehoben, die Preise laufen wieder', step: 'Prüfen Sie in der Konsole, ob der Kanal die nächsten Preise so anzeigt, wie wir sie gesendet haben.' },
-        PRICING_BOUND_UNRESOLVABLE: { what: 'Für ein Angebot lassen sich die Preisgrenzen nicht berechnen', step: 'Öffnen Sie das Angebot in der Konsole: Es fehlt der Mindestpreis, der Höchstpreis oder die Angabe, aus der die Mindestmarge berechnet wird. Ohne beide Grenzen bleibt der Preis unverändert.' },
+        PRICING_BOUND_UNRESOLVABLE: { what: 'Für ein Angebot lassen sich die Preisgrenzen nicht berechnen', step: 'Öffnen Sie das Angebot in der Konsole: Es fehlt der Mindestpreis, der Höchstpreis oder die Angabe, aus der die Mindestmarge berechnet wird. Ohne beide Grenzen bleibt der Preis unverändert.',
+          // Шаг 102: пол выше потолка — суть словами: цены заморожены, что сделать
+          detail: (d: Readonly<Record<string, unknown>>) => (d.cause === 'MARGIN_FLOOR_ABOVE_MAX_PRICE' ? `${d.offer ? `${String(d.offer)}: ` : ''}Untergrenze über Höchstpreis — Preise eingefroren. Heben Sie den Höchstpreis an oder schalten Sie den Abverkauf ein.` : ''),
+        },
         PRICE_REJECTED_BY_BOUND: { what: 'Ein berechneter Preis wurde von einer Grenze abgelehnt', step: 'Öffnen Sie „Warum dieser Preis“ in der Konsole: Dort steht, welche Grenze gehalten hat. Ist die Grenze zu eng gesetzt, ändern Sie sie; sonst ist nichts zu tun.' },
         PRICE_GATE_INTERNAL_VIOLATION: { what: 'Eine interne Prüfung hat einen Preis kurz vor dem Senden gestoppt', step: 'Der Preis wurde NICHT gesendet, und von Ihnen ist nichts zu tun. Melden Sie sich bei uns mit dem Ereigniscode: Wir sehen das Ereignis ebenfalls.' },
         CURRENT_PRICE_OUTSIDE_BOUNDS: { what: 'Der aktuelle Preis eines Angebots liegt außerhalb Ihrer Grenzen', step: 'Öffnen Sie das Angebot in der Konsole: Entweder wurde der Preis im Kanal-Backoffice von Hand geändert, oder die Grenzen passen nicht mehr zu den Stückkosten.' },
@@ -1114,6 +1132,12 @@ export const de: Messages = {
           what: 'Ein Preis unter Ihrer Untergrenze wird schrittweise auf sie angehoben',
           step: 'Nichts zu tun: jeder Schritt bleibt innerhalb Ihrer Schrittgrenze. Soll der Preis die Untergrenze schneller erreichen, erhöhen Sie die Schrittgrenze; wirkt die Untergrenze zu hoch, prüfen Sie Stückkosten und Mindestmarge in der Konsole.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, etwa ${Number(d.steps)} Schritte zu höchstens ${n.percentBp(Number(d.stepLimitBp))}, höchstens ein Schritt alle ${Number(d.paceMinutes)} Minuten.`,
+        },
+        // Шаг 102 [Р-227]: распродажа закончилась по дате — пол снова расчётный, цена вернётся к нему лестницей
+        CLEARANCE_ENDED: {
+          what: 'Der Abverkauf eines Angebots ist zum Datum beendet — die Untergrenze ist wieder die berechnete',
+          step: 'Nichts zu tun: Der Preis steigt innerhalb Ihres Schrittlimits zurück zur Untergrenze. Soll der Abverkauf weitergehen, schalten Sie ihn auf der Seite der Untergrenze wieder ein.',
+          detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${Number(d.steps) > 0 ? `der Preis kehrt in etwa ${Number(d.steps)} ${Number(d.steps) === 1 ? 'Schritt' : 'Schritten'} (~${Number(d.minutes)} Minuten) zur Untergrenze ${n.money(Number(d.floorMinor), String(d.currency))} zurück.` : 'der Preis liegt bereits auf oder über der Untergrenze.'}`,
         },
         PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'Bestandsänderungen eines Angebots sind blockiert: der Kanal hat eine Bestandsänderung abgelehnt, das Angebot wartet auf eine Person', step: 'Öffnen Sie in der Konsole die Seite „Lagerbestand“, prüfen Sie das Angebot und die Antwort des Kanals und heben Sie die Blockade auf.' },
@@ -1209,6 +1233,10 @@ export const de: Messages = {
       floorFromMin: (_min: string) => 'aus Ihrem Mindestpreis',
       floorFromMargin: (pct: string, _margin: string, min: string) => `aus Mindestmarge ${pct} (Ihr Mindestpreis ${min})`,
       floorMarginUnavailable: (min: string, cause: string) => `Ihr Mindestpreis ${min}; Mindestmargen-Untergrenze nicht berechenbar: ${cause}`,
+      // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
+      floorFromBreakEven: (min: string) => `aus der Gewinnschwelle (Ihr Mindestpreis ${min})`, floorFromClearance: 'aus der Abverkaufs-Untergrenze — bewusst unter der Gewinnschwelle', clearancePill: 'Abverkauf',
+      // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
+      floorAboveCeiling: 'Untergrenze über Höchstpreis', frozenDetail: 'Preise eingefroren — Höchstpreis anheben oder Abverkauf einschalten',
     },
     outcomes: { APPROVED: 'Freigegeben', NO_CHANGE: 'Keine Änderung', REJECTED: 'Abgelehnt', HELD: 'Zurückgehalten' },
     rules: {
@@ -1269,6 +1297,8 @@ export const de: Messages = {
       },
     },
     trace: {
+      // Шаг 102 [Р-227]: квитанция в режиме распродажи называет, кто включил, когда и зачем
+      clearanceBy: (who: string, when: string, note: string) => `Eingeschaltet von ${who}, ${when}, Notiz: „${note}“`, clearancePill: 'Abverkauf',
       // Шаг 97 [Р-218]: таблица конкурентов в шаге снимка и «кто подвинул цену»
       competitors: {
         title: 'Wettbewerber in diesem Moment', you: 'Sie', unnamedSeller: 'unbenannter Verkäufer',
@@ -1342,7 +1372,7 @@ export const de: Messages = {
       interventions: { DANGEROUS: 'gefährlich', CORRECTED: 'korrigiert' },
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
       stateStopped: 'gestoppt', stateColumn: 'Zustand', historyColumn: 'Preis', historyLegend: 'vorher → gewollt → gesetzt',
-      stats: { dangerous: 'Gefährlich', corrected: 'Korrigiert', unresolvable: 'Grenze nicht berechenbar', limiterHolds: 'Schritt- und Häufigkeitsgrenzen', stops: 'Von einer Person gestoppt', inputRejects: 'Abgelehnte Wettbewerbsdaten', halts: 'Anhaltungen von Storefronts' },
+      stats: { dangerous: 'Gefährlich', corrected: 'Korrigiert', unresolvable: 'Grenze nicht berechenbar', floorAboveCeiling: 'Untergrenze über Höchstpreis', limiterHolds: 'Schritt- und Häufigkeitsgrenzen', stops: 'Von einer Person gestoppt', inputRejects: 'Abgelehnte Wettbewerbsdaten', halts: 'Anhaltungen von Storefronts' },
       statsLabel: 'Dieser Zeitraum nach Kategorie',
       filters: { label: 'Nur einen Grund zeigen', clear: 'Alle Gründe zeigen' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -1350,7 +1380,7 @@ export const de: Messages = {
       uniformState: 'Jede Zeile unten:', uniformReason: (category: string) => `Grund jeder Zeile unten: ${category}`, eachRepeat: (chip: string) => `je ${chip}`,
       columns: { when: 'Wann', where: 'Wo', kind: 'Gestoppt durch', proposed: 'Vorschlag', before: 'Vorher', change: 'Änderung', limit: 'Grenze', deviation: 'Abweichung', reason: 'Grund' },
       path: 'Entscheidungsweg',
-      limitMin: (amount: string) => `Mindestpreis ${amount}`, limitFloor: (amount: string) => `Mindestmargen-Untergrenze ${amount}`, limitMax: (amount: string) => `Höchstpreis ${amount}`,
+      limitMin: (amount: string) => `Mindestpreis ${amount}`, limitFloor: (amount: string) => `Mindestmargen-Untergrenze ${amount}`, limitClearance: (amount: string) => `Abverkaufs-Untergrenze ${amount}`, limitMax: (amount: string) => `Höchstpreis ${amount}`,
       productRef: (marketplace: string, ref: string) => `${marketplace} · Produkt ${ref}`,
     },
     forms: {
@@ -1379,8 +1409,8 @@ export const de: Messages = {
       feeUsed: 'danach wird der Boden gerechnet (die höhere Schätzung)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
       indexColumns: { offer: 'Angebot', min: 'Mindestpreis', max: 'Höchstpreis', floor: 'Untergrenze' }, missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs. Die Liste zeigt die Grenzen jedes Angebots.', pageTitle: 'Grenzen und Preisuntergrenze', back: '← Kosten & Untergrenzen',
-      minPrice: 'Mindestpreis', maxPrice: 'Höchstpreis', minMargin: 'Mindestmarge', marginNotSet: 'nicht gesetzt — die Untergrenze entspricht Ihrem Mindestpreis',
-      marginAtLeast: (pct: string) => `Marge mindestens ${pct}`, effectiveFloor: 'Wirksame Untergrenze', costAndFees: 'Kosten und Gebühren',
+      minPrice: 'Mindestpreis', maxPrice: 'Höchstpreis', minMargin: 'Mindestmarge', marginNotSet: 'nicht gesetzt — die Untergrenze liegt mindestens auf der Gewinnschwelle, sobald die Stückkosten angegeben sind',
+      marginAtLeast: (pct: string) => `Marge mindestens ${pct}`, marginSuspended: 'gilt nicht, solange der Abverkauf läuft', effectiveFloor: 'Wirksame Untergrenze', costAndFees: 'Kosten und Gebühren',
       columns: { part: 'Bestandteil', amount: (currency: string) => `Betrag, ${currency}`, formula: 'Berechnung' },
       exactMargin: (text: string) => `Exakte Marge: ${text}.`, balance: (ok: boolean) => (ok ? 'Steuer, Gebühren, Kosten und Marge ergeben centgenau den Preis.' : 'Steuer, Gebühren, Kosten und Marge ergeben NICHT den Preis — Rechenfehler.'),
       calculator: 'Abgleich mit dem Gebührenrechner des Kanals',
@@ -1397,6 +1427,36 @@ export const de: Messages = {
       marginUnavailable: (cause: string) => `nicht berechenbar: ${cause} — das Gate lehnt jeden Preis ab`,
       floorNoMin: 'Mindestpreis ist nicht gesetzt — Repricing kann nicht aktiviert werden',
       floorFromMargin: (pct: string, min: string) => `Mindestmarge ${pct}: über Ihrem Mindestpreis ${min}`, floorFromMin: 'aus Ihrem Mindestpreis',
+      floorFromBreakEven: (min: string) => `Gewinnschwelle: über Ihrem Mindestpreis ${min}`,
+      floorFromClearance: (min: string) => `Abverkaufs-Untergrenze: ersetzt Ihren Mindestpreis ${min} und die Mindestmargen-Untergrenze, solange der Abverkauf läuft`,
+      frozen: (floor: string, max: string) => `Untergrenze über Höchstpreis — Preise eingefroren. Ihre Untergrenze ${floor} liegt über Ihrem Höchstpreis ${max}: Kein Preis passt, und keine Preisänderung wird gesendet. Heben Sie den Höchstpreis an oder schalten Sie den Abverkauf ein.`,
+      // Шаг 102 [Р-227]: режим распродажи на странице пола
+      clearance: {
+        title: 'Abverkaufs-Untergrenze — Verkauf unter der Gewinnschwelle erlauben',
+        intro: 'Für Bestand, der weg soll. Solange der Abverkauf läuft, ersetzt diese Untergrenze Ihren Mindestpreis und die Mindestmargen-Untergrenze; Höchstpreis, Schrittlimit, Änderungshäufigkeit und alle Prüfungen bleiben.',
+        breakEven: 'Gewinnschwelle', breakEvenUnknown: 'nicht berechenbar: Stückkosten, Gebühr oder MwSt.-Satz fehlen',
+        floor: 'Abverkaufs-Untergrenze', floorHint: 'Eine absolute Untergrenze: Der Preis geht nie darunter, solange der Abverkauf läuft.',
+        lossPerUnit: 'Verlust je Stück', noLoss: 'keiner — auf dieser Untergrenze deckt ein Verkauf noch seine Kosten',
+        maxLoss: 'Höchster Gesamtverlust', stock: (pieces: number) => `beim aktuellen Bestand von ${pieces} Stück`, stockUnknown: 'Bestand unbekannt — nur der Verlust je Stück wird gezeigt',
+        ack: (breakEven: string) => `Mir ist klar: Jeder Verkauf unter ${breakEven} ist ein Verlust`,
+        note: 'Warum', noteHint: 'Pflicht — bleibt mit Ihrem Namen im Audit-Protokoll.', notePlaceholder: 'Sommerware abverkaufen',
+        endsAt: 'Automatisch beenden', endsAtHint: 'Optional — nach diesem Datum ist die Untergrenze wieder die berechnete.',
+        enable: 'Abverkauf einschalten', mfaHint: 'Verschiebt die Untergrenze: braucht einen zweiten Faktor.', readOnly: 'Nur der Inhaber oder ein Manager kann den Abverkauf einschalten.',
+        on: 'Abverkauf läuft', onBy: (who: string, when: string) => `Eingeschaltet von ${who}, ${when}`, onNote: (note: string) => `Notiz: „${note}“`, onEnds: (when: string) => `Endet automatisch ${when}`,
+        disable: 'Abverkauf ausschalten',
+        returns: (floor: string, steps: number, minutes: number) => (steps === 0
+          ? `Die Untergrenze ist sofort wieder ${floor}; der Preis liegt bereits darauf oder darüber.`
+          : `Die Untergrenze ist sofort wieder ${floor}; der Preis steigt in etwa ${steps} ${steps === 1 ? 'Schritt' : 'Schritten'} (~${minutes} Minuten) zurück.`),
+        enabled: 'Abverkauf läuft.', disabled: 'Abverkauf ist aus.',
+        history: 'Abverkaufs-Protokoll', columns: { when: 'Wann', what: 'Was', who: 'Wer', note: 'Notiz' }, system: 'automatisch',
+        actions: { ENABLE: (floor: string) => `Eingeschaltet, Untergrenze ${floor}`, DISABLE: 'Ausgeschaltet', EXPIRE: 'Zum Datum beendet' },
+        causes: {
+          ACK_REQUIRED: 'Setzen Sie das Häkchen: Jeder Verkauf unter der Gewinnschwelle ist ein Verlust.', NOTE_REQUIRED: 'Schreiben Sie, warum das Angebot abverkauft wird.',
+          FLOOR_INVALID: 'Die Abverkaufs-Untergrenze muss über null und nicht über Ihrem Höchstpreis liegen.', CURRENCY_MISMATCH: 'Die Abverkaufs-Untergrenze muss in der Währung des Angebots sein.',
+          ENDS_IN_PAST: 'Das Enddatum muss in der Zukunft liegen.', MFA_REQUIRED: 'Der Abverkauf verschiebt die Untergrenze: Melden Sie sich mit einem zweiten Faktor an und versuchen Sie es erneut.',
+          NOT_ACTIVE: 'Für dieses Angebot läuft kein Abverkauf.',
+        },
+      },
       unitCost: 'Stückkosten', costProfile: (_id: string) => 'wie von Ihnen angegeben', feeRate: 'Kanalgebühr', feeOfPrice: 'vom Storefront-Preis', perSale: 'pro Verkauf',
       floorBreakdown: 'Aufschlüsselung der wirksamen Untergrenze', currentBreakdown: 'Aufschlüsselung des aktuellen Preises',
       calculatorSteps: (vat: boolean) => [
@@ -1728,6 +1788,8 @@ export const de: Messages = {
         ? `Die Untergrenze musste ${phrase} keinen Preis halten`
         : `Die Untergrenze hat den Preis ${phrase} ${n}-mal gehalten${amounts.length ? `; ohne sie hätten Sie ${amounts.join(' + ')} billiger verkauft` : ''}${unknown ? ` (Betrag bei ${unknown} unbekannt)` : ''}`,
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
+      // Шаг 102 [Р-227]: удержания пола распродажи — отдельной строкой, в «пол удержал» не входят
+      clearanceHeld: (n: number, phrase: string) => `Die Abverkaufs-Untergrenze hat den Preis ${n}-mal ${phrase} gehalten — ein bewusster Verlust, oben nicht mitgezählt`, clearanceKind: 'Abverkaufs-Untergrenze',
       floorTitle: 'Gehalten durch die Untergrenze', floorKinds: { CAPPED: 'auf die Untergrenze gesetzt', HELD: 'unverändert gelassen' },
       // Шаг 96.2: «как удержано» — свойство секции, одной фразой; строка отмечает только вид, который отличается от остальных
       floorCaption: { CAPPED: 'Jedes Halten hat den Preis auf Ihre Untergrenze gesetzt.', HELD: 'Jedes Halten hat den Preis an Ihrer Untergrenze unverändert gelassen.', MIXED: 'Jedes Halten hat den Preis auf Ihre Untergrenze gesetzt; Zeilen mit „unverändert gelassen“ haben ihn dort gehalten.' },

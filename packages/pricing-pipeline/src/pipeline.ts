@@ -37,7 +37,7 @@ import {
 import { competeWithOf, runStrategy, strategyAvailability } from '@repracer/strategy-engine';
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { planPollingTiers } from './polling.ts';
-import { PIPELINE_WRITE_FIELD, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
+import { PIPELINE_WRITE_FIELD, type ClearanceEnded, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
@@ -256,6 +256,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
     // Р-207: стратегия встаёт на пол маржи и поднимает до него цену ниже пола — тем же расчётом, что у Gate; невычислимый пол
     // стратегии не передаётся, и отказ с причиной даёт Gate
     const margin = resolveMarginFloor(sc.cost, sc.guardrails.minMarginBp, scope.currency, sc.costUnavailableCause ?? null);
+    // Шаг 102 [Р-227]: режим распродажи — пол распродажи заменяет весь пол; безубыточность — только для квитанции («−$6.12 за штуку»)
+    const clearance = sc.clearance ?? null;
+    const breakEven = clearance ? resolveMarginFloor(sc.cost, 0, scope.currency, sc.costUnavailableCause ?? null) : null;
     const result = runStrategy({
       writeScope: { writeScopeId: scope.writeScopeId, currency: scope.currency, basis: scope.basis },
       strategy: scope.strategy,
@@ -263,7 +266,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       cost: sc.cost,
       bounds: {
         minMinor: bounds.min.amountMinor, maxMinor: bounds.max.amountMinor,
-        marginFloor: margin.kind === 'OK' ? { amountMinor: margin.floorMinor, minMarginBp: margin.minMarginBp } : null,
+        marginFloor: margin.kind === 'OK' ? { amountMinor: margin.floorMinor, minMarginBp: margin.minMarginBp, source: margin.source } : null,
+        clearance: clearance ? { floorMinor: clearance.floorMinor, breakEvenMinor: breakEven?.kind === 'OK' ? breakEven.floorMinor : null } : null,
       },
       // Р-208: подъём к полу больше предела шага — лестницей; Р-209…Р-211: повод переоценки без наблюдения конкурентов
       stepLimitBp: sc.guardrails.maxStepChangeBp,
@@ -294,8 +298,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
       cost: sc.cost,
       costUnavailableCause: sc.costUnavailableCause ?? null,
       changesInLastHour: sc.changesInLastHour,
+      clearance: clearance ? { floorMinor: clearance.floorMinor } : null,
       now,
     });
+    // Шаг 102 [Р-227]: решение называет строку включения — база сверяет её (своя единица, действует) и держит пол решения по ней
+    decision.clearanceChangeId = clearance ? clearance.changeId : null;
     // Р-74: у решения NO_OP слепка и ссылки на снимок нет — только код причины. Остальные решения — слепок в том же
     // решении и той же транзакции фиксации [Р-68]; повторяющиеся части — ссылками на справочники [Р-75]
     const noChange = decision.decisionClass === 'NO_OP';
@@ -338,7 +345,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
       };
     }
     if (decision.alert) {
-      effects.push({ kind: 'alert', code: decision.alert.code, severity: decision.alert.severity, details: { writeScopeId: scope.writeScopeId, reason: decision.reason.code } });
+      effects.push({ kind: 'alert', code: decision.alert.code, severity: decision.alert.severity, details: { writeScopeId: scope.writeScopeId, reason: decision.reason.code,
+        // Шаг 102 [Р-227]: «пол выше потолка» — письмо называет предложение и что сделать (поднять потолок или включить распродажу)
+        ...(decision.reason.code === 'BOUND_UNRESOLVABLE' && typeof decision.reason.params.cause === 'string'
+          ? { cause: decision.reason.params.cause, offer: scope.productTitle ?? scope.productSku ?? scope.externalUnitId, marketplace: scope.marketplace } : {}) } });
     }
     // Шаг 97 [Р-218]: картина рынка — там же, где ссылка на снимок: цена из данных конкурентов и решение не «без изменения» (0187).
     // Шаг 101 [Р-226]: картина общая для товара, фильтр «Compete with» — у стратегии предложения: исключённые строки помечены, счёт — по снимку
@@ -930,6 +940,18 @@ export function createPricingPipeline(deps: PipelineDeps) {
         const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
         await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'FLOOR_INPUTS_REQUEST_FAILED', message: 'FLOOR_INPUTS_REQUEST_FAILED', details: { error: name } }]);
       }
+      /**
+       * Шаг 102 [Р-227]: режим распродажи с наступившей датой окончания — строку EXPIRE и запрос на переоценку ставит база; первый же
+       * пересчёт ниже начинает подъём к расчётному полу. Владельцу — письмо «цена вернётся к полу примерно за N шагов»
+       */
+      let ended: ClearanceEnded[] = [];
+      try {
+        ended = await store.expireClearances(ctx.tenantId, ctx.channelAccountId);
+      } catch (error) {
+        const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
+        await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'CLEARANCE_EXPIRY_FAILED', message: 'CLEARANCE_EXPIRY_FAILED', details: { error: name } }]);
+      }
+      const reports = new Map<string, ScopeReport>();
       const raises = await store.listFloorRaiseScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);
       // У единицы бывает два повода сразу (себестоимость и отказ перепроверки) — одна переоценка, снимаются оба (ревью шага 73, находка 2)
       const byScope = new Map<string, FloorRaiseCandidate[]>();
@@ -941,6 +963,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
           // Повод оценки — «себестоимость» только у себестоимости; прочие входы — плановая проверка, а сам вход называет объяснение
           // подъёма (ревью шага 74, находка 2 по Р-211)
           const r = await this.recompute(ctx, writeScopeId, { type: after === 'COST_UPDATE' ? 'COST_CHANGE' : 'SCHEDULE' }, { raiseAfter: after });
+          reports.set(writeScopeId, r);
           const committed = r.decision !== undefined && !r.stages.some((x) => x.stage === 'COMMIT' || (x.stage === 'WRITE_RECHECK' && x.outcome === 'BLOCKED'));
           if (committed && r.decision?.decisionClass === 'CHANGED') { changed += 1; raised += 1; }
           // Ревью шага 73, находка 1: запрос снимается только суждением — решение зафиксировано и не удержано остановкой, частотой или
@@ -952,6 +975,24 @@ export function createPricingPipeline(deps: PipelineDeps) {
         } catch (error) {
           await failure(writeScopeId, error);
         }
+      }
+      const paceSeconds = adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS;
+      for (const e of ended) {
+        const reason = reports.get(e.writeScopeId)?.intent?.reason ?? null;
+        const p = (reason?.params ?? {}) as { stepsLeft?: number; floorMinor?: number; currentMinor?: number };
+        // «Примерно N шагов» — из первой ступени лестницы [Р-208]: она сама и оставшиеся; цена уже на полу или выше — шагов нет
+        const steps = reason?.code === 'RAISED_TOWARD_FLOOR' ? Number(p.stepsLeft ?? 0) + 1 : reason?.code === 'RAISED_TO_FLOOR' ? 1 : 0;
+        // Подпись — название товара или SKU продавца (как K10 консоли), а не код единицы канала; витрину словами добавит письмо
+        const label = await store.loadScopeContext(ctx.tenantId, e.writeScopeId, deps.now()).then((l) => l?.context.scope ?? null).catch(() => null);
+        await alerts.raise({
+          ...alertBase(ctx), code: 'CLEARANCE_ENDED', severity: 'WARNING',
+          details: {
+            writeScopeId: e.writeScopeId, offer: label ? label.productTitle ?? label.productSku ?? label.externalUnitId : e.writeScopeId,
+            ...(label ? { marketplace: label.marketplace } : {}), endedAt: e.endsAt, clearanceFloorMinor: e.floorMinor, currency: e.currency, steps,
+            minutes: Math.max(0, steps - 1) * Math.round(paceSeconds / 60),
+            ...(typeof p.floorMinor === 'number' ? { floorMinor: p.floorMinor } : {}), ...(typeof p.currentMinor === 'number' ? { currentMinor: p.currentMinor } : {}),
+          },
+        });
       }
       // Ревью шага 47, находка 5: только должные (без решения за 24 часа), не больше предела за заход, самые давние первыми.
       // Находка 6: запись, которой бюджет правок отказал, даёт CRITICAL PRICE_WRITE_NOT_SENT — при пересчёте раз в сутки не чаще раза в сутки

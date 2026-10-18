@@ -236,7 +236,8 @@ test('screens render from the dictionary: sign-in, products with the effective f
   for (const text of ['Not kept for decisions that did not change the price', 'Steps of a decision that kept the price']) assert.ok(keptHtml.includes(text), text);
 
   const rejected = await html('/src/screens/Rejected.tsx', 'RejectedScreenView', { view: await get<RejectedView>(auth, api('kaufland/pipeline/above-max-price', 'rejected')) });
-  for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '53.2%']) assert.ok(rejected.includes(text), text);
+  // Шаг 102 [Р-227]: себестоимость сценария «выше max_price» выросла до €15.00 — отклонение цели от потолка 14.92 %
+  for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '14.92%']) assert.ok(rejected.includes(text), text);
 
   const usd = (await get<BoundsIndexView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds'))).items.find((b) => b.label.includes('amazon.com'))!;
   const bounds = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: await get<BoundsView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds', usd.writeScopeId)) });
@@ -1153,4 +1154,36 @@ test('step 96: the feed export takes the period and the search of the screen; th
     assert.equal(job.total, expected, `export of ${JSON.stringify(query)}: ${job.total} rows, the screen showed ${expected}`);
   }
   assert.equal((await call(owner, 'POST', api(id, 'feed', 'export'), { query: { period: '5d' } })).status, 400);
+});
+
+/**
+ * Шаг 102 (D1) [Р-227] через консоль: режим распродажи не включается без подтверждения убытка, записки и второго фактора — отказывает
+ * сервер своей причиной (на PostgreSQL — и база, clearance-step102.pg.test.ts); владелец включает, страница пола и Offers показывают
+ * пилюлю, выключение — одним действием и без второго фактора. Экран пола отрисовывает раздел режима на четырёх языках
+ */
+test('step 102 (D1) [Р-227]: the console refuses clearance without the acknowledgement, a note or a second factor; turning it off is one click', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const products = await get<ProductListView>(owner, api(id, 'products'));
+  const ws = products.rows[0]!.unit.writeScopeId;
+  const enable = (auth: Auth, body: Record<string, unknown>) => call(auth, 'POST', api(id, 'bounds', ws, 'clearance'), body);
+  const passwordOnly = { authorization: `Bearer ${issuer.token(account('OWNER').subject, { email: account('OWNER').email, amr: ['pwd'] })}`, cookie: 'repracer_locale=en' };
+  const base = { floorMinor: 100, acknowledged: true, note: 'Clearing summer stock', endsAt: null };
+  const refused = [await enable(owner, { ...base, acknowledged: false }), await enable(owner, { ...base, note: '   ' }), await enable(passwordOnly, base)]
+    .map((r) => `${r.status} ${(r.body as { error?: { code: string } }).error?.code}`);
+  assert.equal(JSON.stringify(refused), JSON.stringify(['400 ACK_REQUIRED', '400 NOTE_REQUIRED', '403 MFA_REQUIRED']));
+  assert.equal((await get<BoundsView>(owner, api(id, 'bounds', ws))).clearance.pill, null, 'nothing was enabled');
+  const on = await enable(owner, base);
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  const view = await get<BoundsView>(owner, api(id, 'bounds', ws));
+  assert.equal(JSON.stringify([view.clearance.pill, view.clearance.active?.note, view.effectiveFloor.minor]), JSON.stringify(['Clearance', 'Clearing summer stock', 100]));
+  assert.equal((await get<ProductListView>(owner, api(id, 'products'))).rows.find((r) => r.unit.writeScopeId === ws)?.clearance, 'Clearance');
+  for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+    const markup = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: await get<BoundsView>(await login('OWNER', locale), api(id, 'bounds', ws)) }, locale);
+    assert.ok(markup.includes(messagesFor(locale).ui.bounds.clearance.disable), `${locale}: the floor page offers to turn clearance off`);
+  }
+  const off = await call(passwordOnly, 'POST', api(id, 'bounds', ws, 'clearance', 'disable'), {});
+  assert.equal(off.status, 200, JSON.stringify(off.body));
+  assert.equal((await get<BoundsView>(owner, api(id, 'bounds', ws))).clearance.pill, null, 'turned off without a second factor');
+  assert.equal((await call(owner, 'POST', api(id, 'bounds', ws, 'clearance', 'disable'), {})).status, 409, 'nothing to turn off');
 });

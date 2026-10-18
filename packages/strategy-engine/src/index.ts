@@ -33,7 +33,16 @@ export interface EngineInput {
    * Границы на момент расчёта; Gate перечитывает их из источника истины. `marginFloor` — пол маржи тем же расчётом, что у Gate
    * (`resolveMarginFloor`), или null, если минимальная маржа не задана или не вычисляется (тогда отказ скажет Gate) [Р-207]
    */
-  bounds: { minMinor: number; maxMinor: number; marginFloor?: { amountMinor: number; minMarginBp: number } | null };
+  bounds: {
+    minMinor: number; maxMinor: number;
+    /** Шаг 102 [Р-227]: BREAK_EVEN — минимальная маржа не задана, пол — безубыточность (маржа 0 %) */
+    marginFloor?: { amountMinor: number; minMarginBp: number; source?: 'MIN_MARGIN' | 'BREAK_EVEN' } | null;
+    /**
+     * Шаг 102 [Р-227]: режим распродажи — пол распродажи заменяет min_price и пол маржи (решение владельца, исключение из Р-5); безубыточность —
+     * для квитанции («−$6.12 за штуку»). Потолок, шаг, частота и проверки — без исключений
+     */
+    clearance?: { floorMinor: number; breakEvenMinor: number | null } | null;
+  };
   currentPriceMinor: number | null;
   /**
    * Р-171 (шаг 41): последнее предложение, УДЕРЖАННОЕ тенью. В теневом режиме цена на витрине не двигается, поэтому
@@ -207,7 +216,8 @@ export const LADDER_PACE_TOLERANCE_SECONDS = 60;
  * себестоимость, комиссия, курс, гардрейл и НДС — только пол маржи
  */
 function raiseAfterMoves(after: FloorRaiseReason, marginBinding: boolean): boolean {
-  if (after === 'FLOOR_RECHECK' || after === 'BOUNDS_UPDATE') return true;
+  // Шаг 102 [Р-227]: конец распродажи возвращает расчётный пол — любой
+  if (after === 'FLOOR_RECHECK' || after === 'BOUNDS_UPDATE' || after === 'CLEARANCE_ENDED') return true;
   return marginBinding;
 }
 
@@ -224,6 +234,26 @@ function pickAnchor(bb: { minor: number } | { unused: (typeof BUYBOX_UNUSED)[num
   return bb.minor <= lowest
     ? { anchorMinor: bb.minor, params: { anchorUsed: 'BUYBOX', anchorMinor: bb.minor, otherAnchorMinor: lowest } }
     : { anchorMinor: lowest, params: { anchorUsed: 'LOWEST', anchorMinor: lowest, otherAnchorMinor: bb.minor } };
+}
+
+/**
+ * Шаг 102 [Р-227]: сколько ступеней до пола от нынешней цены — та же арифметика, что у лестницы движка [Р-208]: ступень на предел шага, последняя —
+ * до пола. Цена на полу или выше — 0; без предела шага — 1 (сразу к полу). Подтверждение выключения распродажи и письмо о её конце называют это число
+ */
+export function ladderSteps(currentMinor: number, floorMinor: number, stepLimitBp: number | null): number {
+  if (currentMinor >= floorMinor) return 0;
+  if (stepLimitBp === null || !Number.isSafeInteger(stepLimitBp) || stepLimitBp <= 0 || currentMinor <= 0) return 1;
+  const stepBp = (from: number, to: number) => Math.ceil(((to - from) * 10_000) / from);
+  let p = currentMinor;
+  let n = 0;
+  for (let guard = 0; guard < 10_000; guard += 1) {
+    n += 1;
+    if (stepBp(p, floorMinor) <= stepLimitBp) return n;
+    const next = p + Math.floor((p * stepLimitBp) / 10_000);
+    if (next <= p) return n;
+    p = next;
+  }
+  return n;
 }
 
 export function runStrategy(input: EngineInput): EngineResult {
@@ -247,12 +277,18 @@ export function runStrategy(input: EngineInput): EngineResult {
    * вставала на min_price, а пол маржи держала только Gate ОТКАЗОМ — и цена, уже стоящая ниже пола маржи, там и оставалась. Пол маржи
    * выше max_price стратегия не берёт: это противоречие настройки, его называет Gate (MARGIN_FLOOR_ABOVE_MAX_PRICE).
    */
-  const margin = bounds.marginFloor ?? null;
+  // Шаг 102 [Р-227]: пол распродажи — положительная сумма не выше потолка (база держит то же при включении)
+  const clearance = bounds.clearance ?? null;
+  if (clearance && (!Number.isSafeInteger(clearance.floorMinor) || clearance.floorMinor <= 0 || clearance.floorMinor > bounds.maxMinor)) {
+    return notEvaluated(r('BOUNDS_INVALID', { minMinor: safe(clearance.floorMinor), maxMinor: safe(bounds.maxMinor), currency }));
+  }
+  const margin = clearance ? null : bounds.marginFloor ?? null;
   const marginBinding = margin !== null && Number.isSafeInteger(margin.amountMinor) && margin.amountMinor > bounds.minMinor && margin.amountMinor <= bounds.maxMinor;
-  const floorMinor = marginBinding ? margin!.amountMinor : bounds.minMinor;
+  const floorMinor = clearance ? clearance.floorMinor : marginBinding ? margin!.amountMinor : bounds.minMinor;
+  const floorBound = clearance ? 'clearance' : marginBinding ? (margin!.source === 'BREAK_EVEN' || margin!.minMarginBp === 0 ? 'break_even' : 'margin_floor') : 'min';
   const belowFloor = current !== null && current < floorMinor;
   const stepLimit = input.stepLimitBp !== null && input.stepLimitBp !== undefined && Number.isSafeInteger(input.stepLimitBp) && input.stepLimitBp > 0 ? input.stepLimitBp : null;
-  const floorParams = { floorMinor, bound: marginBinding ? 'margin_floor' : 'min', ...(marginBinding ? { minMarginBp: margin!.minMarginBp } : {}),
+  const floorParams = { floorMinor, bound: floorBound, ...(marginBinding ? { minMarginBp: margin!.minMarginBp } : {}),
     // Повод — только у пола, который он двигает (ревью шага 73, находка 2): min_price двигает только новая версия min_price, пол маржи —
     // себестоимость, комиссия, курс, гардрейл и НДС; отказ перепроверки — любой пол
     ...(input.raiseAfter && raiseAfterMoves(input.raiseAfter, marginBinding) ? { after: input.raiseAfter } : {}) };
@@ -293,6 +329,16 @@ export function runStrategy(input: EngineInput): EngineResult {
     return propose(step.to, [...chain, step.reason], reference, true);
   };
   const marketFollowing = params.type === 'MATCH_BUYBOX' || params.type === 'BEAT_LOWEST' || params.type === 'WIN_BUYBOX';
+  const clearanceReason = clearance
+    ? r('CLEARANCE_FLOOR', {
+      floorMinor: clearance.floorMinor,
+      ...(clearance.breakEvenMinor !== null && Number.isSafeInteger(clearance.breakEvenMinor) ? { breakEvenMinor: clearance.breakEvenMinor } : {}),
+      // Убыток на штуку на полу распродажи — квитанция говорит его суммой («−$6.12 за штуку»); пол не ниже безубыточности — убытка нет
+      ...(clearance.breakEvenMinor !== null && Number.isSafeInteger(clearance.breakEvenMinor) && clearance.breakEvenMinor > clearance.floorMinor
+        ? { lossPerUnitMinor: clearance.breakEvenMinor - clearance.floorMinor } : {}),
+      currency,
+    })
+    : null;
 
   const req = requirementOf(params);
   const unmet = unmetRequirements(req, snapshot, now);
@@ -617,7 +663,7 @@ export function runStrategy(input: EngineInput): EngineResult {
     }
     if (target < floorMinor) {
       proposed = floorMinor;
-      explanation.push(marginBinding
+      explanation.push(clearance ? r('CAPPED_AT_CLEARANCE_FLOOR', { targetMinor: target, floorMinor, currency }) : marginBinding
         ? r('CAPPED_AT_MARGIN_FLOOR', { targetMinor: target, floorMinor, minMinor: bounds.minMinor, minMarginBp: margin!.minMarginBp, currency })
         : r('CAPPED_AT_MIN_PRICE', { targetMinor: target, minMinor: bounds.minMinor, currency }));
       if (belowFloor) {
@@ -702,7 +748,8 @@ export function runStrategy(input: EngineInput): EngineResult {
         currency: writeScope.currency,
         basis: writeScope.basis,
         reason: main,
-        explanation: chain,
+        // Шаг 102 [Р-227]: каждое решение в режиме распродажи открывается им — квитанция не прячет режим никогда
+        explanation: clearance ? [clearanceReason!, ...chain] : chain,
         inputs: {
           ...(snapshot?.sourceEventId ? { snapshotSourceEventId: snapshot.sourceEventId } : {}),
           ...(snapshot ? { snapshotObservedAt: snapshot.observedAt, snapshotSource: snapshot.source } : {}),

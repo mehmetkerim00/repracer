@@ -48,10 +48,14 @@ export interface FloorHoldItem {
   below: string | null;
   reason: HumanReason;
   decisionId: string | null;
+  /** Шаг 102 [Р-227]: держал пол распродажи — намеренный убыток; пилюля строки, в счёт «пол удержал» не входит */
+  clearance: string | null;
 }
 
 export interface FloorHoldsView {
+  /** Удержания расчётного пола; удержания пола распродажи — отдельно (`clearanceCount`) */
   count: number;
+  clearanceCount: number;
   /** По валютам: сумма (удержанная цена − цель) удержаний с известной целью */
   withoutFloor: Array<{ currency: string; amount: string; minor: number }>;
   /** Удержания без суммы: цель старше горячего буфера intent */
@@ -67,8 +71,10 @@ export interface DangerousReportView {
   to: string;
   /** Начало периода отрезано глубиной буфера решений */
   clipped: boolean;
-  /** Р-117: «пол удержал цену N раз, без него вы продали бы на X дешевле» */
+  /** Р-117: «пол удержал цену N раз, без него вы продали бы на X дешевле» — без удержаний пола распродажи [Р-227] */
   headline: string;
+  /** Шаг 102 [Р-227]: «пол распродажи удержал цену N раз — намеренный убыток, выше не учтён»; удержаний нет — null */
+  clearanceHeadline: string | null;
   floorHolds: FloorHoldsView;
   /** Р-73: отклонения Gate больше 10 % за границей — в норме ноль */
   gateHeadline: string;
@@ -95,12 +101,15 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
   const below = new Map<string, number>();
   const items: Array<FloorHoldItem & { sortAt: string }> = [];
   const seenIntents = new Set<string>();
-  const push = (at: string, writeScopeId: string, kind: 'CAPPED' | 'HELD', target: number | null, floor: number, kept: number, currency: string, reason: Parameters<typeof describe>[0], decisionId: string | null) => {
+  let clearanceCount = 0;
+  const push = (at: string, writeScopeId: string, kind: 'CAPPED' | 'HELD', target: number | null, floor: number, kept: number, currency: string, reason: Parameters<typeof describe>[0], decisionId: string | null, clearance = false) => {
     const scope = scopeById(world, writeScopeId);
-    if (target !== null) below.set(currency, (below.get(currency) ?? 0) + (kept - target));
+    // Шаг 102 [Р-227]: пол распродажи держит намеренный убыток — не то, от чего пол «спас»; считается отдельно
+    if (clearance) clearanceCount += 1;
+    else if (target !== null) below.set(currency, (below.get(currency) ?? 0) + (kept - target));
     items.push({
       sortAt: at, at: m.when(at), unit: scope ? unitOf(world, scope, m) : null, kind, target: target === null ? null : m.money(target, currency), floor: m.money(floor, currency),
-      below: target === null ? null : m.money(kept - target, currency), reason: describe(reason, m), decisionId,
+      below: target === null ? null : m.money(kept - target, currency), reason: describe(reason, m), decisionId, clearance: clearance ? m.ui.products.clearancePill : null,
     });
   };
   // Горячие intent (3 дня): цель стратегии известна. Удержание — эпизод: подряд идущие оценки одной единицы, в которых пол держит
@@ -114,11 +123,11 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
   }
   for (const intents of byScope.values()) {
     intents.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-    type Episode = { at: string; writeScopeId: string; kind: 'CAPPED' | 'HELD'; target: number; floor: number; kept: number; currency: string; reason: Parameters<typeof describe>[0]; decisionId: string | null };
+    type Episode = { at: string; writeScopeId: string; kind: 'CAPPED' | 'HELD'; target: number; floor: number; kept: number; currency: string; reason: Parameters<typeof describe>[0]; decisionId: string | null; clearance: boolean };
     let episode = null as Episode | null;
     const close = () => {
       const e = episode as Episode | null;
-      if (e) push(e.at, e.writeScopeId, e.kind, e.target, e.floor, e.kept, e.currency, e.reason, e.decisionId);
+      if (e) push(e.at, e.writeScopeId, e.kind, e.target, e.floor, e.kept, e.currency, e.reason, e.decisionId, e.clearance);
       episode = null;
     };
     for (const i of intents) {
@@ -126,20 +135,21 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
       // Р-154: оценка без удержания между двумя удержаниями в срез не входит, но закрывает эпизод — это говорит флаг из базы
       if (i.episodeStart) close();
       // Р-207: пол — min_price или пол маржи; у удержания полом маржи граница — floorMinor
-      const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR');
+      const capped = i.explanation.find((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR' || x.code === 'CAPPED_AT_CLEARANCE_FLOOR');
       const held = i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD' ? i.reason : null;
       const hit = capped ?? held;
       const target = Number(hit?.params.targetMinor);
-      const floor = Number(hit?.code === 'CAPPED_AT_MARGIN_FLOOR' ? hit.params.floorMinor : hit?.params.minMinor);
+      const floor = Number(hit?.code === 'CAPPED_AT_MARGIN_FLOOR' || hit?.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? hit.params.floorMinor : hit?.params.minMinor);
+      const clearance = i.explanation.some((x) => x.code === 'CLEARANCE_FLOOR');
       // Удержание у потолка — не работа пола
       if (!hit || !Number.isSafeInteger(target) || !Number.isSafeInteger(floor) || target >= floor) { close(); continue; }
       // kept — цена, которую удержал пол: сам пол (поставлена на пол) или текущая цена (оставлена без изменения)
       const kept = capped ? floor : Math.max(floor, i.currentMinor ?? floor);
       const decision = decisionsByIntent.get(i.intentId) ?? null;
       if (!episode) {
-        episode = { at: i.createdAt, writeScopeId: i.writeScopeId, kind: capped ? 'CAPPED' : 'HELD', target, floor, kept, currency: i.currency, reason: hit, decisionId: decision?.decisionId ?? null };
+        episode = { at: i.createdAt, writeScopeId: i.writeScopeId, kind: capped ? 'CAPPED' : 'HELD', target, floor, kept, currency: i.currency, reason: hit, decisionId: decision?.decisionId ?? null, clearance };
       } else if (kept - target > (episode as Episode).kept - (episode as Episode).target) {
-        episode = { ...(episode as Episode), target, floor, kept, reason: hit, kind: capped ? 'CAPPED' : 'HELD', decisionId: decision?.decisionId ?? (episode as Episode).decisionId };
+        episode = { ...(episode as Episode), target, floor, kept, reason: hit, kind: capped ? 'CAPPED' : 'HELD', decisionId: decision?.decisionId ?? (episode as Episode).decisionId, clearance };
       }
     }
     close();
@@ -148,16 +158,18 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
   // без цели [Р-85]. Удержания без изменения цены (NO_OP) решения не создают и после 3 дней не видны вовсе (ревью шага 22, находка 7)
   for (const d of slice.decisions) {
     if (seenIntents.has(d.intentId) || !inPeriod(d.decidedAt, from, to)) continue;
-    const step = explanationOf(world, d)?.value.strategy.steps?.find((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR');
-    const bound = step?.code === 'CAPPED_AT_MARGIN_FLOOR' ? step.params.floorMinor : step?.params.minMinor;
+    const steps = explanationOf(world, d)?.value.strategy.steps ?? [];
+    const step = steps.find((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR' || x.code === 'CAPPED_AT_CLEARANCE_FLOOR');
+    const bound = step?.code === 'CAPPED_AT_MARGIN_FLOOR' || step?.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? step.params.floorMinor : step?.params.minMinor;
     if (!step || !Number.isSafeInteger(bound)) continue;
-    push(d.decidedAt, d.writeScopeId, 'CAPPED', null, bound as number, bound as number, d.currency, step, d.decisionId);
+    push(d.decidedAt, d.writeScopeId, 'CAPPED', null, bound as number, bound as number, d.currency, step, d.decisionId, steps.some((x) => x.code === 'CLEARANCE_FLOOR'));
   }
   items.sort((a, b) => Date.parse(b.sortAt) - Date.parse(a.sortAt));
   return {
-    count: items.length,
+    count: items.length - clearanceCount,
+    clearanceCount,
     withoutFloor: [...below].map(([currency, minor]) => ({ currency, minor, amount: m.money(minor, currency) })),
-    unknownAmount: items.filter((i) => i.target === null).length,
+    unknownAmount: items.filter((i) => i.target === null && i.clearance === null).length,
     items: items.map(({ sortAt: _sortAt, ...rest }) => rest),
   };
 }
@@ -192,6 +204,7 @@ export function dangerousReport(world: StandWorld, slice: InterventionSlice, ran
   return {
     worldId: world.id, phrase, from: m.when(range.since), to: m.when(range.until), clipped: range.clipped,
     headline: r.floorHeadline(floor.count, phrase, floor.withoutFloor.map((x) => x.amount), floor.unknownAmount), floorHolds: floor,
+    clearanceHeadline: floor.clearanceCount > 0 ? r.clearanceHeld(floor.clearanceCount, phrase) : null,
     gateHeadline: r.headline(items.length, phrase), count: items.length,
     prevented: [...prevented].map(([currency, minor]) => ({ currency, minor, amount: m.money(minor, currency) })),
     worst: items[0] ?? null,

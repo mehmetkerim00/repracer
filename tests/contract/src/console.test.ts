@@ -187,11 +187,12 @@ test('Р-73, C: a Gate rejection more than 10 % beyond the bound is dangerous; t
   const world = await w.view(user('OWNER'));
   const view = await rejectedOf(w.store, world, en);
   const item = view.items.find((i) => i.kind === 'GATE')!;
-  assert.deepEqual([item.proposed, item.limit, item.intervention], ['€38.30', 'your maximum price €25.00', 'DANGEROUS']);
+  // Шаг 102 [Р-227]: себестоимость сценария выросла до €15.00 (а не €20.00 — безубыточность осталась ниже потолка), цель — €28.73
+  assert.deepEqual([item.proposed, item.limit, item.intervention], ['€28.73', 'your maximum price €25.00', 'DANGEROUS']);
   assert.equal(view.summary.dangerous, 1);
   assert.match(view.headline, /^Your bounds stopped 1 dangerous change and corrected \d+$/);
-  assert.equal(item.deviation, '53.2%');
-  assert.equal((await rejectedOf(w.store, world, de)).items.find((i) => i.kind === 'GATE')!.deviation, '53,2 %');
+  assert.equal(item.deviation, '14.92%');
+  assert.equal((await rejectedOf(w.store, world, de)).items.find((i) => i.kind === 'GATE')!.deviation, '14,92 %');
   const shiftWorld = live('kaufland/pipeline/mass-shift-halt');
   const shift = await rejectedOf(shiftWorld.store, await shiftWorld.view(user('OWNER')), en);
   assert.ok(shift.items.some((i) => i.kind === 'HALT' && i.reason.code === 'CHANNEL_MASS_SHIFT'));

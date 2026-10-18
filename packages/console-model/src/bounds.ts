@@ -1,4 +1,5 @@
 import { convertMinor, marginBpAtPrice, storefrontPriceForMarginBp, type CostInputs, type FxApplied } from '@repracer/pricing-model';
+import type { ClearanceState } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
 import { boundText } from './products.ts';
 import { gap, scopeById, unitOf, type ConsoleScope, type Gap, type StandWorld, type UnitRef } from './world.ts';
@@ -36,6 +37,13 @@ export interface BoundsView {
   maxPrice: { amount: string; minor: number | null; source: string };
   marginFloor: { minMarginBp: string | null; amount: string | null; minor: number | null; unavailable: string | null };
   effectiveFloor: { amount: string; minor: number | null; source: string };
+  /** Шаг 102 [Р-227]: пол выше потолка — «цены заморожены: поднимите потолок или включите распродажу»; иначе null */
+  frozen: string | null;
+  /**
+   * Шаг 102 [Р-227]: режим распродажи — безубыточность, убыток на штуку и общий при текущем остатке, кто включил и зачем, история.
+   * Числа формы (пол, убыток) экран пересчитывает при вводе той же формулой: убыток на штуку = безубыточность − пол распродажи
+   */
+  clearance: BoundsClearanceView;
   cost: { lines: MoneyLine[]; fx: string | null; unavailable: string | null };
   /**
    * Р-138 (шаг 29): оценки комиссии с источниками. Когда число продавца и тарифная таблица расходятся, показываются ОБА, и
@@ -46,6 +54,29 @@ export interface BoundsView {
   currentBreakdown: PriceBreakdown | null;
   calculatorCheck: string[];
   gaps: Gap[];
+}
+
+export interface BoundsClearanceView {
+  pill: string | null;
+  canManage: boolean;
+  currency: string;
+  breakEvenMinor: number | null;
+  breakEven: string | null;
+  stockPieces: number | null;
+  active: { floor: string; floorMinor: number; by: string; note: string; endsAt: string | null; lossPerUnit: string | null; maxLoss: string | null } | null;
+  /** Пол после выключения — расчётный; «вернётся к полу примерно за N шагов (~X минут)» */
+  returns: string | null;
+  history: Array<{ at: string; what: string; who: string; note: string | null }>;
+}
+
+/** Расширение экрана пола данными вне мира: журнал режима с именами, остаток товара, темп лестницы (шаг 102) */
+export interface BoundsExtra {
+  clearance?: ClearanceState | null;
+  stockPieces?: number | null;
+  /** Ступеней до расчётного пола от нынешней цены и минут на них — считает сервер арифметикой лестницы движка [Р-208, Р-212] */
+  returnSteps?: { steps: number; minutes: number } | null;
+  canManage?: boolean;
+  people?: Readonly<Record<string, string>>;
 }
 
 const BP = 10_000n;
@@ -96,8 +127,14 @@ export function costInScopeCurrency(scope: ConsoleScope, world: StandWorld): { c
 }
 
 export interface EffectiveFloor {
-  /** max(min_price, цена минимальной маржи) — как пол Gate */
+  /** max(min_price, цена минимальной маржи или безубыточности) — как пол Gate; в режиме распродажи — пол распродажи [Р-227] */
   minor: number | null;
+  /** Откуда пол: минимальная цена, минимальная маржа, безубыточность (маржа 0 %, себестоимость объявлена) или распродажа */
+  source: 'MIN' | 'MARGIN' | 'BREAK_EVEN' | 'CLEARANCE';
+  /** Безубыточность — цена с маржой 0 %; null, если себестоимость, комиссия или ставка НДС неизвестны */
+  breakEvenMinor: number | null;
+  /** Шаг 102 [Р-227]: пол выше потолка — ни одна цена не проходит, цены заморожены (Gate отказывает «пол выше потолка») */
+  aboveCeiling: boolean;
   minMinor: number | null;
   marginFloorMinor: number | null;
   minMarginBp: number | null;
@@ -106,17 +143,48 @@ export interface EffectiveFloor {
 }
 
 export function effectiveFloor(scope: ConsoleScope, world: StandWorld): EffectiveFloor {
-  const min = scope.bounds.min.status === 'RESOLVED' ? scope.bounds.min.amountMinor : null;
-  const minMarginBp = scope.minMarginBp;
-  if (minMarginBp === null) return { minor: min, minMinor: min, marginFloorMinor: null, minMarginBp: null, marginUnavailableCause: null };
-  const converted = costInScopeCurrency(scope, world);
-  if ('unavailableCause' in converted) return { minor: min, minMinor: min, marginFloorMinor: null, minMarginBp, marginUnavailableCause: converted.unavailableCause };
-  const priced = storefrontPriceForMarginBp(converted.cost, minMarginBp);
-  if (!priced.ok) return { minor: min, minMinor: min, marginFloorMinor: null, minMarginBp, marginUnavailableCause: priced.cause };
-  return { minor: min === null ? null : Math.max(min, priced.priceMinor), minMinor: min, marginFloorMinor: priced.priceMinor, minMarginBp, marginUnavailableCause: null };
+  const f = floorOf(scope, world);
+  const max = scope.bounds.max.status === 'RESOLVED' ? scope.bounds.max.amountMinor : null;
+  const floor = f.marginFloorMinor !== null && f.minMinor !== null ? Math.max(f.minMinor, f.marginFloorMinor) : f.minor;
+  return { ...f, aboveCeiling: floor !== null && max !== null && floor > max };
 }
 
-export function boundsView(world: StandWorld, writeScopeId: string, m: Messages): BoundsView | null {
+function floorOf(scope: ConsoleScope, world: StandWorld): Omit<EffectiveFloor, 'aboveCeiling'> {
+  const min = scope.bounds.min.status === 'RESOLVED' ? scope.bounds.min.amountMinor : null;
+  const breakEven = breakEvenOf(scope, world);
+  // Шаг 102 [Р-227]: в режиме распродажи пол — пол распродажи; он заменяет min_price и пол маржи (решение владельца)
+  if (scope.clearance) {
+    return { minor: scope.clearance.floorMinor, source: 'CLEARANCE', breakEvenMinor: breakEven, minMinor: min, marginFloorMinor: null, minMarginBp: scope.minMarginBp, marginUnavailableCause: null };
+  }
+  const minMarginBp = scope.minMarginBp;
+  // Безубыточность — всегда в полу, если себестоимость объявлена; без неё — как прежде, пол = min_price (Р-131)
+  const declared = scope.cost !== null || (scope.declaredCost ?? null) !== null;
+  if (minMarginBp === null && !declared) {
+    return { minor: min, source: 'MIN', breakEvenMinor: null, minMinor: min, marginFloorMinor: null, minMarginBp: null, marginUnavailableCause: null };
+  }
+  const source = minMarginBp === null ? 'BREAK_EVEN' as const : 'MARGIN' as const;
+  if (!scope.cost) return { minor: min, source, breakEvenMinor: null, minMinor: min, marginFloorMinor: null, minMarginBp, marginUnavailableCause: 'FEE_ESTIMATE_MISSING' };
+  const converted = costInScopeCurrency(scope, world);
+  if ('unavailableCause' in converted) return { minor: min, source, breakEvenMinor: null, minMinor: min, marginFloorMinor: null, minMarginBp, marginUnavailableCause: converted.unavailableCause };
+  const priced = storefrontPriceForMarginBp(converted.cost, minMarginBp ?? 0);
+  if (!priced.ok) return { minor: min, source, breakEvenMinor: breakEven, minMinor: min, marginFloorMinor: null, minMarginBp, marginUnavailableCause: priced.cause };
+  const binding = min === null || priced.priceMinor > min;
+  return {
+    minor: min === null ? null : Math.max(min, priced.priceMinor), source: binding ? source : 'MIN', breakEvenMinor: breakEven,
+    minMinor: min, marginFloorMinor: priced.priceMinor, minMarginBp, marginUnavailableCause: null,
+  };
+}
+
+/** Шаг 102 [Р-227]: безубыточность — цена с маржой 0 % тем же расчётом, что пол Gate и базы; без себестоимости или комиссии — null */
+export function breakEvenOf(scope: ConsoleScope, world: StandWorld): number | null {
+  if (!scope.cost) return null;
+  const converted = costInScopeCurrency(scope, world);
+  if ('unavailableCause' in converted) return null;
+  const priced = storefrontPriceForMarginBp(converted.cost, 0);
+  return priced.ok ? priced.priceMinor : null;
+}
+
+export function boundsView(world: StandWorld, writeScopeId: string, m: Messages, extra: BoundsExtra = {}): BoundsView | null {
   const scope = scopeById(world, writeScopeId);
   if (!scope) return null;
   const b = m.ui.bounds;
@@ -127,15 +195,49 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages)
   const converted = costInScopeCurrency(scope, world);
   const cost = 'cost' in converted ? converted.cost : null;
 
+  // Шаг 102 [Р-227]: в режиме распродажи пол маржи не действует — карточка показывает его расчёт и говорит «не действует», а не «нет значения»
+  const marginOf = floor.source === 'CLEARANCE' ? effectiveFloor({ ...scope, clearance: null }, world) : floor;
   const marginFloor: BoundsView['marginFloor'] = {
-    minMarginBp: floor.minMarginBp === null ? null : m.percentBp(floor.minMarginBp),
-    amount: floor.marginFloorMinor === null ? null : money(floor.marginFloorMinor),
-    minor: floor.marginFloorMinor,
-    unavailable: floor.marginUnavailableCause ? b.marginUnavailable(m.values[floor.marginUnavailableCause as keyof typeof m.values] ?? floor.marginUnavailableCause) : null,
+    minMarginBp: marginOf.minMarginBp === null ? null : m.percentBp(marginOf.minMarginBp),
+    amount: marginOf.marginFloorMinor === null ? null : money(marginOf.marginFloorMinor),
+    minor: marginOf.marginFloorMinor,
+    unavailable: floor.source === 'CLEARANCE' ? b.marginSuspended
+      : floor.marginUnavailableCause ? b.marginUnavailable(m.values[floor.marginUnavailableCause as keyof typeof m.values] ?? floor.marginUnavailableCause) : null,
   };
-  const floorSource = floor.minMinor === null ? b.floorNoMin
-    : floor.marginFloorMinor !== null && floor.marginFloorMinor > floor.minMinor ? b.floorFromMargin(marginFloor.minMarginBp!, money(floor.minMinor))
-      : b.floorFromMin;
+  const floorSource = floor.source === 'CLEARANCE' ? b.floorFromClearance(money(floor.minMinor))
+    : floor.minMinor === null ? b.floorNoMin
+      : floor.source === 'BREAK_EVEN' ? b.floorFromBreakEven(money(floor.minMinor))
+        : floor.source === 'MARGIN' ? b.floorFromMargin(marginFloor.minMarginBp!, money(floor.minMinor))
+          : b.floorFromMin;
+  const cl = b.clearance;
+  const lossOf = (floorMinor: number) => (floor.breakEvenMinor !== null && floor.breakEvenMinor > floorMinor ? floor.breakEvenMinor - floorMinor : null);
+  const pieces = extra.stockPieces ?? null;
+  const who = (name: string | null | undefined, email: string | null | undefined, membershipId: string | null) =>
+    name ?? (email ? extra.people?.[email] ?? email : membershipId ? (m.values[world.state.members.find((x) => x.membershipId === membershipId)?.role as keyof typeof m.values] ?? m.ui.common.noValue) : cl.system);
+  const active = scope.clearance ?? null;
+  const activeRow = active ? extra.clearance?.active ?? active : null;
+  const clearance: BoundsClearanceView = {
+    pill: active ? m.ui.products.clearancePill : null,
+    canManage: extra.canManage ?? false,
+    currency: c,
+    breakEvenMinor: floor.breakEvenMinor,
+    breakEven: floor.breakEvenMinor === null ? null : money(floor.breakEvenMinor),
+    stockPieces: pieces,
+    active: active && activeRow ? {
+      floor: money(active.floorMinor), floorMinor: active.floorMinor,
+      by: cl.onBy(who(activeRow.enabledByName, activeRow.enabledByEmail, activeRow.enabledByMembershipId), m.when(activeRow.enabledAt)),
+      note: activeRow.note, endsAt: active.endsAt ? m.when(active.endsAt) : null,
+      lossPerUnit: lossOf(active.floorMinor) === null ? null : money(lossOf(active.floorMinor)),
+      maxLoss: lossOf(active.floorMinor) === null || pieces === null ? null : money(lossOf(active.floorMinor)! * pieces),
+    } : null,
+    returns: active && extra.returnSteps ? cl.returns(money(effectiveFloor({ ...scope, clearance: null }, world).minor), extra.returnSteps.steps, extra.returnSteps.minutes) : null,
+    history: (extra.clearance?.history ?? []).map((h) => ({
+      at: m.when(h.at),
+      what: h.action === 'ENABLE' ? cl.actions.ENABLE(m.money(h.floorMinor, h.currency ?? c)) : cl.actions[h.action],
+      who: h.action === 'EXPIRE' ? cl.system : who(h.byName, h.byEmail, h.membershipId),
+      note: h.note,
+    })),
+  };
 
   const breakdown = (title: string, price: number | null): PriceBreakdown | null => {
     if (!cost || price === null) return null;
@@ -151,6 +253,8 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages)
     maxPrice: { amount: boundText(scope.bounds.max, c, m), minor: scope.bounds.max.status === 'RESOLVED' ? scope.bounds.max.amountMinor : null, source: source(scope.bounds.max) },
     marginFloor,
     effectiveFloor: { amount: money(floor.minor), minor: floor.minor, source: floorSource },
+    frozen: floor.aboveCeiling && scope.bounds.max.status === 'RESOLVED' ? b.frozen(money(floor.minor), money(scope.bounds.max.amountMinor)) : null,
+    clearance,
     // Р-138: оценка продавца и тарифная таблица показываются рядом; помечена та, по которой считается пол
     feeEstimates: feeEstimatesView(scope, m),
     cost: {

@@ -110,11 +110,15 @@ export const ENGINE_REASON_CODES = [
   'ANCHOR_UNDERCUT',
   // Шаг 101 [Р-226]: фильтр «Compete with» — с кем стратегия соревновалась (шаг цепочки)
   'COMPETITORS_FILTERED',
+  // Шаг 102 [Р-227]: режим распродажи — пол распродажи ниже безубыточности (первый шаг цепочки каждого решения в режиме)
+  'CLEARANCE_FLOOR',
   // шаги расчёта
   'CAPPED_AT_MIN_PRICE',
   'CAPPED_AT_MAX_PRICE',
   // Р-207 (шаг 72): цель ниже пола маржи — цена на полу маржи; нынешняя цена ниже пола — подъём до пола
   'CAPPED_AT_MARGIN_FLOOR',
+  // Шаг 102 [Р-227]: цель ниже пола распродажи — на пол распродажи
+  'CAPPED_AT_CLEARANCE_FLOOR',
   'RAISED_TO_FLOOR',
   // Р-208 (шаг 73): подъём к полу больше предела шага — ступень на предел шага, «осталось ~N шагов»
   'RAISED_TOWARD_FLOOR',
@@ -321,14 +325,21 @@ export const CURRENCY_SOURCES = ['SNAPSHOT', 'COST'] as const;
 export const STRATEGY_PARAM_NAMES = ['deadbandMinor', 'priceMinor', 'targetMarginBp', 'undercutMinor', 'fulfillmentHandicapMinor', 'creepStepBp'] as const;
 export const PARAM_CONSTRAINTS = ['POSITIVE', 'NON_NEGATIVE', 'MARGIN_BELOW_100_PERCENT'] as const;
 export const BOUND_NAMES = ['min', 'max', 'margin_floor', 'both'] as const;
-/** Чем был пол, до которого поднята цена [Р-207]: min_price или пол маржи */
-export const FLOOR_BOUNDS = ['min', 'margin_floor'] as const;
+/** Шаг 102 [Р-227]: без минимальной маржи пол — безубыточность; отказ «пол выше потолка» называет её */
+export const UNRESOLVABLE_BOUNDS = [...BOUND_NAMES, 'break_even'] as const;
+/**
+ * Чем был пол, до которого поднята цена [Р-207]: min_price или пол маржи; шаг 102 [Р-227] — безубыточность (маржа 0 %, когда минимальная маржа
+ * не задана) и пол распродажи
+ */
+export const FLOOR_BOUNDS = ['min', 'margin_floor', 'clearance', 'break_even'] as const;
+/** Шаг 102 [Р-227]: отказ Gate «ниже пола» в режиме распродажи — пол распродажи, а не min_price */
+export const CLEARANCE_FLOORS = ['CLEARANCE'] as const;
 /**
  * После чего поднята цена до пола без нового наблюдения конкурентов: себестоимость или комиссия выросли (Р-210), перепроверка базы
  * перед отправкой отказала и единица переоценена (Р-209), изменились курс ЕЦБ, min_price или max_price, гардрейл (минимальная маржа) или ставка НДС
  * (Р-211, шаг 74). Порядок — как в реестре базы (0182)
  */
-export const RAISE_AFTER = ['COST_UPDATE', 'FLOOR_RECHECK', 'FX_UPDATE', 'BOUNDS_UPDATE', 'GUARDRAIL_UPDATE', 'VAT_UPDATE'] as const;
+export const RAISE_AFTER = ['COST_UPDATE', 'FLOOR_RECHECK', 'FX_UPDATE', 'BOUNDS_UPDATE', 'GUARDRAIL_UPDATE', 'VAT_UPDATE', 'CLEARANCE_ENDED'] as const;
 export type FloorRaiseReason = (typeof RAISE_AFTER)[number];
 export const BOUND_CAUSES = [
   'MISSING', 'CURRENCY_MISMATCH', 'BASIS_MISMATCH', 'INVALID_AMOUNT', 'MIN_ABOVE_MAX', 'COST_PROFILE_MISSING', 'COST_CURRENCY_MISMATCH',
@@ -364,7 +375,8 @@ export const WRITE_ERROR_CODES = [
   'RESPONSE_MISMATCH',
 ] as const;
 export const ERROR_CLASSES = ['TRANSIENT', 'PERMANENT', 'REQUIRES_HUMAN'] as const;
-export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'CHANNEL_DISTRUST', 'PRICING_STOP'] as const;
+// Шаг 102 [Р-227]: режим распродажи включён или выключен между чтением контекста и фиксацией — пол решения другой
+export const CONTEXT_CHANGES = ['MIN_PRICE', 'MAX_PRICE', 'CHANNEL_HALT', 'CHANNEL_DISTRUST', 'PRICING_STOP', 'CLEARANCE'] as const;
 export const RECONCILE_RESULTS = ['APPLIED', 'NOT_APPLIED'] as const;
 export const SELLER_ACTIONS = ['RECONNECT_ACCOUNT', 'CHECK_ACCOUNT_STATUS', 'CHECK_LISTING', 'REVIEW_CHANNEL_POLICY', 'CONTACT_CHANNEL_SUPPORT', 'REVIEW_OFFER_STATUS', 'DISABLE_CHANNEL_REPRICER', 'REMOVE_CHANNEL_BOUNDS',
   // Шаг 70 [Р-205] (ревью шага 70, находка 9): ответ канала не о том предложении — причина у канала или в нашей проверке, поддержка канала
@@ -462,6 +474,12 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   CAPPED_AT_MIN_PRICE: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MAX_PRICE: { targetMinor: money('CHANNEL_DERIVED'), maxMinor: money('TENANT'), currency: currency() },
   CAPPED_AT_MARGIN_FLOOR: { targetMinor: money('CHANNEL_DERIVED'), floorMinor: money('TENANT'), minMinor: money('TENANT'), minMarginBp: bp('TENANT'), currency: currency() },
+  /**
+   * Шаг 102 [Р-227]: режим распродажи. Пол распродажи и безубыточность — данные продавца (его пол, его себестоимость и комиссия), в вечном
+   * объяснении остаются: квитанция говорит правду и через год — «пол $7.00 ниже безубыточности $13.12 (−$6.12 за штуку)»
+   */
+  CLEARANCE_FLOOR: { floorMinor: money('TENANT'), breakEvenMinor: money('TENANT', O), lossPerUnitMinor: money('TENANT', O), currency: currency() },
+  CAPPED_AT_CLEARANCE_FLOOR: { targetMinor: money('CHANNEL_DERIVED'), floorMinor: money('TENANT'), currency: currency() },
   RAISED_TO_FLOOR: {
     currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O),
     after: oneOf(RAISE_AFTER, 'TENANT', O), currency: currency(),
@@ -499,13 +517,17 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
 
   APPROVED: { finalMinor: money('TENANT'), floorMinor: money('TENANT'), ceilingMinor: money('TENANT'), currency: currency() },
   NO_CHANGE: {},
-  BELOW_MIN_PRICE: { proposedMinor: money('TENANT', N), minMinor: money('TENANT', N), deviationBp: bp('TENANT', O), source: oneOf(CHECK_SOURCES, 'TENANT', O), currency: currency() },
+  BELOW_MIN_PRICE: {
+    proposedMinor: money('TENANT', N), minMinor: money('TENANT', N), deviationBp: bp('TENANT', O), source: oneOf(CHECK_SOURCES, 'TENANT', O),
+    // Шаг 102 [Р-227]: в режиме распродажи нижняя граница — пол распродажи
+    floor: oneOf(CLEARANCE_FLOORS, 'TENANT', O), currency: currency(),
+  },
   BELOW_MARGIN_FLOOR: {
     proposedMinor: money('TENANT'), floorMinor: money('TENANT'), minMinor: money('TENANT', O), minMarginBp: bp('TENANT', O), deviationBp: bp('TENANT', O), currency: currency(),
   },
   ABOVE_MAX_PRICE: { proposedMinor: money('TENANT', N), maxMinor: money('TENANT', N), deviationBp: bp('TENANT', O), source: oneOf(CHECK_SOURCES, 'TENANT', O), currency: currency() },
   BOUND_UNRESOLVABLE: {
-    bound: oneOf(BOUND_NAMES, 'TENANT'), cause: oneOf(BOUND_CAUSES, 'TENANT'), boundCurrency: currency(O), boundBasis: oneOf(PRICE_BASES, 'TENANT', O),
+    bound: oneOf(UNRESOLVABLE_BOUNDS, 'TENANT'), cause: oneOf(BOUND_CAUSES, 'TENANT'), boundCurrency: currency(O), boundBasis: oneOf(PRICE_BASES, 'TENANT', O),
     scopeCurrency: currency(O), scopeBasis: oneOf(PRICE_BASES, 'TENANT', O), minMarginBp: bp('TENANT', O),
   },
   STEP_LIMIT: { stepBp: bp('TENANT'), limitBp: bp('TENANT'), currentMinor: money('TENANT'), proposedMinor: money('TENANT'), currency: currency() },

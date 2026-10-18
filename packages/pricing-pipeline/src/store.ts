@@ -106,7 +106,7 @@ export interface ScopeEvaluationContext {
   /** Себестоимость единицы товара в валюте единицы — якорь проверки входов, даже без оценки комиссии */
   unitCostMinor: number | null;
   /** Себестоимость есть, но не переведена в валюту единицы записи (нет или устарел курс ЕЦБ) — для объяснения отказа [Р-61] */
-  costUnavailableCause?: FxFailureCause | null;
+  costUnavailableCause?: FxFailureCause | 'FEE_ESTIMATE_MISSING' | null;
   /** Себестоимости для маржи нет — причина для предупреждения при включении (шаг 12) */
   costMissingCause?: 'COST_PROFILE_MISSING' | 'FEE_ESTIMATE_MISSING' | FxFailureCause | null;
   guardrails: GuardrailSet;
@@ -124,6 +124,64 @@ export interface ScopeEvaluationContext {
    * некуда, оценка пропускается без решения (иначе каждая оценка горячего яруса давала CHANGED и запись BUDGET_EXHAUSTED)
    */
   budgetExhausted?: { resetsAt: Instant | null; budgetDay: string | null } | null;
+  /** Шаг 102 [Р-227]: действующий режим распродажи единицы — пол распродажи заменяет весь пол; null — режима нет */
+  clearance?: ClearanceRef | null;
+}
+
+/** Шаг 102 [Р-227]: включённый режим распродажи — строка журнала включения (`tenant_data.clearance_change`) */
+export interface ClearanceRef {
+  changeId: string;
+  floorMinor: number;
+  currency: string;
+  endsAt: Instant | null;
+  note: string;
+  enabledAt: Instant;
+  enabledByMembershipId: string | null;
+  /** Кто включил — имя и адрес участника (административный сервис читает их рядом с журналом); у памяти и без имени — null */
+  enabledByName?: string | null;
+  enabledByEmail?: string | null;
+}
+
+/** Шаг 102 [Р-227]: включение режима распродажи — пол распродажи, записка «зачем», подтверждение убытка, необязательная дата окончания */
+export interface ClearanceEnableInput {
+  writeScopeId: string;
+  floorMinor: number;
+  currency: string;
+  endsAt: Instant | null;
+  note: string;
+  acknowledged: boolean;
+}
+export type ClearanceInvalidCause = 'ACK_REQUIRED' | 'NOTE_REQUIRED' | 'FLOOR_INVALID' | 'CURRENCY_MISMATCH' | 'ENDS_IN_PAST';
+export type ClearanceEnableResult =
+  | { status: 'ENABLED'; changeId: string }
+  | { status: 'INVALID'; cause: ClearanceInvalidCause }
+  | { status: 'MFA_REQUIRED' }
+  | { status: 'FORBIDDEN' };
+export type ClearanceDisableResult = { status: 'DISABLED' } | { status: 'NOT_ACTIVE' } | { status: 'FORBIDDEN' };
+/** Строка журнала режима распродажи — история на странице пола; новые первыми */
+export interface ClearanceChangeRow {
+  changeId: string;
+  action: 'ENABLE' | 'DISABLE' | 'EXPIRE';
+  floorMinor: number | null;
+  currency: string | null;
+  endsAt: Instant | null;
+  note: string | null;
+  membershipId: string | null;
+  byName?: string | null;
+  byEmail?: string | null;
+  at: Instant;
+}
+export interface ClearanceState {
+  active: ClearanceRef | null;
+  history: ClearanceChangeRow[];
+}
+/** Режим распродажи, закончившийся по дате, — для письма владельцу «цена вернётся к полу примерно за N шагов» */
+export interface ClearanceEnded {
+  writeScopeId: string;
+  floorMinor: number;
+  currency: string;
+  endsAt: Instant;
+  note: string;
 }
 
 /** Ссылка на полный снимок решения: истекает через 18 месяцев [Р-38, Р-68] */
@@ -690,6 +748,13 @@ export interface PricingStore {
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   /** Р-134, Р-135: массовый импорт себестоимости — предпросмотр без записи, применение целиком и со вторым фактором */
   importCosts(tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult>;
+  /**
+   * Шаг 102 [Р-227]: режим распродажи. Включает владелец или менеджер от своего имени со вторым фактором, подтверждением и запиской —
+   * отказывает база (0197), хранилище переводит её отказ в причину. Выключение — одним действием, без второго фактора
+   */
+  enableClearance(tenantId: string, input: ClearanceEnableInput, actor: AdminActor): Promise<ClearanceEnableResult>;
+  disableClearance(tenantId: string, input: { writeScopeId: string; note: string | null }, actor: AdminActor): Promise<ClearanceDisableResult>;
+  clearanceOf(tenantId: string, writeScopeId: string): Promise<ClearanceState>;
   /** Шаг 99 [Р-224, Р-225]: импорт границ и минимальной маржи — целиком, одной транзакцией вместе со строкой журнала */
   importBounds(tenantId: string, input: { rows: readonly BoundsImportRowInput[]; run?: ImportRunInput }, actor: AdminActor): Promise<BoundsImportResult>;
   /** Шаг 99 [Р-225]: назначение стратегий из файла — целиком, одной транзакцией вместе со строкой журнала */
@@ -787,6 +852,8 @@ export interface PricingStore {
    * Возвращает число поставленных запросов
    */
   requestFloorRaiseForPlatformInputs(tenantId: string, channelAccountId: string, now: Instant): Promise<number>;
+  /** Шаг 102 [Р-227]: режимы распродажи аккаунта, чья дата окончания наступила, — строкой EXPIRE (часы базы) и запросом на переоценку */
+  expireClearances(tenantId: string, channelAccountId: string): Promise<ClearanceEnded[]>;
   /** Р-126: опрос товаров выполнен — время последнего опроса */
   markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;
@@ -1047,6 +1114,10 @@ export interface ConsoleScopeRow {
    * всех записей тенанта. Принятая, но не применённая запись — в `writes` (в полёте).
    */
   lastApplied: { amountMinor: number; acceptedAt: Instant } | null;
+  /** Шаг 102 [Р-227]: действующий режим распродажи — пилюля «Clearance» и пол распродажи на экранах */
+  clearance?: ClearanceRef | null;
+  /** Предел шага цены (гардрейл) — «вернётся к полу примерно за N шагов» при выключении распродажи */
+  maxStepChangeBp?: number | null;
 }
 
 export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationIntentColumns {
@@ -1238,6 +1309,8 @@ export interface DecisionDetail {
   decision: ConsoleDecisionRow;
   intent: ConsoleIntentRow | null;
   writes: ConsoleWriteRow[];
+  /** Шаг 102 [Р-227]: строка включения режима распродажи, при котором принято решение, — квитанция называет, кто, когда и зачем */
+  clearance?: ClearanceRef | null;
 }
 
 /** Решения показанных единиц: последнее и сколько всего в горячем буфере — только для строк страницы, не для каталога */

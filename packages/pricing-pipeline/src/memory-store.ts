@@ -2,7 +2,7 @@ import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/chan
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow,
+import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
@@ -620,9 +620,74 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return { currency: row.currency, basis: row.basis, min: one(row.minPrice), max: one(row.maxPrice) };
   }
 
-  private contextVersion(row: ScopeRow): string {
+  private contextVersion(row: ScopeRow, now: Instant = systemClock.now()): string {
     const v = (b: SeedBound | null | undefined) => (b ? `${b.id}:${b.amountMinor}:${b.isActive !== false}` : '-');
-    return `${v(row.minPrice)}|${v(row.maxPrice)}|halt:${this.activeHalt(row.channelAccountId, row.marketplace)?.haltId ?? '-'}|distrust:${this.activeDistrust(row.channelAccountId, row.marketplace)?.distrustId ?? '-'}|stop:${this.activeStop(row.channelAccountId, row.marketplace)?.stopId ?? '-'}`;
+    return `${v(row.minPrice)}|${v(row.maxPrice)}|halt:${this.activeHalt(row.channelAccountId, row.marketplace)?.haltId ?? '-'}|distrust:${this.activeDistrust(row.channelAccountId, row.marketplace)?.distrustId ?? '-'}|stop:${this.activeStop(row.channelAccountId, row.marketplace)?.stopId ?? '-'}|clearance:${this.activeClearance(row.writeScopeId, now)?.changeId ?? '-'}`;
+  }
+
+  // --- Шаг 102 [Р-227]: режим распродажи — журнал только на добавление, как tenant_data.clearance_change (0197) ---------------------
+  private readonly clearanceLog: Array<ClearanceChangeRow & { writeScopeId: string; seq: number }> = [];
+  private clearanceSeq = 0;
+
+  /** Действующий режим: последняя строка единицы — включение, и его дата ещё не наступила (как tenant_data.active_clearance) */
+  private activeClearance(writeScopeId: string, now: Instant): ClearanceRef | null {
+    const last = this.clearanceLog.filter((c) => c.writeScopeId === writeScopeId).sort((a, b) => b.seq - a.seq)[0];
+    if (!last || last.action !== 'ENABLE' || (last.endsAt !== null && Date.parse(last.endsAt) <= Date.parse(now))) return null;
+    return { changeId: last.changeId, floorMinor: last.floorMinor!, currency: last.currency!, endsAt: last.endsAt, note: last.note ?? '', enabledAt: last.at, enabledByMembershipId: last.membershipId };
+  }
+
+  async enableClearance(_tenantId: string, input: ClearanceEnableInput, actor: AdminActor): Promise<ClearanceEnableResult> {
+    if (!input.acknowledged) return { status: 'INVALID', cause: 'ACK_REQUIRED' };
+    if (input.note.trim() === '') return { status: 'INVALID', cause: 'NOTE_REQUIRED' };
+    if (!actor.mfa) return { status: 'MFA_REQUIRED' };
+    const row = this.scope(input.writeScopeId);
+    if (input.currency !== row.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
+    const b = this.boundsOf(row);
+    if (!Number.isSafeInteger(input.floorMinor) || input.floorMinor <= 0 || b.max.status !== 'RESOLVED' || input.floorMinor > b.max.amountMinor) {
+      return { status: 'INVALID', cause: 'FLOOR_INVALID' };
+    }
+    const now = systemClock.now();
+    if (input.endsAt !== null && Date.parse(input.endsAt) <= Date.parse(now)) return { status: 'INVALID', cause: 'ENDS_IN_PAST' };
+    const seq = ++this.clearanceSeq;
+    const changeId = `clearance-${seq}`;
+    this.clearanceLog.push({ changeId, seq, writeScopeId: input.writeScopeId, action: 'ENABLE', floorMinor: input.floorMinor,
+      currency: input.currency, endsAt: input.endsAt, note: input.note.trim(), membershipId: actor.membershipId, at: now });
+    return { status: 'ENABLED', changeId };
+  }
+
+  async disableClearance(_tenantId: string, input: { writeScopeId: string; note: string | null }, actor: AdminActor): Promise<ClearanceDisableResult> {
+    const now = systemClock.now();
+    if (!this.activeClearance(input.writeScopeId, now)) return { status: 'NOT_ACTIVE' };
+    const seq = ++this.clearanceSeq;
+    this.clearanceLog.push({ changeId: `clearance-${seq}`, seq, writeScopeId: input.writeScopeId, action: 'DISABLE', floorMinor: null,
+      currency: null, endsAt: null, note: input.note?.trim() || null, membershipId: actor.membershipId, at: now });
+    // Конец распродажи — запрос на переоценку, как триггер журнала в базе: первый же пересчёт начинает подъём к полу
+    this.requestFloorRaise(input.writeScopeId, 'CLEARANCE_ENDED', now);
+    return { status: 'DISABLED' };
+  }
+
+  async clearanceOf(_tenantId: string, writeScopeId: string): Promise<ClearanceState> {
+    return {
+      active: this.activeClearance(writeScopeId, systemClock.now()),
+      history: this.clearanceLog.filter((c) => c.writeScopeId === writeScopeId).sort((a, b) => b.seq - a.seq).slice(0, 50)
+        .map(({ writeScopeId: _w, seq: _s, ...rest }) => rest),
+    };
+  }
+
+  async expireClearances(_tenantId: string, channelAccountId: string): Promise<ClearanceEnded[]> {
+    const now = systemClock.now();
+    const ended: ClearanceEnded[] = [];
+    for (const row of this.scopes.values()) {
+      if (row.channelAccountId !== channelAccountId) continue;
+      const last = this.clearanceLog.filter((c) => c.writeScopeId === row.writeScopeId).sort((a, b) => b.seq - a.seq)[0];
+      if (!last || last.action !== 'ENABLE' || last.endsAt === null || Date.parse(last.endsAt) > Date.parse(now)) continue;
+      const seq = ++this.clearanceSeq;
+      this.clearanceLog.push({ changeId: `clearance-${seq}`, seq, writeScopeId: row.writeScopeId, action: 'EXPIRE', floorMinor: null,
+        currency: null, endsAt: null, note: null, membershipId: null, at: now });
+      this.requestFloorRaise(row.writeScopeId, 'CLEARANCE_ENDED', now);
+      ended.push({ writeScopeId: row.writeScopeId, floorMinor: last.floorMinor!, currency: last.currency!, endsAt: last.endsAt, note: last.note ?? '' });
+    }
+    return ended;
   }
 
   private scopeEvaluationContext(row: ScopeRow, now: Instant): ScopeEvaluationContext {
@@ -637,9 +702,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return {
       scope: this.context(row),
       bounds: this.boundsOf(row),
-      contextVersion: this.contextVersion(row),
+      contextVersion: this.contextVersion(row, now),
       cost,
       unitCostMinor: cost?.unitCostMinor ?? null,
+      clearance: this.activeClearance(row.writeScopeId, now),
       costUnavailableCause: converted && !converted.ok ? converted.cause : null,
       costMissingCause: !row.cost ? 'COST_PROFILE_MISSING' : converted && !converted.ok ? converted.cause : null,
       guardrails: { ...NO_GUARDRAILS, ...row.guardrails },
@@ -1011,13 +1077,17 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const b = this.boundsOf(row);
     if (b.min.status !== 'RESOLVED') return { ok: false, cause: 'MISSING' };
     const minMinor = b.min.amountMinor;
+    // Шаг 102 [Р-227]: в режиме распродажи пол — пол распродажи, он заменяет min_price и пол маржи
+    const clearance = this.activeClearance(row.writeScopeId, now);
+    if (clearance) return { ok: true, floorMinor: clearance.floorMinor, minMinor, marginFloorMinor: null, minMarginBp: null };
     const minMarginBp = row.guardrails?.minMarginBp ?? null;
-    if (minMarginBp === null) return { ok: true, floorMinor: minMinor, minMinor, marginFloorMinor: null, minMarginBp: null };
+    // Без минимальной маржи пол — безубыточность (маржа 0 %), если себестоимость объявлена; без неё — min_price (Р-131)
+    if (minMarginBp === null && !row.cost) return { ok: true, floorMinor: minMinor, minMinor, marginFloorMinor: null, minMarginBp: null };
     const ctx = this.scopeEvaluationContext(row, now);
     if (!ctx.cost) return { ok: false, cause: (ctx.costMissingCause ?? 'COST_PROFILE_MISSING') as (typeof BOUND_CAUSES)[number] };
-    const priced = storefrontPriceForMarginBp(ctx.cost, minMarginBp);
+    const priced = storefrontPriceForMarginBp(ctx.cost, minMarginBp ?? 0);
     if (!priced.ok) return { ok: false, cause: priced.cause };
-    return { ok: true, floorMinor: Math.max(minMinor, priced.priceMinor), minMinor, marginFloorMinor: priced.priceMinor, minMarginBp };
+    return { ok: true, floorMinor: Math.max(minMinor, priced.priceMinor), minMinor, marginFloorMinor: priced.priceMinor, minMarginBp: minMarginBp ?? 0 };
   }
 
   private dispatchRefusal(w: WriteRow, now: Instant): { status: 'DISCARDED_STALE' | 'BLOCKED'; reason: Reason<string> } | null {
@@ -2376,6 +2446,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
           cost: s.cost ?? null, minMarginBp: s.guardrails?.minMarginBp ?? null,
           // Шаг 99: себестоимость продавца и маржа по уровням — в памяти уровень один, предложения
           declaredCost: s.cost ? { costProfileId: s.cost.costProfileId, currency: s.cost.currency, unitCostMinor: s.cost.unitCostMinor } : null,
+          clearance: this.activeClearance(s.writeScopeId, systemClock.now()), maxStepChangeBp: s.guardrails?.maxStepChangeBp ?? null,
           ownMinMarginBp: s.guardrails?.minMarginBp ?? null, widerMinMarginBp: null,
           ...(s.sellerFee ? { feeEstimates: [{ source: 'SELLER_DECLARED', feeRateBp: s.sellerFee.feeRateBp, fixedFeeMinor: s.sellerFee.fixedFeeMinor, scheduleVersion: null }] } : {}),
           channelHalt: halt ? InMemoryPricingStore.haltRef(halt) : null, priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,
@@ -2472,6 +2543,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       decision: { ...decision },
       intent: this.intents.find((i) => i.intentId === decision.intentId) ?? null,
       writes: this.writes.filter((w) => w.decisionId === decisionId).sort((a, b) => a.version - b.version).map((w) => this.consoleWrite(w)),
+      clearance: (() => {
+        const c = this.clearanceLog.find((x) => x.changeId === decision.clearanceChangeId && x.action === 'ENABLE');
+        return c ? { changeId: c.changeId, floorMinor: c.floorMinor!, currency: c.currency!, endsAt: c.endsAt, note: c.note ?? '', enabledAt: c.at, enabledByMembershipId: c.membershipId } : null;
+      })(),
     };
   }
 
@@ -2485,7 +2560,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async interventions(_tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
     const within = (at: string) => Date.parse(at) > Date.parse(from) && Date.parse(at) <= Date.parse(to);
     const capped = (i: ConsoleIntentRow) => i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD'
-      || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR');
+      || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR' || x.code === 'CAPPED_AT_CLEARANCE_FLOOR');
     /**
      * Граница эпизода — по намерениям единицы ВНУТРИ окна, в порядке времени, ровно как оконная функция базы: удержание,
      * начавшееся до окна и длящееся в нём, считается в окне одним удержанием. Прежняя редакция смотрела на все намерения,

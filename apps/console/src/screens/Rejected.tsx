@@ -54,7 +54,7 @@ function PriceHistory({ item }: { item: RejectedItem }) {
 }
 
 /** Шаг 96.2 (E): счётчики периода — по чипу на категорию; ненулевые — акцентом, нулевые — приглушённо, но видны все */
-const STAT_KEYS = ['dangerous', 'corrected', 'unresolvable', 'limiterHolds', 'stops', 'inputRejects', 'halts'] as const;
+const STAT_KEYS = ['dangerous', 'corrected', 'unresolvable', 'floorAboveCeiling', 'limiterHolds', 'stops', 'inputRejects', 'halts'] as const;
 
 /**
  * Экран C: опасные изменения (отклонение от границы больше 10 %) отдельно от скорректированных [Р-73].

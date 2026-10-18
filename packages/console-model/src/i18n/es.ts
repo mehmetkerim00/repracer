@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   CROSS_CHANNEL_FX_UNAVAILABLE: 'Sin tipo de cambio para comparar canales',
   FIXED_PRICE: 'Precio fijo', MARGIN_TARGET: 'Precio para el margen objetivo', BUYBOX_MATCH: 'Igualar la Buy Box', BUYBOX_UNDERCUT: 'Quedar por debajo de la Buy Box',
   LOWEST_MATCH: 'Igualar el precio más bajo', LOWEST_UNDERCUT: 'Quedar por debajo del precio más bajo', CAPPED_AT_MIN_PRICE: 'Objetivo limitado a su precio mínimo',
-  CAPPED_AT_MAX_PRICE: 'Objetivo limitado a su precio máximo', CAPPED_AT_MARGIN_FLOOR: 'Objetivo limitado al piso de margen', RAISED_TO_FLOOR: 'Subido hasta el piso', RAISED_TOWARD_FLOOR: 'Subido un paso hacia el piso', ALREADY_AT_TARGET: 'Ya está en el objetivo', WITHIN_DEADBAND: 'Cambio por debajo del umbral', SHADOW_ALREADY_PROPOSED: 'Ya propuesto en modo sombra', LADDER_PACED: 'Siguiente paso hacia el piso, más tarde',
+  CAPPED_AT_MAX_PRICE: 'Objetivo limitado a su precio máximo', CAPPED_AT_MARGIN_FLOOR: 'Objetivo limitado al piso de margen', CLEARANCE_FLOOR: 'Modo liquidación', CAPPED_AT_CLEARANCE_FLOOR: 'Objetivo limitado al piso de liquidación', RAISED_TO_FLOOR: 'Subido hasta el piso', RAISED_TOWARD_FLOOR: 'Subido un paso hacia el piso', ALREADY_AT_TARGET: 'Ya está en el objetivo', WITHIN_DEADBAND: 'Cambio por debajo del umbral', SHADOW_ALREADY_PROPOSED: 'Ya propuesto en modo sombra', LADDER_PACED: 'Siguiente paso hacia el piso, más tarde',
   ALREADY_WINNING_BUYBOX: 'Ya tiene la Buy Box', NO_COMPETITOR_OFFERS: 'Sin competidores', TARGET_OUTSIDE_BOUNDS_HOLD: 'Objetivo fuera de los límites — se mantiene',
   BUYBOX_WIN_TARGET: 'Ganar la Buy Box', CREEP_UP: 'Subido un paso mientras gana', CREEP_STEP_BACK: 'Buy Box perdida — vuelta al último precio ganador',
   CAPPED_AT_CREEP_CEILING: 'Por debajo del precio que perdió la Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Titular de la Buy Box no indicado — se mantiene',
@@ -44,14 +44,19 @@ const titles: Record<AnyReasonCode, string> = {
 
 /** Р-209, Р-210: после чего поднята цена без наблюдения конкурентов */
 const RAISE_AFTER_TEXT: Readonly<Record<FloorRaiseReason, string>> = {
-  COST_UPDATE: ' tras la actualización del costo',
+  // Шаг 102: рост себестоимости называет фраза впереди (costRaise), а не хвост «после чего»
+  COST_UPDATE: '',
   FLOOR_RECHECK: ' después de recalcular el piso antes del envío (costo, comisiones, tipo de cambio e IVA actuales)',
   FX_UPDATE: ' tras la actualización del tipo de cambio del BCE',
   BOUNDS_UPDATE: ' después de que cambiara su precio mínimo o máximo',
   GUARDRAIL_UPDATE: ' después de que cambiara su margen mínimo o su límite de paso',
   VAT_UPDATE: ' después de que cambiara la tasa de IVA',
+  CLEARANCE_ENDED: ' después de terminar la liquidación',
 };
 const raiseAfter = (f: Fmt): string => RAISE_AFTER_TEXT[String(f.get('after') ?? '') as FloorRaiseReason] ?? '';
+/** Шаг 102 [Р-227]: рост себестоимости поднял пол — словами владельца, впереди фразы; граница пола — словами */
+const costRaise = (f: Fmt): string => (f.get('after') === 'COST_UPDATE' ? 'El costo unitario subió: el piso subió. ' : '');
+const floorWord = (f: Fmt): string => ({ margin_floor: 'su piso de margen', break_even: 'su punto de equilibrio', clearance: 'su piso de liquidación' } as Record<string, string>)[String(f.get('bound'))] ?? 'su precio mínimo';
 const deviation = (f: Fmt) => opt(f, 'deviationBp', () => ` en un ${f.bp('deviationBp')}`);
 
 /** Шаг 101 [Р-226]: фильтр «Compete with», ориентир и почему Buy Box не участвовал — словами */
@@ -122,10 +127,17 @@ const reasons: Record<AnyReasonCode, Template> = {
   CAPPED_AT_MIN_PRICE: (f) => `El objetivo ${f.money('targetMinor')} está por debajo de su precio mínimo — se limita a ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `El objetivo ${f.money('targetMinor')} está por encima de su precio máximo — se limita a ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `El objetivo ${f.money('targetMinor')} está por debajo de su piso de margen ${f.money('floorMinor')} (margen ${f.bp('minMarginBp')}) — se fija en el piso de margen.`,
-  RAISED_TO_FLOOR: (f) => (f.get('bound') === 'margin_floor'
+  // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
+  CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Modo liquidación: el piso de ${f.money('floorMinor')} está por debajo del punto de equilibrio de ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} por unidad).` : f.has('breakEvenMinor') ? `Modo liquidación: piso de ${f.money('floorMinor')}, punto de equilibrio de ${f.money('breakEvenMinor')}.` : `Modo liquidación: piso de ${f.money('floorMinor')} — el punto de equilibrio no se puede calcular.`),
+  CAPPED_AT_CLEARANCE_FLOOR: (f) => `El objetivo ${f.money('targetMinor')} está por debajo de su piso de liquidación de ${f.money('floorMinor')} — se fija en el piso de liquidación.`,
+  RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
+    ? `Su precio ${f.money('currentMinor')} estaba por debajo de su punto de equilibrio — subido a ${f.money('floorMinor')}${raiseAfter(f)}.`
+    : f.get('bound') === 'clearance'
+    ? `Su precio ${f.money('currentMinor')} estaba por debajo de su piso de liquidación — subido a ${f.money('floorMinor')}${raiseAfter(f)}.`
+    : f.get('bound') === 'margin_floor'
     ? `Su precio ${f.money('currentMinor')} estaba por debajo de su piso de margen — subido a su piso de margen ${f.money('floorMinor')}${raiseAfter(f)}${opt(f, 'minMarginBp', () => ` (margen ${f.bp('minMarginBp')})`)}.`
     : `Su precio ${f.money('currentMinor')} estaba por debajo de su precio mínimo — subido a ${f.money('floorMinor')}${raiseAfter(f)}.`),
-  RAISED_TOWARD_FLOOR: (f) => `Su precio ${f.money('currentMinor')} está por debajo de ${f.get('bound') === 'margin_floor' ? 'su piso de margen' : 'su precio mínimo'} ${f.money('floorMinor')} — subido un paso${raiseAfter(f)}, hasta donde lo permite el límite de paso de ${f.bp('stepLimitBp')}; ${f.get('stepsLeft') === 1 ? `falta aproximadamente ${f.count('stepsLeft')} paso` : `faltan unos ${f.count('stepsLeft')} pasos`} hasta el piso.`,
+  RAISED_TOWARD_FLOOR: (f) => costRaise(f) + `Su precio ${f.money('currentMinor')} está por debajo de ${floorWord(f)} ${f.money('floorMinor')} — subido un paso${raiseAfter(f)}, hasta donde lo permite el límite de paso de ${f.bp('stepLimitBp')}; ${f.get('stepsLeft') === 1 ? `falta aproximadamente ${f.count('stepsLeft')} paso` : `faltan unos ${f.count('stepsLeft')} pasos`} hasta el piso.`,
   ALREADY_AT_TARGET: (f) => `El precio ya es igual al objetivo ${f.money('targetMinor')}.`,
   WITHIN_DEADBAND: (f) => `La diferencia de ${f.money('deltaMinor')} está por debajo del umbral de ${f.money('deadbandMinor')} — el precio se mantiene.`,
   // Р-171 (шаг 41): то же предложение уже удержано тенью — повторять его незачем
@@ -161,10 +173,12 @@ const reasons: Record<AnyReasonCode, Template> = {
     ? `Paso a ${f.money('finalMinor')} hacia el piso ${f.money('floorMinor')} aprobado; el precio sigue por debajo del piso.`
     : `Precio ${f.money('finalMinor')} aprobado dentro de ${f.money('floorMinor')}–${f.money('ceilingMinor')}.`),
   NO_CHANGE: () => 'Sin cambio de precio: la decisión se registra sin enviar nada.',
-  BELOW_MIN_PRICE: (f) => `Rechazado: ${f.money('proposedMinor')} está por debajo de su precio mínimo de ${f.money('minMinor')}${deviation(f)}.`,
+  BELOW_MIN_PRICE: (f) => f.get('floor') === 'CLEARANCE' ? `Rechazado: ${f.money('proposedMinor')} está por debajo de su piso de liquidación de ${f.money('minMinor')}${deviation(f)}.` : `Rechazado: ${f.money('proposedMinor')} está por debajo de su precio mínimo de ${f.money('minMinor')}${deviation(f)}.`,
   BELOW_MARGIN_FLOOR: (f) => `Rechazado: ${f.money('proposedMinor')} está por debajo del piso de margen de ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (margen ${f.bp('minMarginBp')})`)}${deviation(f)}.`,
   ABOVE_MAX_PRICE: (f) => `Rechazado: ${f.money('proposedMinor')} está por encima de su precio máximo de ${f.money('maxMinor')}${deviation(f)}.`,
-  BOUND_UNRESOLVABLE: (f) => `Rechazado: no se puede calcular ${f.value('bound')} — ${f.value('cause')}${opt(f, 'boundCurrency', () => ` (límite ${f.raw('boundCurrency')} ${f.value('boundBasis')}, oferta ${f.raw('scopeCurrency')} ${f.value('scopeBasis')})`)}${opt(f, 'minMarginBp', () => ` (margen mínimo ${f.bp('minMarginBp')})`)}. No se envía nada.`,
+  BOUND_UNRESOLVABLE: (f) => f.get('cause') === 'MARGIN_FLOOR_ABOVE_MAX_PRICE'
+    ? `Rechazado: ${f.value('bound')} está por encima de su precio máximo${opt(f, 'minMarginBp', () => ` (margen mínimo ${f.bp('minMarginBp')})`)}: ningún precio cabe, los precios quedan congelados. Suba el precio máximo o active la liquidación. No se envía nada.`
+    : `Rechazado: no se puede calcular ${f.value('bound')} — ${f.value('cause')}${opt(f, 'boundCurrency', () => ` (límite ${f.raw('boundCurrency')} ${f.value('boundBasis')}, oferta ${f.raw('scopeCurrency')} ${f.value('scopeBasis')})`)}${opt(f, 'minMarginBp', () => ` (margen mínimo ${f.bp('minMarginBp')})`)}. No se envía nada.`,
   STEP_LIMIT: (f) => `Retenido: el cambio de ${f.money('currentMinor')} a ${f.money('proposedMinor')} es de ${f.bp('stepBp')}, y el paso permitido es de ${f.bp('limitBp')}.`,
   CHANGE_RATE_LIMIT: (f) => `Retenido: ya hubo ${f.count('changes')} cambios en la última hora, y el límite es ${f.count('limit')}.`,
   INTENT_EXPIRED: (f) => `Rechazado: el precio propuesto esperó ${f.seconds('waitedSeconds')} y venció (${f.when('expiresAt')}).`,
@@ -296,6 +310,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MIN_PRICE: (f) => `El objetivo calculado con los precios de la competencia estaba por debajo de su precio mínimo — se limitó a ${f.money('minMinor')}.`,
   CAPPED_AT_MAX_PRICE: (f) => `El objetivo calculado con los precios de la competencia estaba por encima de su precio máximo — se limitó a ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `El objetivo calculado con los precios de la competencia estaba por debajo de su piso de margen — se fijó en el piso de margen de ${f.money('floorMinor')} (margen ${f.bp('minMarginBp')}).`,
+  CAPPED_AT_CLEARANCE_FLOOR: (f) => `El objetivo calculado con los precios de la competencia estaba por debajo de su piso de liquidación — se fijó en ${f.money('floorMinor')}.`,
   ALREADY_AT_TARGET: () => 'El precio ya era igual al objetivo.',
   WITHIN_DEADBAND: (f) => `La diferencia con el objetivo estaba por debajo del umbral de ${f.money('deadbandMinor')} — el precio se mantiene.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `El objetivo estaba fuera de ${f.money('minMinor')}–${f.money('maxMinor')}; la estrategia está configurada para mantener el precio.`,
@@ -303,7 +318,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   ENGINE_CURRENCY_MISMATCH: (f) => `Estrategia no evaluada: la moneda no coincide (${f.value('source')} en otra moneda; oferta: ${f.raw('expected')}).`,
   DIVERGENCE_CASE_OPENED: (f) => `Caso de discrepancia abierto: el canal mostraba un precio distinto del esperado (${f.money('expectedMinor')}).`,
   // Отказ Gate у цены из данных конкурента: предложенная цена и отклонение выведены из цены конкурента [Р-85]; граница — наша
-  BELOW_MIN_PRICE: (f) => `Rechazado: el precio propuesto estaba por debajo de su precio mínimo de ${f.money('minMinor')}.`,
+  BELOW_MIN_PRICE: (f) => f.get('floor') === 'CLEARANCE' ? `Rechazado: el precio propuesto estaba por debajo de su piso de liquidación de ${f.money('minMinor')}.` : `Rechazado: el precio propuesto estaba por debajo de su precio mínimo de ${f.money('minMinor')}.`,
   BELOW_MARGIN_FLOOR: (f) => `Rechazado: el precio propuesto estaba por debajo del piso de margen de ${f.money('floorMinor')}${opt(f, 'minMarginBp', () => ` (margen ${f.bp('minMarginBp')})`)}.`,
   ABOVE_MAX_PRICE: (f) => `Rechazado: el precio propuesto estaba por encima de su precio máximo de ${f.money('maxMinor')}.`,
   STEP_LIMIT: (f) => `Retenido: el cambio desde ${f.money('currentMinor')} superaba el paso permitido de ${f.bp('limitBp')}.`,
@@ -330,7 +345,7 @@ const values: Record<ValueKey, string> = {
   COST_PROFILE: 'el costo unitario', VAT_RATE: 'la tasa de IVA del producto', SNAPSHOT: 'datos de la competencia',
   deadbandMinor: 'umbral', priceMinor: 'precio fijo', targetMarginBp: 'margen objetivo', undercutMinor: 'rebaja', fulfillmentHandicapMinor: 'desventaja logística', creepStepBp: 'paso de subida', MERCHANT: 'el vendedor',
   POSITIVE: 'positivo', NON_NEGATIVE: 'cero o más', MARGIN_BELOW_100_PERCENT: 'inferior al 100% con comisiones',
-  min: 'su precio mínimo', max: 'su precio máximo', margin_floor: 'el piso de margen', both: 'los límites de precio',
+  min: 'su precio mínimo', max: 'su precio máximo', margin_floor: 'el piso de margen', both: 'los límites de precio', break_even: 'el punto de equilibrio',
   MISSING: 'sin definir', CURRENCY_MISMATCH: 'en otra moneda', BASIS_MISMATCH: 'en otra base de precio', INVALID_AMOUNT: 'un importe no válido',
   MIN_ABOVE_MAX: 'su precio mínimo está por encima de su precio máximo', COST_PROFILE_MISSING: 'el costo unitario no está definido', COST_CURRENCY_MISMATCH: 'el costo unitario está en otra moneda',
   VAT_UNKNOWN: 'la tasa de IVA del producto no está definida', UNATTAINABLE: 'inalcanzable con las comisiones actuales', MARGIN_FLOOR_ABOVE_MAX_PRICE: 'el precio con el margen mínimo supera su precio máximo',
@@ -351,7 +366,7 @@ const values: Record<ValueKey, string> = {
   UNSUPPORTED: 'no compatible con el canal', UNKNOWN: 'error desconocido', MAX_ATTEMPTS: 'máximo de intentos', NOT_APPLIED: 'no aplicado',
   SCOPE_HELD: 'oferta retenida', SCOPE_CONTESTED: 'oferta en disputa', SCOPE_BLOCKED: 'oferta bloqueada', SCOPE_RETIRED: 'oferta retirada',
   TRANSIENT: 'temporal', PERMANENT: 'permanente', REQUIRES_HUMAN: 'requiere una persona',
-  MIN_PRICE: 'su precio mínimo', MAX_PRICE: 'su precio máximo', CHANNEL_HALT: 'la suspensión del sitio', CHANNEL_DISTRUST: 'la desconfianza en el canal', PRICING_STOP: 'la detención de precios',
+  MIN_PRICE: 'su precio mínimo', MAX_PRICE: 'su precio máximo', CHANNEL_HALT: 'la suspensión del sitio', CHANNEL_DISTRUST: 'la desconfianza en el canal', PRICING_STOP: 'la detención de precios', CLEARANCE: 'el modo liquidación',
   APPLIED: 'aplicado',
   RECONNECT_ACCOUNT: 'Vuelva a conectar la cuenta del canal', CHECK_ACCOUNT_STATUS: 'Revise el estado de la cuenta del canal', CHECK_LISTING: 'Revise la oferta en el canal',
   REVIEW_CHANNEL_POLICY: 'Revise el aviso de políticas del canal', CONTACT_CHANNEL_SUPPORT: 'Contacte al soporte del canal', REVIEW_OFFER_STATUS: 'Revise el estado de la oferta',
@@ -1156,7 +1171,10 @@ export const es: Messages = {
         PRICING_CHANNEL_RESUMED: { what: 'se levantó la suspensión de un sitio; los precios basados en la competencia vuelven a funcionar', step: 'Revise en la consola los primeros cambios de precio después de levantarla: muestran si los datos de la competencia vuelven a ser fiables.' },
         PRICING_CHANNEL_DISTRUSTED: { what: 'el canal muestra un precio distinto del que enviamos', step: 'Abra la consola: los precios de este canal están detenidos hasta que una persona levante la desconfianza. Compare nuestro precio con el del panel de vendedor del canal.' },
         PRICING_CHANNEL_TRUST_RESTORED: { what: 'se levantó la desconfianza en el canal y los precios vuelven a funcionar', step: 'Revise en la consola si el canal muestra los siguientes precios exactamente como los enviamos.' },
-        PRICING_BOUND_UNRESOLVABLE: { what: 'no se pueden calcular los límites de precio de una oferta', step: 'Abra la oferta en la consola: falta el precio mínimo, el precio máximo o el dato con el que se calcula el margen mínimo. Sin ambos límites, el precio no cambia.' },
+        PRICING_BOUND_UNRESOLVABLE: { what: 'no se pueden calcular los límites de precio de una oferta', step: 'Abra la oferta en la consola: falta el precio mínimo, el precio máximo o el dato con el que se calcula el margen mínimo. Sin ambos límites, el precio no cambia.',
+          // Шаг 102: пол выше потолка — суть словами: цены заморожены, что сделать
+          detail: (d: Readonly<Record<string, unknown>>) => (d.cause === 'MARGIN_FLOOR_ABOVE_MAX_PRICE' ? `${d.offer ? `${String(d.offer)}: ` : ''}piso por encima del techo: precios congelados. Suba el precio máximo o active la liquidación.` : ''),
+        },
         PRICE_REJECTED_BY_BOUND: { what: 'un límite rechazó un precio calculado', step: 'Abra “Por qué este precio” en la consola: indica qué límite actuó. Amplíe el límite si es demasiado estrecho; si no, no hay nada que hacer.' },
         PRICE_GATE_INTERNAL_VIOLATION: { what: 'una revisión interna detuvo un precio justo antes del envío', step: 'El precio NO se envió y usted no tiene que hacer nada. Contáctenos con el código del evento: nosotros también vemos el evento.' },
         CURRENT_PRICE_OUTSIDE_BOUNDS: { what: 'el precio actual de una oferta está fuera de sus límites', step: 'Abra la oferta en la consola: o el precio se cambió a mano en el panel de vendedor del canal, o los límites ya no corresponden al costo unitario.' },
@@ -1166,6 +1184,12 @@ export const es: Messages = {
           what: 'un precio por debajo de su piso se está subiendo hasta él paso a paso',
           step: 'No hay nada que hacer: cada paso respeta su límite de paso. Para llegar antes al piso, aumente el límite de paso; si el piso parece demasiado alto, revise el costo unitario y el margen mínimo en la consola.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${n.money(Number(d.currentMinor), String(d.currency))} → ${n.money(Number(d.floorMinor), String(d.currency))}, unos ${Number(d.steps)} pasos de como máximo ${n.percentBp(Number(d.stepLimitBp))} cada uno, como máximo un paso cada ${Number(d.paceMinutes)} minutos.`,
+        },
+        // Шаг 102 [Р-227]: распродажа закончилась по дате — пол снова расчётный, цена вернётся к нему лестницей
+        CLEARANCE_ENDED: {
+          what: 'la liquidación de una oferta terminó en su fecha — el piso vuelve a ser el calculado',
+          step: 'No hace falta nada: el precio vuelve al piso dentro de su límite de paso. Si la venta debe seguir, active la liquidación de nuevo en la página del piso de la oferta.',
+          detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${Number(d.steps) > 0 ? `el precio vuelve al piso de ${n.money(Number(d.floorMinor), String(d.currency))} en unos ${Number(d.steps)} ${Number(d.steps) === 1 ? 'paso' : 'pasos'} (~${Number(d.minutes)} minutos).` : 'el precio ya está en el piso o por encima.'}`,
         },
         PRICE_WRITE_NOT_SENT: { what: 'un cambio de precio no se envió al canal', step: 'Abra Cambios de precio en la consola y revise las ofertas de este canal.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'las actualizaciones de inventario de una oferta están bloqueadas: el canal rechazó una actualización de inventario y la oferta espera a una persona', step: 'Abra la pantalla Inventario en la consola, revise la oferta y la respuesta del canal y luego quite el bloqueo.' },
@@ -1263,6 +1287,10 @@ export const es: Messages = {
       floorFromMin: (_min: string) => 'de su precio mínimo',
       floorFromMargin: (pct: string, _margin: string, min: string) => `del margen mínimo de ${pct} (su precio mínimo: ${min})`,
       floorMarginUnavailable: (min: string, cause: string) => `Su precio mínimo: ${min}; piso de margen no disponible: ${cause}`,
+      // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
+      floorFromBreakEven: (min: string) => `del punto de equilibrio (su precio mínimo: ${min})`, floorFromClearance: 'del piso de liquidación — por debajo del punto de equilibrio a propósito', clearancePill: 'Liquidación',
+      // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
+      floorAboveCeiling: 'Piso por encima del techo', frozenDetail: 'precios congelados: suba el precio máximo o active la liquidación',
     },
     outcomes: { APPROVED: 'Aprobado', NO_CHANGE: 'Sin cambio', REJECTED: 'Rechazado', HELD: 'Retenido' },
     rules: {
@@ -1324,6 +1352,8 @@ export const es: Messages = {
       },
     },
     trace: {
+      // Шаг 102 [Р-227]: квитанция в режиме распродажи называет, кто включил, когда и зачем
+      clearanceBy: (who: string, when: string, note: string) => `Activado por ${who}, ${when}, nota: “${note}”`, clearancePill: 'Liquidación',
       // Шаг 97 [Р-218]: таблица конкурентов в шаге снимка и «кто подвинул цену»
       competitors: {
         title: 'Competidores en ese momento', you: 'Usted', unnamedSeller: 'vendedor sin nombre',
@@ -1398,7 +1428,7 @@ export const es: Messages = {
       interventions: { DANGEROUS: 'peligroso', CORRECTED: 'corregido' },
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
       stateStopped: 'detenido', stateColumn: 'Estado', historyColumn: 'Precio', historyLegend: 'antes → deseado → fijado',
-      stats: { dangerous: 'Peligrosos', corrected: 'Corregidos', unresolvable: 'Límite no calculable', limiterHolds: 'Límites de paso y frecuencia', stops: 'Detenidos por una persona', inputRejects: 'Datos de la competencia rechazados', halts: 'Suspensiones de sitios' },
+      stats: { dangerous: 'Peligrosos', corrected: 'Corregidos', unresolvable: 'Límite no calculable', floorAboveCeiling: 'Piso por encima del techo', limiterHolds: 'Límites de paso y frecuencia', stops: 'Detenidos por una persona', inputRejects: 'Datos de la competencia rechazados', halts: 'Suspensiones de sitios' },
       statsLabel: 'Este período por categoría',
       filters: { label: 'Mostrar solo un motivo', clear: 'Mostrar todos los motivos' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -1406,7 +1436,7 @@ export const es: Messages = {
       uniformState: 'Todas las filas de abajo:', uniformReason: (category: string) => `Motivo de todas las filas de abajo: ${category}`, eachRepeat: (chip: string) => `${chip} cada una`,
       columns: { when: 'Cuándo', where: 'Dónde', kind: 'Detenido por', proposed: 'Propuesto', before: 'Antes', change: 'Cambio', limit: 'Límite', deviation: 'Más allá del límite', reason: 'Motivo' },
       path: 'Recorrido de la decisión',
-      limitMin: (amount: string) => `su precio mínimo ${amount}`, limitFloor: (amount: string) => `piso de margen ${amount}`, limitMax: (amount: string) => `su precio máximo ${amount}`,
+      limitMin: (amount: string) => `su precio mínimo ${amount}`, limitFloor: (amount: string) => `piso de margen ${amount}`, limitClearance: (amount: string) => `piso de liquidación ${amount}`, limitMax: (amount: string) => `su precio máximo ${amount}`,
       productRef: (marketplace: string, ref: string) => `${marketplace} · producto ${ref}`,
     },
     // Шаг 94: почему кнопка формы недоступна — подсказкой при наведении и строкой под рядом кнопок
@@ -1437,8 +1467,8 @@ export const es: Messages = {
       feeUsed: 'el piso se calcula con esta (la estimación más alta)',
       feeEstimate: (source: string, rate: string, fixed: string, scheduleVersion: string | null) => `${source}: ${rate} + ${fixed}${scheduleVersion ? ` (${scheduleVersion})` : ''}`,
       indexColumns: { offer: 'Oferta', min: 'Precio mínimo', max: 'Precio máximo', floor: 'Piso' }, missingTitle: 'Oferta no encontrada', missingText: 'Este enlace no lleva a una oferta de este espacio de trabajo. La lista muestra los límites de cada oferta.', pageTitle: 'Límites y piso de precio', back: '← Costos y pisos',
-      minPrice: 'Precio mínimo', maxPrice: 'Precio máximo', minMargin: 'Margen mínimo', marginNotSet: 'sin definir: el piso es igual a su precio mínimo',
-      marginAtLeast: (pct: string) => `margen de al menos ${pct}`, effectiveFloor: 'Piso vigente', costAndFees: 'Costo y comisiones',
+      minPrice: 'Precio mínimo', maxPrice: 'Precio máximo', minMargin: 'Margen mínimo', marginNotSet: 'sin definir: el piso es al menos el punto de equilibrio en cuanto declare el costo unitario',
+      marginAtLeast: (pct: string) => `margen de al menos ${pct}`, marginSuspended: 'no se aplica mientras la liquidación está activa', effectiveFloor: 'Piso vigente', costAndFees: 'Costo y comisiones',
       columns: { part: 'Componente', amount: (currency: string) => `Importe, ${currency}`, formula: 'Cómo se calcula' },
       exactMargin: (text: string) => `Margen exacto: ${text}.`, balance: (ok: boolean): string => (ok ? 'Impuesto, comisiones, costo y margen suman el precio al centavo.' : 'Impuesto, comisiones, costo y margen NO suman el precio: error de cálculo.'),
       calculator: 'Compárelo con la calculadora de comisiones del canal',
@@ -1455,6 +1485,36 @@ export const es: Messages = {
       marginUnavailable: (cause: string) => `no calculable: ${cause}; el Gate rechaza todos los precios`,
       floorNoMin: 'El precio mínimo no está definido: no se pueden activar los precios automáticos',
       floorFromMargin: (pct: string, min: string) => `margen mínimo de ${pct}: por encima de su precio mínimo de ${min}`, floorFromMin: 'de su precio mínimo',
+      floorFromBreakEven: (min: string) => `punto de equilibrio: por encima de su precio mínimo de ${min}`,
+      floorFromClearance: (min: string) => `piso de liquidación: reemplaza su precio mínimo de ${min} y el piso de margen mientras dure la liquidación`,
+      frozen: (floor: string, max: string) => `Piso por encima del techo: precios congelados. Su piso de ${floor} está por encima de su precio máximo de ${max}: ningún precio cabe y no se envía ningún cambio de precio. Suba el precio máximo o active la liquidación.`,
+      // Шаг 102 [Р-227]: режим распродажи на странице пола
+      clearance: {
+        title: 'Piso de liquidación — permitir vender por debajo del punto de equilibrio',
+        intro: 'Para el inventario que quiere sacar. Mientras dure la liquidación, este piso reemplaza su precio mínimo y el piso de margen; el precio máximo, el límite de paso, la frecuencia de cambios y todas las verificaciones se mantienen.',
+        breakEven: 'Punto de equilibrio', breakEvenUnknown: 'no se puede calcular: falta el costo unitario, la comisión o la tasa de IVA',
+        floor: 'Piso de liquidación', floorHint: 'Un piso absoluto: el precio nunca baja de él mientras dure la liquidación.',
+        lossPerUnit: 'Pérdida por unidad', noLoss: 'ninguna — en este piso cada venta aún cubre sus costos',
+        maxLoss: 'Pérdida total máxima', stock: (pieces: number) => `con el inventario actual de ${pieces} ${pieces === 1 ? 'unidad' : 'unidades'}`, stockUnknown: 'inventario desconocido — solo se muestra la pérdida por unidad',
+        ack: (breakEven: string) => `Entiendo: cada venta por debajo de ${breakEven} pierde dinero`,
+        note: 'Por qué', noteHint: 'Obligatorio — queda en el registro de auditoría con su nombre.', notePlaceholder: 'Liquidar el inventario de verano',
+        endsAt: 'Terminar automáticamente', endsAtHint: 'Opcional — después de esta fecha el piso vuelve a ser el calculado.',
+        enable: 'Activar la liquidación', mfaHint: 'Mueve el piso: requiere un segundo factor.', readOnly: 'Solo el propietario o un gerente puede activar la liquidación.',
+        on: 'La liquidación está activa', onBy: (who: string, when: string) => `Activada por ${who}, ${when}`, onNote: (note: string) => `Nota: “${note}”`, onEnds: (when: string) => `Termina automáticamente ${when}`,
+        disable: 'Desactivar la liquidación',
+        returns: (floor: string, steps: number, minutes: number) => (steps === 0
+          ? `El piso vuelve a ${floor} de inmediato; el precio ya está en él o por encima.`
+          : `El piso vuelve a ${floor} de inmediato; el precio vuelve a él en unos ${steps} ${steps === 1 ? 'paso' : 'pasos'} (~${minutes} minutos).`),
+        enabled: 'La liquidación está activa.', disabled: 'La liquidación está desactivada.',
+        history: 'Registro de liquidación', columns: { when: 'Cuándo', what: 'Qué', who: 'Quién', note: 'Nota' }, system: 'automáticamente',
+        actions: { ENABLE: (floor: string) => `Activada, piso de ${floor}`, DISABLE: 'Desactivada', EXPIRE: 'Terminó en su fecha' },
+        causes: {
+          ACK_REQUIRED: 'Marque la casilla: cada venta por debajo del punto de equilibrio pierde dinero.', NOTE_REQUIRED: 'Escriba por qué se liquida la oferta.',
+          FLOOR_INVALID: 'El piso de liquidación debe ser mayor que cero y no superar su precio máximo.', CURRENCY_MISMATCH: 'El piso de liquidación debe estar en la moneda de la oferta.',
+          ENDS_IN_PAST: 'La fecha de fin debe ser futura.', MFA_REQUIRED: 'La liquidación mueve el piso: inicie sesión con un segundo factor e inténtelo de nuevo.',
+          NOT_ACTIVE: 'La liquidación no está activa para esta oferta.',
+        },
+      },
       unitCost: 'Costo unitario', costProfile: (_id: string) => 'tal como lo declaró', feeRate: 'Comisión del canal', feeOfPrice: 'del precio del sitio', perSale: 'por venta',
       floorBreakdown: 'Desglose del piso vigente', currentBreakdown: 'Desglose del precio actual',
       calculatorSteps: (vat: boolean) => [
@@ -1791,6 +1851,8 @@ export const es: Messages = {
         : `El piso contuvo el precio ${n} ${n === 1 ? 'vez' : 'veces'} ${phrase}${amounts.length ? `; sin él habría vendido ${amounts.join(' + ')} más barato` : ''}${unknown ? ` (importe desconocido en ${unknown} ${unknown === 1 ? 'caso' : 'casos'})` : ''}`,
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
+      // Шаг 102 [Р-227]: удержания пола распродажи — отдельной строкой, в «пол удержал» не входят
+      clearanceHeld: (n: number, phrase: string) => `El piso de liquidación contuvo el precio ${n} ${n === 1 ? 'vez' : 'veces'} ${phrase} — una pérdida intencional, no se cuenta arriba`, clearanceKind: 'piso de liquidación',
       floorTitle: 'El piso contuvo el precio', floorKinds: { CAPPED: 'fijado en el piso', HELD: 'se mantuvo sin cambio' },
       // Шаг 96.2: «как удержано» — свойство секции, одной фразой; строка отмечает только вид, который отличается от остальных
       floorCaption: { CAPPED: 'En cada caso, el precio se fijó en su piso.', HELD: 'En cada caso, el precio se mantuvo sin cambio en su piso.', MIXED: 'En cada caso, el precio se fijó en su piso; en las filas marcadas con “se mantuvo sin cambio”, el precio ya estaba ahí y no se movió.' },

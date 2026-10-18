@@ -497,8 +497,9 @@ test('step 73: a raise after a cost update, a step toward the floor and its appr
   const en = messagesFor('en');
   const de = messagesFor('de');
   const afterCost = { code: 'RAISED_TO_FLOOR', params: { currentMinor: 1600, floorMinor: 1829, bound: 'margin_floor', minMarginBp: 1000, after: 'COST_UPDATE', currency: 'EUR' } } as const;
-  assert.equal(describe(afterCost, en).text, 'Your price €16.00 was below your margin floor — raised to your margin floor €18.29 after cost update (margin 10%).');
-  assert.match(describe(afterCost, de).text, /auf die Untergrenze 18,29 € angehoben nach der Kostenänderung/);
+  // Шаг 102 [Р-227]: рост себестоимости называет фраза владельца впереди — «unit cost increased: floor moved up»
+  assert.equal(describe(afterCost, en).text, 'Unit cost increased: floor moved up. Your price €16.00 was below your margin floor — raised to your margin floor €18.29 (margin 10%).');
+  assert.match(describe(afterCost, de).text, /^Stückkosten gestiegen: Untergrenze angehoben\. .*auf die Untergrenze 18,29 € angehoben/);
   const recheck = { ...afterCost, params: { ...afterCost.params, after: 'FLOOR_RECHECK' } };
   assert.match(describe(recheck, en).text, /raised to your margin floor €18\.29 after the floor was recomputed before sending \(current cost, fees, exchange rate and VAT\)/);
   const step = { code: 'RAISED_TOWARD_FLOOR', params: { currentMinor: 1000, floorMinor: 1524, bound: 'margin_floor', minMarginBp: 1000, stepLimitBp: 1000, stepsLeft: 4, currency: 'EUR' } } as const;

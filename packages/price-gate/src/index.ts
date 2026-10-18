@@ -47,7 +47,8 @@ export const NO_GUARDRAILS: GuardrailSet = { guardrailIds: [], minMarginBp: null
 
 export type MarginFloorResolution =
   | { kind: 'NONE' }
-  | { kind: 'OK'; floorMinor: number; minMarginBp: number }
+  /** Шаг 102 [Р-227]: BREAK_EVEN — минимальная маржа не задана (или не выше 0 %), пол — безубыточность */
+  | { kind: 'OK'; floorMinor: number; minMarginBp: number; source: 'MIN_MARGIN' | 'BREAK_EVEN' }
   | { kind: 'UNRESOLVABLE'; cause: string };
 
 /**
@@ -55,12 +56,20 @@ export type MarginFloorResolution =
  * поднимает до него цену, которая ниже; Gate проверяет ту же цену тем же расчётом, а база — своей формулой перед каждой
  * отправкой [Р-83] (`tenant_data.price_for_margin_bp`, тот же `ceil`). Себестоимость приходит уже в валюте единицы записи.
  */
+/**
+ * Пол маржи. Шаг 102 [Р-227, решение владельца]: безубыточность (маржа 0 %) входит в пол всегда — по сути «минимальная маржа по умолчанию 0 %».
+ * Без объявленной себестоимости — как прежде (Р-131: репрайсинг не включается), пола маржи нет. Себестоимость объявлена, а комиссия, курс или НДС
+ * не вычисляются — отказ, как у заданной маржи: убыток не должен пройти от того, что безубыточность не посчитана. Режим распродажи пол маржи
+ * снимает — его не зовут
+ */
 export function resolveMarginFloor(cost: CostInputs | null, minMarginBp: number | null, currency: string, costUnavailableCause?: string | null): MarginFloorResolution {
-  if (minMarginBp === null) return { kind: 'NONE' };
+  const breakEven = minMarginBp === null || minMarginBp <= 0;
+  if (minMarginBp === null && !cost && (costUnavailableCause ?? 'COST_PROFILE_MISSING') === 'COST_PROFILE_MISSING') return { kind: 'NONE' };
   if (!cost) return { kind: 'UNRESOLVABLE', cause: costUnavailableCause ?? 'COST_PROFILE_MISSING' };
   if (cost.currency !== currency) return { kind: 'UNRESOLVABLE', cause: 'COST_CURRENCY_MISMATCH' };
-  const priced = storefrontPriceForMarginBp(cost, minMarginBp);
-  return priced.ok ? { kind: 'OK', floorMinor: priced.priceMinor, minMarginBp } : { kind: 'UNRESOLVABLE', cause: priced.cause };
+  const bp = breakEven ? 0 : minMarginBp!;
+  const priced = storefrontPriceForMarginBp(cost, bp);
+  return priced.ok ? { kind: 'OK', floorMinor: priced.priceMinor, minMarginBp: bp, source: breakEven ? 'BREAK_EVEN' : 'MIN_MARGIN' } : { kind: 'UNRESOLVABLE', cause: priced.cause };
 }
 
 export interface GateInput {
@@ -86,6 +95,11 @@ export interface GateInput {
   cost: CostInputs | null;
   /** Себестоимость не переведена в валюту цены — причина отказа пола маржи вместо «нет профиля» [Р-61] */
   costUnavailableCause?: string | null;
+  /**
+   * Шаг 102 [Р-227]: режим распродажи — пол распродажи заменяет min_price и пол маржи (решение владельца, исключение из Р-5). Потолок, шаг,
+   * частота и прочие проверки — без исключений
+   */
+  clearance?: { floorMinor: number } | null;
   changesInLastHour: number;
   now: Instant;
 }
@@ -232,16 +246,19 @@ export function decide(input: GateInput): PriceDecisionDraft {
   if (!absolute.ok) {
     return fail('BOUNDS_RESOLVED', 'BOUND_UNRESOLVABLE', absolute.params, 'REJECTED', { code: 'PRICING_BOUND_UNRESOLVABLE', severity: 'CRITICAL' });
   }
-  floor = absolute.value.minMinor;
+  const clearance = input.clearance ?? null;
+  floor = clearance ? clearance.floorMinor : absolute.value.minMinor;
   ceiling = absolute.value.maxMinor;
   minIds = absolute.value.minIds;
   maxIds = absolute.value.maxIds;
   ok('BOUNDS_RESOLVED');
 
-  // 5. Пол маржи: задан ограничением — обязан вычисляться
-  const margin = resolveMarginFloor(input.cost, guardrails.minMarginBp, scope.currency, input.costUnavailableCause);
+  // 5. Пол маржи: задан ограничением — обязан вычисляться; без ограничения — безубыточность (шаг 102); в режиме распродажи снят
+  const margin: MarginFloorResolution = clearance ? { kind: 'NONE' } : resolveMarginFloor(input.cost, guardrails.minMarginBp, scope.currency, input.costUnavailableCause);
   if (margin.kind !== 'NONE') {
-    const marginFail = (c: string) => fail('MARGIN_FLOOR', 'BOUND_UNRESOLVABLE', { bound: 'margin_floor', cause: c, minMarginBp: guardrails.minMarginBp }, 'REJECTED',
+    // Шаг 102 [Р-227]: без минимальной маржи пол — безубыточность, и отказ называет её, а не «пол маржи 0 %»
+    const marginFail = (c: string) => fail('MARGIN_FLOOR', 'BOUND_UNRESOLVABLE', guardrails.minMarginBp === null || guardrails.minMarginBp === undefined
+      ? { bound: 'break_even', cause: c } : { bound: 'margin_floor', cause: c, minMarginBp: guardrails.minMarginBp }, 'REJECTED',
       { code: 'PRICING_BOUND_UNRESOLVABLE', severity: 'CRITICAL' });
     if (margin.kind === 'UNRESOLVABLE') return marginFail(margin.cause);
     if (margin.floorMinor > ceiling) return marginFail('MARGIN_FLOOR_ABOVE_MAX_PRICE');
@@ -277,7 +294,13 @@ export function decide(input: GateInput): PriceDecisionDraft {
   rung = intent.reason.code === 'RAISED_TOWARD_FLOOR' && guardrails.maxStepChangeBp !== null && intent.currentMinor !== null && intent.currentMinor > 0
     && proposed > intent.currentMinor && proposed < floor;
   // Отклонение от нарушенной границы — основа «опасного изменения» [Р-73]
-  if (proposed < absolute.value.minMinor && !rung) {
+  // Шаг 102 [Р-227]: в режиме распродажи нижняя граница — пол распродажи (min_price не действует, пол маржи снят)
+  if (clearance && proposed < clearance.floorMinor && !rung) {
+    deviationBp = boundDeviationBp(proposed, clearance.floorMinor);
+    return fail('LOWER_BOUND', 'BELOW_MIN_PRICE', { proposedMinor: proposed, minMinor: clearance.floorMinor, deviationBp, source: 'GATE', floor: 'CLEARANCE', currency }, 'REJECTED',
+      { code: 'PRICE_REJECTED_BY_BOUND', severity: 'WARNING' });
+  }
+  if (!clearance && proposed < absolute.value.minMinor && !rung) {
     deviationBp = boundDeviationBp(proposed, absolute.value.minMinor);
     return fail('LOWER_BOUND', 'BELOW_MIN_PRICE', { proposedMinor: proposed, minMinor: absolute.value.minMinor, deviationBp, source: 'GATE', currency }, 'REJECTED',
       { code: 'PRICE_REJECTED_BY_BOUND', severity: 'WARNING' });
@@ -285,7 +308,7 @@ export function decide(input: GateInput): PriceDecisionDraft {
   if (proposed < floor && !rung) {
     deviationBp = boundDeviationBp(proposed, floor);
     return fail('LOWER_BOUND', 'BELOW_MARGIN_FLOOR', {
-      proposedMinor: proposed, floorMinor: floor, minMinor: absolute.value.minMinor, minMarginBp: guardrails.minMarginBp, deviationBp, currency,
+      proposedMinor: proposed, floorMinor: floor, minMinor: absolute.value.minMinor, minMarginBp: margin.kind === 'OK' ? margin.minMarginBp : guardrails.minMarginBp ?? 0, deviationBp, currency,
     }, 'REJECTED', { code: 'PRICE_REJECTED_BY_BOUND', severity: 'WARNING' });
   }
   ok('LOWER_BOUND');
