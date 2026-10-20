@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0198_verify_schema_invariants_v54.sql';
+const VERIFY = 'migrations/0200_verify_schema_invariants_v55.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2768,6 +2768,74 @@ export const STEP102_ROWS = [
         node(R102, E102, 'the database wrote the expiry', '^ENABLE$')),
       m(dropTrigger('zb_clearance_expired_audit', 'tenant_data.clearance_change'),
         node(R102, E102, 'the expiry is a system event in the audit log', '^0$')),
+    ],
+  },
+];
+
+// Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — журнал умолчания (правило человека) и журнал назначений
+// (каждая смена стратегии единицы; решение правила — только то, что из действующего правила следует, и только о новичке)
+const R103 = T('default-strategy-step103.pg.test.ts');
+const E1_103 = 'a new offer gets the default strategy of its account';
+const E4_103 = 'a strategy the channel gives no data for cannot become the default';
+const P103 = 'the default is the rule of a person';
+const G103 = 'a «default rule» row is only what the current rule entails';
+const M103 = 'every manual assignment and removal is a journal row of the person';
+const EB103 = 'eBay listings we may not write to';
+export const STEP103_ROWS = [
+  {
+    row: 'шаг 103 (Р-228, Р-39, OQ-169)', critical: false,
+    invariant: 'умолчание аккаунта задаёт человек от своего имени, для подключённого аккаунта, только стратегией с активной версией, которой канал даёт данные; журнал только на добавление, в аудите, уходит с тенантом',
+    mutations: [
+      m(replaceInFunction('tenant_data.default_strategy_change_guard()', 'IF person IS NULL OR person IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+        node(R103, P103, 'set in the name of another member', '^accepted$')),
+      m(replaceInFunction('tenant_data.default_strategy_change_guard()', 'IF acc.disconnected_at IS NOT NULL THEN', 'IF false THEN'),
+        node(R103, P103, 'a disconnected account', '"SET"')),
+      // Без проверки активной версии отказ остаётся (у пустых параметров тип неизвестен), но причина ложная — «канал не даёт данных» [Р-94]
+      m(replaceInFunction('tenant_data.default_strategy_change_guard()', 'IF NOT FOUND THEN', 'IF false THEN'),
+        node(R103, P103, 'a strategy without an active version', '"cause":"STRATEGY_UNAVAILABLE"')),
+      m(replaceInFunction('tenant_data.default_strategy_change_guard()', "IF unmet <> '{}'::jsonb THEN", 'IF false THEN'),
+        node(R103, E4_103, 'refused: the channel gives no data for the strategy', '^\\["SET",null\\]$')),
+      m(dropTrigger('b_default_strategy_change_guard', 'tenant_data.default_strategy_change'), node(R103, P103, 'set in the name of another member', '^accepted$')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.default_strategy_change'),
+        verify('tenant_data\\.default_strategy_change: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.default_strategy_change'),
+        verify('tenant_data\\.default_strategy_change: administrative INSERT is not written to the audit log')),
+      m(replaceInFunction('security.admin_write_action(text)', "('tenant_data.default_strategy_change', 'MANAGE_PRICING'),", ''),
+        verify('tenant_data\\.default_strategy_change: no administrative action is declared')),
+      m(dropTrigger('zz_append_only', 'tenant_data.default_strategy_change'), smoke('append-only tenant_data.default_strategy_change')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.default_strategy_change'), smoke('truncate tenant_data.default_strategy_change')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.default_strategy_change', ", ''),
+        verify('tenant_data\\.default_strategy_change: tenant closure does not delete the table')),
+    ],
+  },
+  {
+    row: 'шаг 103 (Р-228, Р-97)', critical: false,
+    invariant: 'строка правила умолчания — только по действующему правилу аккаунта, не «None», его стратегией и последней активной версией и только о предложении, созданном этой транзакцией; каждое автоназначение — событие системы в аудите и ведёт к человеку; ручные назначения и снятия — строками человека; журнал только на добавление, уходит с тенантом',
+    mutations: [
+      m(replaceInFunction('tenant_data.strategy_assignment_guard()', 'IF d.channel_account_id IS DISTINCT FROM NEW.channel_account_id OR d.pricing_strategy_id IS NULL THEN', 'IF false THEN'),
+        node(R103, G103, 'a «None» rule', 'does not follow default rule')),
+      m(replaceInFunction('tenant_data.strategy_assignment_guard()', 'IF EXISTS (SELECT 1 FROM tenant_data.default_strategy_change n', 'IF false AND EXISTS (SELECT 1 FROM tenant_data.default_strategy_change n'),
+        node(R103, G103, 'a rule that is no longer current', 'is not a new offer')),
+      m(replaceInFunction('tenant_data.strategy_assignment_guard()', 'IF NEW.pricing_strategy_id IS DISTINCT FROM d.pricing_strategy_id OR NEW.pricing_strategy_version IS DISTINCT FROM latest THEN', 'IF false THEN'),
+        node(R103, G103, 'not the latest active version', 'is not a new offer')),
+      m(replaceInFunction('tenant_data.strategy_assignment_guard()', 'IF NEW.write_scope_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenant_data.write_scope s', 'IF false AND NOT EXISTS (SELECT 1 FROM tenant_data.write_scope s'),
+        node(R103, G103, 'an existing offer', '^accepted$')),
+      m(replaceInFunction('tenant_data.strategy_assignment_guard()', 'IF NEW.write_scope_id IS NULL AND NOT EXISTS (SELECT 1 FROM tenant_data.offer_mapping m', 'IF false AND NOT EXISTS (SELECT 1 FROM tenant_data.offer_mapping m'),
+        node(R103, G103, 'an existing listing', '^accepted$')),
+      m(dropTrigger('b_strategy_assignment_guard', 'tenant_data.strategy_assignment'), node(R103, G103, 'a rule that is no longer current', '^accepted$')),
+      m(dropConstraint('strategy_assignment_shape', 'tenant_data.strategy_assignment'), node(R103, G103, 'a «not assigned» row of a person', '^accepted$')),
+      m(dropTrigger('zb_strategy_assigned_by_default_audit', 'tenant_data.strategy_assignment'), node(R103, E1_103, 'each automatic assignment is a system event in the audit log', '^0$')),
+      m(dropTrigger('zc_write_scope_strategy_journal', 'tenant_data.write_scope'), node(R103, M103, 'manual assign and removal — rows of the person', '^\\[\\]$')),
+      m(replaceInFunction('tenant_data.write_scope_strategy_journal()', 'AND a.created_at = now()) THEN', 'AND false) THEN'),
+        node(R103, E1_103, 'one journal row per automatic assignment', '^4$')),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid,uuid,jsonb)', 'PERFORM tenant_data.apply_default_strategy(p_tenant_id, p_channel_account_id, scope, v_mapping);', 'NULL;'),
+        node(R103, E1_103, 'SYN-103-NEW-1: default strategy v2, engine off', '^\\[null,null,"OFF"\\]$')),
+      m(replaceInFunction('tenant_data.record_discovered_offers(uuid,uuid,jsonb)', 'PERFORM tenant_data.apply_default_strategy(p_tenant_id, p_channel_account_id, NULL, v_mapping);', 'NULL;'),
+        node(R103, EB103, 'not assigned: listings we may not write to', '^\\[\\["ASSIGNED",null,false,true\\]\\]$')),
+      m(dropTrigger('zz_append_only', 'tenant_data.strategy_assignment'), smoke('append-only tenant_data.strategy_assignment')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.strategy_assignment'), smoke('truncate tenant_data.strategy_assignment')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.strategy_assignment', ", ''),
+        verify('tenant_data\\.strategy_assignment: tenant closure does not delete the table')),
     ],
   },
 ];

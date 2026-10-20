@@ -57,6 +57,9 @@ const CLEARANCE_COST_MINOR = 1100;
 const CLEARANCE_FLOOR_MINOR = 1000;
 /** Насколько лоукостер FBM дешевле держателя Buy Box FBA: меньше бонуса исполнения каналом модели ($0.50) — Buy Box остаётся у FBA */
 const FBM_DISCOUNT_MINOR = 25;
+/** Шаг 103 [Р-228]: умолчание amazon.com главного демо и названия двух новых листингов (синтетические) */
+const DEFAULT_STRATEGY_NAME = 'Beat the lowest by 1 cent';
+const NEW_OFFER_TITLES = ['Bamboo cutting board, large', 'Pour-over coffee dripper'] as const;
 /** Сколько суток вперёд у модели расписание конкурентов: демо живёт, пока жив процесс */
 const SCHEDULE_DAYS = 400;
 /** Ход настоящего времени после прожатой недели */
@@ -218,6 +221,11 @@ export async function startDemoUsMarket(input: {
   orders?: { pipeline: StockPipeline; skus: readonly string[] };
   /** Шаг 91: названия товаров лёгкого продавца — свой диапазон, чтобы его товары не повторяли товары главного демо */
   titleOffsets?: DemoTitleOffsets;
+  /**
+   * Шаг 103 [Р-228]: у главного демо владелец задал стратегию по умолчанию для amazon.com, и после прожатой недели на аккаунте появились
+   * два новых листинга — обход каталога заводит их, и правило умолчания назначает им стратегию (цены не двигаются: движок выключен)
+   */
+  newOffers?: boolean;
 }): Promise<DemoUsMarket> {
   const { pools, store, accounts: a, log } = input;
   const { SimulatedAmazonPort, AMAZON_SIM_DESCRIPTOR_US, AMAZON_US, LANDED_CHANNEL_BONUS, SYNTHETIC_SELLERS, sellersFor } = await import('@repracer/contract-tests/simulator');
@@ -366,6 +374,44 @@ export async function startDemoUsMarket(input: {
     ordersSince = at;
   };
 
+  /**
+   * Шаг 103 [Р-228]: владелец демо задаёт умолчание amazon.com — «Beat the lowest by 1 cent» — тем же путём, что продавец на экране Channels
+   * (строка журнала умолчания от его имени, в аудите); затем у продавца появляются два листинга, и обход каталога — настоящий путь
+   * `discoverOffers` → `record_discovered_offers` — заводит их. Обход видит только новые листинги: сверка цен прежних предложений модели
+   * демо (цены в тени не отправлялись) дала бы ложные «внешние правки»
+   */
+  const newOffersAppear = async () => {
+    const beatId = await inTenant(pools.admin, a.tenantId, async (tx) => (await tx.query(
+      `SELECT pricing_strategy_id FROM tenant_data.pricing_strategy WHERE tenant_id = $1 AND name = $2 AND status = 'ACTIVE' ORDER BY version DESC LIMIT 1`,
+      [a.tenantId, DEFAULT_STRATEGY_NAME])).rows[0]?.pricing_strategy_id as string | undefined, a.userId);
+    if (!beatId) throw new Error(`no active strategy «${DEFAULT_STRATEGY_NAME}»`);
+    const set = await store.setDefaultStrategy(a.tenantId, a.amazonAccountId, beatId, { membershipId: a.ownerMembershipId, userId: a.userId, mfa: false });
+    if (set.status !== 'SET') throw new Error(`default strategy: ${JSON.stringify(set)}`);
+    const fresh = new Set<string>();
+    for (const [i, title] of NEW_OFFER_TITLES.entries()) {
+      const n = String(amazonScopes.length + i + 1).padStart(2, '0');
+      port.addListing({ sku: `SYN-DEMO-US-AMZ-${n}`, asin: `B0DEMOUS${n}`, marketplaces: [AMAZON_US], priceMinor: 2199, quantity: 4, title });
+      fresh.add(`SYN-DEMO-US-AMZ-${n}`);
+    }
+    const onlyNew = new Proxy(port, {
+      get(target, key) {
+        if (key === 'discoverOffers') {
+          return async (c: AdapterCallContext, page: Parameters<typeof target.discoverOffers>[1]) => {
+            const found = await target.discoverOffers(c, page);
+            return { ...found, items: found.items.filter((x) => fresh.has(x.identity.externalSku ?? '')) };
+          };
+        }
+        const v = Reflect.get(target, key, target) as unknown;
+        return typeof v === 'function' ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const discovery = createPricingPipeline({ store: store as never, adapter: onlyNew, alerts, logger: deps.logger, now: nowIso as never });
+    // Срок захода — с запасом: обход останавливается за минуту до срока вызова, а у такта рынка срок — минута
+    const found = await discovery.discoverOffers({ ...ctx(a.amazonAccountId), deadline: new Date(Date.parse(nowIso()) + 10 * MINUTE_MS).toISOString() as never }, {});
+    if (found.catalogued !== fresh.size) throw new Error(`new amazon.com offers: ${found.catalogued} of ${fresh.size} catalogued (${found.stop})`);
+    log(`demo US: ${found.catalogued} new amazon.com offers found, default strategy «${DEFAULT_STRATEGY_NAME}»`);
+  };
+
   let pressed: DemoUsMarket['pressed'] = null;
   if (virtualMs !== null) {
     // Ревью шага 68, находка 8: сбой одного шага прожатия не роняет посев демо (и старт консоли) — считается и называется числом
@@ -389,6 +435,10 @@ export async function startDemoUsMarket(input: {
     virtualMs = null;
     pressed = { amazon: counts.amazon, ebay: counts.ebay, walmart: counts.walmart, seconds: Math.round((systemClock.nowMs() - realStart) / 100) / 10 };
     log(`demo US week pressed: ${input.pressDays} days, amazon.com snapshots ${pressed.amazon}, eBay US recomputed ${pressed.ebay}, walmart.com snapshots ${pressed.walmart}, alerts kept in memory ${alertCount}, ${pressed.seconds} s`);
+  }
+
+  if (input.newOffers) {
+    await newOffersAppear().catch((error: unknown) => log(`demo US new offers failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   // Дальше — настоящее время: снимки по сроку доставки, пересчёт eBay по расписанию (должные — без решения за сутки)

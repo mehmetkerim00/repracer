@@ -182,6 +182,29 @@ test('B: the happy path decision shows the whole way from snapshot to channel co
   assert.match((await traceOf(w.store, world, noChange.decisionId, en))!.headline, /^The price stayed: /);
 });
 
+/**
+ * Шаг 103 [Р-228]: стратегию решения назначило правило умолчания аккаунта — квитанция говорит это и называет человека, задавшего умолчание,
+ * и когда; если после правила стратегию сменили (другая версия) — строки нет
+ */
+test('step 103: the receipt says the strategy was assigned by the default rule of the channel account, and who set it', async () => {
+  const w = live('kaufland/pipeline/happy-path');
+  const world = await w.view(user('OWNER'));
+  world.people = { 'alex@example.test': 'Alex Porter' };
+  const approved = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items.find((d) => d.outcome === 'APPROVED')!;
+  const detail = (await w.store.decisionDetail(world.tenantId, approved.decisionId))!;
+  const plain = decisionTrace(world, detail, en).steps.find((s) => s.key === 'STRATEGY')!;
+  assert.equal(plain.items.some((i) => i.label === en.ui.trace.assignedHow), false, 'assigned by a person — no line');
+  const strategy = world.state.scopes.find((sc) => sc.writeScopeId === approved.writeScopeId)!.strategy!;
+  const assignment = (version: number) => ({
+    outcome: 'ASSIGNED' as const, source: 'DEFAULT_RULE' as const, reason: null, strategyId: strategy.strategyId, version, channelAccountId: world.accounts[0]!.channelAccountId,
+    at: '2026-10-20T09:00:00.000Z', rule: { changeId: 'c-1', setAt: '2026-10-19T08:00:00.000Z', setByMembershipId: 'mb-1', setByName: null, setByEmail: 'alex@example.test' },
+  });
+  const items = (v: number) => decisionTrace(world, { ...detail, assignment: assignment(v) }, en).steps.find((s) => s.key === 'STRATEGY')!.items;
+  const line = items(strategy.version).find((i) => i.label === en.ui.trace.assignedHow);
+  assert.match(line?.value ?? '', /^By the default rule of Kaufland · kaufland\.de, kaufland\.at, set by Alex Porter, Oct 19, 2026/, JSON.stringify(line));
+  assert.equal(items(strategy.version + 1).some((i) => i.label === en.ui.trace.assignedHow), false, 'another version — changed after the rule, no line');
+});
+
 test('Р-73, C: a Gate rejection more than 10 % beyond the bound is dangerous; the screen counts it with the limit and the deviation', async () => {
   const w = live('kaufland/pipeline/above-max-price');
   const world = await w.view(user('OWNER'));

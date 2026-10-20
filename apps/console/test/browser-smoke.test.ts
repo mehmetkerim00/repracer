@@ -203,7 +203,27 @@ before(async () => {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(all) }),
     simulator: { token: (a) => issuer.token(a.subject, { email: a.email, extra: { name: a.displayName } }), expiresInSeconds: 900 },
   };
-  const connect = (worldId: string) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : null);
+  /**
+   * Шаг 103 [Р-228]: у смоук-мира — аккаунт Kaufland на экране Channels (как у мира тенанта): карточка аккаунта со стратегией по умолчанию
+   * для новых предложений. Аккаунт — тот же, что у предложений мира, данные синтетические
+   */
+  const smokeAccount = w0.accounts[0]!;
+  const smokeConnect: typeof emptyWorldConnect = {
+    connectable: () => [],
+    connections: async () => ({
+      accounts: [{
+        channelAccountId: smokeAccount.channelAccountId, channel: smokeAccount.channel, region: null, marketplaces: [...smokeAccount.marketplaces], externalAccountId: 'syn-smoke-account',
+        authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: w0.clock.iso() as never, offers: 200, unmanagedOffers: 0, shadowDecisions24h: 3070,
+        credentialObtainedAt: null, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: false, discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null,
+        otherTools: 'NONE', otherToolsAnsweredAt: w0.clock.iso() as never, quantityWritesConfirmed: true, externalEdits24h: 0,
+      }],
+      pending: [],
+    }),
+    start: async () => ({ status: 'UNAVAILABLE' }),
+    callback: async () => ({ status: 'BAD_CALLBACK' }),
+    cancel: async () => false,
+  };
+  const connect = (worldId: string) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : worldId === w0.id ? smokeConnect : null);
   // Основной стенд — профиль eu: смоук Kaufland и немецкие проходы шагов 76–86 гоняются на нём (Европа заморожена, не удалена)
   euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
   usApi = createStandApi(all, identity, { market: 'us', connect, people: STAND_PEOPLE });
@@ -1922,5 +1942,62 @@ test('step 102 (C): the floor page enables clearance with the loss per piece; th
   } finally {
     store.setCost(writeScopeId, before102);
   }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 103 [Р-228]: карточка аккаунта на Channels называет стратегию по умолчанию для новых предложений одной строкой и задаёт её — выбором
+ * стандарта формы (Field), кнопка без изменения говорит почему; после сохранения строка называет стратегию и кто задал. Обе темы, 1440 и 375 —
+ * без прокрутки вбок, выбор не выходит за карточку
+ */
+test('step 103 (D) [Р-228]: the channel account card says the default strategy for new offers in one line and sets it; both themes, 375 to 1440', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.connections.defaultStrategy;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/channels`)}, true)`);
+  await settled(b, 'channels');
+  await b.waitText(t.title);
+  const line = () => b.evaluate<string>(`document.querySelector('.account-default .default-line')?.textContent.trim() ?? ''`);
+  assert.equal(await line(), t.line(t.none), 'no default yet — «None», the behaviour before the step');
+  const choice = await b.evaluate<{ value: string; label: string; options: number; disabled: boolean; why: string }>(`(() => { const s = document.querySelector('.account-default select');
+    const o = [...s.options].find((x) => x.value !== '' && !x.disabled); const button = document.querySelector('.account-default button.primary');
+    return { value: o.value, label: o.textContent.trim(), options: s.options.length, disabled: button.disabled, why: button.title }; })()`);
+  assert.ok(choice.options >= 2, 'None and at least one strategy to choose');
+  assert.deepEqual([choice.disabled, choice.why], [true, en.ui.forms.why.chooseOther], 'nothing changed — the button says why');
+  await b.evaluate(`(() => { const s = document.querySelector('.account-default select');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ${JSON.stringify(choice.value)}); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.click(t.save, '.account-default button');
+  await waitFor(b, `(document.querySelector('.account-default .default-line')?.textContent ?? '').startsWith(${JSON.stringify(`${t.line(choice.label)} · set by `)})`,
+    'the line names the strategy and who set it');
+  const fits = `(() => { const card = document.querySelector('.card.account').getBoundingClientRect(), s = document.querySelector('.account-default select').getBoundingClientRect();
+    return s.left >= card.left - 0.5 && s.right <= card.right + 0.5; })()`;
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await settled(b, `${scheme} ${width}: channels`);
+      const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+      assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: Channels does not scroll sideways — ${fit.out.join('; ')}`);
+      assert.equal(await b.evaluate<boolean>(fits), true, `${scheme} ${width}: the select stays inside the account card`);
+    }
+  }
+  await b.setColorScheme('light');
+  await b.setViewport(1440, 900);
+  // Вернуть «None»: следующие проверки видят мир прежним
+  await b.evaluate(`(() => { const s = document.querySelector('.account-default select');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ''); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.click(t.save, '.account-default button');
+  await waitFor(b, `(document.querySelector('.account-default .default-line')?.textContent ?? '').startsWith(${JSON.stringify(`${t.line(t.none)} · set by `)})`, 'back to «None»');
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

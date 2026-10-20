@@ -891,6 +891,29 @@ export const fr: Messages = {
      * произошло БЫ, и ни слова о том, сколько бы он заработал — этого мы не знаем.
      */
     connections: {
+      /** Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта */
+      defaultStrategy: {
+        title: 'Stratégie par défaut pour les nouvelles offres',
+        line: (name: string) => `Stratégie par défaut pour les nouvelles offres : ${name}`,
+        none: 'Aucune — attribuer manuellement', unnamed: 'une stratégie sans nom', someone: 'un membre de cet espace de travail',
+        setBy: (who: string, when: string) => `définie par ${who}, ${when}`,
+        hint: 'Les nouvelles offres trouvées sur ce compte du canal reçoivent cette stratégie, comme si vous cliquiez sur Attribuer. Les prix ne bougent pas d’eux-mêmes : le repricing d’une nouvelle offre reste désactivé jusqu’à ce que vous l’activiez, et il lui faut un coût unitaire et des limites. Un changement ne concerne que les offres trouvées plus tard.',
+        save: 'Enregistrer par défaut',
+        choose: 'Choisir la stratégie par défaut',
+        unavailable: (needs: string) => `indisponible sur ce canal : il faut ${needs}`,
+        assigned: (n: number) => (n === 1 ? 'Attribuée à 1 nouvelle offre jusqu’ici' : `Attribuée à ${n} nouvelles offres jusqu’ici`),
+        notAssigned: (n: number, reason: string) => `non attribuée à ${n} : ${reason}`,
+        reasons: {
+          CHANNEL_PRICING: 'le canal fixe lui-même le prix de l’offre', NOT_WRITABLE: 'nous ne pouvons pas envoyer de prix à l’annonce eBay (enchère ou non migrée)',
+          STRATEGY_UNAVAILABLE: 'la stratégie n’est plus disponible sur ce canal',
+        },
+        saved: (name: string) => `Enregistré. Les nouvelles offres de ce compte du canal recevront : ${name}.`,
+        errors: {
+          unavailable: (needs: string) => `Cette stratégie ne peut pas être celle par défaut sur ce canal : il lui faut ${needs}.`,
+          versionNotActive: 'Cette stratégie n’a pas de version active.', disconnected: 'Ce compte du canal est déconnecté.',
+          notFound: 'La stratégie ou le compte du canal est introuvable.', noRight: 'Seul le propriétaire ou un gestionnaire peut changer la stratégie par défaut.',
+        },
+      },
       noChannels: 'Aucun compte du canal pour l’instant, et la connexion des canaux n’est pas encore configurée sur ce serveur — l’équipe de la plateforme l’active.',
       title: 'Comptes des canaux',
       intro: 'Vous connectez un canal vous-même : le bouton ouvre la page de consentement du canal, vous y autorisez l’accès, et le canal vous renvoie ici. Une nouvelle connexion démarre en mode fantôme — le moteur fonctionne entièrement et n’envoie rien à votre boutique.',
@@ -1289,6 +1312,7 @@ export const fr: Messages = {
       floorMarginUnavailable: (min: string, cause: string) => `Votre prix minimum ${min} ; plancher de marge indisponible : ${cause}`,
       // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
       floorFromBreakEven: (min: string) => `du seuil de rentabilité (votre prix minimum ${min})`, floorFromClearance: 'du plancher de déstockage — sous le seuil de rentabilité à dessein', clearancePill: 'Déstockage',
+      notAssigned: (reason: string) => `Non attribuée : ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Plancher au-dessus du plafond', frozenDetail: 'prix gelés — relevez le prix maximum ou activez le déstockage',
     },
@@ -1394,6 +1418,8 @@ export const fr: Messages = {
       sanityTitle: (_ruleset: string) => 'Contrôle des entrées',
       sanityAccepted: (checks: number, warnings: number) => `Données de la concurrence acceptées : ${checks} règles vérifiées${warnings ? `, ${warnings} avertissements` : ''}`,
       anchorNotRun: 'non vérifié : le contrôle s’est arrêté avant', anchorPassed: 'réussi',
+      assignedHow: 'Comment elle a été attribuée', assignedByDefault: (account: string, who: string, when: string) => `Par la règle par défaut de ${account}, définie par ${who}, ${when}`,
+      someone: 'un membre de cet espace de travail', someAccount: 'un compte du canal',
       anchorsUsed: (list: string) => `Utilisés : ${list}`, noAnchor: 'Aucun repère n’a été utilisé',
       proposed: (price: string, change: string | null, text: string) => `Proposé ${price}${change ? ` (${change})` : ''} : ${text}`,
       keep: (text: string) => `Maintenir le prix : ${text}`,
@@ -1451,6 +1477,7 @@ export const fr: Messages = {
         previewFirst: 'Affichez d’abord l’aperçu : l’enregistrement applique exactement ce que l’aperçu a montré.',
         storefront: 'Choisissez d’abord au moins un site.',
         typeName: 'Saisissez d’abord exactement l’identifiant affiché ci-dessus.',
+        chooseOther: 'Choisissez d’abord une autre stratégie.',
         period: 'Saisissez d’abord les deux dates.',
         note: (min: number) => `Saisissez d’abord une note d’au moins ${min} caractères.`,
       },
@@ -1585,6 +1612,7 @@ export const fr: Messages = {
       rePreviewed: 'Les offres ont changé depuis l’aperçu. L’aperçu a été relancé — vérifiez-le et enregistrez de nouveau.',
       sample: (shown: number, total: number) => `Aperçu de ${shown} offres sur ${total} : la stratégie est appliquée aux ${total}. La base de données vérifie chaque offre individuellement.`,
       versionsTitle: 'Versions', statuses: { DRAFT: 'brouillon', ACTIVE: 'active', ARCHIVED: 'archivée' }, statusUnknown: 'statut non enregistré', authorUnknown: 'auteur non enregistré',
+      defaultFor: (accounts: string) => `Par défaut pour les nouvelles offres sur : ${accounts}`, byDefaultRule: 'par règle par défaut',
       versionBy: (author: string, when: string) => `${author} · ${when}`,
       assignVersion: 'Attribuer', assigning: (name: string, version: number) => `Attribuer « ${name} » version ${version} sans nouvelle version`,
       assignConfirmText: 'La version affichée est attribuée telle quelle ; aucune nouvelle version n’est créée.',

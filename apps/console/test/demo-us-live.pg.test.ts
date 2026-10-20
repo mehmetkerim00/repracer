@@ -30,6 +30,8 @@ async function call<T>(method: 'GET' | 'POST', path: string, token: string, body
 }
 
 let env: Record<string, string> = {};
+/** Шаг 103 [Р-228]: два новых листинга amazon.com главного демо — с правилом умолчания аккаунта */
+const NEW_AMAZON_OFFERS = 2;
 
 before(async () => {
   assert.ok(existsSync(new URL('../dist/index.html', import.meta.url)), 'интерфейс не собран: `npm run build -w apps/console`');
@@ -92,7 +94,8 @@ test('шаг 64: демо с профилем США — аккаунты eBay U
   assert.equal(screen.body.accounts.length, 3, `кроме витрин США аккаунтов нет: ${JSON.stringify(screen.body.accounts.map((a) => [a.channel, a.marketplaces]))}`);
   for (const a of us) {
     assert.equal(a.state, 'SHADOW', `${a.channel}: аккаунт рождён в тени`);
-    assert.equal(a.offers, 12, `${a.channel}: каталог из обнаружения — ${a.progressText}`);
+    // Шаг 103: у amazon.com после прожатой недели появились два новых листинга — их завёл обход каталога с правилом умолчания
+    assert.equal(a.offers, a.channel === 'AMAZON' ? 12 + NEW_AMAZON_OFFERS : 12, `${a.channel}: каталог из обнаружения — ${a.progressText}`);
     assert.equal(a.otherTools.question, 'Does another tool update stock or prices in this channel?');
     // Шаг 87: остатки amazon.com ведёт склад демо — владелец ответил «других инструментов нет» и подтвердил запись количества [Р-202];
     // у ebay.com вопрос не отвечен: на нём сценарий показа отвечает «Yes — stock». Шаг 89: у walmart.com запись количества тоже
@@ -134,7 +137,7 @@ test('шаг 68: демо США — решения в долларах, «по�
     const found = await call<{ items: UnitRef[]; total: number }>('GET', `/api/worlds/${w}/offers?q=${encodeURIComponent(storefront)}`, guest);
     assert.equal(found.status, 200);
     // K10: подпись — название товара и витрина словами; поиск по подписи находит все предложения витрины
-    assert.equal(found.body.total, 12, `${storefront}: поиск по подписи находит предложения витрины — ${JSON.stringify(found.body.items.slice(0, 2))}`);
+    assert.equal(found.body.total, storefront === 'amazon.com' ? 12 + NEW_AMAZON_OFFERS : 12, `${storefront}: поиск по подписи находит предложения витрины — ${JSON.stringify(found.body.items.slice(0, 2))}`);
     assert.ok(found.body.items.every((u) => u.channel === channel && u.label.endsWith(` · ${storefront}`) && !codes.test(u.label)), JSON.stringify(found.body.items[0]));
     let changed: { trace: DecisionTrace; price: string } | null = null;
     for (const unit of found.body.items) {
@@ -304,7 +307,7 @@ test('шаг 64: перезапуск консоли на той же базе �
   const demo = (await call<WorldSummary[]>('GET', '/api/worlds', guest)).body.find((w) => w.demo)!;
   const screen = await call<ConnectionsView>('GET', `/api/worlds/${encodeURIComponent(demo.id)}/connections`, guest);
   const us = screen.body.accounts.filter((a) => a.marketplaces.includes('EBAY_US') || a.marketplaces.includes('ATVPDKIKX0DER'));
-  assert.deepEqual(us.map((a) => a.offers), [12, 12], 'у нового демо свои аккаунты США со своим каталогом');
+  assert.deepEqual(us.map((a) => [a.channel, a.offers]).sort(), [['AMAZON', 12 + NEW_AMAZON_OFFERS], ['EBAY', 12]], 'у нового демо свои аккаунты США со своим каталогом');
 });
 
 /**
@@ -408,4 +411,40 @@ test('шаг 102 (E): демо — предложение amazon.com в режи
     { floorMinor: 900, acknowledged: true, note: 'x', endsAt: null });
   const disable = await call<{ error: { code: string } }>('POST', `/api/worlds/${w}/bounds/${unit.writeScopeId}/clearance/disable`, guest, {});
   assert.equal(JSON.stringify([enable.status, disable.status]), JSON.stringify([403, 403]), 'the guest of the demo cannot touch clearance');
+});
+
+/**
+ * Шаг 103 [Р-228]: в демо владелец задал стратегию по умолчанию для amazon.com, и после прожатой недели на аккаунте появились два листинга —
+ * обход каталога завёл их, правило умолчания назначило стратегию. Через консоль как гость: карточка аккаунта называет умолчание одной
+ * строкой (кто задал) и что правило сделало; у ebay.com — «None»; карточка стратегии называет аккаунт; новички — со стратегией и без
+ * единого решения о цене (умолчание назначает, но не включает); гость умолчание не меняет
+ */
+test('шаг 103: демо — стратегия по умолчанию amazon.com, два новых предложения получили её, цены не двигаются, гость не меняет умолчание', async () => {
+  const issued = await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const guest = ((await issued.json()) as StandToken).accessToken;
+  const demo = (await call<WorldSummary[]>('GET', '/api/worlds', guest)).body.find((w) => w.demo)!;
+  const w = encodeURIComponent(demo.id);
+  const screen = (await call<ConnectionsView>('GET', `/api/worlds/${w}/connections`, guest)).body;
+  const amazon = screen.accounts.find((a) => a.channel === 'AMAZON')!;
+  const ebay = screen.accounts.find((a) => a.channel === 'EBAY')!;
+  assert.match(amazon.defaultStrategy?.line ?? '', /^Default strategy for new offers: Beat the lowest by 1 cent · set by .+, .+$/, 'the default in one line, with who set it');
+  assert.equal(amazon.defaultStrategy?.results, 'Assigned to 2 new offers so far');
+  assert.equal(ebay.defaultStrategy?.line, 'Default strategy for new offers: None — assign manually', 'no default on ebay.com — the behaviour before the step');
+  assert.equal(JSON.stringify([amazon.defaultStrategy?.canEdit, ebay.defaultStrategy?.canEdit]), JSON.stringify([false, false]), 'the guest only reads');
+  // «Win the Buy Box» на amazon.com недоступна (держатель Buy Box не назван, A-29) — в выборе видна с причиной и не выбирается [Р-39]
+  const win = amazon.defaultStrategy?.options.find((o) => o.label.startsWith('Win the Buy Box'));
+  assert.equal(JSON.stringify([win?.disabled, /not available on this channel: needs .*Buy Box winner/.test(win?.label ?? '')]), JSON.stringify([true, true]), JSON.stringify(win));
+  // Карточка стратегии называет аккаунт, для которого она — умолчание
+  const strategies = (await call<{ strategies: Array<{ name: string | null; defaultFor: string | null }> }>('GET', `/api/worlds/${w}/strategies`, guest)).body;
+  assert.equal(strategies.strategies.find((x) => x.name === 'Beat the lowest by 1 cent')?.defaultFor, 'Default for new offers on: Amazon · amazon.com');
+  // Новички — со стратегией и без решений о цене: движок у них выключен, себестоимости нет [Р-131]
+  for (const q of ['Bamboo cutting board', 'Pour-over coffee dripper']) {
+    const found = (await call<{ items: UnitRef[]; total: number }>('GET', `/api/worlds/${w}/offers?q=${encodeURIComponent(q)}`, guest)).body;
+    assert.equal(found.total, 1, `${q}: a new amazon.com offer`);
+    const decisions = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${found.items[0]!.writeScopeId}`, guest)).body;
+    assert.equal(decisions.items.length, 0, `${q}: no price decision — the default assigns, it does not switch on`);
+  }
+  // Гость демо умолчание не меняет
+  const changed = await call<{ error: { code: string } }>('POST', `/api/worlds/${w}/connections/default-strategy`, guest, { channelAccountId: ebay.channelAccountId, strategyId: null });
+  assert.equal(changed.status, 403, JSON.stringify(changed.body));
 });

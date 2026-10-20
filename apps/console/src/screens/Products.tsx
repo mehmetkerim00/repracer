@@ -99,6 +99,8 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
                 {/* Шаг 78: источник пилюлей и короткое имя; подробности стратегии — подсказкой и на «Why this price» */}
                 {col.strategy ? <td className="strategy" title={r.strategy.detail}>
                   {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null} <span className="strategy-name">{r.strategy.label}</span>
+                  {/* Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию — причина словами под именем */}
+                  {r.notAssigned ? <div className="muted small">{r.notAssigned}</div> : null}
                 </td> : null}
                 {col.lastChange ? <td><Cell cell={r.lastChange} /></td> : null}
                 {col.nextCheck ? <td><Cell cell={r.nextCheck} /></td> : null}

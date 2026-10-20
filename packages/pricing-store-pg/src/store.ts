@@ -49,7 +49,8 @@ import type {
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow,
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult,
-  ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded } from '@repracer/pricing-pipeline';
+  ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
+  DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason } from '@repracer/pricing-pipeline';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -627,6 +628,30 @@ async function clearanceChanges(tx: Tx, tenantId: string, by: { writeScopeId?: s
     endsAt: r.ends_at ? iso(r.ends_at) : null, note: r.note ?? null, membershipId: r.created_by_membership_id ?? null,
     byName: r.by_name ?? null, byEmail: r.by_email ?? null, at: iso(r.created_at),
   }));
+}
+
+/**
+ * Шаг 103 [Р-228]: источник стратегии единиц — последняя строка журнала назначений (до момента `at`, если он задан: квитанция видит
+ * назначение, действовавшее при решении). У правила умолчания — строка умолчания и человек, который его задал
+ */
+async function assignmentRefs(tx: Tx, tenantId: string, writeScopeIds: readonly string[], at: string | null = null): Promise<Map<string, StrategyAssignmentRef>> {
+  if (writeScopeIds.length === 0) return new Map();
+  const { rows } = await tx.query(
+    `SELECT DISTINCT ON (a.write_scope_id) a.write_scope_id, a.outcome, a.source, a.reason, a.pricing_strategy_id, a.pricing_strategy_version,
+            a.channel_account_id, a.created_at, c.default_strategy_change_id AS rule_id, c.created_at AS rule_at, c.created_by_membership_id AS rule_by,
+            u.display_name AS rule_by_name, u.email AS rule_by_email
+       FROM tenant_data.strategy_assignment a
+       LEFT JOIN tenant_data.default_strategy_change c ON c.tenant_id = a.tenant_id AND c.default_strategy_change_id = a.default_strategy_change_id
+       LEFT JOIN tenant_data.membership mb ON mb.tenant_id = c.tenant_id AND mb.membership_id = c.created_by_membership_id
+       LEFT JOIN platform.app_user u ON u.user_id = mb.user_id
+      WHERE a.tenant_id = $1 AND a.write_scope_id = ANY($2::uuid[]) AND ($3::timestamptz IS NULL OR a.created_at <= $3::timestamptz)
+      ORDER BY a.write_scope_id, a.seq DESC`, [tenantId, [...writeScopeIds], at]);
+  return new Map(rows.map((r) => [String(r.write_scope_id), {
+    outcome: r.outcome, source: r.source, reason: (r.reason ?? null) as DefaultRuleReason | null,
+    strategyId: r.pricing_strategy_id ?? null, version: r.pricing_strategy_version === null ? null : Number(r.pricing_strategy_version),
+    channelAccountId: String(r.channel_account_id), at: iso(r.created_at),
+    rule: r.rule_id ? { changeId: String(r.rule_id), setAt: iso(r.rule_at), setByMembershipId: String(r.rule_by), setByName: r.rule_by_name ?? null, setByEmail: r.rule_by_email ?? null } : null,
+  } as StrategyAssignmentRef]));
 }
 
 function clearanceRefOf(c: ClearanceChangeRow): ClearanceRef {
@@ -2515,6 +2540,10 @@ export class PgPricingStore implements PricingStore {
             .map((f) => ({ source: f.source, feeRateBp: f.feeRateBp ?? null, fixedFeeMinor: f.fixedFeeMinor ?? null, scheduleVersion: f.scheduleVersion ?? null })),
         };
       });
+      // Шаг 103 [Р-228]: источник стратегии показанных единиц — отдельным запросом по журналу назначений, а не столбцом общего контекста
+      // единицы (контекст читает и путь решения: колонка в нём стоила бы планирования каждой оценке, урок шага 97.1)
+      const assignments = await assignmentRefs(tx, tenantId, scopes.map((sc) => sc.writeScopeId));
+      for (const sc of scopes) sc.assignment = assignments.get(sc.writeScopeId) ?? null;
       // Р-154: только записи в полёте — одна на единицу; завершённые читаются лентой страницами
       const writes = (await q(`SELECT ${WRITE_HOT_COLUMNS} FROM tenant_data.channel_write w
                                  LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
@@ -2865,8 +2894,10 @@ export class PgPricingStore implements PricingStore {
       ]);
       // Шаг 102 [Р-227]: решение в режиме распродажи — строка включения с автором для квитанции
       const clearance = d.clearance_change_id ? (await clearanceChanges(tx, tenantId, { changeId: d.clearance_change_id }))[0] ?? null : null;
+      // Шаг 103 [Р-228]: назначение стратегии, действовавшее в момент решения, — «assigned by default rule» в квитанции
+      const assignment = (await assignmentRefs(tx, tenantId, [String(d.write_scope_id)], iso(d.decided_at))).get(String(d.write_scope_id)) ?? null;
       return { decision: decisionRow(d), intent: i ? intentRow(i) : null, writes: writes.map(writeRow),
-        clearance: clearance && clearance.action === 'ENABLE' ? clearanceRefOf(clearance) : null };
+        clearance: clearance && clearance.action === 'ENABLE' ? clearanceRefOf(clearance) : null, assignment };
     });
   }
 
@@ -3442,6 +3473,57 @@ export class PgPricingStore implements PricingStore {
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }
+  }
+
+  /** Шаг 103 [Р-228]: стратегия по умолчанию аккаунта — строкой журнала от имени человека; отказы базы — причинами словами экрана */
+  async setDefaultStrategy(tenantId: string, channelAccountId: string, strategyId: string | null, actor: AdminActor): Promise<DefaultStrategyResult> {
+    try {
+      return await inTenant(this.admin('setDefaultStrategy'), tenantId, async (tx) => {
+        const { rows: [r] } = await tx.query(
+          `INSERT INTO tenant_data.default_strategy_change (tenant_id, channel_account_id, pricing_strategy_id, created_by_membership_id)
+           VALUES ($1, $2, $3, $4) RETURNING default_strategy_change_id`, [tenantId, channelAccountId, strategyId, actor.membershipId]);
+        return { status: 'SET' as const, changeId: String(r.default_strategy_change_id) };
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      const e = error as { code?: string; message?: string };
+      const message = e.message ?? '';
+      if (e.code === '42501' || /is not the membership of the session user/.test(message)) return { status: 'FORBIDDEN' };
+      const unavailable = /is not available on channel \S+ and cannot be the default: (\{.*\})$/.exec(message);
+      if (unavailable) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE', unmet: JSON.parse(unavailable[1]!) as Record<string, string[]> };
+      if (/has no active version/.test(message)) return { status: 'INVALID', cause: 'VERSION_NOT_ACTIVE' };
+      if (/is disconnected/.test(message)) return { status: 'INVALID', cause: 'ACCOUNT_DISCONNECTED' };
+      if (e.code === '23503') return { status: 'INVALID', cause: 'ACCOUNT_NOT_FOUND' };
+      // Номер стратегии не той формы — такой стратегии нет (аккаунт сверяет консоль до вызова)
+      if (e.code === '22P02') return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
+      throw error;
+    }
+  }
+
+  /** Шаг 103 [Р-228]: действующее умолчание каждого аккаунта с автором и решениями правила по нему (назначено / не назначено по причинам) */
+  async defaultStrategies(tenantId: string): Promise<DefaultStrategyRow[]> {
+    return inTenant(this.admin('defaultStrategies'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT c.channel_account_id, c.default_strategy_change_id, c.pricing_strategy_id, c.created_at, c.created_by_membership_id,
+                u.display_name, u.email,
+                (SELECT ps.name FROM tenant_data.pricing_strategy ps WHERE ps.tenant_id = c.tenant_id AND ps.pricing_strategy_id = c.pricing_strategy_id
+                  ORDER BY ps.version DESC LIMIT 1) AS strategy_name,
+                (SELECT count(*) FROM tenant_data.strategy_assignment a
+                  WHERE a.tenant_id = c.tenant_id AND a.default_strategy_change_id = c.default_strategy_change_id AND a.outcome = 'ASSIGNED')::int AS assigned,
+                coalesce((SELECT json_agg(json_build_object('reason', x.reason, 'count', x.n) ORDER BY x.reason)
+                            FROM (SELECT a.reason, count(*)::int AS n FROM tenant_data.strategy_assignment a
+                                   WHERE a.tenant_id = c.tenant_id AND a.default_strategy_change_id = c.default_strategy_change_id AND a.outcome = 'NOT_ASSIGNED'
+                                   GROUP BY a.reason) x), '[]') AS not_assigned
+           FROM (SELECT DISTINCT ON (x.channel_account_id) x.* FROM tenant_data.default_strategy_change x
+                  WHERE x.tenant_id = $1 ORDER BY x.channel_account_id, x.seq DESC) c
+           LEFT JOIN tenant_data.membership mb ON mb.tenant_id = c.tenant_id AND mb.membership_id = c.created_by_membership_id
+           LEFT JOIN platform.app_user u ON u.user_id = mb.user_id
+          ORDER BY c.channel_account_id`, [tenantId]);
+      return rows.map((r) => ({
+        channelAccountId: String(r.channel_account_id), strategyId: r.pricing_strategy_id ?? null, strategyName: r.strategy_name ?? null,
+        setAt: iso(r.created_at), setByMembershipId: String(r.created_by_membership_id), setByName: r.display_name ?? null, setByEmail: r.email ?? null,
+        assigned: Number(r.assigned), notAssigned: (r.not_assigned as Array<{ reason: DefaultRuleReason; count: number }>),
+      }));
+    });
   }
 
   async clearanceOf(tenantId: string, writeScopeId: string): Promise<ClearanceState> {

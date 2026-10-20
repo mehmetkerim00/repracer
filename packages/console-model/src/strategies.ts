@@ -99,6 +99,8 @@ export interface StrategyListItem {
   versions: Array<{ version: number; status: string; tone: Tone; author: string; createdAt: string }>;
   /** OQ-169: последнюю версию можно назначить выбранным офферам без новой версии — только действующую */
   assignable: boolean;
+  /** Шаг 103 [Р-228]: для каких аккаунтов стратегия — умолчание новых предложений («Default for new offers on: …»), иначе null */
+  defaultFor: string | null;
 }
 
 export interface StrategyScopeItem {
@@ -113,6 +115,8 @@ export interface StrategyScopeItem {
   version: number | null;
   /** OQ-169: стратегию можно снять — она есть, репрайсинг выключен, у зрителя есть право */
   canUnassign: boolean;
+  /** Шаг 103 [Р-228]: нынешнюю стратегию назначило правило умолчания аккаунта — «by default rule», иначе null */
+  byDefaultRule: string | null;
 }
 
 /** Шаг 66 (ревью, находка 7): сколько предложений с ценообразованием канала экран стратегий называет поимённо */
@@ -194,6 +198,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       draft: { name: name ?? label.label, params: { ...d.params }, deadbandMinor: d.deadbandMinor },
       versions: allVersions,
       assignable: canEdit && (latestMeta?.status ?? 'ACTIVE') === 'ACTIVE',
+      defaultFor: defaultForOf(world, d.strategyId, m),
     };
   }).sort((a, b) => b.scopeCount - a.scopeCount || a.strategyId.localeCompare(b.strategyId));
   // Р-136: список предложений — страницей; ответ экрана на каталоге целевого клиента был 3,7 МБ
@@ -205,6 +210,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       channelPricing: notes[0] ?? null, assignable: notes.length === 0,
       strategyId: s.strategy?.strategyId ?? null, version: s.strategy?.version ?? null,
       canUnassign: canEdit && s.strategy !== null && s.pricingMode !== 'ENGINE',
+      byDefaultRule: assignedByDefaultRule(s) ? m.ui.strategies.byDefaultRule : null,
     };
   });
   /**
@@ -300,6 +306,43 @@ export function fingerprint(value: unknown): string {
 }
 
 /** Текущая стратегия единиц превью — то, что сохранение заменит (находка 4 ревью шага 21) */
+/**
+ * Шаг 103 [Р-228]: нынешнюю стратегию единицы назначило правило умолчания — последняя строка журнала назначений единицы — строка правила
+ * с этой же стратегией и версией (ручная смена после неё — уже строка человека)
+ */
+export function assignedByDefaultRule(s: ConsoleScope): boolean {
+  const a = s.assignment;
+  return !!a && a.source === 'DEFAULT_RULE' && a.outcome === 'ASSIGNED' && s.strategy !== null && a.strategyId === s.strategy.strategyId && a.version === s.strategy.version;
+}
+
+/** Шаг 103 [Р-228]: аккаунты, для которых стратегия — умолчание новых предложений, подписью «канал · аккаунт · витрины» */
+function defaultForOf(world: StandWorld, strategyId: string, m: Messages): string | null {
+  const accounts = (world.defaultStrategies ?? []).filter((d) => d.strategyId === strategyId)
+    .flatMap((d) => { const a = world.accounts.find((x) => x.channelAccountId === d.channelAccountId); return a ? [accountLabel(a, m)] : []; });
+  return accounts.length > 0 ? m.ui.strategies.defaultFor(accounts.join('; ')) : null;
+}
+
+/** Подпись аккаунта канала словами: «Amazon · A1SYN… · amazon.com» */
+export function accountLabel(a: { channel: string; externalAccountId?: string; marketplaces: readonly string[] }, m: Messages): string {
+  const channel = (m.values as Record<string, string | undefined>)[a.channel] ?? a.channel;
+  return [channel, ...(a.externalAccountId ? [a.externalAccountId] : []), a.marketplaces.map((id) => storefrontName(a.channel, id, m)).join(', ')].filter((x) => x !== '').join(' · ');
+}
+
+/**
+ * Шаг 103 [Р-228]: стратегии, которые могут быть умолчанием, — последняя АКТИВНАЯ версия каждой (OQ-169), по имени. У версии без строки
+ * метаданных (стратегии посева в памяти) статус — действующая, как у «Assign»; имени нет — подпись типа
+ */
+export function activeStrategyChoices(world: StandWorld, m: Messages): Array<{ strategyId: string; version: number; name: string; params: StrategyParams }> {
+  const meta = (d: StrategyDefinition) => world.state.strategyVersions.find((v) => v.strategyId === d.strategyId && v.version === d.version);
+  const latest = new Map<string, StrategyDefinition>();
+  for (const d of world.state.strategies) {
+    if ((meta(d)?.status ?? 'ACTIVE') !== 'ACTIVE') continue;
+    if ((latest.get(d.strategyId)?.version ?? 0) < d.version) latest.set(d.strategyId, d);
+  }
+  return [...latest.values()].map((d) => ({ strategyId: d.strategyId, version: d.version, name: meta(d)?.name ?? strategyLabel(d, '', m).label, params: d.params }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.strategyId.localeCompare(b.strategyId));
+}
+
 export function currentStrategies(world: StandWorld, writeScopeIds: readonly string[]): Array<{ writeScopeId: string; strategyId: string | null; version: number | null }> {
   return writeScopeIds.map((id) => {
     const s = scopeById(world, id)?.strategy ?? null;

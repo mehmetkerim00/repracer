@@ -750,6 +750,8 @@ ul.strategy-cards > li.card { margin: 0; padding: var(--space-4); }
 ul.strategy-cards .buttons { margin-top: var(--space-2); }
 /* сводка стратегии — сколько и где, ссылка раскрывает предложения списком (шаг 78) */
 .strategy-usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 var(--space-1); font-weight: var(--weight-medium); }
+/* шаг 103 [Р-228]: стратегия — умолчание новых предложений аккаунтов, строкой под сводкой */
+.strategy-default { margin: 0 0 var(--space-1); }
 button.link {
   border: 0; background: none; box-shadow: none; padding: 0; color: var(--accent); font-size: var(--font-size-sm); font-weight: var(--weight-medium); cursor: pointer;
 }
@@ -805,6 +807,10 @@ p.status-line { padding: var(--space-2) var(--space-3); border-radius: var(--rad
 .account-writers { border-left: 1px solid var(--divider); padding-left: var(--space-5); min-width: 0; }
 .account-writers p { margin: 0 0 var(--space-2); }
 .account .badge { white-space: normal; }
+/* шаг 103 [Р-228]: стратегия по умолчанию для новых предложений — строкой во всю ширину карточки аккаунта, под обеими колонками */
+.account-default { grid-column: 1 / -1; border-top: 1px solid var(--divider); padding-top: var(--space-3); min-width: 0; }
+.account-default p { margin: 0 0 var(--space-2); }
+.account-default select { max-width: 100%; }
 .segmented { display: inline-flex; flex-wrap: wrap; background: var(--track-bg); border-radius: var(--radius); margin: var(--space-1) 0 var(--space-2); }
 .segmented button { border: var(--border-width) solid transparent; border-radius: var(--radius); box-shadow: none; background: transparent; font-size: var(--font-size); padding: var(--space-1) var(--space-3); }
 .segmented button:hover:not(:disabled) { background: var(--control-bg-hover); }

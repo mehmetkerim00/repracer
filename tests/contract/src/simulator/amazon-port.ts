@@ -52,7 +52,11 @@ export const AMAZON_SIM_SOURCE = 'AMAZON_ANY_OFFER_CHANGED';
  * Шаг 69 (OQ-249): `title` — название товара, которое адаптер берёт из `itemName` сводки searchListingsItems; по умолчанию синтетическое
  * «Synthetic product <sku>», null — канал названия не отдал
  */
-export interface AmazonSkuSpec { sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number; title?: string | null }
+export interface AmazonSkuSpec {
+  sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number; title?: string | null;
+  /** Шаг 103 [Р-120, Р-228]: у листинга правило автоматического ценообразования Amazon — обнаружение называет его, движок не назначается */
+  automatedPricing?: boolean;
+}
 /**
  * Шаг 97 [H]: `channelFulfilled` — предложение исполняет Amazon (FBA), `rating` — SellerFeedbackRating продавца (синтетический),
  * `shippingMinor` — доставка продавца
@@ -71,7 +75,7 @@ export interface AmazonPortModelSpec {
   selfChannelFulfilled?: boolean;
 }
 
-interface Listing { sku: string; asin: string; marketplace: string; title: string | null; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
+interface Listing { sku: string; asin: string; marketplace: string; title: string | null; automatedPricing: boolean; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
 
 class Bucket {
   private tokens: number;
@@ -147,10 +151,7 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     this.startMs = Date.parse(deps.now());
     this.nowMs = this.startMs;
     this.rng = new SeededRandom(spec.seed);
-    for (const s of spec.skus) {
-      const title = s.title === undefined ? `Synthetic product ${s.sku}` : s.title;
-      for (const m of s.marketplaces) this.listings.set(`${m}|${s.sku}`, { sku: s.sku, asin: s.asin, marketplace: m, title, priceMinor: s.priceMinor, quantity: s.quantity, pendingPrice: null, pendingQuantity: null, edits: [] });
-    }
+    for (const s of spec.skus) this.addListing(s);
     this.competitors = spec.competitors.map((c) => ({ ...c, index: 0 }));
     const p = this.params.patchRate;
     this.seller = new Bucket(p.seller.ratePerSecond, p.seller.burst, this.startMs);
@@ -377,9 +378,21 @@ export class SimulatedAmazonPort implements ChannelAdapter {
 
   /**
    * Шаг 43 [Р-176]: обнаружение офферов нового аккаунта — `searchListingsItems` по снимку (адаптер, `listing.ts`): SKU продавца
-   * страницами, с правилом автоматического ценообразования в атрибутах [Р-120]. У модели правил нет — все офферы свободны.
+   * страницами, с правилом автоматического ценообразования в атрибутах [Р-120]. Правило — у листинга, заданного `automatedPricing` (шаг 103).
    * Квота поиска в снимке не названа (проверить), поэтому модель её не расходует и не придумывает.
    */
+  /**
+   * Шаг 103 [Р-228]: у продавца появился новый листинг — сценарий «на аккаунте появились новые предложения». Следующий обход каталога
+   * его найдёт; правило умолчания аккаунта решает о нём в той же транзакции, что заводит предложение
+   */
+  addListing(s: AmazonSkuSpec): void {
+    const title = s.title === undefined ? `Synthetic product ${s.sku}` : s.title;
+    for (const m of s.marketplaces) {
+      this.listings.set(`${m}|${s.sku}`, { sku: s.sku, asin: s.asin, marketplace: m, title, automatedPricing: s.automatedPricing ?? false, priceMinor: s.priceMinor,
+        quantity: s.quantity, pendingPrice: null, pendingQuantity: null, edits: [] });
+    }
+  }
+
   async discoverOffers(_ctx: AdapterCallContext, page: PageRequest): Promise<Page<DiscoveredOffer>> {
     this.now();
     this.stats.discoveryCalls += 1;
@@ -390,7 +403,7 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     const items: DiscoveredOffer[] = slice.map((l) => ({
       identity: { ...(this.descriptor.region ? { region: this.descriptor.region } : {}), marketplace: l.marketplace, externalSku: l.sku, channelProductRef: l.asin },
       gtins: [], condition: 'new', fulfillment: 'MERCHANT', ...(l.title !== null ? { title: l.title } : {}), currentPrice: { amountMinor: l.priceMinor, currency, basis },
-      currentQuantity: l.quantity, isLive: true, channelPricing: { automatedPricing: false, channelBounds: false },
+      currentQuantity: l.quantity, isLive: true, channelPricing: { automatedPricing: l.automatedPricing, channelBounds: false },
     }));
     return { items, ...(from + slice.length < all.length ? { nextCursor: String(from + slice.length) } : {}) };
   }

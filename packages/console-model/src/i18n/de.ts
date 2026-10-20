@@ -853,6 +853,29 @@ export const de: Messages = {
      * Шаг 41 [Р-169…Р-171]: тот же экран по-немецки. Язык — свойство тенанта [Р-161].
      */
     connections: {
+      /** Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта */
+      defaultStrategy: {
+        title: 'Standardstrategie für neue Angebote',
+        line: (name: string) => `Standardstrategie für neue Angebote: ${name}`,
+        none: 'Keine — manuell zuweisen', unnamed: 'eine Strategie ohne Namen', someone: 'ein Mitglied dieses Arbeitsbereichs',
+        setBy: (who: string, when: string) => `festgelegt von ${who}, ${when}`,
+        hint: 'Neue Angebote, die auf diesem Kanalkonto gefunden werden, erhalten diese Strategie, als hätten Sie „Zuweisen“ gedrückt. Preise ändern sich nicht von selbst: das Repricing eines neuen Angebots bleibt aus, bis Sie es einschalten, und braucht Stückkosten und Grenzen. Eine Änderung gilt nur für später gefundene Angebote.',
+        save: 'Standard speichern',
+        choose: 'Standard wählen',
+        unavailable: (needs: string) => `in diesem Kanal nicht verfügbar: braucht ${needs}`,
+        assigned: (n: number) => (n === 1 ? 'Bisher 1 neuem Angebot zugewiesen' : `Bisher ${n} neuen Angeboten zugewiesen`),
+        notAssigned: (n: number, reason: string) => `${n} nicht zugewiesen: ${reason}`,
+        reasons: {
+          CHANNEL_PRICING: 'der Kanal bepreist das Angebot selbst', NOT_WRITABLE: 'an das eBay-Angebot können wir keine Preise senden (Auktion oder nicht migriert)',
+          STRATEGY_UNAVAILABLE: 'die Strategie ist in diesem Kanal nicht mehr verfügbar',
+        },
+        saved: (name: string) => `Gespeichert. Neue Angebote auf diesem Kanalkonto erhalten: ${name}.`,
+        errors: {
+          unavailable: (needs: string) => `Diese Strategie kann in diesem Kanal nicht Standard sein: sie braucht ${needs}.`,
+          versionNotActive: 'Diese Strategie hat keine aktive Version.', disconnected: 'Dieses Kanalkonto ist getrennt.',
+          notFound: 'Die Strategie oder das Kanalkonto wurde nicht gefunden.', noRight: 'Nur der Inhaber oder ein Manager kann die Standardstrategie ändern.',
+        },
+      },
       noChannels: 'Noch kein Kanalkonto, und das Verbinden von Kanälen ist auf diesem Server noch nicht eingerichtet — das schaltet das Plattform-Team frei.', 
       title: 'Kanalkonten',
       intro: 'Sie verbinden einen Kanal selbst: der Knopf öffnet die Zustimmungsseite des Kanals, dort erlauben Sie den Zugriff, und der Kanal schickt Sie hierher zurück. Eine neue Verbindung beginnt im Schattenmodus — die Engine arbeitet vollständig und sendet nichts an Ihren Shop.',
@@ -1235,6 +1258,7 @@ export const de: Messages = {
       floorMarginUnavailable: (min: string, cause: string) => `Ihr Mindestpreis ${min}; Mindestmargen-Untergrenze nicht berechenbar: ${cause}`,
       // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
       floorFromBreakEven: (min: string) => `aus der Gewinnschwelle (Ihr Mindestpreis ${min})`, floorFromClearance: 'aus der Abverkaufs-Untergrenze — bewusst unter der Gewinnschwelle', clearancePill: 'Abverkauf',
+      notAssigned: (reason: string) => `Nicht zugewiesen: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Untergrenze über Höchstpreis', frozenDetail: 'Preise eingefroren — Höchstpreis anheben oder Abverkauf einschalten',
     },
@@ -1339,6 +1363,8 @@ export const de: Messages = {
       sanityTitle: (_ruleset: string) => 'Eingangsprüfung',
       sanityAccepted: (checks: number, warnings: number) => `Wettbewerbsdaten angenommen: ${checks} Regeln geprüft${warnings ? `, ${warnings} Hinweise` : ''}`,
       anchorNotRun: 'nicht geprüft: die Prüfung endete vorher', anchorPassed: 'bestanden',
+      assignedHow: 'Wie sie zugewiesen wurde', assignedByDefault: (account: string, who: string, when: string) => `Durch die Standardregel von ${account}, festgelegt von ${who}, ${when}`,
+      someone: 'ein Mitglied dieses Arbeitsbereichs', someAccount: 'ein Kanalkonto',
       anchorsUsed: (list: string) => `Verwendet: ${list}`, noAnchor: 'Kein Anker wurde verwendet',
       proposed: (price: string, change: string | null, text: string) => `Vorgeschlagen ${price}${change ? ` (${change})` : ''}: ${text}`,
       keep: (text: string) => `Preis beibehalten: ${text}`,
@@ -1394,6 +1420,7 @@ export const de: Messages = {
         previewFirst: 'Zuerst die Vorschau anzeigen: gespeichert wird genau, was die Vorschau gezeigt hat.',
         storefront: 'Zuerst mindestens eine Storefront wählen.',
         typeName: 'Zuerst die oben genannte Kennung genau eintippen.',
+        chooseOther: 'Wählen Sie zuerst eine andere Strategie.',
         period: 'Zuerst beide Daten eingeben.',
         note: (min: number) => `Zuerst eine Notiz mit mindestens ${min} Zeichen eingeben.`,
       },
@@ -1526,6 +1553,7 @@ export const de: Messages = {
       rePreviewed: 'Die Angebote haben sich seit der Vorschau geändert. Die Vorschau wurde neu berechnet — bitte prüfen und erneut speichern.',
       sample: (shown: number, total: number) => `Vorschau für ${shown} von ${total} Angeboten: die Strategie wird auf alle ${total} angewendet. Die Datenbank prüft jedes Angebot einzeln.`,
       versionsTitle: 'Versionen', statuses: { DRAFT: 'Entwurf', ACTIVE: 'aktiv', ARCHIVED: 'archiviert' }, statusUnknown: 'Status nicht erfasst', authorUnknown: 'Autor nicht erfasst',
+      defaultFor: (accounts: string) => `Standard für neue Angebote auf: ${accounts}`, byDefaultRule: 'per Standardregel',
       versionBy: (author: string, when: string) => `${author} · ${when}`,
       assignVersion: 'Zuweisen', assigning: (name: string, version: number) => `„${name}“ Version ${version} ohne neue Version zuweisen`,
       assignConfirmText: 'Die gezeigte Version wird unverändert zugewiesen; es entsteht keine neue Version.',

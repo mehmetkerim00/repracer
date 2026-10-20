@@ -891,6 +891,29 @@ export const en = {
      * произошло БЫ, и ни слова о том, сколько бы он заработал — этого мы не знаем.
      */
     connections: {
+      /** Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта */
+      defaultStrategy: {
+        title: 'Default strategy for new offers',
+        line: (name: string) => `Default strategy for new offers: ${name}`,
+        none: 'None — assign manually', unnamed: 'a strategy without a name', someone: 'a member of this workspace',
+        setBy: (who: string, when: string) => `set by ${who}, ${when}`,
+        hint: 'New offers found on this channel account get this strategy, as if you pressed Assign. Prices do not move by themselves: repricing of a new offer stays off until you switch it on, and it needs a unit cost and bounds. A change affects only offers found later.',
+        save: 'Save default',
+        choose: 'Choose the default',
+        unavailable: (needs: string) => `not available on this channel: needs ${needs}`,
+        assigned: (n: number) => (n === 1 ? 'Assigned to 1 new offer so far' : `Assigned to ${n} new offers so far`),
+        notAssigned: (n: number, reason: string) => `not assigned to ${n}: ${reason}`,
+        reasons: {
+          CHANNEL_PRICING: 'the channel prices the offer itself', NOT_WRITABLE: 'we cannot send prices to the eBay listing (auction or not migrated)',
+          STRATEGY_UNAVAILABLE: 'the strategy is no longer available on this channel',
+        },
+        saved: (name: string) => `Saved. New offers on this channel account will get: ${name}.`,
+        errors: {
+          unavailable: (needs: string) => `This strategy cannot be the default on this channel: it needs ${needs}.`,
+          versionNotActive: 'This strategy has no active version.', disconnected: 'This channel account is disconnected.',
+          notFound: 'The strategy or the channel account was not found.', noRight: 'Only the owner or a manager can change the default strategy.',
+        },
+      },
       noChannels: 'No channel account yet, and connecting channels is not set up on this server yet — the platform team enables it.', 
       title: 'Channel accounts',
       intro: 'You connect a channel yourself: the button opens the consent page of the channel, you allow access there, and the channel sends you back here. A new connection starts in the shadow — the engine works completely and sends nothing to your store.',
@@ -1289,6 +1312,7 @@ export const en = {
       floorMarginUnavailable: (min: string, cause: string) => `Your minimum price ${min}; minimum-margin floor unavailable: ${cause}`,
       // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
       floorFromBreakEven: (min: string) => `from break-even (your minimum price ${min})`, floorFromClearance: 'from the clearance floor — below break-even on purpose', clearancePill: 'Clearance',
+      notAssigned: (reason: string) => `Not assigned: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Floor above ceiling', frozenDetail: 'prices frozen — raise the maximum price or enable clearance',
     },
@@ -1394,6 +1418,8 @@ export const en = {
       sanityTitle: (_ruleset: string) => 'Input check',
       sanityAccepted: (checks: number, warnings: number) => `Snapshot accepted: ${checks} rules checked${warnings ? `, ${warnings} warnings` : ''}`,
       anchorNotRun: 'not checked: the check stopped earlier', anchorPassed: 'passed',
+      assignedHow: 'How it was assigned', assignedByDefault: (account: string, who: string, when: string) => `By the default rule of ${account}, set by ${who}, ${when}`,
+      someone: 'a member of this workspace', someAccount: 'a channel account',
       anchorsUsed: (list: string) => `Used: ${list}`, noAnchor: 'No anchor was used',
       proposed: (price: string, change: string | null, text: string) => `Proposed ${price}${change ? ` (${change})` : ''}: ${text}`,
       keep: (text: string) => `Keep the price: ${text}`,
@@ -1451,6 +1477,7 @@ export const en = {
         previewFirst: 'Show the preview first: saving applies exactly what the preview showed.',
         storefront: 'Choose at least one storefront first.',
         typeName: 'Type the identifier shown above exactly first.',
+        chooseOther: 'Choose a different strategy first.',
         period: 'Enter both dates first.',
         note: (min: number) => `Enter a note of at least ${min} characters first.`,
       },
@@ -1586,6 +1613,7 @@ export const en = {
       rePreviewed: 'The offers changed since the preview. The preview was run again — check it and save again.',
       sample: (shown: number, total: number) => `Preview of ${shown} of ${total} offers: the strategy is applied to all ${total}. The database checks every offer on its own.`,
       versionsTitle: 'Versions', statuses: { DRAFT: 'draft', ACTIVE: 'active', ARCHIVED: 'archived' }, statusUnknown: 'status not recorded', authorUnknown: 'author not recorded',
+      defaultFor: (accounts: string) => `Default for new offers on: ${accounts}`, byDefaultRule: 'by default rule',
       versionBy: (author: string, when: string) => `${author} · ${when}`,
       assignVersion: 'Assign', assigning: (name: string, version: number) => `Assign “${name}” version ${version} without a new version`,
       assignConfirmText: 'The shown version is assigned as it is; no new version is created.',

@@ -84,6 +84,7 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
                   {a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}
                 </div>
                 <div className="account-writers"><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></div>
+                {a.defaultStrategy ? <div className="account-default"><DefaultStrategy worldId={worldId} account={a} onChanged={retry} /></div> : null}
               </article>
             ))}
           </div>
@@ -218,6 +219,44 @@ function ExternalWriters({ worldId, account: a, onChanged }: { worldId: string; 
       ) : null}
       <p>{a.externalEditsText}</p>
       <p className="note">{a.externalEditsNote}</p>
+      {message ? <p className="notice" role="status">{message}</p> : null}
+      {error ? <ErrorBox message={error} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — одной строкой, что сейчас и кто задал; что правило уже сделало;
+ * выбор — «None» и активные стратегии, недоступная на канале — с причиной и не выбирается. Умолчание назначает, но не включает
+ */
+function DefaultStrategy({ worldId, account: a, onChanged }: { worldId: string; account: ConnectionAccountView; onChanged: () => void }) {
+  const m = useMessages();
+  const d = a.defaultStrategy!;
+  const [choice, setChoice] = useState<string>(d.current ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => { setChoice(d.current ?? ''); }, [d.current]);
+  const same = choice === (d.current ?? '');
+  const save = () => void requestJson<{ message: string }>(worldPath(worldId, 'connections', 'default-strategy'), {
+    method: 'POST', locale: m.locale, body: { channelAccountId: a.channelAccountId, strategyId: choice === '' ? null : choice },
+  }).then((r) => { setError(null); setMessage(r.message); onChanged(); }).catch((e: unknown) => { setMessage(null); setError(errorText(e, m)); });
+  return (
+    <div>
+      <p className="default-line"><strong>{d.line}</strong></p>
+      {d.results ? <p className="note">{d.results}</p> : null}
+      {d.canEdit ? (
+        <>
+          {/* Строка выше уже называет умолчание — у поля своя подпись действия, а не повтор заголовка */}
+          <Field label={m.ui.connections.defaultStrategy.choose} caption={d.hint}>
+            <select value={choice} onChange={(e) => setChoice(e.currentTarget.value)}>
+              {d.options.map((o) => <option key={o.strategyId ?? ''} value={o.strategyId ?? ''} disabled={o.disabled}>{o.label}</option>)}
+            </select>
+          </Field>
+          <FormActions hint={same ? m.ui.forms.why.chooseOther : null}>
+            <button type="button" className="primary" disabled={same} title={same ? m.ui.forms.why.chooseOther : undefined} onClick={save}>{d.saveLabel}</button>
+          </FormActions>
+        </>
+      ) : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {error ? <ErrorBox message={error} /> : null}
     </div>

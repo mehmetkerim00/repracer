@@ -502,6 +502,11 @@ SELECT pg_temp.expect_fail('truncate tenant_data.import_run', $q$ TRUNCATE tenan
 -- Шаг 102 [Р-227]: журнал режима распродажи — доказательство намеренного убытка, TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.clearance_change', $q$ TRUNCATE tenant_data.clearance_change $q$,
   'TRUNCATE of tenant_data.clearance_change is forbidden');
+-- Шаг 103 [Р-228]: журналы умолчания и назначений — то, к чему прослеживается каждое автоназначение; TRUNCATE их не берёт
+SELECT pg_temp.expect_fail('truncate tenant_data.default_strategy_change', $q$ TRUNCATE tenant_data.default_strategy_change $q$,
+  'TRUNCATE of tenant_data.default_strategy_change is forbidden');
+SELECT pg_temp.expect_fail('truncate tenant_data.strategy_assignment', $q$ TRUNCATE tenant_data.strategy_assignment $q$,
+  'TRUNCATE of tenant_data.strategy_assignment is forbidden');
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.channel_write_mode_change', $q$ TRUNCATE tenant_data.channel_write_mode_change $q$,
   'TRUNCATE of tenant_data.channel_write_mode_change is forbidden');
@@ -771,6 +776,11 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'COSTS', 'CHECKED', 'r103.csv', 
 SELECT set_config('app.user_id', 'a1000000-0000-0000-0000-00000000000a', true), set_config('app.auth_mfa', 'on', true) \gset
 INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action, floor_minor, currency, note, acknowledged, created_by_membership_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', 'ENABLE', 900, 'EUR', 'Clearing summer stock', true,
+        'a2000000-0000-0000-0000-00000000000a');
+
+-- Шаг 103 [Р-228]: строка журнала умолчания — владелец задал стратегию по умолчанию аккаунта от своего имени
+INSERT INTO tenant_data.default_strategy_change (tenant_id, channel_account_id, pricing_strategy_id, created_by_membership_id)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001',
         'a2000000-0000-0000-0000-00000000000a');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости

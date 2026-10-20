@@ -1187,3 +1187,40 @@ test('step 102 (D1) [Р-227]: the console refuses clearance without the acknowle
   assert.equal((await get<BoundsView>(owner, api(id, 'bounds', ws))).clearance.pill, null, 'turned off without a second factor');
   assert.equal((await call(owner, 'POST', api(id, 'bounds', ws, 'clearance', 'disable'), {})).status, 409, 'nothing to turn off');
 });
+
+/**
+ * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — маршрутом экрана Channels. Задаёт тот, кто назначает стратегии
+ * (владелец, менеджер); недоступная на канале стратегия — отказ с причиной словами [Р-39]; неверный запрос — 400, чужой аккаунт — 404
+ */
+test('step 103 [Р-228]: the console sets the default strategy of a channel account; a channel-unavailable strategy is refused with the reason', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const w = liveOf(id);
+  const accountId = w.accounts[0]!.channelAccountId;
+  const owner = await login('OWNER');
+  const path = api(id, 'connections', 'default-strategy');
+  const strategy = (await get<StrategyListView>(owner, api(id, 'strategies'))).strategies.find((x) => x.assignable)!;
+  const set = await call(owner, 'POST', path, { channelAccountId: accountId, strategyId: strategy.strategyId });
+  assert.equal(set.status, 200, JSON.stringify(set.body));
+  assert.match((set.body as { message: string }).message, /^Saved\. New offers on this channel account will get: .+\.$/);
+  assert.equal((await w.store.defaultStrategies(w.tenantId)).find((d) => d.channelAccountId === accountId)?.strategyId, strategy.strategyId);
+  const manager = await login('MANAGER');
+  const cleared = await call(manager, 'POST', path, { channelAccountId: accountId, strategyId: null });
+  assert.equal(JSON.stringify([cleared.status, (cleared.body as { message?: string }).message]),
+    JSON.stringify([200, 'Saved. New offers on this channel account will get: None — assign manually.']), 'a manager clears it — «None»');
+  const refused = [
+    await call(owner, 'POST', path, { channelAccountId: accountId, strategyId: 7 }),
+    await call(owner, 'POST', path, { channelAccountId: 'acc-unknown', strategyId: null }),
+  ].map((r) => `${r.status} ${(r.body as { error?: { code: string } }).error?.code}`);
+  assert.equal(JSON.stringify(refused), JSON.stringify(['400 BAD_REQUEST', '404 ACCOUNT_NOT_FOUND']));
+  // «Win the Buy Box» на Amazon недоступна: держатель Buy Box не назван (A-29) — база и модель отказывают одинаково, причина словами
+  const amazonId = 'amazon/pipeline/console-channel-trust';
+  const amazonOwner = await login('OWNER');
+  const saved = await liveOf(amazonId).store.saveStrategy(liveOf(amazonId).tenantId, { strategyId: null, name: 'Win the Buy Box', deadbandMinor: 0, assignTo: [],
+    params: { type: 'WIN_BUYBOX', undercutMinor: 1, fulfillmentHandicapMinor: 0, creepUp: false, creepStepBp: 100, atBound: 'CAP' } as never },
+    { membershipId: account('OWNER').membershipAlias, userId: account('OWNER').userAlias, mfa: false });
+  assert.equal(saved.status, 'SAVED', JSON.stringify(saved));
+  const win = await call(amazonOwner, 'POST', api(amazonId, 'connections', 'default-strategy'),
+    { channelAccountId: liveOf(amazonId).accounts[0]!.channelAccountId, strategyId: (saved as { strategy: { strategyId: string } }).strategy.strategyId });
+  assert.equal(win.status, 409, JSON.stringify(win.body));
+  assert.match((win.body as { error: { message: string } }).error.message, /^This strategy cannot be the default on this channel: it needs .*the Buy Box winner/);
+});

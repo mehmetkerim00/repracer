@@ -20,9 +20,9 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { connectableInMarket, connectionsView, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
+import { activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
-import { descriptorOf } from './channel-descriptors.ts';
+import { descriptorOf, strategyAvailableOn } from './channel-descriptors.ts';
 import {
   NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
 } from '../src/api-types.ts';
@@ -605,8 +605,54 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const param4 = parts[4] ?? null;
       const t = m.ui.connections;
       if (req.method === 'GET' && param4 === null) {
-        const rows = connect ? await connect.connections(live.tenantId) : { accounts: [], pending: [] };
-        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m));
+        /**
+         * Шаг 103 [Р-228]: у карточки аккаунта — стратегия по умолчанию для новых предложений: строки умолчаний, активные стратегии (мир без
+         * единиц — только справочник стратегий) и доступность на канале тем же правилом, что у превью и импорта стратегий [Р-39]
+         */
+        const [rows, defaultRows, strategyWorld] = await Promise.all([
+          connect ? connect.connections(live.tenantId) : Promise.resolve({ accounts: [], pending: [] }),
+          live.store.defaultStrategies(live.tenantId), live.view(viewer, { scopeIds: [] }),
+        ]);
+        const defaults: DefaultStrategyInput = {
+          rows: defaultRows, strategies: activeStrategyChoices(strategyWorld, m), availability: strategyAvailableOn, canEdit: can(viewer.role, 'MANAGE_PRICING'),
+          ...(services.people ? { people: services.people } : {}),
+        };
+        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m, defaults));
+      }
+      /**
+       * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — правом назначать стратегии (владелец и менеджер), без
+       * второго фактора: назначение — действие внутри забора (Р-225). Кто задаёт, активна ли версия и даёт ли канал данные — проверяет база;
+       * консоль переводит её исход в код HTTP, не переписывая причину [Р-94]
+       */
+      if (req.method === 'POST' && param4 === 'default-strategy') {
+        const d = t.defaultStrategy;
+        if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', d.errors.noRight);
+        const accountId = typeof body.channelAccountId === 'string' ? body.channelAccountId : null;
+        if (!accountId || !live.accounts.some((a) => a.channelAccountId === accountId)) return fail(404, 'ACCOUNT_NOT_FOUND', d.errors.notFound);
+        const strategyId = body.strategyId === null ? null : typeof body.strategyId === 'string' && body.strategyId.length > 0 && body.strategyId.length <= 100 ? body.strategyId : undefined;
+        if (strategyId === undefined) return fail(400, 'BAD_REQUEST', s.badRequest);
+        const result = await live.store.setDefaultStrategy(live.tenantId, accountId, strategyId,
+          { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+        switch (result.status) {
+          case 'SET': {
+            const row = (await live.store.defaultStrategies(live.tenantId)).find((x) => x.channelAccountId === accountId);
+            return ok({ changeId: result.changeId, message: d.saved(strategyId === null ? d.none : row?.strategyName ?? d.unnamed) });
+          }
+          case 'FORBIDDEN': return fail(403, 'FORBIDDEN', d.errors.noRight);
+          case 'INVALID':
+            switch (result.cause) {
+              case 'STRATEGY_UNAVAILABLE': {
+                const channel = live.accounts.find((a) => a.channelAccountId === accountId)?.channel ?? '';
+                const unmet = result.unmet ?? {};
+                const words = [...new Set(Object.values(unmet).flat().filter((c) => c !== 'RECONCILIATION_ONLY' && !c.startsWith('AVAILABILITY_')))]
+                  .map((c) => (m.values as Record<string, string | undefined>)[c] ?? c).join(', ');
+                return fail(409, 'STRATEGY_UNAVAILABLE', d.errors.unavailable(words || ((m.values as Record<string, string | undefined>)[channel] ?? channel)));
+              }
+              case 'VERSION_NOT_ACTIVE': return fail(409, 'VERSION_NOT_ACTIVE', d.errors.versionNotActive);
+              case 'ACCOUNT_DISCONNECTED': return fail(409, 'ACCOUNT_DISCONNECTED', d.errors.disconnected);
+              default: return fail(404, result.cause, d.errors.notFound);
+            }
+        }
       }
       if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel' && param4 !== 'other-tools' && param4 !== 'quantity-writes' && param4 !== 'quantity-writes-revoke')) return fail(404, 'NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
@@ -777,11 +823,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const param = parts[4] ?? null;
     /** Экраны, которые отдают и маршруты записи (ответ после действия) — одним построителем */
     const strategiesScreen = async (canEdit: boolean, query?: ListQuery) => {
-      const [page, f] = await Promise.all([
+      const [page, f, defaults] = await Promise.all([
         catalogPageFor(listQuery(query)),
         facts({ first: 1, strategyUsage: { examples: STRATEGY_SCOPE_EXAMPLES }, channelPricing: { limit: CHANNEL_PRICING_SHOWN } }),
+        // Шаг 103 [Р-228]: карточка стратегии называет аккаунты, для которых она — умолчание новых предложений
+        live.store.defaultStrategies(live.tenantId),
       ]);
       const world = await load(page && f ? [...page.scopeIds, ...f.firstIds, ...(f.strategyUsage ?? []).flatMap((u) => u.exampleIds)] : null, { catalogPage: page, facts: f });
+      world.defaultStrategies = defaults;
       return strategiesView(world, m, canEdit, query);
     };
     const stopScreen = async () => {

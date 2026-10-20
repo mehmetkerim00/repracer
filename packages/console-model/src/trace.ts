@@ -6,6 +6,7 @@ import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { strategyLabel } from './products.ts';
+import { accountLabel } from './strategies.ts';
 import { channelOf, gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
@@ -193,6 +194,20 @@ export function isDangerous(d: ConsoleDecision): boolean {
 }
 
 /** Р-154: решение приходит одним запросом по идентификатору — с горячим намерением и записями по нему, а не поиском по всем */
+/**
+ * Шаг 103 [Р-228]: стратегию решения назначило правило умолчания аккаунта — квитанция говорит это и называет человека, задавшего
+ * умолчание, и когда (последняя строка журнала назначений единицы на момент решения — та же стратегия и версия)
+ */
+function assignedByRule(detail: DecisionDetail, def: StrategyDefinition | null, world: StandWorld, m: Messages): TraceItem[] {
+  const a = detail.assignment;
+  if (!a || a.source !== 'DEFAULT_RULE' || a.outcome !== 'ASSIGNED' || !a.rule) return [];
+  // Решение — по той же стратегии и версии, что назначило правило (иначе стратегию сменили после него)
+  if (!def || a.strategyId !== def.strategyId || a.version !== def.version) return [];
+  const account = world.accounts.find((x) => x.channelAccountId === a.channelAccountId);
+  const who = a.rule.setByName ?? (a.rule.setByEmail ? world.people?.[a.rule.setByEmail] ?? a.rule.setByEmail : m.ui.trace.someone);
+  return [{ label: m.ui.trace.assignedHow, value: m.ui.trace.assignedByDefault(account ? accountLabel(account, m) : m.ui.trace.someAccount, who, m.when(a.rule.setAt)) }];
+}
+
 export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Messages): DecisionTrace {
   const d = detail.decision;
   const t = m.ui.trace;
@@ -306,6 +321,7 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
       summary: st.intentClass === 'CHANGED' ? t.proposed(money(st.proposedMinor), m.change(st.currentMinor, st.proposedMinor), reason.text) : t.keep(reason.text),
       items: [
         { label: t.strategy, value: `${label.label}${m.colon}${label.detail}` },
+        ...assignedByRule(detail, def, world, m),
         { label: t.trigger, value: (m.ui.triggers as Record<string, string | undefined>)[st.trigger] ?? st.trigger },
         { label: t.before, value: money(st.currentMinor) },
         { label: t.boundsAtStrategy, value: `${money(st.boundsAtStrategy.minMinor)} – ${money(st.boundsAtStrategy.maxMinor)}` },

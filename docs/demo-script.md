@@ -122,8 +122,10 @@ pricing. У раздела из одного пункта заголовка н�
 - **Подзаголовок:** «The channel is connected and the engine runs completely — snapshots, checks, strategy, bounds, explanation.» и ссылка
   **«Learn more»** — раскрывает: «Nothing is sent to your store: every change below was held back.»
 - **Карточка «Next step»** (шаг 96, В22) — та же логика, что у пути подключения на Channels, один источник: «Next step: Stock
-  synchronization enabled (12 of 36)», пилюля **«Waiting for your decision»** и кнопка **«Open Channels»**. У демо путь не пройдётся сам:
-  запись количества eBay и Walmart ждёт подтверждения владельца [Р-202] — об этом раздел «г».
+  synchronization enabled (12 of 38)» и кнопка **«Go to inventory»**. У демо путь не пройдётся сам: запись количества eBay и Walmart ждёт
+  подтверждения владельца [Р-202] — об этом раздел «г»; с шага 103 открыты и шаги себестоимости, границ и включения — у двух новых
+  товаров amazon.com (раздел «г», «Новые товары») себестоимости нет, поэтому пилюли «Waiting for your decision» (путь ждёт только
+  владельца) у демо больше нет.
 - **Period** (шаг 96, II; шаг 96.1 — один контрол диапазона) — кнопка с датами «Last 7 days · Oct 9 – Oct 16, 2026». Нажатие открывает
   календарь: слева **Last 24 hours / Last 7 days / Last 30 days**, справа два месяца, внизу **Apply / Cancel**. Свой диапазон — двумя
   нажатиями: первое — начало («Now pick the last day — Oct 7, 2026 or later.»), второе — конец; день раньше начала календарь не примет и
@@ -290,9 +292,10 @@ resume anytime with a note.» Ниже — таблица трёх видов о
 
 **Экран «Channels»** (шаг 95; шаг 96 — В15 и решение по варианту шага 95). У демо путь подключения не пройдётся сам: запись количества
 eBay и Walmart ждёт решения владельца [Р-202], об этом и рассказ ниже. Пока путь ждёт только решения владельца, чеклист свёрнут в одну
-строку над аккаунтами: «Setup: step 4 of 8 — Stock synchronization enabled (12 of 36) waits for your decision below.» и ссылка «Show the
-checklist» (раскрывает прежние восемь шагов). Сразу под ней — раздел **«Channel accounts»**, карточка **eBay · syn_demo_ebay_us_… ·
-ebay.com**:
+строку над аккаунтами; с шага 103 у демо открыты и шаги себестоимости, границ и включения (два новых товара amazon.com без себестоимости),
+поэтому чеклист «Setup» развёрнут под аккаунтами: «Resume at: Stock synchronization enabled», у шага себестоимости — «36 of 38 offers
+have unit costs. Narrowing continues the path with those; the rest stay off until their costs are imported.» Сверху — раздел **«Channel
+accounts»**, карточка **eBay · syn_demo_ebay_us_… · ebay.com**:
 
 - «shadow: connected, nothing is sent to your store»;
 - «Found 12 offers; the shadow made N decisions in the last 24 hours.» (шаг 68: тень США считает);
@@ -324,12 +327,21 @@ the owner.» — так выглядит канал, остатки которо
 Что сказать: по умолчанию мы остатки в канал не отправляем вовсе, пока владелец не подтвердил, что другой инструмент их не ведёт.
 Подтверждение отзывается тем же экраном («Revoke stock updates») и выключает отправку остатков сразу.
 
+**Новые товары — со стратегией сами** (шаг 103, Р-228). Внизу карточки amazon.com — строка **«Default strategy for new offers: Beat the
+lowest by 1 cent · set by …»** и под ней «Assigned to 2 new offers so far»: после прожатой недели у продавца появились два листинга
+(«Bamboo cutting board, large», «Pour-over coffee dripper»), обход каталога завёл их — и правило аккаунта назначило им стратегию. У eBay —
+«None — assign manually». В выборе стратегии «Win the Buy Box» серая с причиной: на Amazon держатель Buy Box не назван.
+
+Что сказать: умолчание назначает, но не включает — у новых товаров нет себестоимости, и цена не сдвинется, пока вы сами не включите
+репрайсинг; каждое такое назначение в журнале с вашим именем как автора правила; смена умолчания трогает только товары, которые придут
+потом. Найти новинки — Offers, поиск «Bamboo»: стратегия есть, решений о цене нет.
+
 ## д. Продажа: резервация и остатки (2 мин)
 
 **Экран «Inventory»** (шаг 96, В19: пункт и страница остатков — Inventory, прежний адрес `…/stock` перенаправляется). Сводка сверху
 (шаг 96, А7 — людскими словами):
 
-> «Products 36: with stock 36; offers in sync 12; updates being sent now 0; our number differs from the store’s 0; open reservations R.»
+> «Products 38: with stock 36; offers in sync 12; updates being sent now 0; our number differs from the store’s 0; open reservations R.»
 >
 > «Warehouse Newark, DE — File import (internal pool); 36 products with figures»
 
@@ -338,7 +350,7 @@ the owner.» — так выглядит канал, остатки которо
 шаг «г», отправка остатков по Р-202 выключена до подтверждения владельца).
 
 Сверху таблицы — товары с остатком по убыванию «Available», при равенстве выше — с резервами (шаг 84.1). Поставьте флажок **«Only products
-with reservations»** — список фильтруется сразу, над таблицей «N of 36 products match.» и
+with reservations»** — список фильтруется сразу, над таблицей «N of 38 products match.» и
 кнопка «Show all» (или ищите по названию и SKU: поле «Search by name or SKU» и кнопка «Search», шаг 69, K8) — останутся строки с
 заказами. Первая резервация в проходе шага 76 появилась на 5-й минуте после запуска. Ожидаемая строка, например:
 

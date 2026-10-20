@@ -891,6 +891,29 @@ export const es: Messages = {
      * произошло БЫ, и ни слова о том, сколько бы он заработал — этого мы не знаем.
      */
     connections: {
+      /** Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта */
+      defaultStrategy: {
+        title: 'Estrategia predeterminada para ofertas nuevas',
+        line: (name: string) => `Estrategia predeterminada para ofertas nuevas: ${name}`,
+        none: 'Ninguna — asignar manualmente', unnamed: 'una estrategia sin nombre', someone: 'un miembro de este espacio de trabajo',
+        setBy: (who: string, when: string) => `definida por ${who}, ${when}`,
+        hint: 'Las ofertas nuevas que se encuentren en esta cuenta del canal reciben esta estrategia, como si usted pulsara Asignar. Los precios no cambian solos: el repricing de una oferta nueva sigue apagado hasta que usted lo active, y necesita un costo unitario y límites. Un cambio afecta solo a las ofertas que se encuentren después.',
+        save: 'Guardar predeterminada',
+        choose: 'Elegir la predeterminada',
+        unavailable: (needs: string) => `no disponible en este canal: necesita ${needs}`,
+        assigned: (n: number) => (n === 1 ? 'Asignada a 1 oferta nueva hasta ahora' : `Asignada a ${n} ofertas nuevas hasta ahora`),
+        notAssigned: (n: number, reason: string) => `sin asignar a ${n}: ${reason}`,
+        reasons: {
+          CHANNEL_PRICING: 'el canal fija el precio de la oferta por sí mismo', NOT_WRITABLE: 'no podemos enviar precios al anuncio de eBay (subasta o no migrado)',
+          STRATEGY_UNAVAILABLE: 'la estrategia ya no está disponible en este canal',
+        },
+        saved: (name: string) => `Guardado. Las ofertas nuevas de esta cuenta del canal recibirán: ${name}.`,
+        errors: {
+          unavailable: (needs: string) => `Esta estrategia no puede ser la predeterminada en este canal: necesita ${needs}.`,
+          versionNotActive: 'Esta estrategia no tiene una versión activa.', disconnected: 'Esta cuenta del canal está desconectada.',
+          notFound: 'No se encontró la estrategia o la cuenta del canal.', noRight: 'Solo el propietario o un gerente puede cambiar la estrategia predeterminada.',
+        },
+      },
       noChannels: 'Todavía no hay cuentas de canal, y la conexión de canales aún no está configurada en este servidor; la activa el equipo de la plataforma.',
       title: 'Cuentas de canal',
       intro: 'Usted mismo conecta un canal: el botón abre la página de consentimiento del canal, usted permite el acceso allí y el canal lo devuelve aquí. Una conexión nueva empieza en modo sombra: el motor funciona por completo y no envía nada a su tienda.',
@@ -1289,6 +1312,7 @@ export const es: Messages = {
       floorMarginUnavailable: (min: string, cause: string) => `Su precio mínimo: ${min}; piso de margen no disponible: ${cause}`,
       // Шаг 102 [Р-227]: безубыточность — третий источник пола; распродажа заменяет пол
       floorFromBreakEven: (min: string) => `del punto de equilibrio (su precio mínimo: ${min})`, floorFromClearance: 'del piso de liquidación — por debajo del punto de equilibrio a propósito', clearancePill: 'Liquidación',
+      notAssigned: (reason: string) => `Sin asignar: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Piso por encima del techo', frozenDetail: 'precios congelados: suba el precio máximo o active la liquidación',
     },
@@ -1394,6 +1418,8 @@ export const es: Messages = {
       sanityTitle: (_ruleset: string) => 'Revisión de datos de entrada',
       sanityAccepted: (checks: number, warnings: number) => `Datos de la competencia aceptados: ${checks} reglas revisadas${warnings ? `, ${warnings} advertencias` : ''}`,
       anchorNotRun: 'no revisado: la revisión se detuvo antes', anchorPassed: 'superado',
+      assignedHow: 'Cómo se asignó', assignedByDefault: (account: string, who: string, when: string) => `Por la regla predeterminada de ${account}, definida por ${who}, ${when}`,
+      someone: 'un miembro de este espacio de trabajo', someAccount: 'una cuenta del canal',
       anchorsUsed: (list: string) => `Usadas: ${list}`, noAnchor: 'No se usó ninguna referencia',
       proposed: (price: string, change: string | null, text: string) => `Propuesto ${price}${change ? ` (${change})` : ''}: ${text}`,
       keep: (text: string) => `Mantener el precio: ${text}`,
@@ -1451,6 +1477,7 @@ export const es: Messages = {
         previewFirst: 'Primero muestre la vista previa: al guardar se aplica exactamente lo que mostró la vista previa.',
         storefront: 'Primero elija al menos un sitio.',
         typeName: 'Primero escriba exactamente el identificador que se muestra arriba.',
+        chooseOther: 'Primero elija otra estrategia.',
         period: 'Primero ingrese ambas fechas.',
         note: (min: number) => `Primero ingrese una nota de al menos ${min} caracteres.`,
       },
@@ -1585,6 +1612,7 @@ export const es: Messages = {
       rePreviewed: 'Las ofertas cambiaron desde la vista previa. La vista previa se generó de nuevo: revísela y vuelva a guardar.',
       sample: (shown: number, total: number) => `Vista previa de ${shown} de ${total} ofertas: la estrategia se aplica a las ${total}. La base de datos revisa cada oferta por separado.`,
       versionsTitle: 'Versiones', statuses: { DRAFT: 'borrador', ACTIVE: 'activa', ARCHIVED: 'archivada' }, statusUnknown: 'estado no registrado', authorUnknown: 'autor no registrado',
+      defaultFor: (accounts: string) => `Predeterminada para ofertas nuevas en: ${accounts}`, byDefaultRule: 'por regla predeterminada',
       versionBy: (author: string, when: string) => `${author} · ${when}`,
       assignVersion: 'Asignar', assigning: (name: string, version: number) => `Asignar “${name}” versión ${version} sin crear una versión nueva`,
       assignConfirmText: 'La versión mostrada se asigna tal cual; no se crea ninguna versión nueva.',

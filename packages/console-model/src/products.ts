@@ -43,6 +43,8 @@ export interface ProductRow {
   clearance: string | null;
   /** Шаг 102 [Р-227]: пол выше потолка — пилюля и «цены заморожены: поднимите потолок или включите распродажу» */
   frozen: string | null;
+  /** Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию новому предложению — причина словами, иначе null */
+  notAssigned: string | null;
 }
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
@@ -109,6 +111,17 @@ export function strategyLabel(def: StrategyDefinition | null, currency: string, 
       };
     }
   }
+}
+
+/**
+ * Шаг 103 [Р-228]: честная пометка «not assigned: …» — у предложения нет стратегии, и последнее слово о нём — правило умолчания аккаунта,
+ * которое его не назначило (ценообразование канала, листинг без записи, стратегия недоступна на канале)
+ */
+export function notAssignedText(scope: { strategy: StrategyDefinition | null; assignment?: { outcome: string; reason: string | null } | null }, m: Messages): string | null {
+  const a = scope.assignment;
+  if (scope.strategy || !a || a.outcome !== 'NOT_ASSIGNED' || !a.reason) return null;
+  const reasons = m.ui.connections.defaultStrategy.reasons as Record<string, string | undefined>;
+  return m.ui.products.notAssigned(reasons[a.reason] ?? a.reason);
 }
 
 export function boundText(b: BoundResolution, currency: string, m: Messages): string {
@@ -267,6 +280,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       channelNotes: channelNotes(world, scope, m),
       clearance: scope.clearance ? p.clearancePill : null,
       frozen: floor.aboveCeiling ? p.floorAboveCeiling : null,
+      notAssigned: notAssignedText(scope, m),
     };
   });
   return {

@@ -339,6 +339,8 @@ async function startUsDemoWorld(options: DemoWorldOptions): Promise<RunningDemoW
     accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon, walmartAccountId: us.walmart },
     pressDays: options.usPressDays ?? 0, log,
     orders: { pipeline: stockPipeline, skus: skus.filter((sku) => sku.includes('-AMZ-')) },
+    // Шаг 103 [Р-228]: умолчание amazon.com и два новых листинга — только у главного демо, не у лёгких продавцов
+    newOffers: true,
   });
   const accounts = us.accounts;
   const nowIso = () => systemClock.now();

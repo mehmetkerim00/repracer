@@ -1,4 +1,5 @@
-import { can, holdsOwnerActions, type MemberRole } from '@repracer/pricing-model';
+import { can, holdsOwnerActions, type MemberRole, type StrategyParams } from '@repracer/pricing-model';
+import type { DefaultStrategyRow } from '@repracer/pricing-pipeline';
 import type { ConnectionRow, PendingRequestRow } from '@repracer/pricing-store-pg';
 import type { Messages } from './i18n/index.ts';
 import { storefrontName } from './world.ts';
@@ -61,6 +62,71 @@ export interface ConnectionAccountView {
   externalEdits24h: number;
   externalEditsText: string;
   externalEditsNote: string;
+  /** Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта; null — экрану не дали данных или аккаунт отключён */
+  defaultStrategy: DefaultStrategyView | null;
+}
+
+/** Шаг 103 [Р-228]: выбор умолчания — «None» и активные стратегии; недоступная на канале — с причиной и не выбирается [Р-39] */
+export interface DefaultStrategyOption {
+  strategyId: string | null;
+  label: string;
+  disabled: boolean;
+}
+
+export interface DefaultStrategyView {
+  title: string;
+  /** Одной строкой: что сейчас и кто задал */
+  line: string;
+  current: string | null;
+  options: DefaultStrategyOption[];
+  canEdit: boolean;
+  hint: string;
+  saveLabel: string;
+  /** Что правило уже сделало: назначено N новичкам, не назначено — с причинами; null у «None» */
+  results: string | null;
+}
+
+/** Шаг 103 [Р-228]: что экрану нужно для умолчаний — строки умолчаний, активные стратегии и правило доступности стратегии на канале */
+export interface DefaultStrategyInput {
+  rows: readonly DefaultStrategyRow[];
+  strategies: ReadonlyArray<{ strategyId: string; name: string; params: StrategyParams }>;
+  availability: (channel: string, params: StrategyParams) => { available: true } | { available: false; unmet: Readonly<Record<string, readonly string[]>> };
+  canEdit: boolean;
+  people?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Чего стратегии не хватает на канале — словами, без имён источников: требования всех источников, кроме служебных (сверка, доступность),
+ * по одному разу. Тот же расчёт, что у превью и стража назначения [Р-39]
+ */
+function unmetWords(unmet: Readonly<Record<string, readonly string[]>>, m: Messages): string {
+  const all = Object.values(unmet).flat();
+  const meaningful = all.filter((c) => c !== 'RECONCILIATION_ONLY' && !c.startsWith('AVAILABILITY_'));
+  return [...new Set(meaningful.length > 0 ? meaningful : all)].map((c) => (m.values as Record<string, string | undefined>)[c] ?? c).join(', ');
+}
+
+export function defaultStrategyView(account: { channelAccountId: string; channel: string }, input: DefaultStrategyInput, m: Messages): DefaultStrategyView {
+  const t = m.ui.connections.defaultStrategy;
+  const row = input.rows.find((r) => r.channelAccountId === account.channelAccountId) ?? null;
+  const current = row?.strategyId ?? null;
+  const options: DefaultStrategyOption[] = [
+    { strategyId: null, label: t.none, disabled: false },
+    ...input.strategies.map((st) => {
+      const a = input.availability(account.channel, st.params);
+      return a.available ? { strategyId: st.strategyId, label: st.name, disabled: false }
+        : { strategyId: st.strategyId, label: `${st.name} — ${t.unavailable(unmetWords(a.unmet, m))}`, disabled: true };
+    }),
+  ];
+  const name = current === null ? t.none : row?.strategyName ?? input.strategies.find((x) => x.strategyId === current)?.name ?? t.unnamed;
+  const who = row ? row.setByName ?? (row.setByEmail ? input.people?.[row.setByEmail] ?? row.setByEmail : t.someone) : null;
+  const reasons = t.reasons as Record<string, string | undefined>;
+  const results = current === null || !row ? null
+    : [row.assigned > 0 || row.notAssigned.length === 0 ? t.assigned(row.assigned) : null,
+      ...row.notAssigned.map((x) => t.notAssigned(x.count, reasons[x.reason] ?? x.reason))].filter((x): x is string => x !== null).join(' · ');
+  return {
+    title: t.title, line: `${t.line(name)}${row && who ? ` · ${t.setBy(who, m.when(row.setAt))}` : ''}`, current, options,
+    canEdit: input.canEdit, hint: t.hint, saveLabel: t.save, results,
+  };
 }
 
 /** Шаг 60 [Р-202]: ответы на вопрос о других инструментах канала */
@@ -189,6 +255,7 @@ export function connectionsView(
   rows: { accounts: ConnectionRow[]; pending: PendingRequestRow[] },
   connectable: readonly ConnectableChannel[],
   m: Messages,
+  defaults: DefaultStrategyInput | null = null,
 ): ConnectionsView {
   const t = m.ui.connections;
   const canManage = can(input.role, 'MANAGE_TENANT');
@@ -226,6 +293,7 @@ export function connectionsView(
       reconnectLabel: state === 'REVOKED' ? t.reconnectRevoked : t.reconnect,
       channelLimitText: channelLimitText(a.channel, m),
       ...externalWritersView(a, input.role, m),
+      defaultStrategy: defaults && a.authStatus !== 'DISCONNECTED' ? defaultStrategyView(a, defaults, m) : null,
     };
   });
   const channels = connectable.map((c): ConnectionChannelView => {

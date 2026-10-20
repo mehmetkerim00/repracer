@@ -1,4 +1,5 @@
 import type {
+  DefaultStrategyRow,
   ConsoleCatalogFacts, ConsoleCatalogPage, ConsoleDecisionRow, ConsoleHaltRow, ConsoleIntentRow, ConsoleScopeRow, ConsoleState, ConsoleStopRow, ConsoleWriteRow,
 } from '@repracer/pricing-pipeline';
 import type { MemberRole } from '@repracer/pricing-model';
@@ -49,6 +50,8 @@ export interface StandWorld {
    */
   catalogPage?: ConsoleCatalogPage;
   catalogFacts?: ConsoleCatalogFacts;
+  /** Шаг 103 [Р-228]: стратегии по умолчанию аккаунтов — карточка стратегии называет, для каких аккаунтов она умолчание */
+  defaultStrategies?: readonly DefaultStrategyRow[];
 }
 
 export type ConsoleScope = ConsoleScopeRow;

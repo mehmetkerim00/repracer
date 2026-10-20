@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow,
-  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult } from './store.ts';
+  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -672,6 +672,41 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       history: this.clearanceLog.filter((c) => c.writeScopeId === writeScopeId).sort((a, b) => b.seq - a.seq).slice(0, 50)
         .map(({ writeScopeId: _w, seq: _s, ...rest }) => rest),
     };
+  }
+
+  // --- Шаг 103 [Р-228]: стратегия по умолчанию аккаунта — журнал только на добавление, как tenant_data.default_strategy_change (0199) ----
+  private readonly defaultLog: Array<{ changeId: string; seq: number; channelAccountId: string; strategyId: string | null; membershipId: string; at: Instant }> = [];
+
+  async setDefaultStrategy(_tenantId: string, channelAccountId: string, strategyId: string | null, actor: AdminActor): Promise<DefaultStrategyResult> {
+    const known = this.accountChannels.has(channelAccountId) || [...this.scopes.values()].some((r) => r.channelAccountId === channelAccountId);
+    if (!known) return { status: 'INVALID', cause: 'ACCOUNT_NOT_FOUND' };
+    if (strategyId !== null) {
+      const versions = [...this.strategyVersions.values()].filter((d) => d.strategyId === strategyId);
+      if (versions.length === 0) return { status: 'INVALID', cause: 'STRATEGY_NOT_FOUND' };
+      // OQ-169: только активная версия; у версии без строки метаданных статус — действующая (как assignable у экрана)
+      const active = versions.filter((d) => (this.strategyMeta.get(`${d.strategyId}@${d.version}`)?.status ?? 'ACTIVE') === 'ACTIVE')
+        .sort((x, y) => y.version - x.version)[0];
+      if (!active) return { status: 'INVALID', cause: 'VERSION_NOT_ACTIVE' };
+      const sources = this.sourcesFor(channelAccountId);
+      const availability = sources ? strategyAvailability(active.params, sources) : null;
+      if (availability && !availability.available) return { status: 'INVALID', cause: 'STRATEGY_UNAVAILABLE', unmet: availability.unmet as Record<string, string[]> };
+    }
+    const seq = this.defaultLog.length + 1;
+    const changeId = `default-${seq}`;
+    this.defaultLog.push({ changeId, seq, channelAccountId, strategyId, membershipId: actor.membershipId, at: systemClock.now() });
+    return { status: 'SET', changeId };
+  }
+
+  async defaultStrategies(_tenantId: string): Promise<DefaultStrategyRow[]> {
+    const latest = new Map<string, (typeof this.defaultLog)[number]>();
+    for (const c of this.defaultLog) latest.set(c.channelAccountId, c);
+    return [...latest.values()].map((c) => {
+      const versions = [...this.strategyVersions.values()].filter((d) => d.strategyId === c.strategyId).sort((x, y) => y.version - x.version);
+      const name = versions[0] ? this.strategyMeta.get(`${versions[0].strategyId}@${versions[0].version}`)?.name ?? null : null;
+      // Обнаружение в памяти каталога не заводит — решений правила здесь нет
+      return { channelAccountId: c.channelAccountId, strategyId: c.strategyId, strategyName: name, setAt: c.at, setByMembershipId: c.membershipId,
+        setByName: null, setByEmail: null, assigned: 0, notAssigned: [] };
+    });
   }
 
   async expireClearances(_tenantId: string, channelAccountId: string): Promise<ClearanceEnded[]> {

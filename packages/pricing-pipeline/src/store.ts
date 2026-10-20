@@ -129,6 +129,44 @@ export interface ScopeEvaluationContext {
 }
 
 /** Шаг 102 [Р-227]: включённый режим распродажи — строка журнала включения (`tenant_data.clearance_change`) */
+/** Шаг 103 [Р-228]: почему правило умолчания не назначило стратегию новому предложению */
+export type DefaultRuleReason = 'CHANNEL_PRICING' | 'NOT_WRITABLE' | 'STRATEGY_UNAVAILABLE';
+
+/**
+ * Шаг 103 [Р-228]: источник нынешней стратегии единицы — последняя строка журнала назначений. У правила умолчания — строка умолчания и
+ * человек, который его задал: любое автоназначение прослеживается до живого человека
+ */
+export interface StrategyAssignmentRef {
+  outcome: 'ASSIGNED' | 'UNASSIGNED' | 'NOT_ASSIGNED';
+  source: 'PERSON' | 'DEFAULT_RULE';
+  reason: DefaultRuleReason | null;
+  strategyId: string | null;
+  version: number | null;
+  channelAccountId: string;
+  at: Instant;
+  rule: { changeId: string; setAt: Instant; setByMembershipId: string; setByName: string | null; setByEmail: string | null } | null;
+}
+
+/** Шаг 103 [Р-228]: действующее умолчание аккаунта — экран Channels; счётчики — решения правила по нему */
+export interface DefaultStrategyRow {
+  channelAccountId: string;
+  /** null — «None — assign manually» */
+  strategyId: string | null;
+  strategyName: string | null;
+  setAt: Instant;
+  setByMembershipId: string;
+  setByName: string | null;
+  setByEmail: string | null;
+  assigned: number;
+  notAssigned: Array<{ reason: DefaultRuleReason; count: number }>;
+}
+
+export type DefaultStrategyResult =
+  | { status: 'SET'; changeId: string }
+  | { status: 'FORBIDDEN' }
+  /** STRATEGY_UNAVAILABLE — канал не даёт стратегии данных [Р-39]; VERSION_NOT_ACTIVE — у стратегии нет активной версии (OQ-169) */
+  | { status: 'INVALID'; cause: 'STRATEGY_UNAVAILABLE' | 'VERSION_NOT_ACTIVE' | 'ACCOUNT_DISCONNECTED' | 'ACCOUNT_NOT_FOUND' | 'STRATEGY_NOT_FOUND'; unmet?: Record<string, string[]> };
+
 export interface ClearanceRef {
   changeId: string;
   floorMinor: number;
@@ -755,6 +793,12 @@ export interface PricingStore {
   enableClearance(tenantId: string, input: ClearanceEnableInput, actor: AdminActor): Promise<ClearanceEnableResult>;
   disableClearance(tenantId: string, input: { writeScopeId: string; note: string | null }, actor: AdminActor): Promise<ClearanceDisableResult>;
   clearanceOf(tenantId: string, writeScopeId: string): Promise<ClearanceState>;
+  /**
+   * Шаг 103 [Р-228]: стратегия по умолчанию для НОВЫХ предложений аккаунта (null — «None — assign manually»). Задаёт человек от своего
+   * имени без второго фактора (действие внутри забора, Р-225); стратегия — с активной версией и доступная на канале [Р-39]
+   */
+  setDefaultStrategy(tenantId: string, channelAccountId: string, strategyId: string | null, actor: AdminActor): Promise<DefaultStrategyResult>;
+  defaultStrategies(tenantId: string): Promise<DefaultStrategyRow[]>;
   /** Шаг 99 [Р-224, Р-225]: импорт границ и минимальной маржи — целиком, одной транзакцией вместе со строкой журнала */
   importBounds(tenantId: string, input: { rows: readonly BoundsImportRowInput[]; run?: ImportRunInput }, actor: AdminActor): Promise<BoundsImportResult>;
   /** Шаг 99 [Р-225]: назначение стратегий из файла — целиком, одной транзакцией вместе со строкой журнала */
@@ -1118,6 +1162,8 @@ export interface ConsoleScopeRow {
   clearance?: ClearanceRef | null;
   /** Предел шага цены (гардрейл) — «вернётся к полу примерно за N шагов» при выключении распродажи */
   maxStepChangeBp?: number | null;
+  /** Шаг 103 [Р-228]: откуда нынешняя стратегия — «assigned by default rule» на карточке стратегии; «not assigned: …» с причиной */
+  assignment?: StrategyAssignmentRef | null;
 }
 
 export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationIntentColumns {
@@ -1311,6 +1357,8 @@ export interface DecisionDetail {
   writes: ConsoleWriteRow[];
   /** Шаг 102 [Р-227]: строка включения режима распродажи, при котором принято решение, — квитанция называет, кто, когда и зачем */
   clearance?: ClearanceRef | null;
+  /** Шаг 103 [Р-228]: назначение стратегии, действовавшее в момент решения, — квитанция говорит «assigned by default rule» */
+  assignment?: StrategyAssignmentRef | null;
 }
 
 /** Решения показанных единиц: последнее и сколько всего в горячем буфере — только для строк страницы, не для каталога */

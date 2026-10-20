@@ -241,6 +241,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
                   onClick={() => setOpenOffers(openOffers === s.strategyId ? null : s.strategyId)}>{openOffers === s.strategyId ? t.hideOffers : t.showOffers}</button> : null}
               </>
             )}</div>
+            {/* Шаг 103 [Р-228]: стратегия — умолчание новых предложений аккаунтов: одной строкой, без пилюли */}
+            {s.defaultFor ? <div className="small muted strategy-default">{s.defaultFor}</div> : null}
             {openOffers === s.strategyId ? (
               <ul className="offer-list small">
                 {s.scopes.map((u) => <li key={u.unit.writeScopeId}>{u.unit.label}{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
@@ -345,7 +347,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <ul className="index pick-list">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
-            <CheckField label={s.unit.label} caption={`${s.strategy} · ${s.mode}`} disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
+            <CheckField label={s.unit.label} caption={`${s.strategy} · ${s.mode}${s.byDefaultRule ? ` · ${s.byDefaultRule}` : ''}`} disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
               {...(s.assignable ? {} : { title: t.notAssignable })}
               onChange={(v) => pick(v ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} />
             {s.channelPricing ? <div className="small pick-note"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}
