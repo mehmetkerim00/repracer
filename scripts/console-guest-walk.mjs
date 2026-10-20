@@ -82,15 +82,16 @@ const stop = await walk('stop (остановить цены)', 'POST', `/api/wo
 check(stop.status === 403, `остановка цен гостю запрещена: ${stop.status}`);
 const bounds = await walk('bounds/plan (экран различий границ)', 'POST', `/api/worlds/${world}/bounds/plan`, { token, body: { offers: { all: true }, minPriceMinor: 100 } });
 check(bounds.status === 403, `правка границ гостю запрещена: ${bounds.status}`);
-// Все три пути, которыми наблюдатель создаёт задание без проверки права в консоли [Р-143]: отказывает база
-for (const [what, path, body] of [
-  ['compliance/evidence (выгрузка доказательства)', `/api/worlds/${world}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }],
-  ['feed/export (выгрузка ленты цен)', `/api/worlds/${world}/feed/export`, { from: '2026-01-01', to: '2026-01-31' }],
-  ['strategies/preview (предпросмотр стратегии)', `/api/worlds/${world}/strategies/preview`, { draft: { name: 'Gast-Vorschau', params: { type: 'FIXED', priceMinor: 1500 } }, all: true }],
+// Все три пути, которыми наблюдатель создаёт задание без проверки права в консоли [Р-143]: отказывает база. Шаг 104 [Р-229]: выгрузка
+// экрана — маршрут `exports` (прежний `feed/export` удалён), гостю отказывает консоль своей причиной, страж базы 0124 — за ней
+for (const [what, path, body, code] of [
+  ['compliance/evidence (выгрузка доказательства)', `/api/worlds/${world}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }, 'FORBIDDEN'],
+  ['exports (выгрузка экрана)', `/api/worlds/${world}/exports`, { screen: 'price-changes', format: 'csv', query: { period: '7d' } }, 'EXPORT_NOT_IN_DEMO'],
+  ['strategies/preview (предпросмотр стратегии)', `/api/worlds/${world}/strategies/preview`, { draft: { name: 'Gast-Vorschau', params: { type: 'FIXED', priceMinor: 1500 } }, all: true }, 'FORBIDDEN'],
 ]) {
   const job = await walk(what, 'POST', path, { token, body });
   // Именно отказ в ПРАВЕ: 400 от тела и 404 от переименованного маршрута зеленели бы так же
-  check(job.status === 403 && job.body?.error?.code === 'FORBIDDEN', `${what}: ${job.status} ${job.text.slice(0, 160)}`);
+  check(job.status === 403 && job.body?.error?.code === code, `${what}: ${job.status} ${job.text.slice(0, 160)}`);
 }
 const jobs = await walk('jobs (список заданий)', 'GET', `/api/worlds/${world}/jobs`, { token });
 check(jobs.status === 200, `список заданий отвечает: ${jobs.status}`);

@@ -247,6 +247,23 @@ test('Р-160: гость не может НИЧЕГО изменить — от�
 });
 
 /**
+ * Шаг 104.1 [Р-146]: путь гостя развёртывания (`scripts/console-guest-walk.mjs`) ходил только в полном CI через прокси профиля
+ * production — и разошёлся с маршрутами молча: шаг 104 убрал `feed/export`, сценарий ждал отказа в праве и получил 404, полный прогон
+ * покраснел через час после быстрого. Здесь тот же сценарий идёт против той же консоли, что поднимает профиль (`startConsole`), на каждом
+ * коммите. Стоит до теста предела выдачи: он исчерпывает гостей минуты
+ */
+test('step 104.1 [Р-146]: the deployment guest walk passes against this console — its routes cannot drift unseen', async () => {
+  const { execFile } = await import('node:child_process');
+  const script = new URL('../../../scripts/console-guest-walk.mjs', import.meta.url).pathname;
+  const run = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    execFile(process.execPath, [script, origin], { timeout: 240_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) =>
+      resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr }));
+  });
+  assert.equal(run.code, 0, `the guest walk is red: ${run.stderr.split('\n').filter((l) => l.includes('GUEST WALK RED')).join(' | ') || run.stderr.slice(-600)}`);
+  assert.match(run.stdout, /GUEST WALK: \d+ /, 'the walk printed its result line');
+});
+
+/**
  * Находка 5 ревью шага 37: маршрут гостя ПУБЛИЧНЫЙ, и каждый вызов пишет три строки в платформенные таблицы. Предел
  * выдачи — свойство демо: он назван числом, отвечает 429 и человеческим текстом, а не 500 и не молчанием.
  */
