@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0200_verify_schema_invariants_v55.sql';
+const VERIFY = 'migrations/0202_verify_schema_invariants_v56.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2839,3 +2839,37 @@ export const STEP103_ROWS = [
     ],
   },
 ];
+
+// Шаг 104 [Р-229]: выгрузка экранов — потолок 50 000 строк у файла выгрузки и событие аудита при сохранении файла (0201)
+const R104 = T('screen-export-step104.pg.test.ts');
+const CAP104 = 'the database refuses a screen export file over 50 000 rows';
+const AUD104 = 'every saved export file is an audit event of the person who asked for it';
+export const STEP104_ROWS = [
+  {
+    row: 'шаг 104 (Р-229, потолок)', critical: false,
+    invariant: 'файл выгрузки экрана больше 50 000 строк база не сохраняет — отказ «narrow the period», а не обрезанный файл; ровно 50 000 — сохраняет; файл другого вида потолком выгрузки не ограничен; выгрузка экрана — вид, отдающий файл, с правом на отмену',
+    mutations: [
+      m(dropTrigger('c_bulk_job_artifact_export_cap', 'tenant_data.bulk_job_artifact'), node(R104, CAP104, 'an export over the limit', '^accepted$')),
+      m(replaceInFunction('tenant_data.bulk_job_artifact_export_cap()', 'IF NEW.rows_count > 50000 AND EXISTS', 'IF false AND EXISTS'),
+        node(R104, CAP104, 'an export over the limit', '^accepted$')),
+      // Потолок — только у выгрузки экрана: без условия вида он ловил бы и шаблон импорта
+      m(replaceInFunction('tenant_data.bulk_job_artifact_export_cap()', "AND j.kind = 'SCREEN_EXPORT') THEN", 'AND true) THEN'),
+        node(R104, CAP104, 'an import template is not capped', 'over the limit of 50 000 rows')),
+      // Без вида в списке «отдаёт файл» файл выгрузки не сохраняется вовсе — страж файла задания (0113) отказывает своей причиной
+      m(replaceInFunction('security.file_producing_job_kinds()', "UNION ALL SELECT unnest(ARRAY['SCREEN_EXPORT'])", ''),
+        node(R104, CAP104, 'an export over the limit', 'does not give the seller a file: see security.file_producing_job_kinds')),
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'SCREEN_EXPORT' THEN 'VIEW_PRICING'", ''),
+        verify('bulk job kind SCREEN_EXPORT has no cancel right known to the permission matrix')),
+    ],
+  },
+  {
+    row: 'шаг 104 (Р-229, аудит)', critical: false,
+    invariant: 'каждый сохранённый файл выгрузки экрана — событие аудита от имени человека, создавшего задание (кто, что, сколько строк); файл другого вида события выгрузки не пишет',
+    mutations: [
+      m(dropTrigger('zb_screen_export_audit', 'tenant_data.bulk_job_artifact'), node(R104, AUD104, 'one event for one file', '^0$')),
+      m(replaceInFunction('tenant_data.screen_export_audit()', "IF j.kind IS DISTINCT FROM 'SCREEN_EXPORT' THEN", 'IF false THEN'),
+        node(R104, AUD104, 'an import template writes no export event', '^2$')),
+    ],
+  },
+];
+

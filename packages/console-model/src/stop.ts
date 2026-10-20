@@ -1,4 +1,5 @@
 import { can, type StopScope } from '@repracer/pricing-model';
+import type { PageInfo } from './page.ts';
 import type { Messages } from './i18n/index.ts';
 import type { ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
 import { channelOf, gap, storefrontName, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld } from './world.ts';
@@ -106,6 +107,8 @@ export interface StopView {
   halts: { active: HaltCard[]; history: HaltCard[] };
   distrusts: { active: DistrustCard[]; history: DistrustCard[] };
   audit: AuditCard[];
+  /** Шаг 104 [Р-229]: журнал аудита за период — страницей (прежде — последние 200 без листания) */
+  auditPage?: PageInfo;
   notStopped: string[];
   gaps: Gap[];
 }
@@ -250,7 +253,18 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
       active: world.state.distrusts.filter((d) => d.releasedAt === null).map((d) => distrustCard(world, d, m)),
       history: world.state.distrusts.filter((d) => d.releasedAt !== null).map((d) => distrustCard(world, d, m)),
     },
-    audit: audit.map((a): AuditCard => (a.action === 'channel.offer_unpublished' ? {
+    audit: auditCards(world, audit, m),
+    notStopped: m.ui.stop.notStopped,
+    gaps: world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [],
+  };
+}
+
+/**
+ * Журнал аудита карточками — что, кто и о чём словами экрана. Шаг 104 [Р-229]: та же функция даёт слова файлу выгрузки журнала, чтобы
+ * файл не расходился с экраном
+ */
+export function auditCards(world: StandWorld, audit: readonly ConsoleAuditRow[], m: Messages): AuditCard[] {
+  return audit.map((a): AuditCard => (a.action === 'channel.offer_unpublished' ? {
       // Шаг 89: событие канала — актёр канал, предмет — предложение словами (название или SKU · витрина), объяснение — почему
       at: m.when(a.at), action: m.ui.stop.auditActions[a.action],
       actor: (m.values as Record<string, string | undefined>)[a.channel ?? ''] ?? a.channel ?? m.ui.stop.system,
@@ -269,10 +283,7 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
       note: a.note,
       // Шаг 93: участник назван по имени — его адрес подсказкой
       ...(a.action === 'membership.role_changed' && a.memberEmail && personName(a, world) !== a.memberEmail ? { scopeHint: a.memberEmail } : {}),
-    })),
-    notStopped: m.ui.stop.notStopped,
-    gaps: world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [],
-  };
+    }));
 }
 
 export function planStop(world: StandWorld, target: StopTarget, m: Messages): StopPlan {

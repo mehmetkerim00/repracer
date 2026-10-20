@@ -15,6 +15,11 @@ export interface XlsxSheet {
   header?: boolean;
   /** Ширина колонок в символах; по умолчанию — по самому длинному значению, не больше 60 */
   widths?: readonly number[];
+  /**
+   * Шаг 104 [Р-229]: колонки чисел (номера с нуля) — числовые ячейки, чтобы формулы продавца считали: «17.99» с точкой, без локали.
+   * Значение, которое не число (пусто, текст), остаётся строкой; строка заголовка — всегда строкой
+   */
+  numeric?: ReadonlySet<number>;
 }
 
 const escapeXml = (text: string) => text
@@ -34,6 +39,9 @@ function columnLetters(index: number): string {
   return name;
 }
 
+/** Число без локали: знак, цифры и точка — ровно то, что Excel читает числом во всех языках */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
 /** Имя листа: Excel не принимает «[]:*?/\» и больше 31 знака */
 const sheetName = (name: string) => name.replace(/[[\]:*?/\\]/g, ' ').slice(0, 31) || 'Sheet';
 
@@ -45,7 +53,9 @@ function sheetXml(sheet: XlsxSheet): string {
   const pane = sheet.header ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '';
   const rows = sheet.rows.map((row, r) => {
     const style = sheet.header && r === 0 ? ' s="1"' : '';
-    const cells = row.map((value, c) => (value === '' ? '' : `<c r="${columnLetters(c)}${r + 1}" t="inlineStr"${style}><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`)).join('');
+    const cells = row.map((value, c) => (value === '' ? ''
+      : !(sheet.header && r === 0) && sheet.numeric?.has(c) && PLAIN_NUMBER.test(value) ? `<c r="${columnLetters(c)}${r + 1}"><v>${value}</v></c>`
+        : `<c r="${columnLetters(c)}${r + 1}" t="inlineStr"${style}><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`)).join('');
     return `<row r="${r + 1}">${cells}</row>`;
   }).join('');
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import type { BoundsDiffView, ComplianceView, DecisionListView, DiscountCheckView, DecisionTrace, PriceFeedView, StopView, StrategyListView, StrategyPreviewView } from '@repracer/console-model';
+import { EXPORT_HEADERS, type BoundsDiffView, type ComplianceView, type DecisionListView, type DiscountCheckView, type DecisionTrace, type PriceFeedView, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
@@ -233,15 +233,49 @@ test('Р-142: выгрузка ленты цен — файл со всеми з
   const feed = (await handle({ method: 'GET', url: url('feed'), body: undefined, ...owner })).body as PriceFeedView;
   assert.ok(feed.page.total > 0, `в ленте мира стенда есть записи: ${feed.page.total}`);
 
-  const job = await finishJob(await handle({ method: 'POST', url: url('feed', 'export'), body: { query: {} }, ...owner }));
+  // Шаг 104 [Р-229]: выгрузка ленты — общей кнопкой «Export» экрана Price changes
+  const job = await finishJob(await handle({ method: 'POST', url: url('exports'), body: { screen: 'price-changes', format: 'csv', query: {} }, ...owner }));
   assert.equal(job.status, 'SUCCEEDED', job.error ?? '');
   assert.equal(job.artifact!.rows, feed.page.total, 'в файле столько записей, сколько лента насчитала по всему окну');
 
   const file = await handle({ method: 'GET', url: url('jobs', job.jobId, 'artifact'), body: undefined, ...owner });
   assert.equal(file.status, 200, JSON.stringify(file.body));
   const lines = (file.file as { content: string }).content.trim().split('\n');
-  assert.equal(lines[0], 'at,channel,marketplace,offer,price_from,price_to,change,status,source,reason,decision_id');
+  assert.equal(lines[0], EXPORT_HEADERS['price-changes'].join(','));
   assert.equal(lines.length, feed.page.total + 1, 'строк в файле столько же, сколько записей в ленте, плюс заголовок');
   // Файл — это то же, что на экране: первая запись ленты узнаётся в первой строке файла
-  assert.ok(lines[1]!.includes(feed.items[0]!.to), `первая строка файла — первая запись ленты: ${lines[1]}`);
+  assert.ok(lines[1]!.includes(feed.items[0]!.to.replace(/[^\d.]/g, '')) && (feed.items[0]!.decisionId === null || lines[1]!.includes(feed.items[0]!.decisionId)),
+    `первая строка файла — первая запись ленты: ${lines[1]}`);
 });
+
+/**
+ * Шаг 104 [Р-229] (E3): в выгрузку не попадает ни одна строка чужого тенанта — выгрузка читает базу тем же хранилищем под RLS, что
+ * экран. Два мира стенда — два тенанта на одной базе (Kaufland и Amazon): ключи решений и предложений тенанта Amazon есть в ЕГО выгрузке
+ * (контроль: детектор видит чужие ключи) и нет ни в одной выгрузке тенанта Kaufland — по всем экранам, читающим базу. Остатки миров стенда
+ * живут в памяти мира (не в базе) — их изоляция по тенанту держится тестами хранилища остатков
+ */
+test('step 104 (E3) [Р-229]: an export carries no row of another tenant — the other tenant\'s keys are in its own export and in none of ours', async () => {
+  const owner = await login('OWNER');
+  const main = worlds.find((w) => w.id === WORLD)!;
+  const trust = worlds.find((w) => w.id === TRUST_WORLD)!;
+  const exportText = async (world: LiveWorld, screen: string, query: Record<string, string>): Promise<string> => {
+    const created = await handle({ method: 'POST', url: `/api/worlds/${encodeURIComponent(world.id)}/exports`, body: { screen, format: 'csv', query }, ...owner });
+    const done = await finishJob(created, world);
+    assert.equal(done.status, 'SUCCEEDED', `${world.id} ${screen}: ${done.error ?? ''}`);
+    return (await world.store.bulkJobArtifact(world.tenantId, done.jobId))!.content;
+  };
+  // Ключи чужого тенанта: его решения и единицы записи (идентификаторы — UUID, совпасть случайно не могут)
+  const theirDecisions = (await trust.store.decisionPage(trust.tenantId, { offset: 0, limit: 200 })).items.map((d) => d.decisionId);
+  const theirScopes = (await trust.view({ membershipId: 'stand-owner', role: 'OWNER' } as never)).state.scopes.map((sc) => sc.writeScopeId);
+  assert.ok(theirDecisions.length > 0 && theirScopes.length > 0, 'the other tenant has rows that could leak');
+  // Контроль: выгрузка самого того тенанта его ключи содержит — детектор не слеп
+  const own = `${await exportText(trust, 'decisions', { period: '30d' })}${await exportText(trust, 'offers', {})}`;
+  assert.ok(theirDecisions.some((id) => own.includes(id)) && theirScopes.some((id) => own.includes(id)), 'control: the other tenant\'s own export names its keys');
+  const markers = [...theirDecisions, ...theirScopes];
+  for (const [screen, query] of [['price-changes', { period: '30d' }], ['decisions', { period: '30d' }], ['prevented-by-rules', { period: '30d' }],
+    ['stopped-by-people', { period: '30d' }], ['offers', {}], ['imports', { kind: 'COSTS', period: '30d' }], ['audit-log', { period: '30d' }]] as const) {
+    const text = await exportText(main, screen, query);
+    assert.deepEqual(markers.filter((id) => text.includes(id)), [], `${screen}: no key of another tenant in the file`);
+  }
+});
+

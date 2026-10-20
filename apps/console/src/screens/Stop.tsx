@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import type { DistrustCard, HaltCard, StopCard, StopPlan, StopTarget, StopView, TargetCard } from '@repracer/console-model';
+import { AUDIT_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type DistrustCard, type HaltCard, type ListQuery, type Period, type StopCard, type StopPlan, type StopTarget, type StopView, type TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Load, NoteConfirm, useMessages, When } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, NoteConfirm, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { PeriodPicker } from '../date-range.tsx';
+import { ExportControl, exportQuery } from '../export.tsx';
 
 /**
  * Экран E — три вида остановки, каждый своим разделом: остановка человеком (все цены) [Р-69], системная остановка витрины по
@@ -65,8 +67,10 @@ function DistrustCardView({ distrust, onRelease }: { distrust: DistrustCard; onR
   );
 }
 
-export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDistrust }: {
+export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDistrust, audit }: {
   view: StopView;
+  /** Шаг 104 [Р-229]: журнал аудита — за период и страницами, выгрузка по периоду; без них (тесты экранов) — как было */
+  audit?: { worldId: string; period: Period; onPeriod: (p: Period) => void; query: ListQuery; onQuery: (q: ListQuery) => void };
   onStop?: (target: StopTarget) => void;
   onResume?: (stop: StopCard) => void;
   onRelease?: (halt: HaltCard) => void;
@@ -75,6 +79,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
   const m = useMessages();
   const s = m.ui.stop;
   const k = s.kindsColumns;
+  const auditZone = commonZone(view.audit.map((a) => a.at));
   return (
     <section>
       <h2>{s.pageTitle}</h2>
@@ -155,23 +160,33 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
       </section>
       <section className="stop-audit">
         <h3>{s.auditTitle}</h3>
+        {audit ? (
+          <div className="toolbar field-toolbar">
+            <PeriodPicker value={audit.period} maxDays={AUDIT_KEEP_DAYS} onChange={audit.onPeriod} />
+            <ExportControl worldId={audit.worldId} screen="audit-log" query={exportQuery(audit.period, {})} empty={view.audit.length === 0} />
+          </div>
+        ) : null}
         {view.audit.length === 0 ? <p className="muted empty">{s.auditEmpty}</p> : (
           <div className="table-wrap">
+            {/* Шаг 104: у журнала появился период — у таблицы шапка, и пояс стоит в ней один раз (отложенное шага 100, D) */}
             <table className="cardify">
+              <thead><tr><th><WhenHead label={s.auditColumns.when} zone={auditZone} /></th><th>{s.auditColumns.action}</th><th>{s.auditColumns.who}</th>
+                <th>{s.auditColumns.subject}</th><th>{s.auditColumns.note}</th></tr></thead>
               <tbody>
                 {view.audit.map((a, i) => (
                   <tr key={i}>
-                    <td className="nowrap"><When value={a.at} /></td>
+                    <td className="nowrap" data-label={`${s.auditColumns.when}${auditZone ? ` · ${auditZone}` : ''}`}><When value={a.at} zone={!auditZone} /></td>
                     <td className="card-title">{a.action}</td>
-                    <td>{a.actor}</td>
-                    <td title={a.scopeHint ?? undefined}>{a.scope}</td>
-                    <td>{a.note ? s.noteLabel(a.note) : a.detail ?? ''}</td>
+                    <td data-label={s.auditColumns.who}>{a.actor}</td>
+                    <td data-label={s.auditColumns.subject} title={a.scopeHint ?? undefined}>{a.scope}</td>
+                    <td data-label={s.auditColumns.note}>{a.note ? s.noteLabel(a.note) : a.detail ?? ''}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        {audit && view.auditPage ? <Pager page={view.auditPage} query={audit.query} onQuery={audit.onQuery} /> : null}
       </section>
       <Gaps gaps={view.gaps} />
     </section>
@@ -188,7 +203,10 @@ type Pending =
 export function StopScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const d = m.ui.app.dialog;
-  const [resource, retry] = useResource<StopView>(worldPath(worldId, 'stop'), m.locale);
+  // Шаг 104 [Р-229]: журнал аудита — за период (по умолчанию 30 дней) и страницей
+  const [auditPeriod, setAuditPeriod] = useState<Period>({ preset: '30d' });
+  const [auditQuery, setAuditQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [resource, retry] = useResource<StopView>(`${worldPath(worldId, 'stop')}?${periodSearch(auditPeriod)}&offset=${auditQuery.offset}&limit=${auditQuery.limit}`, m.locale);
   const [pending, setPending] = useState<Pending>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -257,6 +275,7 @@ export function StopScreen({ worldId }: { worldId: string }) {
             onResume={(stop) => { reset(); setMessage(null); setPending({ kind: 'resume', stop }); }}
             onRelease={(halt) => { reset(); setMessage(null); setPending({ kind: 'release', halt }); }}
             onReleaseDistrust={(distrust) => { reset(); setMessage(null); setPending({ kind: 'distrust', distrust }); }}
+            audit={{ worldId, period: auditPeriod, onPeriod: (p) => { setAuditPeriod(p); setAuditQuery({ ...auditQuery, offset: 0 }); }, query: auditQuery, onQuery: setAuditQuery }}
           />
         )}
       </Load>

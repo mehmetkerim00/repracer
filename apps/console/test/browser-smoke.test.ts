@@ -802,7 +802,9 @@ test('step 95 (Р-217): nine menu items; every old address leads to its new plac
   await settled(b, 'feed/decisions');
   const fields = await b.evaluate<string[]>(`[...document.querySelectorAll('.toolbar .field-label')].map((l) => l.textContent.trim())`);
   // Шаг 96: у решений — период и исход (вариант шага 95 принят); статус — только у записей
-  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.period.label, en.ui.feed.filters.offer, en.ui.feed.outcome.label], 'decisions: kind, period, offer and outcome — status belongs to price writes');
+  // Шаг 104: последним — «Export» того, что показывает экран
+  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.period.label, en.ui.feed.filters.offer, en.ui.feed.outcome.label, en.ui.export.button],
+    'decisions: kind, period, offer and outcome — status belongs to price writes; export last');
   const receipt = await b.evaluate<string>(`document.querySelector('.world-content table a.row-link').getAttribute('href')`);
   await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`);
   await settled(b, 'receipt');
@@ -2001,3 +2003,75 @@ test('step 103 (D) [Р-228]: the channel account card says the default strategy 
   await waitFor(b, `(document.querySelector('.account-default .default-line')?.textContent ?? '').startsWith(${JSON.stringify(`${t.line(t.none)} · set by `)})`, 'back to «None»');
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
+
+/**
+ * Шаг 104 [Р-229] (смоук): «Export» — CSV и XLSX — на каждом экране с данными, где его поставили (обе части Price changes, обе вкладки
+ * Protections, Offers, Inventory, журнал импортов на Costs & floors, журнал аудита на Stop pricing): подпись поля и подпись «заголовки
+ * всегда на английском» — на четырёх языках; в обеих темах при 1440 и 375 страница не уходит вбок, ряд фильтров не ломается (поле не
+ * выше содержимого, подпись над контролом, касание 44 px на телефоне); нажатие CSV даёт задание и файл
+ */
+const EXPORT_AT: ReadonlyArray<readonly [string, string]> = [['feed', 'price-changes'], ['feed/decisions', 'decisions'], ['protections/people', 'stopped-by-people'],
+  ['protections/rules', 'prevented-by-rules'], ['products', 'offers'], ['inventory', 'inventory'], ['costs', 'imports'], ['stop', 'audit-log']];
+test('step 104 (D) [Р-229]: «Export» with CSV and XLSX on every screen with data — four languages, both themes, 375 keeps the filter row; a click gives the file', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+  };
+  const control = (screen: string) => `(() => { const g = document.querySelector('[data-export="${screen}"]'); if (!g) return null; const field = g.closest('.field');
+    const buttons = [...g.querySelectorAll('button')];
+    return { label: field?.querySelector('.field-label')?.textContent.trim() ?? '', buttons: buttons.map((x) => x.textContent.trim()),
+      disabledWhy: buttons.every((x) => x.disabled) ? buttons[0].title : buttons.some((x) => x.disabled) ? 'MIXED' : null,
+      note: (field?.parentElement?.querySelector('.export-note')?.textContent ?? '').trim() }; })()`;
+  for (const m of [en, de, es, fr]) {
+    if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
+    for (const [route, screen] of EXPORT_AT) {
+      await go(route);
+      await waitFor(b, `document.querySelector('[data-export="${screen}"]') !== null`, `${m.locale} ${route}: the export control`);
+      const found = await b.evaluate<{ label: string; buttons: string[]; disabledWhy: string | null; note: string }>(control(screen));
+      // Пустой журнал выгружать нечего — кнопка отключена и говорит почему; иначе — доступна
+      assert.ok(found.disabledWhy === null || found.disabledWhy === m.ui.export.empty, `${m.locale} ${route}: ${JSON.stringify(found)}`);
+      assert.deepEqual([found.label, found.buttons, found.note], [m.ui.export.button, ['CSV', 'XLSX'], m.ui.export.headerNote], `${m.locale} ${route}: label, formats and the line about English headers`);
+    }
+    if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
+  }
+  // Каждый экран с выгрузкой, а не выборка: полный смоук нашёл кнопку периода журнала импортов (вложенная карточка), вылезавшую на 375 из
+  // ряда фильтров на 3 px, — эту проверку держит и правило «ничто не выступает за свою рамку» [Р-146]
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      for (const route of new Set(EXPORT_AT.map(([r]) => r))) {
+        await go(route);
+        const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+        assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width} ${route}: no sideways scroll — ${fit.out.join('; ')}`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width} ${route}: nothing sticks out of its frame`);
+        assert.deepEqual(await b.evaluate<string[]>(FIELD_SLACK), [], `${scheme} ${width} ${route}: a field of the filter row is taller than its content`);
+        assert.deepEqual(await b.evaluate<string[]>(FORM_GEOMETRY), [], `${scheme} ${width} ${route}: form geometry`);
+        if (width === 375) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${scheme} ${route}: touch targets`);
+      }
+    }
+  }
+  await b.setColorScheme('light');
+  await b.setViewport(1440, 900);
+  // Нажатие CSV на Price changes: задание, исполнитель, файл к скачиванию
+  await go('feed');
+  await b.evaluate(`(document.querySelector('[data-export="price-changes"] button').click(), true)`);
+  await waitFor(b, `document.querySelector('.export-progress') !== null`, 'the export job is shown under the filter row');
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `(document.querySelector('.export-progress')?.textContent ?? '').includes(${JSON.stringify(en.ui.jobs.download)})`, 'the file is ready to download', 30_000);
+  await b.click(en.ui.jobs.download, '.export-progress button');
+  await new Promise((x) => setTimeout(x, 500));
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+

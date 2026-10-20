@@ -505,7 +505,7 @@ test('Р-151: два виртуальных часа демо — первые �
    * Р-151: «помечен везде, где показываются деньги» — включая ФАЙЛЫ (ревью шага 34, находка 4). Выгрузка живёт дольше экрана:
    * её пересылают и переименовывают, поэтому метка стоит и в имени, и в каждой строке.
    */
-  const exported = await runJob('feed/export (демо)', DEMO_WORLD, api(DEMO_WORLD, 'feed', 'export'), {});
+  const exported = await runJob('exports (демо, Price changes)', DEMO_WORLD, api(DEMO_WORLD, 'exports'), { screen: 'price-changes', format: 'csv', query: {} });
   assert.ok(exported.artifact, 'у выгрузки есть файл');
   assert.ok(exported.artifact.fileName.startsWith(DEMO_FILE_PREFIX), `имя файла демо-тенанта помечено: ${exported.artifact.fileName}`);
   const fileResponse = await call('GET', api(DEMO_WORLD, 'jobs', `${exported.jobId}/artifact`));

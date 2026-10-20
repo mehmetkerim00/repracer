@@ -6,6 +6,7 @@ import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, MarketContext, Pag
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
+import { ExportControl, exportQuery } from '../export.tsx';
 
 /**
  * Р-153 (шаг 35): экран остатков. По товару — физический остаток, резервации, доступно; по каналу — что посчитано,
@@ -142,6 +143,8 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
             <button type="submit">{t.filter.apply}</button>
             {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter({ search: '', withReservations: false }); }}>{t.filter.reset}</button> : null}
           </div>
+          {/* Шаг 104 [Р-229]: выгрузка — по ПРИМЕНЁННОМУ фильтру: тем товарам, что в таблице */}
+          <ExportControl worldId={worldId} screen="inventory" query={exportQuery(null, { q: v.filter.search, reserved: v.filter.withReservations ? '1' : undefined })} empty={v.rows.length === 0} />
         </form>
       ) : null}
       {v.filter.matchedText ? <p className="section-sub">{v.filter.matchedText}</p> : null}

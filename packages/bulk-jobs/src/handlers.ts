@@ -16,6 +16,11 @@ import type { BoundsEditInput, BulkJobRow, StrategyPreview } from '@repracer/pri
 import type { StockStore } from '@repracer/stock-sync';
 import type { BulkJobContext, BulkJobHandlers, BulkJobWork } from './index.ts';
 import type { BulkJobPhase } from '@repracer/pricing-pipeline';
+import { EXPORT_ABOUT_SHEET, EXPORT_FORMATS, EXPORT_HEADERS, EXPORT_MAX_ROWS, EXPORT_NUMERIC_COLUMNS, EXPORT_SCREENS, exportAboutLines, exportFileName } from '@repracer/console-model';
+import { screenExportCount, screenExportRows, type ScreenExportDeps, type ScreenExportParams } from './screen-export.ts';
+
+// Шаг 104 [Р-229]: сервер переводит фильтры экрана в запрос и считает строки тем же путём, что исполнитель
+export { screenExportCount, screenExportRows, type ScreenExportDeps, type ScreenExportParams, type ScreenExportQuery } from './screen-export.ts';
 
 /**
  * Р-139 (шаг 30): что делает фоновое задание каждого вида. Работа повторяет ровно тот путь, который раньше шёл синхронным
@@ -564,6 +569,40 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
             await progress(rows.length, 'PRODUCING');
           }
           return { ...await produce({ fileName: priceFeedFileName(world, m, query), header: PRICE_FEED_CSV_HEADER, rows }) };
+        },
+      };
+    },
+
+    /**
+     * Шаг 104 [Р-229]: выгрузка экрана — строки те же, что у экрана при тех же фильтрах и периоде (запрос к хранилищу сервер положил в
+     * параметры задания), заголовки английские; XLSX — с листом «About this export». Больше 50 000 строк — отказ: файл не обрезается
+     */
+    async SCREEN_EXPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      const p = job.params as unknown as ScreenExportParams & { timeZone?: unknown };
+      if (!(EXPORT_SCREENS as readonly string[]).includes(p.screen) || !(EXPORT_FORMATS as readonly string[]).includes(p.format) || !p.query) {
+        throw Object.assign(new Error('bad screen export'), { cause: 'BAD_REQUEST' });
+      }
+      const m = messagesOfJob(job);
+      const timeZone = typeof p.timeZone === 'string' ? p.timeZone : null;
+      let world: Promise<StandWorld> | null = null;
+      const deps: ScreenExportDeps = {
+        store: ctx.store, ...(options.stock ? { stock: options.stock } : {}), tenantId: ctx.tenantId, now: p.exportedAt,
+        world: () => (world ??= options.world(ctx)), m, timeZone,
+      };
+      // Число строк — тем же запросом: данные могли вырасти после нажатия, и потолок держится и здесь
+      const total = await screenExportCount(p, deps);
+      if (total > EXPORT_MAX_ROWS) throw Object.assign(new Error('too many rows'), { cause: 'TOO_MANY_ROWS' });
+      return {
+        total,
+        async run(progress, produce) {
+          await progress(0, 'PRODUCING');
+          const rows = await screenExportRows(p, deps, (n) => progress(Math.min(n, Math.max(total, n)), 'PRODUCING'));
+          const about = exportAboutLines({ workspace: p.workspace, screen: p.screen, period: p.period, filters: p.filters, exportedBy: p.exportedBy,
+            exportedAt: p.exportedAt, rows: rows.length, timeZone });
+          return { ...await produce({
+            fileName: exportFileName(p.workspace, p.screen, p.periodPart), header: EXPORT_HEADERS[p.screen], rows, format: p.format, numericColumns: EXPORT_NUMERIC_COLUMNS,
+            ...(p.format === 'xlsx' ? { sheets: { data: 'Data', help: EXPORT_ABOUT_SHEET, helpLines: about } } : {}),
+          }) };
         },
       };
     },

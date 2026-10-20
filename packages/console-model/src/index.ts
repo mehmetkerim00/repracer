@@ -40,3 +40,11 @@ export { connectionsView, defaultStrategyView, type DefaultStrategyInput, type D
 // Шаг 87 [Р-214]: профиль рынка развёртывания — каналы, витрины, языки и правило Omnibus, которые консоль предлагает
 export { connectableInMarket, DEFAULT_MARKET_PROFILE, extendedRolesOf, isMarketProfile, localeInMarket, MARKET_PROFILES, marketProfileOf, marketScope, storefrontInMarket, US_STOREFRONTS, worldInMarket, type MarketProfile, type MarketScope } from './market.ts';
 export { BUYBOX_SHARE_HORIZON_MS, BUYBOX_SHARE_KEEP_DAYS, buyboxDiagnosis, buyboxShare, competitionView, competitorColumns, type CompetitorColumns, type BuyboxShare, type CompetitionInput, type CompetitionRow, type CompetitionView, type DiagnosisReason, type ShareSpan } from './competition.ts';
+// Шаг 104 [Р-229]: выгрузка экранов в файл
+export {
+  amountText, AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, auditExportRows, changePercent, dateInZone, decisionExportRows, EXPORT_ABOUT_SHEET, EXPORT_FORMATS, EXPORT_HEADERS, EXPORT_MAX_ROWS,
+  EXPORT_NUMERIC_COLUMNS, EXPORT_SCREEN_TITLES, EXPORT_SCREENS, exportAboutLines, exportFileName, feedExportRows, importExportRows, isoInZone, offerExportRows, protectionExportRows,
+  stockExportRows, workspaceSlug, type ExportAbout, type ExportFormat, type ExportScreen,
+} from './screen-export.ts';
+export type { ExportRef } from './export-ref.ts';
+export { auditCards } from './stop.ts';

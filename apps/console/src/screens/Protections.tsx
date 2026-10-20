@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { periodSearch, type Period } from '@repracer/console-model';
 import { href, useMessages } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
+import { ExportControl, exportQuery } from '../export.tsx';
 import { DangerousScreen } from './Dangerous.tsx';
 import { RejectedScreen } from './Rejected.tsx';
 
@@ -19,6 +20,11 @@ export function ProtectionsScreen({ worldId, tab, days }: { worldId: string; tab
   const p = m.ui.protections;
   // Шаг 96 (II): период — общий на обе вкладки; прежний адрес `protections/rules/<1|7|30>` задаёт начальный пресет
   const [period, setPeriod] = useState<Period>({ preset: days === 1 ? '24h' : days === 30 ? '30d' : '7d' });
+  // Шаг 104 [Р-229]: фильтр причины списка — здесь, чтобы выгрузка вкладки видела тот же фильтр; новый период его сбрасывает
+  const [reason, setReason] = useState<string | null>(null);
+  const choosePeriod = (p: Period) => { setPeriod(p); setReason(null); };
+  // У вкладок свои причины: другая вкладка начинает без фильтра
+  useEffect(() => { setReason(null); }, [tab]);
   return (
     <section className="protections">
       <h2>{m.ui.app.screens.protections}</h2>
@@ -27,12 +33,15 @@ export function ProtectionsScreen({ worldId, tab, days }: { worldId: string; tab
         <a href={href(worldId, 'protections', 'people')} className={tab === 'people' ? 'active' : ''} aria-current={tab === 'people' ? 'page' : undefined}>{p.people}</a>
         <a href={href(worldId, 'protections', 'rules')} className={tab === 'rules' ? 'active' : ''} aria-current={tab === 'rules' ? 'page' : undefined}>{p.rules}</a>
       </nav>
-      <div className="toolbar field-toolbar period-bar"><PeriodPicker value={period} onChange={setPeriod} /></div>
+      <div className="toolbar field-toolbar period-bar">
+        <PeriodPicker value={period} onChange={choosePeriod} />
+        <ExportControl worldId={worldId} screen={tab === 'people' ? 'stopped-by-people' : 'prevented-by-rules'} query={exportQuery(period, { reason })} />
+      </div>
       {/* ключ — период: смена периода начинает списки с первой страницы */}
-      {tab === 'people' ? <RejectedScreen key={periodSearch(period)} worldId={worldId} only="STOP" period={period} /> : (
+      {tab === 'people' ? <RejectedScreen key={periodSearch(period)} worldId={worldId} only="STOP" period={period} reason={reason} onReason={setReason} /> : (
         <>
           <DangerousScreen key={`d-${periodSearch(period)}`} worldId={worldId} period={period} />
-          <RejectedScreen key={`r-${periodSearch(period)}`} worldId={worldId} only="RULES" period={period} />
+          <RejectedScreen key={`r-${periodSearch(period)}`} worldId={worldId} only="RULES" period={period} reason={reason} onReason={setReason} />
         </>
       )}
     </section>

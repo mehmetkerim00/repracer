@@ -4,16 +4,17 @@ import type { TenantWorldIndex } from './tenant-worlds.ts';
 import { createServer, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
   BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor,
+  AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
 } from '@repracer/console-model';
 import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
 import { TABLE_ENCODINGS } from '@repracer/cost-import';
-import { APPLY_JOB_OF } from '@repracer/bulk-jobs/handlers';
+import { APPLY_JOB_OF, screenExportCount, type ScreenExportParams } from '@repracer/bulk-jobs/handlers';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_PEOPLE, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
@@ -173,8 +174,6 @@ function draftProblemsText(problems: ReadonlyArray<{ field: string; code: string
 const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 /** Р-123: выгрузка доказательной истории — не больше 18 месяцев за запрос */
 export const EVIDENCE_MAX_DAYS = 550;
-/** Р-154: экран остановок показывает последние события аудита, а не весь журнал тенанта */
-const AUDIT_RECENT = 200;
 /**
  * Inbound API: строк в одном вызове — не больше; склад шлёт партиями.
  *
@@ -515,6 +514,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           id: e.id, title: e.title, description: '', failures: [], scopes: c.scopes, decisionsLastDay: c.decisionsLastDay,
           interventionsLastWeek: c.interventionsLastWeek, activeStops: c.activeStops, activeHalts: c.activeHalts, role: roleShown(membership.role, m),
           demo: c.demo, awaitingAccess: c.awaitingAccess, euStorefronts: c.euStorefronts, locale: c.locale ? localeInMarket(market, c.locale) : c.locale, timeZone: c.timeZone, landing: 'products',
+          canExport: membership.role !== 'GUEST',
         }];
       });
       // Р-154: список миров — счётчики агрегатом, без чтения состояния ни одного мира
@@ -536,6 +536,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Ревью шага 69, находка 5: язык демо — язык гостя, поэтому список его не называет; пояс — называет
           locale: display && !display.followsRequestLocale ? localeInMarket(market, display.locale) : null, timeZone: display?.timeZone ?? null,
           landing: live.landing ?? 'products',
+          // Шаг 104 [Р-229]: гость публичного демо не выгружает — заданий у него нет вовсе (страж 0124, Р-160)
+          canExport: viewer.role !== 'GUEST',
         };
       })), ...tenantRows]);
     }
@@ -833,9 +835,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       world.defaultStrategies = defaults;
       return strategiesView(world, m, canEdit, query);
     };
-    const stopScreen = async () => {
+    /**
+     * Шаг 104 [Р-229]: журнал аудита — за период и страницей (по умолчанию — 30 дней, первая страница); прежде — последние 200 без листания.
+     * Ответы действий (остановка, снятия) показывают первую страницу периода по умолчанию
+     */
+    const stopScreen = async (audit: { period: Period; query: ListQuery } = { period: { preset: '30d' }, query: { offset: 0, limit: LIST_PAGE_DEFAULT } }) => {
       const world = await load([], { facts: await facts({ stopImpact: true }) });
-      return stopView(world, await live.store.auditRecent(world.tenantId, AUDIT_RECENT), m);
+      const range = periodRange(audit.period, live.clock.iso(), display?.timeZone ?? null, AUDIT_KEEP_DAYS);
+      const window = { since: range.since as never, ...upperOf(audit.period, range) };
+      const probe = await live.store.auditPage(world.tenantId, { ...window, offset: 0, limit: 1 });
+      const clamped = { ...audit.query, offset: clampOffset(audit.query, probe.total) };
+      const page = await live.store.auditPage(world.tenantId, { ...window, ...clamped });
+      return { ...stopView(world, page.items, m), auditPage: pageInfo(clamped, page.total, m) };
     };
     const complianceScreen = async (query?: ListQuery) => {
       const [announcements, page, f] = await Promise.all([live.store.discountAnnouncements(live.tenantId), catalogPageFor(listQuery(query)), facts({ first: OFFER_CHOICES })]);
@@ -877,8 +888,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
           const kind = IMPORT_KIND_LIST.find((k) => k === url.searchParams.get('kind'));
           if (!kind) return fail(400, 'BAD_REQUEST', s.badRequest);
+          // Шаг 104 [Р-229]: за период и страницей (по умолчанию — 30 дней); прежде — последние 20 без листания (отложенное шага 99 закрыто)
+          const period = parsePeriod(url.searchParams);
+          const query = parseListQuery(url.searchParams);
+          if (period === null || !query) return fail(400, 'BAD_PERIOD', s.badRequest);
+          const chosen = period ?? { preset: '30d' as const };
+          const range = periodRange(chosen, live.clock.iso(), display?.timeZone ?? null, IMPORTS_KEEP_DAYS);
+          const window = { kind, since: range.since as never, ...upperOf(chosen, range) };
           const world = await load([]);
-          return ok(importHistoryView(kind, await live.store.importRuns(world.tenantId, { kind, limit: IMPORT_HISTORY_SHOWN }), world, m));
+          const probe = await live.store.importRunsPage(world.tenantId, { ...window, offset: 0, limit: 1 });
+          const clamped = { ...query, offset: clampOffset(query, probe.total) };
+          const page = await live.store.importRunsPage(world.tenantId, { ...window, ...clamped });
+          return ok({ ...importHistoryView(kind, page.items, world, m), page: pageInfo(clamped, page.total, m) });
         }
         // Шаг 35 [Р-153]: остатки — страницей по товарам, сводка агрегатом, расхождения — отдельным списком
         case 'stock': {
@@ -970,7 +991,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const b = await boundsPage(param);
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }
-        case 'stop': return ok(await stopScreen());
+        case 'stop': {
+          const period = parsePeriod(url.searchParams);
+          const query = parseListQuery(url.searchParams);
+          if (period === null || !query) return fail(400, 'BAD_PERIOD', s.badRequest);
+          return ok(await stopScreen({ period: period ?? { preset: '30d' }, query }));
+        }
         /**
          * Шаг 97 [Р-219…Р-221]: страница Competition одного предложения — последний принятый снимок, отрезки держателя Buy Box за период
          * (не глубже 45 суток — столько живут отрезки, 0188) и пол продавца для диагностики. Консоль в ClickHouse не ходит [Р-22]
@@ -1097,10 +1123,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       || ((screen === 'stops' && parts[5] === 'resume') || ((screen === 'halts' || screen === 'distrusts') && parts[5] === 'release')) && param !== null;
     const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
       || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
-      || (screen === 'bounds' && param === 'apply') || screen === 'imports';
+      || (screen === 'bounds' && param === 'apply') || screen === 'imports' || screen === 'exports';
     const oneUnit = (screen === 'scopes' && param !== null && parts[5] === 'enable') || (screen === 'bounds' && param !== null && parts[5] === 'clearance') ? [param]
-      : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId]
-        : screen === 'feed' && param === 'export' ? [((body.query ?? {}) as Record<string, unknown>).writeScopeId] : null;
+      : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId] : null;
     const world = stopRoute ? await load([], { facts: await facts({ stopImpact: true }) })
       : tenantOnlyRoute ? await load([])
         : oneUnit ? await load(oneUnit, { facts: screen === 'compliance' && param === 'evidence' ? await facts({}) : null })
@@ -1123,6 +1148,82 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }
       return null;
     };
+    /**
+     * Шаг 104 [Р-229]: параметры экрана → запрос к хранилищу, тем же разбором, что GET экрана (период в поясе пространства, верхняя граница —
+     * только у своего диапазона дат, поиск — найденными предложениями). Фильтры и период — ещё и словами файла и события аудита
+     */
+    const resolveExport = async (exportScreen: ExportScreen, params: URLSearchParams, now: string, tz: string | null):
+      Promise<Pick<ScreenExportParams, 'query' | 'filters' | 'period' | 'periodPart'> | null> => {
+      const day = (iso: string) => dateInZone(iso, tz);
+      // Часть имени файла: даты окна в поясе пространства; окно без начала (вся лента) — «all»
+      const windowed = (since: string | null, until: string | null) => ({ period: { since, until }, periodPart: `${since ? day(since) : 'all'}_${day(until ?? now)}` });
+      const offerLabel = async (ws: string) => { const w = await load([ws]); const sc = scopeById(w, ws); return sc ? unitOf(w, sc, m).label : null; };
+      const searchText = (params.get('q') ?? '').trim();
+      if (searchText.length > 100) return null;
+      switch (exportScreen) {
+        case 'price-changes': {
+          const query = parseFeedQuery(params);
+          if (!query) return null;
+          const offer = query.writeScopeId ? await offerLabel(query.writeScopeId) : '';
+          if (offer === null) return null;
+          let until: string | null = null;
+          if (query.period) {
+            const range = periodRange(query.period, now, tz, FEED_MAX_DAYS);
+            query.since = range.since;
+            Object.assign(query, upperOf(query.period, range));
+            until = 'preset' in query.period ? null : range.until;
+          }
+          if (query.q) query.scopes = (await searchOffers(query.q.toLowerCase(), SEARCH_FILTER_LIMIT)).ids;
+          const { offset: _offset, limit: _limit, ...feed } = feedPageQuery(query);
+          const since = query.since ?? (query.days ? new Date(Date.parse(now) - query.days * 86_400_000).toISOString() : null);
+          return { query: { feed }, filters: { status: query.status ?? '', offer: offer ?? '', search: query.q ?? '' }, ...windowed(since, until) };
+        }
+        case 'decisions': {
+          const period = parsePeriod(params);
+          const outcome = params.get('outcome');
+          const ws = params.get('writeScopeId');
+          if (period === null || (outcome !== null && !(outcome in DECISION_OUTCOME_GROUPS))) return null;
+          const offer = ws ? await offerLabel(ws) : '';
+          if (offer === null) return null;
+          const found = searchText === '' ? null : await searchOffers(searchText.toLowerCase(), SEARCH_FILTER_LIMIT);
+          const range = period ? periodRange(period, now, tz, HOT_DECISIONS_DAYS) : null;
+          const decisions = { ...(ws ? { writeScopeId: ws } : {}), ...(found ? { writeScopeIds: found.ids } : {}),
+            ...(period && range ? { since: range.since as never, ...upperOf(period, range) } : {}), ...(outcome ? { outcome: outcome as DecisionOutcomeGroup } : {}) };
+          return { query: { decisions }, filters: { outcome: outcome ?? '', offer: offer ?? '', search: searchText },
+            ...windowed(range?.since ?? null, period && range && !('preset' in period) ? range.until : null) };
+        }
+        case 'stopped-by-people':
+        case 'prevented-by-rules': {
+          const period = periodOf(params, {});
+          const reason = params.get('reason');
+          if (period === null || (reason !== null && !/^[A-Z][A-Z0-9_]{0,63}$/.test(reason))) return null;
+          const range = periodRange(period, now, tz, HOT_DECISIONS_DAYS);
+          return { query: { protections: { since: range.since, until: range.until, clipped: range.clipped, phrase: periodPhrase(period, m), reason } },
+            filters: { reason: reason ?? '' }, ...windowed(range.since, range.until) };
+        }
+        case 'offers': return { query: {}, filters: {}, period: null, periodPart: day(now) };
+        case 'inventory': {
+          const reserved = params.get('reserved');
+          if (reserved !== null && reserved !== '1') return null;
+          return { query: { stock: { ...(searchText ? { search: searchText } : {}), ...(reserved === '1' ? { withReservations: true } : {}) } },
+            filters: { search: searchText, with_reservations: reserved === '1' ? 'yes' : '' }, period: null, periodPart: day(now) };
+        }
+        case 'imports':
+        case 'audit-log': {
+          const period = parsePeriod(params);
+          if (period === null) return null;
+          const chosen = period ?? { preset: '30d' as const };
+          const range = periodRange(chosen, now, tz, exportScreen === 'imports' ? IMPORTS_KEEP_DAYS : AUDIT_KEEP_DAYS);
+          const until = 'preset' in chosen ? null : range.until;
+          const window = { since: range.since, ...(until ? { until } : {}) };
+          if (exportScreen === 'audit-log') return { query: { audit: window }, filters: {}, ...windowed(range.since, until) };
+          const kind = IMPORT_KIND_LIST.find((k) => k === params.get('kind'));
+          if (!kind) return null;
+          return { query: { imports: { kind, ...window } }, filters: { import: kind }, ...windowed(range.since, until) };
+        }
+      }
+    };
+
     /**
      * Р-139: массовая операция — создание ЗАДАНИЯ. Запрос обязан быть дешёвым: всё, что растёт с размером каталога, делает
      * задание. Второй фактор предъявляется здесь, человеком; фоновый процесс предъявит базе само задание.
@@ -1160,36 +1261,33 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     }
 
     /**
-     * Р-142 (шаг 31): выгрузка ленты цен файлом. Фильтр — тот же, что на экране, и приходит он тем же разбором: файл обязан
-     * совпадать с тем, что продавец видел. Второго фактора не требует — ничего не меняет.
+     * Шаг 104 [Р-229]: выгрузка экрана в файл (CSV / XLSX). Фильтры и период — те же параметры, что у GET экрана, тем же разбором: что
+     * видишь, то и выгружаешь. Сервер переводит их в запрос к хранилищу, считает строки тем же путём, что исполнитель, и до создания
+     * задания честно отказывает больше 50 000 строк («narrow the period»). Заменяет «All N entries as a file» шага 31 (решение владельца).
+     * Гость демо не выгружает: заданий у него нет вовсе (страж 0124, Р-160) — кнопка у него отключена с той же причиной
      */
-    if (screen === 'feed' && param === 'export') {
+    if (screen === 'exports' && param === null) {
+      const x = m.ui.export;
+      if (viewer.role === 'GUEST') return fail(403, 'EXPORT_NOT_IN_DEMO', x.guest);
+      const exportScreen = (EXPORT_SCREENS as readonly string[]).includes(String(body.screen)) ? body.screen as ExportScreen : null;
+      const format = (EXPORT_FORMATS as readonly string[]).includes(String(body.format)) ? body.format as ExportFormat : null;
       const raw = (body.query ?? {}) as Record<string, unknown>;
-      const asStrings = Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'string' || typeof v === 'number').map(([k, v]) => [k, String(v)]));
-      const query = parseFeedQuery(new URLSearchParams(asStrings));
-      if (!query || (query.writeScopeId && !scopeById(world, query.writeScopeId))) return fail(400, 'BAD_FEED_QUERY', s.badRequest);
-      /**
-       * Шаг 96: «All N entries as a file» — за период экрана. Начало окна считается здесь, в момент нажатия, и задание несёт его
-       * готовым (`since`): выгрузка, начатая через минуту, не сдвигает «последние 7 дней» на эту минуту; конец — только у своего
-       * диапазона дат (`upperOf`), у пресета окно открыто сверху, как у экрана
-       */
-      const exported: Record<string, string> = { ...asStrings };
-      if (query.period) {
-        const range = periodRange(query.period, world.now, display?.timeZone ?? null, FEED_MAX_DAYS);
-        for (const key of ['period', 'from', 'to', 'days']) delete exported[key];
-        Object.assign(exported, { since: range.since, ...upperOf(query.period, range) });
-        query.since = range.since;
-        Object.assign(query, upperOf(query.period, range));
-      }
-      // Шаг 96 (Б11): поиск экрана — найденными предложениями, как у таблицы; задание несёт их готовыми
-      if (query.q) {
-        const found = await searchOffers(query.q.toLowerCase(), SEARCH_FILTER_LIMIT);
-        delete exported.q;
-        exported.scopes = found.ids.join(',');
-        query.scopes = found.ids;
-      }
-      const total = (await live.store.feedPage(world.tenantId, world.now as never, feedPageQuery({ ...query, offset: 0, limit: 1 }))).total;
-      return createJob('PRICE_FEED_EXPORT', { query: exported }, total, m.ui.jobs.createdFeedExport);
+      if (!exportScreen || !format || typeof raw !== 'object' || raw === null) return fail(400, 'BAD_EXPORT', s.badRequest);
+      const params = new URLSearchParams(Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'string' || typeof v === 'number').map(([k, v]) => [k, String(v)])));
+      const now = live.clock.iso();
+      const tz = display?.timeZone ?? null;
+      const resolved = await resolveExport(exportScreen, params, now, tz);
+      if (!resolved) return fail(400, 'BAD_EXPORT', s.badRequest);
+      const exportParams: ScreenExportParams = {
+        screen: exportScreen, format, workspace: world.demo && !live.ownName ? m.ui.app.demoWorldTitle : live.title,
+        exportedBy: principal.name ?? principal.email ?? (m.values as Record<string, string | undefined>)[viewer.role] ?? viewer.role, exportedAt: now, ...resolved,
+      };
+      const deps = { store: live.store, ...(live.stock ? { stock: live.stock } : {}), tenantId: live.tenantId, now, world: () => load(null), m, timeZone: tz };
+      // Offers — число предложений каталога (база, иначе мир); Protections — срез вмешательств ограничен (5 000) и потолка не достигает
+      const total = exportScreen === 'offers' ? (targeted ? (await catalogPageFor({ offset: 0, limit: 1 }))?.total ?? 0 : world.state.scopes.length)
+        : exportScreen === 'stopped-by-people' || exportScreen === 'prevented-by-rules' ? null : await screenExportCount(exportParams, deps);
+      if (total !== null && total > EXPORT_MAX_ROWS) return fail(409, 'TOO_MANY_ROWS', x.tooMany(total, EXPORT_MAX_ROWS));
+      return createJob('SCREEN_EXPORT', exportParams as unknown as Record<string, unknown>, total, x.created);
     }
 
     /**
@@ -1765,8 +1863,6 @@ export function resolveStandIdentityMode(env: Readonly<Record<string, string | u
   throw new Error('STAND_IDENTITY must be "simulator" or "oidc": the stand does not choose the sign-in mode on its own');
 }
 
-/** Шаг 99 [Р-224]: сколько последних запусков импорта показывает история на странице импорта */
-const IMPORT_HISTORY_SHOWN = 20;
 const MAX_BODY_BYTES = 64 * 1024;
 /**
  * Ревью шага 28, находка 6: массовый импорт — это файл продавца, и 64 КиБ хватало примерно на 2 180 строк при объявленном пределе

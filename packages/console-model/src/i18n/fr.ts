@@ -1621,6 +1621,15 @@ export const fr: Messages = {
       unassignText: 'L’offre garde son prix actuel ; la tarification automatique étant désactivée, rien n’est calculé. La version elle-même est conservée.',
       unassigned: 'Stratégie retirée.',
     },
+    /** Шаг 104 [Р-229]: выгрузка экрана в файл */
+    export: {
+      button: 'Exporter', csv: 'CSV', xlsx: 'XLSX', label: 'Exporter ce que montre cet écran',
+      headerNote: 'Les en-têtes de colonnes du fichier sont toujours en anglais.',
+      guest: 'L’export n’est pas disponible dans la démo publique',
+      created: 'Le fichier est préparé en arrière-plan. Vous pouvez quitter cette page.',
+      tooMany: (rows: number, limit: number) => `Cet export aurait ${rows} lignes, au-delà de la limite de ${limit}. Réduisez la période.`,
+      empty: 'Rien à exporter : l’écran n’affiche aucune ligne.',
+    },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
       links: { title: 'Lancer une modification groupée', bounds: 'Définir les prix minimum et maximum de nombreuses offres', strategies: 'Attribuer une stratégie à de nombreuses offres', costs: 'Importer les coûts unitaires' },
@@ -1629,6 +1638,7 @@ export const fr: Messages = {
         COST_IMPORT: 'Importer les coûts unitaires', REPRICING_ENABLE: 'Activer la tarification automatique', STOCK_IMPORT: 'Importer le stock', STOCK_SYNC_ENABLE: 'Activer la synchronisation du stock', BOUNDS_EDIT: 'Modifier les limites', BOUNDS_PLAN: 'Calculer les différences de limites',
         STRATEGY_ASSIGN: 'Attribuer une stratégie', STRATEGY_PREVIEW: 'Prévisualiser une stratégie', PRICE_EVIDENCE: 'Exporter les preuves de prix',
         PRICE_FEED_EXPORT: 'Exporter le journal des prix',
+        SCREEN_EXPORT: 'Exporter un écran',
         IMPORT_TEMPLATE: 'Préparer un modèle d’import', IMPORT_CHECK: 'Vérifier un fichier d’import',
       },
       queued: 'En file d’attente — l’opération démarre sous peu.',
@@ -1647,7 +1657,7 @@ export const fr: Messages = {
       doneBounds: (offers: number, changed: number) => `Terminé : limites vérifiées pour ${offers} ${offers === 1 ? 'offre' : 'offres'}, ${changed} modifiées.`,
       doneStrategy: (offers: number, version: number) => `Terminé : version ${version} attribuée à ${offers} ${offers === 1 ? 'offre' : 'offres'}.`,
       doneFeedExport: (rows: number, bytes: number) => `Terminé : ${rows} entrées, ${Math.round(bytes / 1024)} Ko — le fichier est prêt à être téléchargé.`,
-      createdFeedExport: 'Le journal des prix est exporté en arrière-plan. Vous pouvez quitter cette page.',
+      doneScreenExport: (rows: number, bytes: number) => `Terminé : ${rows} ${rows === 1 ? 'ligne' : 'lignes'}, ${Math.round(bytes / 1024)} Ko — le fichier est prêt à être téléchargé.`,
       reportReady: (rows: number) => `Lignes non appliquées : ${rows} — la liste complète est disponible sous forme de fichier.`,
       donePreview: (offers: number) => `Terminé : calculé pour ${offers} ${offers === 1 ? 'offre' : 'offres'}.`,
       doneEnable: (enabled: number, already: number, skipped: number) => `Terminé : tarification automatique activée pour ${enabled} offres${already > 0 ? `, ${already} tournaient déjà` : ''}${skipped > 0 ? `, ${skipped} n’ont pas pu être activées — voir la liste` : ''}.`,
@@ -1681,6 +1691,7 @@ export const fr: Messages = {
         NO_ROWS: 'aucune ligne à appliquer', BAD_REQUEST: 'la requête est incomplète', BAD_DRAFT: 'le brouillon de stratégie est incomplet',
         BAD_SCOPES: 'aucune offre sélectionnée', CONFLICT: 'les limites ont changé entre-temps',
         MFA_REQUIRED: 'le second facteur manque', MFA_REQUIRED_WINDOW: 'plus de cinq offres ont été modifiées au cours des dix dernières minutes : connectez-vous avec un second facteur pour continuer', FORBIDDEN: 'le rôle ne permet pas cette action', JOB_FAILED: 'erreur inattendue',
+        TOO_MANY_ROWS: 'plus de 50 000 lignes — réduisez la période',
         UNKNOWN_JOB_KIND: 'le processus d’arrière-plan ne connaît pas cette opération',
         TOO_MANY_ATTEMPTS: 'l’opération a échoué à plusieurs reprises et n’est plus retentée',
         DATA_CHANGED: 'vos données ont changé après la vérification — vérifiez à nouveau le fichier', HAS_ERRORS: 'le fichier a des lignes en erreur — rien n’a été appliqué',
@@ -1862,7 +1873,6 @@ export const fr: Messages = {
       // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит
       searchLimited: (shown: number, total: number) => `${total} offres correspondent — la liste affiche les ${shown} premières.`,
       pageTitle: 'Changements de prix', empty: 'Pas encore de changement de prix. Ils apparaissent dès que la tarification automatique est activée et qu’un prix est envoyé à un canal.',
-      exportAll: (n: number) => `Les ${n} entrées dans un fichier`,
       columns: { when: 'Quand', offer: 'Offre', from: 'De', to: 'À', change: 'Variation', status: 'Statut', source: 'Source', reason: 'Raison' },
       counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number; shadowHeld: number }) => `${c.shadowHeld > 0 ? `Retenus par le mode fantôme ${c.shadowHeld} · appliqués` : 'Appliqués'} ${c.applied} · en cours ${c.inFlight} · non envoyés ${c.notSent} · remplacés ${c.superseded}`,
       statuses: { PENDING: 'En file d’attente', DISPATCHED: 'Envoyé', ACCEPTED: 'Accepté, non confirmé', APPLIED: 'Appliqué', NOT_APPLIED: 'Non appliqué', FAILED: 'Échec', BLOCKED: 'Bloqué', SUPERSEDED: 'Remplacé par un prix plus récent', DISCARDED_STALE: 'Non envoyé', BUDGET_EXHAUSTED: 'Budget de modifications épuisé', SHADOW_HELD: 'Retenu par le mode fantôme' },
@@ -1994,6 +2004,7 @@ export const fr: Messages = {
       haltReview: (when: string) => `Contrôle par nouvel échantillon après ${when}`, haltReleasedAuto: (when: string) => `automatiquement par un nouvel échantillon le ${when}`,
       notStopped: ['La synchronisation du stock', 'Une mise à jour déjà envoyée au canal : son résultat est accepté'],
       auditTitle: 'Journal d’audit : arrêts, rôles et événements des canaux',
+      auditColumns: { when: 'Quand', action: 'Opération', who: 'Qui', subject: 'Objet', note: 'Remarque' },
       auditEmpty: 'Pas encore d’arrêt, de changement de rôle ni d’événement de canal. Chaque arrêt, reprise et changement de rôle est listé ici avec son auteur, ainsi que chaque offre qu’un canal a retirée de la vente, avec la raison.',
       auditActions: { 'pricing.stop_created': 'Tarification arrêtée', 'pricing.stop_released': 'Tarification reprise', 'pricing.halt_created': 'Site suspendu par le système', 'pricing.halt_released': 'Suspension du site levée', 'pricing.distrust_created': 'Défiance envers le canal par le système — tous les prix bloqués', 'pricing.distrust_released': 'Défiance envers le canal levée', 'membership.role_changed': 'Rôle modifié', 'channel.offer_unpublished': 'Offre non publiée : prix non compétitif' },
       /** Шаг 89: почему канал снял предложение — словами и с ценой «в другом месте», если канал её назвал */

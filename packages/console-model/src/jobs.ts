@@ -34,6 +34,8 @@ export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
   // Шаг 99 [Р-224]: шаблон импорта — выгрузка; примерка — первая половина импорта, как экран различий у правки каталога
   IMPORT_TEMPLATE: 'VIEW_PRICING',
   IMPORT_CHECK: 'MANAGE_PRICING',
+  // Шаг 104 [Р-229]: выгрузка экрана — просмотр
+  SCREEN_EXPORT: 'VIEW_PRICING',
 };
 
 /** СВОЁ задание отменяет любой участник; чужое — по праву на его вид операции */
@@ -134,6 +136,7 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
     case 'STOCK_SYNC_ENABLE': return m.ui.stock.enable.done({ scopes: n(r.scopes), created: n(r.created), awaitingAck: n(r.awaitingAck), writes: n(r.writes) });
     case 'IMPORT_TEMPLATE': return t.doneTemplate(n(r.rows));
     case 'IMPORT_CHECK': return t.doneCheck({ total: n(r.total), changed: n(r.changed), rejected: n(r.rejected) });
+    case 'SCREEN_EXPORT': return t.doneScreenExport(n(r.rows), n(r.bytes));
   }
 }
 

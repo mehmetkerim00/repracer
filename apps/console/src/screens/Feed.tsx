@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodSearch, type DecisionListView, type FeedQuery, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
-import { requestJson, useResource, worldPath } from '../api.ts';
-import type { JobCreatedResponse } from '../api-types.ts';
-import { JobProgress } from './Jobs.tsx';
+import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
 import { Field } from '../forms.tsx';
 import { PeriodPicker } from '../date-range.tsx';
+import { ExportControl, exportQuery } from '../export.tsx';
 
 /**
  * Шаг 95 [Р-217]: Price changes — единственный журнал цен. «Kind» выбирает, что в нём: записи в канал (как было) или все решения —
@@ -50,24 +49,6 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
   const c = f.columns;
   const q = view.query;
   const current: FeedQuery = { ...query, ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}), limit: q.limit };
-  /**
-   * Р-142 (шаг 31): всю ленту за период продавец уносит ФАЙЛОМ — экран отдаёт страницу не больше 200 записей. Готовит файл фоновое
-   * задание [Р-139] по тому же фильтру, что сейчас на экране; шаг 96 — и за тот же период и тот же поиск
-   */
-  const [exportJobId, setExportJobId] = useState<string | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const exportFeed = async () => {
-    setExportError(null);
-    const period = query.period ? Object.fromEntries(new URLSearchParams(periodSearch(query.period))) : {};
-    try {
-      const created = await requestJson<JobCreatedResponse>(`${worldPath(view.worldId, 'feed', 'export')}`, {
-        method: 'POST',
-        body: { query: { ...(q.writeScopeId ? { writeScopeId: q.writeScopeId } : {}), ...(q.status ? { status: q.status } : {}), ...(query.q ? { q: query.q } : {}), ...period } },
-        locale: m.locale,
-      });
-      setExportJobId(created.jobId);
-    } catch (e) { setExportError(errorText(e, m)); }
-  };
   const zone = commonZone(view.items.map((i) => i.at));
   /**
    * Шаг 84: одинаковая причина у многих строк (у тени — «Not sent: this channel account is in shadow mode…») — один раз строкой при полосе
@@ -83,16 +64,13 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
   return (
     <section className="journal-table">
       {onQuery ? null : <><h2>{f.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.feed}</p></>}
-      {exportError ? <ErrorBox message={exportError} /> : null}
-      {exportJobId ? <JobProgress worldId={view.worldId} jobId={exportJobId} /> : null}
       {view.clipped ? <p className="notice">{m.ui.period.clipped(90)}</p> : null}
       {view.search && view.search.total > view.search.shown ? <p className="notice">{f.searchLimited(view.search.shown, view.search.total)}</p> : null}
       {trialWeek ? <p className="notice trial-week">{f.trialWeek}</p> : null}
       {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
         <div className="table-wrap">
-          {/* Шаг 84: выгрузка — действие над таблицей, в её полосе итогов; ряд фильтров остаётся одним рядом */}
+          {/* Шаг 104 [Р-229]: выгрузка — кнопкой «Export» в ряду фильтров (прежняя «All N entries as a file» заменена) */}
           <div className="table-head"><span>{f.counts(view.counts)}</span>
-            {onQuery ? <button type="button" disabled={view.page.total === 0} onClick={() => void exportFeed()}>{f.exportAll(view.page.total)}</button> : null}
             {shared.map((text) => <span key={text} className="head-note">{text}</span>)}</div>
           <table className="feed dense sticky-end cardify clickable-rows">
             <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
@@ -183,6 +161,8 @@ function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch }: J
           {FEED_STATUS_GROUPS.map((g) => <option key={g} value={g}>{f.statusGroups[g]}</option>)}
         </select></Field>
         {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
+        {/* Шаг 104 [Р-229]: что видишь — то и выгружаешь: те же период, предложение, статус и поиск */}
+        <ExportControl worldId={worldId} screen="price-changes" query={exportQuery(period, { writeScopeId: query.writeScopeId, status: query.status, q: search })} />
       </div>
       <Load shape="table" resource={resource} retry={retry}>{(view) => <FeedScreenView view={view} onQuery={setQuery} query={full} />}</Load>
     </>
@@ -219,6 +199,7 @@ function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch }
           {(['CHANGED', 'NO_CHANGE', 'REJECTED'] as const).map((o) => <option key={o} value={o}>{f.outcome[o]}</option>)}
         </select></Field>
         {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
+        <ExportControl worldId={worldId} screen="decisions" query={exportQuery(period, { writeScopeId: query.writeScopeId, outcome: query.outcome, q: search })} />
       </div>
       <p className="section-sub">{f.kind.decisionsCaption}</p>
       <Load shape="table" resource={resource} retry={retry}>

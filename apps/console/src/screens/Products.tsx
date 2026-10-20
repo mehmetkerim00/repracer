@@ -4,6 +4,7 @@ import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
 import { CheckField, FormActions } from '../forms.tsx';
+import { ExportControl } from '../export.tsx';
 
 /** Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда */
 const OPTIONAL_COLUMNS = ['ceiling', 'strategy', 'lastChange', 'nextCheck', 'channel'] as const;
@@ -47,6 +48,8 @@ export function ProductsView({ view, onEnable, query, onQuery }: {
       <p className="subtitle">{m.ui.app.subtitles.products}</p>
       {/* Задача D шага 34: новый тенант без данных видит, ПОЧЕМУ пусто и куда идти, а не пустую таблицу */}
       {view.rows.length === 0 ? <p className="notice">{m.ui.onboarding.empty.products} <a href={href(view.worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
+      {/* Шаг 104 [Р-229]: выгрузка — состояние витрины целиком (все страницы списка), а не только показанная страница */}
+      {view.rows.length > 0 ? <div className="toolbar field-toolbar export-bar"><ExportControl worldId={view.worldId} screen="offers" query={{}} /></div> : null}
       {view.rows.length > 0 ? <div className="table-wrap">
         {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными */}
         <div className="table-head">

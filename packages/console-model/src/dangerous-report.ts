@@ -1,4 +1,5 @@
 import { DANGEROUS_DEVIATION_BP } from '@repracer/pricing-model';
+import type { ExportRef } from './export-ref.ts';
 import type { InterventionSlice } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
 import { explanationOf, isDangerous } from './trace.ts';
@@ -34,6 +35,8 @@ export interface DangerousItem {
   deviation: string;
   reason: HumanReason;
   decisionId: string;
+  /** Шаг 104 [Р-229]: сырьё строки — только для выгрузки */
+  ref?: ExportRef;
 }
 
 /** Р-117: стратегия хотела ниже пола и была удержана */
@@ -50,6 +53,8 @@ export interface FloorHoldItem {
   decisionId: string | null;
   /** Шаг 102 [Р-227]: держал пол распродажи — намеренный убыток; пилюля строки, в счёт «пол удержал» не входит */
   clearance: string | null;
+  /** Шаг 104 [Р-229]: сырьё строки — только для выгрузки */
+  ref?: ExportRef;
 }
 
 export interface FloorHoldsView {
@@ -97,7 +102,7 @@ function boundOf(code: string, params: Record<string, unknown>): number | null {
 
 const inPeriod = (at: string, from: number, to: number) => Date.parse(at) > from && Date.parse(at) <= to;
 
-function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, to: number, m: Messages): FloorHoldsView {
+function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, to: number, m: Messages, refs = false): FloorHoldsView {
   const below = new Map<string, number>();
   const items: Array<FloorHoldItem & { sortAt: string }> = [];
   const seenIntents = new Set<string>();
@@ -110,6 +115,7 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
     items.push({
       sortAt: at, at: m.when(at), unit: scope ? unitOf(world, scope, m) : null, kind, target: target === null ? null : m.money(target, currency), floor: m.money(floor, currency),
       below: target === null ? null : m.money(kept - target, currency), reason: describe(reason, m), decisionId, clearance: clearance ? m.ui.products.clearancePill : null,
+      ...(refs ? { ref: { at, currency, was: null, wanted: target, set: kept, bound: floor, deviationBp: null } } : {}),
     });
   };
   // Горячие intent (3 дня): цель стратегии известна. Удержание — эпизод: подряд идущие оценки одной единицы, в которых пол держит
@@ -175,11 +181,11 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, from: number, t
 }
 
 /** Р-154: отчёт строится по срезу вмешательств окна — «без изменения» в него не попадают ещё в базе */
-export function dangerousReport(world: StandWorld, slice: InterventionSlice, range: PeriodRange, phrase: string, m: Messages): DangerousReportView {
+export function dangerousReport(world: StandWorld, slice: InterventionSlice, range: PeriodRange, phrase: string, m: Messages, opts: { refs?: boolean } = {}): DangerousReportView {
   const r = m.ui.dangerous;
   const to = Date.parse(range.until);
   const from = Date.parse(range.since);
-  const floor = floorHolds(world, slice, from, to, m);
+  const floor = floorHolds(world, slice, from, to, m, opts.refs === true);
   const decisions = slice.decisions
     .filter((d) => isDangerous(d) && Date.parse(d.decidedAt) > from && Date.parse(d.decidedAt) <= to)
     .sort((a, b) => (b.boundDeviationBp ?? 0) - (a.boundDeviationBp ?? 0) || Date.parse(b.decidedAt) - Date.parse(a.decidedAt));
@@ -199,6 +205,7 @@ export function dangerousReport(world: StandWorld, slice: InterventionSlice, ran
     return {
       at: m.when(d.decidedAt), unit, proposed: m.money(d.proposedMinor, d.currency), bound: m.money(bound, d.currency),
       deviation: m.percentBp(d.boundDeviationBp), reason: describe(d.reason, m), decisionId: d.decisionId,
+      ...(opts.refs ? { ref: { at: d.decidedAt, currency: d.currency, was: null, wanted: d.proposedMinor, set: null, bound, deviationBp: d.boundDeviationBp } } : {}),
     };
   });
   return {

@@ -2,6 +2,7 @@ import { classifyBoundIntervention, type BoundIntervention } from '@repracer/pri
 import type { InterventionSlice } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
+import type { ExportRef } from './export-ref.ts';
 import { explanationOf } from './trace.ts';
 import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
@@ -33,6 +34,8 @@ export interface RejectedItem {
   decisionId: string | null;
   /** Шаг 102 [Р-227]: пол (безубыточность или пол маржи) выше потолка — цены предложения заморожены; своя категория счётчиков */
   floorAboveCeiling?: boolean;
+  /** Шаг 104 [Р-229]: сырьё строки — только для выгрузки */
+  ref?: ExportRef;
 }
 
 export interface RejectedView {
@@ -54,7 +57,8 @@ export const REJECTED_WINDOW_DAYS = 7;
  * Р-154: отчёт строится по СРЕЗУ ВМЕШАТЕЛЬСТВ окна (`interventions`): решения не «без изменения», намерения с целью на
  * границе, записи, остановленные перепроверкой, отклонённые снимки. Девять из десяти решений сюда не попадают ещё в базе.
  */
-export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Messages): RejectedView {
+export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Messages, opts: { refs?: boolean } = {}): RejectedView {
+  const ref = (r: ExportRef) => (opts.refs ? { ref: r } : {});
   const { state } = world;
   const r = m.ui.rejected;
   const rows: Array<RejectedItem & { sortAt: string }> = [];
@@ -79,6 +83,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
         limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? r.limitFloor(money(bound))
           : step.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? r.limitClearance(money(bound)) : r.limitMax(money(bound)),
         set: money(bound), deviation: null, intervention: 'CORRECTED', reason: describe(step, m), decisionId: d.decisionId,
+        ...ref({ at: d.decidedAt, currency: d.currency, was: e!.strategy.currentMinor, wanted: target, set: bound, bound, deviationBp: null }),
       });
     }
     if (d.outcome !== 'REJECTED' && d.outcome !== 'HELD') continue;
@@ -103,6 +108,10 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       deviation: d.boundDeviationBp === null ? null : m.percentBp(d.boundDeviationBp),
       // Ревью шага 68, находка 1: причина Gate — из строки решения (полные параметры, 30 суток), а не из слепка без сумм
       intervention, reason: describe(!e || e.gate.reason.code === d.reason.code ? d.reason : e.gate.reason, m), decisionId: d.decisionId,
+      ...ref({ at: d.decidedAt, currency: d.currency, was: e ? e.strategy.currentMinor : null, wanted: proposed, set: e ? e.strategy.currentMinor : null,
+        bound: Number.isSafeInteger(code === 'BELOW_MIN_PRICE' ? params.minMinor : code === 'BELOW_MARGIN_FLOOR' ? params.floorMinor : code === 'ABOVE_MAX_PRICE' ? params.maxMinor : null)
+          ? Number(code === 'BELOW_MIN_PRICE' ? params.minMinor : code === 'BELOW_MARGIN_FLOOR' ? params.floorMinor : params.maxMinor) : null,
+        deviationBp: d.boundDeviationBp }),
     });
   }
 
@@ -114,6 +123,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       current: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, change: scope ? m.change(scope.currentPriceMinor, w.amountMinor) : null,
       limit: null, set: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, deviation: null, intervention: null,
       reason: describe({ code: w.endReason!, params: w.endParams }, m), decisionId: w.decisionId,
+      ...ref({ at: w.createdAt, currency: w.currency, was: scope ? scope.currentPriceMinor : null, wanted: w.amountMinor, set: scope ? scope.currentPriceMinor : null, bound: null, deviationBp: null }),
     });
   }
 
@@ -128,6 +138,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       unit: scope ? unitOf(world, scope, m) : null, productRef: r.productRef(s.key.marketplace, s.key.channelProductRef),
       proposed: null, current: null, change: null, limit: null, set: null, deviation: null, intervention: null,
       reason: describe({ code: s.reasonCode, params: s.details }, m), decisionId: null,
+      ...ref({ at: s.receivedAt, currency: null, was: null, wanted: null, set: null, bound: null, deviationBp: null }),
     });
   }
 

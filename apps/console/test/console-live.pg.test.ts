@@ -489,14 +489,15 @@ test('Р-142: отчёт об импорте и выгрузка ленты це
    */
   const feed = await measure<{ page: { total: number } }>('feed (лента, первая страница)', 'GET', api('feed'));
   assert.equal(feed.status, 200, JSON.stringify(feed.body).slice(0, 200));
-  const feedJob = await runBulkOperation('feed/export (вся лента файлом)', api('feed', 'export'), { query: {} });
+  // Шаг 104 [Р-229]: выгрузка ленты — общей кнопкой «Export» экрана Price changes
+  const feedJob = await runBulkOperation('exports (вся лента файлом)', api('exports'), { screen: 'price-changes', format: 'csv', query: {} });
   assert.equal(feedJob.artifact!.rows, feed.body.page.total, 'в файле столько записей, сколько лента насчитала по всему окну');
 
   const feedByLink = await browserNavigate(api('jobs', `${feedJob.jobId}/artifact`));
   assert.equal(feedByLink.status, 401, 'выгрузка ленты по ссылке без заголовка не отдаётся');
-  const feedFile = await consoleDownload('feed/export (скачивание клиентом консоли)', api('jobs', `${feedJob.jobId}/artifact`));
-  assert.equal(feedFile.text.trim().split('\n')[0], 'at,channel,marketplace,offer,price_from,price_to,change,status,source,reason,decision_id');
-  assert.match(feedFile.fileName, /^price-feed_/, 'имя файла говорит о периоде и предложении');
+  const feedFile = await consoleDownload('exports (скачивание клиентом консоли)', api('jobs', `${feedJob.jobId}/artifact`));
+  assert.equal(feedFile.text.trim().split('\n')[0], 'time,write_id,decision_id,channel,storefront,sku,offer,price_from,price_to,currency,change_percent,status,source,reason');
+  assert.match(feedFile.fileName, /-price-changes-all_\d{4}-\d{2}-\d{2}\.csv$/, 'имя файла говорит о рабочем пространстве, экране и периоде');
 });
 
 /**

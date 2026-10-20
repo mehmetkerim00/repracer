@@ -812,6 +812,11 @@ export interface PricingStore {
   importRunOfJob(tenantId: string, bulkJobId: string): Promise<ImportRunRow | null>;
   /** История импортов одного вида — новые первыми; читает экран страницы импорта */
   importRuns(tenantId: string, query: { kind: ImportKind; limit: number }): Promise<ImportRunRow[]>;
+  /**
+   * Шаг 104 [Р-229]: журнал импортов вида за период [since, until) — страницей и с итогом (экран листает, выгрузка идёт подряд). Журнал
+   * хранится до закрытия тенанта; без периода — весь
+   */
+  importRunsPage(tenantId: string, query: { kind: ImportKind; since?: Instant; until?: Instant; offset: number; limit: number }): Promise<{ items: ImportRunRow[]; total: number }>;
   /** Р-139 (шаг 30): массовые операции — фоновые задания с видимым ходом */
   createBulkJob(tenantId: string, input: BulkJobInput, actor: AdminActor): Promise<BulkJobCreated>;
   claimBulkJob(tenantId: string, owner: string, leaseSeconds: number): Promise<BulkJobRow | null>;
@@ -996,6 +1001,11 @@ export interface PricingStore {
   /** Последние события аудита остановок [Р-76] и смен ролей [Р-213], свежие первыми */
   auditRecent(tenantId: string, limit: number): Promise<ConsoleAuditRow[]>;
   /**
+   * Шаг 104 [Р-229]: журнал аудита экрана Stop pricing (остановки, смены ролей, события канала) за период по времени действия [since,
+   * until) — страницей и с итогом; свежие первыми, тем же порядком, что `auditRecent`
+   */
+  auditPage(tenantId: string, query: { since?: Instant; until?: Instant; offset: number; limit: number }): Promise<{ items: ConsoleAuditRow[]; total: number }>;
+  /**
    * Шаг 88 [Р-213]: смена роли участника — одна роль на человека, новая заменяет прежнюю. Меняет владелец (или прежний администратор)
    * со вторым фактором; в журнал аудита событие пишет база (кто, когда, прежняя → новая), журнал только на добавление
    */
@@ -1025,7 +1035,9 @@ export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRAT
   /** Шаг 35 [Р-152]: файл остатков продавца — инвентаризация внутреннего пула; право — на каталог (MANAGE_CATALOG) */
   | 'STOCK_IMPORT'
   /** Шаг 35 [Р-139]: буфер аккаунта, единицы записи остатка и первые записи — на каталог целевого клиента это десятки секунд */
-  | 'STOCK_SYNC_ENABLE';
+  | 'STOCK_SYNC_ENABLE'
+  /** Шаг 104 [Р-229]: выгрузка экрана в файл (CSV / XLSX) — ничего не меняет, отдаёт файл; не больше 50 000 строк */
+  | 'SCREEN_EXPORT';
 
 /**
  * Р-143 (шаг 31): виды заданий, которые НИЧЕГО НЕ МЕНЯЮТ. Им второй фактор не нужен, и создать их может любой участник; но
@@ -1037,14 +1049,14 @@ export const BULK_JOB_QUEUE_LIMIT = 20;
 /** Сколько заданий держит в очереди ОДИН участник: меньше общего предела, чтобы один не занимал очередь тенанта */
 export const BULK_JOB_MEMBER_QUEUE_LIMIT = 5;
 
-export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'IMPORT_TEMPLATE', 'IMPORT_CHECK'];
+export const READ_ONLY_JOB_KINDS: readonly BulkJobKind[] = ['BOUNDS_PLAN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'IMPORT_TEMPLATE', 'IMPORT_CHECK', 'SCREEN_EXPORT'];
 
 /**
  * Р-145 (шаг 32): виды заданий, которые отдают продавцу ФАЙЛ. Повторяет `security.file_producing_job_kinds()` (0193) — список
  * один, база последнее слово. Шаг 99: файлы отдают шаблон импорта и примерка (отчёт об ошибочных строках); импорт себестоимости
  * файла больше не отдаёт — файл с ошибками не применяется вовсе [Р-224].
  */
-export const FILE_PRODUCING_JOB_KINDS: readonly BulkJobKind[] = ['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT'];
+export const FILE_PRODUCING_JOB_KINDS: readonly BulkJobKind[] = ['IMPORT_TEMPLATE', 'IMPORT_CHECK', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'SCREEN_EXPORT'];
 export type BulkJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED' | 'CANCELLED';
 export type BulkJobPhase = 'PREPARING' | 'APPLYING' | 'PRODUCING' | 'DONE';
 

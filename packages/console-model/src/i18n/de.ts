@@ -1566,6 +1566,15 @@ export const de: Messages = {
      * Р-139 (шаг 30): экран фонового задания. Слова подобраны так, чтобы продавец, вернувшийся через час или перезагрузивший
      * страницу, понял три вещи: что делается, сколько осталось и что сейчас в базе.
      */
+    /** Шаг 104 [Р-229]: выгрузка экрана в файл */
+    export: {
+      button: 'Exportieren', csv: 'CSV', xlsx: 'XLSX', label: 'Exportieren, was dieser Bildschirm zeigt',
+      headerNote: 'Die Spaltenüberschriften in der Datei sind immer auf Englisch.',
+      guest: 'Der Export ist in der öffentlichen Demo nicht verfügbar',
+      created: 'Die Datei wird im Hintergrund erstellt. Sie können diese Seite verlassen.',
+      tooMany: (rows: number, limit: number) => `Dieser Export hätte ${rows} Zeilen — mehr als die Grenze von ${limit}. Grenzen Sie den Zeitraum ein.`,
+      empty: 'Nichts zu exportieren: der Bildschirm zeigt keine Zeilen.',
+    },
     jobs: {
       links: { title: 'Eine Massenänderung beginnen', bounds: 'Mindest- und Höchstpreis für viele Angebote festlegen', strategies: 'Vielen Angeboten eine Strategie zuweisen', costs: 'Stückkosten importieren' },
       pageTitle: 'Massenvorgänge', back: '← Angebote', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge. Sie erscheinen hier, wenn Sie Stückkosten importieren, die Grenzen vieler Angebote ändern oder vielen Angeboten eine Strategie zuweisen.',
@@ -1573,6 +1582,7 @@ export const de: Messages = {
         COST_IMPORT: 'Stückkosten importieren', REPRICING_ENABLE: 'Repricing einschalten', STOCK_IMPORT: 'Bestand importieren', STOCK_SYNC_ENABLE: 'Bestandsabgleich einschalten', BOUNDS_EDIT: 'Grenzen ändern', BOUNDS_PLAN: 'Unterschiede der Grenzen rechnen',
         STRATEGY_ASSIGN: 'Strategie zuweisen', STRATEGY_PREVIEW: 'Strategie vorab rechnen', PRICE_EVIDENCE: 'Preisnachweis ausgeben',
         PRICE_FEED_EXPORT: 'Preisverlauf ausgeben',
+        SCREEN_EXPORT: 'Bildschirm exportieren',
         IMPORT_TEMPLATE: 'Importvorlage erstellen', IMPORT_CHECK: 'Importdatei prüfen',
       },
       queued: 'In der Warteschlange — der Vorgang beginnt gleich.',
@@ -1591,7 +1601,7 @@ export const de: Messages = {
       doneBounds: (offers: number, changed: number) => `Fertig: Grenzen von ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} geprüft, ${changed} geändert.`,
       doneStrategy: (offers: number, version: number) => `Fertig: Version ${version} ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'} zugewiesen.`,
       doneFeedExport: (rows: number, bytes: number) => `Fertig: ${rows} Einträge, ${Math.round(bytes / 1024)} KB — die Datei steht zum Download bereit.`,
-      createdFeedExport: 'Der Preisverlauf wird im Hintergrund ausgegeben. Sie können die Seite verlassen.',
+      doneScreenExport: (rows: number, bytes: number) => `Fertig: ${rows} ${rows === 1 ? 'Zeile' : 'Zeilen'}, ${Math.round(bytes / 1024)} KB — die Datei steht zum Download bereit.`,
       reportReady: (rows: number) => `Nicht angewendete Zeilen: ${rows} — die vollständige Liste steht als Datei bereit.`,
       donePreview: (offers: number) => `Fertig: für ${offers} ${offers === 1 ? 'Angebot' : 'Angebote'} vorab gerechnet.`,
       doneEnable: (enabled: number, already: number, skipped: number) => `Fertig: Repricing bei ${enabled} Angeboten eingeschaltet${already > 0 ? `, ${already} liefen schon` : ''}${skipped > 0 ? `, ${skipped} konnten nicht eingeschaltet werden — siehe Liste` : ''}.`,
@@ -1625,6 +1635,7 @@ export const de: Messages = {
         NO_ROWS: 'keine anwendbaren Zeilen', BAD_REQUEST: 'die Anfrage ist unvollständig', BAD_DRAFT: 'der Strategieentwurf ist unvollständig',
         BAD_SCOPES: 'keine Angebote ausgewählt', CONFLICT: 'die Grenzen haben sich inzwischen geändert',
         MFA_REQUIRED: 'der zweite Faktor fehlt', MFA_REQUIRED_WINDOW: 'in den letzten zehn Minuten wurden mehr als fünf Angebote geändert: zum Fortfahren mit zweitem Faktor anmelden', FORBIDDEN: 'die Rolle darf das nicht', JOB_FAILED: 'unerwarteter Fehler',
+        TOO_MANY_ROWS: 'mehr als 50.000 Zeilen — grenzen Sie den Zeitraum ein',
         UNKNOWN_JOB_KIND: 'diesen Vorgang kennt der Hintergrundprozess nicht',
         TOO_MANY_ATTEMPTS: 'der Vorgang ist mehrfach gescheitert und wird nicht weiter versucht',
         DATA_CHANGED: 'Ihre Daten haben sich nach der Prüfung geändert — prüfen Sie die Datei erneut', HAS_ERRORS: 'die Datei hat Zeilen mit Fehlern — nichts wurde angewendet',
@@ -1800,7 +1811,6 @@ export const de: Messages = {
       searchLimited: (shown: number, total: number) => `${total} Angebote passen — die Liste zeigt die ersten ${shown} davon.`,
       pageTitle: 'Preisänderungen', empty: 'Noch keine Preisänderungen. Sie erscheinen, sobald Repricing eingeschaltet ist und ein Preis an einen Kanal gesendet wird.',
       // Р-142 (шаг 31): весь период уносится файлом — на экране страница не больше 200 записей
-      exportAll: (n: number) => `Alle ${n} Einträge als Datei`,
       columns: { when: 'Wann', offer: 'Angebot', from: 'Von', to: 'Auf', change: 'Änderung', status: 'Status', source: 'Quelle', reason: 'Grund' },
       counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number; shadowHeld: number }) => `${c.shadowHeld > 0 ? `Im Schattenmodus zurückgehalten ${c.shadowHeld} · angewendet` : 'Angewendet'} ${c.applied} · in Bearbeitung ${c.inFlight} · nicht gesendet ${c.notSent} · ersetzt ${c.superseded}`,
       statuses: { PENDING: 'In der Warteschlange', DISPATCHED: 'Gesendet', ACCEPTED: 'Angenommen, nicht bestätigt', APPLIED: 'Angewendet', NOT_APPLIED: 'Nicht angewendet', FAILED: 'Fehlgeschlagen', BLOCKED: 'Blockiert', SUPERSEDED: 'Durch neueren Preis ersetzt', DISCARDED_STALE: 'Nicht gesendet', BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', SHADOW_HELD: 'Im Schattenmodus zurückgehalten' },
@@ -1928,6 +1938,7 @@ export const de: Messages = {
       haltReview: (when: string) => `Prüfung einer frischen Stichprobe nach ${when}`, haltReleasedAuto: (when: string) => `automatisch durch frische Stichprobe ${when}`,
       notStopped: ['Bestandssynchronisierung', 'Eine bereits an den Kanal gesendete Übertragung: ihr Ergebnis wird übernommen'],
       auditTitle: 'Audit-Protokoll: Stopps, Rollen und Kanalereignisse',
+      auditColumns: { when: 'Wann', action: 'Aktion', who: 'Wer', subject: 'Betrifft', note: 'Notiz' },
       auditEmpty: 'Noch keine Stopps, Rollenwechsel oder Kanalereignisse. Jeder Stopp, jede Fortsetzung und jeder Rollenwechsel erscheint hier mit Person, jedes vom Kanal aus dem Verkauf genommene Angebot mit dem Grund.',
       auditActions: { 'pricing.stop_created': 'Preise gestoppt', 'pricing.stop_released': 'Preise fortgesetzt', 'pricing.halt_created': 'Storefront vom System angehalten', 'pricing.halt_released': 'Anhalten der Storefront aufgehoben', 'pricing.distrust_created': 'Kanal vom System als nicht vertrauenswürdig markiert — alle Preise angehalten', 'pricing.distrust_released': 'Misstrauen gegenüber dem Kanal aufgehoben', 'membership.role_changed': 'Rolle geändert', 'channel.offer_unpublished': 'Angebot nicht veröffentlicht: Preis nicht wettbewerbsfähig' },
       offerUnpublishedDetail: (elsewhere: string | null) => `Dasselbe Produkt ist anderswo günstiger${elsewhere ? ` (${elsewhere})` : ''} — auf einem anderen Kanal oder bei Walmart selbst. PriceTrail ändert den Preis hier nicht für Sie.`,

@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import type { BoundsIndexView, DiscountAnnounceResponse, EnableResult, JobCreatedResponse, SessionView, StandToken, WorldSummary } from '../src/api-types.ts';
 import { createHash } from 'node:crypto';
+import { inflateRawSync } from 'node:zlib';
+import { parseCsv, parseXlsx } from '@repracer/cost-import';
 import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode, standTokenSecondsOf } from '../server/stand-server.ts';
 import { runJob, runPendingJobs } from './run-jobs.ts';
 
@@ -654,8 +656,10 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
     assert.equal((await call(viewer, 'GET', `${api(feedId, 'feed')}?${bad}`)).status, 400, bad);
   }
   const markup = await html('/src/screens/Feed.tsx', 'FeedScreenView', { view: one, onQuery: () => {} });
-  // Шаг 96: фильтры (вид, период, поиск, статус) стоят над перезагружаемой таблицей — у таблицы остаются страницы и выгрузка
-  for (const text of ['Older →', `1–1 of ${all.page.total}`, 'entries as a file']) assert.ok(markup.includes(text), text);
+  // Шаг 96: фильтры (вид, период, поиск, статус) стоят над перезагружаемой таблицей — у таблицы остаются страницы. Шаг 104 [Р-229]:
+  // выгрузка — кнопкой «Export» в ряду фильтров; прежней «All N entries as a file» в полосе итогов таблицы нет
+  for (const text of ['Older →', `1–1 of ${all.page.total}`]) assert.ok(markup.includes(text), text);
+  assert.ok(!markup.includes('entries as a file'), 'the old export link is gone');
 });
 
 test('step 24, OQ-169/170: an existing strategy version is assigned without a new version after its preview; a strategy is removed only with repricing off; versions show author and status', async () => {
@@ -974,7 +978,7 @@ test('Р-147: список заданий не несёт их итогов', as
  */
 test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
   const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
-  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE', 'IMPORT_TEMPLATE', 'IMPORT_CHECK'] as const;
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE', 'IMPORT_TEMPLATE', 'IMPORT_CHECK', 'SCREEN_EXPORT'] as const;
   // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 
@@ -1148,12 +1152,13 @@ test('step 96: the feed export takes the period and the search of the screen; th
   assert.deepEqual([nothing, past], [0, 0], 'a search with no match and a range before the first write give empty journals');
   assert.ok(found >= 1, `search «4101» finds the offer — ${found}`);
   for (const [query, expected] of [[{ period: '24h' }, day], [{ period: '7d', q: 'zzz-no-such' }, 0], [{ period: '7d', q: '4101' }, found], [{ from: '2026-10-01', to: '2026-10-02' }, 0]] as const) {
-    const created = await call(owner, 'POST', api(id, 'feed', 'export'), { query });
+    // Шаг 104 [Р-229]: выгрузка ленты — общей кнопкой «Export» (прежняя «All N entries as a file» заменена)
+    const created = await call(owner, 'POST', api(id, 'exports'), { screen: 'price-changes', format: 'csv', query });
     assert.equal(created.status, 200, JSON.stringify(created.body));
     const job = await get<{ total: number | null }>(owner, api(id, 'jobs', (created.body as { jobId: string }).jobId));
     assert.equal(job.total, expected, `export of ${JSON.stringify(query)}: ${job.total} rows, the screen showed ${expected}`);
   }
-  assert.equal((await call(owner, 'POST', api(id, 'feed', 'export'), { query: { period: '5d' } })).status, 400);
+  assert.equal((await call(owner, 'POST', api(id, 'exports'), { screen: 'price-changes', format: 'csv', query: { period: '5d' } })).status, 400);
 });
 
 /**
@@ -1223,4 +1228,180 @@ test('step 103 [Р-228]: the console sets the default strategy of a channel acco
     { channelAccountId: liveOf(amazonId).accounts[0]!.channelAccountId, strategyId: (saved as { strategy: { strategyId: string } }).strategy.strategyId });
   assert.equal(win.status, 409, JSON.stringify(win.body));
   assert.match((win.body as { error: { message: string } }).error.message, /^This strategy cannot be the default on this channel: it needs .*the Buy Box winner/);
+});
+
+
+/** Шаг 104: книга XLSX — ZIP; запись по имени, разжатая */
+function zipEntry(zip: Buffer, name: string): string | null {
+  let at = 0;
+  while (at + 30 <= zip.length && zip.readUInt32LE(at) === 0x04034b50) {
+    const method = zip.readUInt16LE(at + 8);
+    const size = zip.readUInt32LE(at + 18);
+    const nameLength = zip.readUInt16LE(at + 26);
+    const extra = zip.readUInt16LE(at + 28);
+    const entry = zip.subarray(at + 30, at + 30 + nameLength).toString('utf8');
+    const data = zip.subarray(at + 30 + nameLength + extra, at + 30 + nameLength + extra + size);
+    if (entry === name) return (method === 8 ? inflateRawSync(data) : data).toString('utf8');
+    at += 30 + nameLength + extra + size;
+  }
+  return null;
+}
+
+/** Шаг 104: выгрузка экрана через консоль — задание, его исполнение и файл */
+async function exportFile(auth: Auth, id: string, screen: string, query: Record<string, string>, format: 'csv' | 'xlsx' = 'csv') {
+  const created = await call(auth, 'POST', api(id, 'exports'), { screen, format, query });
+  assert.equal(created.status, 200, `${screen}: ${JSON.stringify(created.body)}`);
+  const jobId = (created.body as JobCreatedResponse).jobId;
+  const job = await runJob(liveOf(id), jobId, 'en');
+  assert.equal(job.status, 'SUCCEEDED', `${screen}: ${job.error ?? job.headline}`);
+  const artifact = await liveOf(id).store.bulkJobArtifact(liveOf(id).tenantId, jobId);
+  assert.ok(artifact, `${screen}: the file is there`);
+  return artifact;
+}
+const csvTable = (content: string) => parseCsv(content).rows;
+const column = (rows: readonly (readonly string[])[], name: string) => {
+  const i = rows[0]!.indexOf(name);
+  assert.ok(i >= 0, `column ${name} in ${rows[0]!.join(',')}`);
+  return rows.slice(1).map((r) => r[i] ?? '');
+};
+
+/**
+ * Шаг 104 [Р-229] (E1): что видишь, то и выгружаешь — файл совпадает с экраном строка в строку при тех же фильтрах и периоде, на всех
+ * восьми выгрузках: обе части Price changes, обе вкладки Protections (с фильтром причины), Offers, Inventory, журнал импортов и журнал аудита.
+ * Экран собирается всеми страницами по HTTP, файл — заданием; сверяются ключи строк в порядке экрана
+ */
+test('step 104 (E1) [Р-229]: an export is the screen row for row with the same filters and period — every screen', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const pages = async <T,>(url: (offset: number) => string, take: (body: unknown) => { items: T[]; total: number }) => {
+    const out: T[] = [];
+    for (let offset = 0, total = 1; offset < total; offset += 200) {
+      const page = take(await get<unknown>(owner, url(offset)));
+      total = page.total;
+      out.push(...page.items);
+    }
+    return out;
+  };
+  // Price changes — отправленные цены и все решения, период 30 дней
+  const feed = await pages<{ decisionId: string | null }>((o) => `${api(id, 'feed')}?period=30d&offset=${o}&limit=200`, (b) => ({ items: (b as PriceFeedView).items, total: (b as PriceFeedView).page.total }));
+  assert.ok(feed.length > 0, 'the journal of sent prices has rows');
+  assert.deepEqual(column(csvTable((await exportFile(owner, id, 'price-changes', { period: '30d' })).content), 'decision_id'), feed.map((i) => i.decisionId ?? ''), 'price changes, prices sent');
+  const decisions = await pages<DecisionListItem>((o) => `${api(id, 'decisions')}?period=30d&offset=${o}&limit=200`, (b) => ({ items: (b as DecisionListView).items, total: (b as DecisionListView).page.total }));
+  assert.ok(decisions.length > feed.length, 'all decisions are more than the prices sent');
+  assert.deepEqual(column(csvTable((await exportFile(owner, id, 'decisions', { period: '30d' })).content), 'decision_id'), decisions.map((d) => d.decisionId), 'price changes, all decisions');
+  // Offers и Inventory — весь каталог, все страницы, в порядке экрана: и на мире Amazon с несколькими предложениями — у мира Kaufland
+  // предложение одно, и порядок на нём не проверить (ручная мутация «строки в другом порядке» прошла бы)
+  let offers: Array<{ unit: { writeScopeId: string; externalUnitId: string } }> = [];
+  for (const w of [id, 'amazon/pipeline/console-channel-trust']) {
+    offers = await pages<{ unit: { writeScopeId: string; externalUnitId: string } }>((o) => `${api(w, 'products')}?offset=${o}&limit=200`, (b) => ({ items: (b as ProductListView).rows, total: (b as ProductListView).page.total }));
+    assert.deepEqual(column(csvTable((await exportFile(owner, w, 'offers', {})).content), 'write_scope_id'), offers.map((r) => r.unit.writeScopeId), `${w}: offers`);
+    const stock = await pages<{ productId: string }>((o) => `${api(w, 'stock')}?offset=${o}&limit=200`, (b) => ({ items: (b as StockView).rows, total: (b as StockView).page.total }));
+    assert.ok(stock.length > 0, `${w}: inventory has products`);
+    assert.deepEqual(column(csvTable((await exportFile(owner, w, 'inventory', {})).content), 'product_id'), stock.map((r) => r.productId), `${w}: inventory`);
+  }
+  assert.ok(offers.length >= 2, `the order of the rows is checked on several offers — ${offers.length}`);
+  offers = await pages<{ unit: { writeScopeId: string; externalUnitId: string } }>((o) => `${api(id, 'products')}?offset=${o}&limit=200`, (b) => ({ items: (b as ProductListView).rows, total: (b as ProductListView).page.total }));
+  // Журнал импортов — свой запуск примерки, журнал за 30 дней
+  const sku = offers[0]?.unit.externalUnitId ?? '';
+  const check = await call(owner, 'POST', api(id, 'imports', 'check'), { kind: 'COSTS', fileName: 'costs.csv', content: Buffer.from(`sku;unit cost;currency\n${sku};10,50;EUR\n`, 'utf8').toString('base64') });
+  assert.equal(check.status, 200, JSON.stringify(check.body));
+  await runJob(liveOf(id), (check.body as JobCreatedResponse).jobId, 'en');
+  const runs = await pages<{ runId: string }>((o) => `${api(id, 'imports')}?kind=COSTS&period=30d&offset=${o}&limit=200`, (b) => ({ items: (b as { items: Array<{ runId: string }> }).items, total: (b as { page: { total: number } }).page.total }));
+  assert.ok(runs.length > 0, 'the import journal has the check');
+  assert.deepEqual(column(csvTable((await exportFile(owner, id, 'imports', { kind: 'COSTS', period: '30d' })).content), 'import_run_id'), runs.map((r) => r.runId), 'import history');
+  // Журнал аудита — остановка и её снятие человеком; журнал за 30 дней
+  assert.equal((await call(owner, 'POST', api(id, 'stop'), { target: { kind: 'TENANT' }, note: 'Step 104 export check stop', confirmed: true })).status, 200);
+  const stopId = (await get<StopView>(owner, api(id, 'stop'))).stops.active[0]!.stopId;
+  assert.equal((await call(owner, 'POST', api(id, 'stops', stopId, 'resume'), { note: 'Step 104 export check resumes', confirmed: true })).status, 200);
+  const audit = await pages<{ action: string }>((o) => `${api(id, 'stop')}?period=30d&offset=${o}&limit=200`, (b) => ({ items: (b as StopView).audit, total: (b as StopView).auditPage!.total }));
+  assert.ok(audit.length >= 2, `the audit log has the stop and its release — ${audit.length}`);
+  assert.deepEqual(column(csvTable((await exportFile(owner, id, 'audit-log', { period: '30d' })).content), 'action_text'), audit.map((a) => a.action), 'audit log');
+  // Protections — обе вкладки; у «Prevented by rules» — удержания пола, отказы за границей и прочие правила, с фильтром причины и без
+  for (const world of ['kaufland/pipeline/above-max-price', 'kaufland/pipeline/kill-switch-tenant-stop']) {
+    const rejected = await get<RejectedView>(owner, `${api(world, 'rejected')}?period=30d`);
+    const report = await get<DangerousReportView>(owner, `${api(world, 'dangerous')}?period=30d`);
+    const rules = rejected.items.filter((i) => i.kind !== 'STOP');
+    const people = rejected.items.filter((i) => i.kind === 'STOP');
+    const ids = (xs: ReadonlyArray<{ decisionId: string | null }>) => xs.map((x) => x.decisionId ?? '');
+    assert.deepEqual(column(csvTable((await exportFile(owner, world, 'prevented-by-rules', { period: '30d' })).content), 'decision_id'),
+      [...ids(report.floorHolds.items), ...ids(report.items), ...ids(rules)], `${world}: prevented by rules`);
+    assert.deepEqual(column(csvTable((await exportFile(owner, world, 'stopped-by-people', { period: '30d' })).content), 'decision_id'), ids(people), `${world}: stopped by people`);
+    const reason = rules[0]?.reason.code;
+    if (reason) {
+      assert.deepEqual(column(csvTable((await exportFile(owner, world, 'prevented-by-rules', { period: '30d', reason })).content), 'decision_id'),
+        [...ids(report.floorHolds.items), ...ids(report.items), ...ids(rules.filter((i) => i.reason.code === reason))], `${world}: prevented by rules, filtered by ${reason}`);
+    }
+  }
+  const above = await get<RejectedView>(owner, `${api('kaufland/pipeline/above-max-price', 'rejected')}?period=30d`);
+  const stopped = await get<RejectedView>(owner, `${api('kaufland/pipeline/kill-switch-tenant-stop', 'rejected')}?period=30d`);
+  assert.ok(above.items.some((i) => i.kind !== 'STOP') && stopped.items.some((i) => i.kind === 'STOP'), 'both tabs had rows to compare');
+});
+
+/**
+ * Шаг 104 [Р-229] (E2): больше 50 000 строк — честный отказ «narrow the period» до создания задания, а не обрезанный файл; ровно 50 000 —
+ * выгружается. Если строк стало больше за время работы — отказывает исполнитель своей причиной (TOO_MANY_ROWS)
+ */
+test('step 104 (E2) [Р-229]: 50 001 rows — refused with «narrow the period» before any job; 50 000 — exported; grown since — the job refuses', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const live = liveOf(id);
+  const owner = await login('OWNER');
+  const store = live.store as unknown as { feedPage: (...a: unknown[]) => Promise<{ total: number }>; auditPage: (...a: unknown[]) => Promise<{ items: unknown[]; total: number }> };
+  const feedPage = store.feedPage.bind(store);
+  let total = EXPORT_MAX_ROWS + 1;
+  store.feedPage = async (...a: unknown[]) => ({ ...await feedPage(...a), total });
+  try {
+    const refused = await call(owner, 'POST', api(id, 'exports'), { screen: 'price-changes', format: 'csv', query: { period: '30d' } });
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    const error = (refused.body as { error: { code: string; message: string } }).error;
+    assert.equal(error.code, 'TOO_MANY_ROWS');
+    assert.match(error.message, /50001 rows .* limit of 50000\. Narrow the period\.$/);
+    total = EXPORT_MAX_ROWS;
+    const allowed = await call(owner, 'POST', api(id, 'exports'), { screen: 'price-changes', format: 'csv', query: { period: '30d' } });
+    assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+    assert.equal((await call(owner, 'POST', api(id, 'jobs', (allowed.body as JobCreatedResponse).jobId, 'cancel'), {})).status, 200, 'the pending job is cancelled');
+  } finally {
+    store.feedPage = feedPage;
+  }
+  // Данные выросли после нажатия: задание считает строки тем же запросом и отказывает, а не обрезает файл
+  const created = await call(owner, 'POST', api(id, 'exports'), { screen: 'audit-log', format: 'csv', query: { period: '30d' } });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const auditPage = store.auditPage.bind(store);
+  store.auditPage = async (...a: unknown[]) => ({ ...await auditPage(...a), total: EXPORT_MAX_ROWS + 1 });
+  try {
+    const job = await runJob(live, (created.body as JobCreatedResponse).jobId, 'en');
+    assert.equal(job.status, 'FAILED', job.headline);
+    assert.match(String(job.error ?? ''), /more than 50,000 rows — narrow the period/, 'the job names the reason');
+  } finally {
+    store.auditPage = auditPage;
+  }
+});
+
+/**
+ * Шаг 104 [Р-229] (E4): заголовки колонок файла — английские при любом языке интерфейса; XLSX — с листом «About this export» (что, за
+ * какой период, кто и сколько строк), имя файла — «<workspace>-<screen>-<period>», время — ISO с поясом, суммы — числом (в XLSX —
+ * числовыми ячейками) и колонкой валюты
+ */
+test('step 104 (E4) [Р-229]: column headers are English on a Spanish and a French screen; XLSX carries «About this export»; times ISO, amounts numbers', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  for (const locale of ['es', 'fr'] as const) {
+    const owner = await login('OWNER', locale);
+    const csv = csvTable((await exportFile(owner, id, 'decisions', { period: '30d' })).content);
+    assert.deepEqual(csv[0], [...EXPORT_HEADERS.decisions], `${locale}: CSV headers in English`);
+    const xlsx = await exportFile(owner, id, 'decisions', { period: '30d' }, 'xlsx');
+    const book = Buffer.from(xlsx.content, 'base64');
+    assert.deepEqual(parseXlsx(book).rows[0], [...EXPORT_HEADERS.decisions], `${locale}: XLSX headers in English`);
+    assert.match(zipEntry(book, 'xl/workbook.xml') ?? '', /<sheet name="Data"[^>]*\/><sheet name="About this export"/);
+    const about = zipEntry(book, 'xl/worksheets/sheet2.xml') ?? '';
+    for (const line of ['Workspace: ', 'Screen: Price changes — all decisions', 'Period: ', 'Filters: none', 'Exported by: ', `Rows: ${csv.length - 1}`, 'Column headers are always in English']) {
+      assert.ok(about.includes(line), `${locale}: «About this export» says ${line}`);
+    }
+    assert.match(xlsx.fileName, /^[a-z0-9-]+-decisions-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.xlsx$/, `${locale}: <workspace>-<screen>-<period>.xlsx — ${xlsx.fileName}`);
+    const row = csv[1]!;
+    assert.match(row[0]!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/, `${locale}: time is ISO with the zone — ${row[0]}`);
+    assert.match(row[csv[0]!.indexOf('price')]!, /^-?\d+\.\d{2}$/, `${locale}: the amount is a number with a point`);
+    assert.equal(row[csv[0]!.indexOf('currency')], 'EUR');
+    // В XLSX колонка цены — числовые ячейки (формулы считают), а не строки
+    const priceColumn = String.fromCharCode(65 + EXPORT_HEADERS.decisions.indexOf('price'));
+    assert.match(zipEntry(book, 'xl/worksheets/sheet1.xml') ?? '', new RegExp(`<c r="${priceColumn}2"><v>-?\\d+\\.\\d{2}</v></c>`), `${locale}: the price cell is a number`);
+  }
 });

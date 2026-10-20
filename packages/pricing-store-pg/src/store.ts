@@ -1630,6 +1630,18 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
+  /** Шаг 104 [Р-229]: журнал импортов вида за период — страница и итог; индекс `import_run_kind_recent_idx` (0193) */
+  async importRunsPage(tenantId: string, query: { kind: ImportKind; since?: Instant; until?: Instant; offset: number; limit: number }): Promise<{ items: ImportRunRow[]; total: number }> {
+    return inTenant(this.admin('importRunsPage'), tenantId, async (tx) => {
+      const where = `tenant_id = $1 AND kind = $2 AND ($3::timestamptz IS NULL OR recorded_at >= $3::timestamptz) AND ($4::timestamptz IS NULL OR recorded_at < $4::timestamptz)`;
+      const args = [tenantId, query.kind, query.since ?? null, query.until ?? null];
+      const { rows: [c] } = await tx.query(`SELECT count(*)::int AS n FROM tenant_data.import_run WHERE ${where}`, args);
+      const { rows } = await tx.query(`SELECT ${IMPORT_RUN_COLUMNS} FROM tenant_data.import_run WHERE ${where} ORDER BY recorded_at DESC, import_run_id OFFSET $5 LIMIT $6`,
+        [...args, Math.max(0, query.offset), Math.max(1, query.limit)]);
+      return { items: rows.map(importRunRow), total: Number(c.n) };
+    });
+  }
+
   async importRuns(tenantId: string, query: { kind: ImportKind; limit: number }): Promise<ImportRunRow[]> {
     return inTenant(this.admin('importRuns'), tenantId, async (tx) => {
       const { rows } = await tx.query(
@@ -3063,6 +3075,52 @@ export class PgPricingStore implements PricingStore {
              ORDER BY h.event_time DESC, h.recorded_at DESC LIMIT $2)
          ) a ORDER BY a.changes ->> 'at' DESC, a.recorded_at DESC, a.audit_event_id DESC LIMIT $2`, [tenantId, limit]);
       return rows.map(auditRow);
+    });
+  }
+
+  /**
+   * Шаг 104 [Р-229]: журнал аудита Stop pricing за период по времени действия — страница и итог. Те же три источника и тот же порядок,
+   * что у `auditRecent`; период считается по времени действия (у события канала — времени события)
+   */
+  async auditPage(tenantId: string, query: { since?: Instant; until?: Instant; offset: number; limit: number }): Promise<{ items: ConsoleAuditRow[]; total: number }> {
+    return inTenant(this.admin('auditPage'), tenantId, async (tx) => {
+      const union = `SELECT * FROM (
+           (SELECT e.action, e.actor_type, e.actor_membership_id, e.entity_type, e.entity_id, e.changes, e.recorded_at, e.audit_event_id,
+                   NULL::text AS actor_role, NULL::text AS member_email, NULL::text AS member_name,
+                   (e.changes ->> 'at')::timestamptz AS at_ts
+              FROM audit.audit_event e
+             WHERE e.tenant_id = $1 AND e.entity_type IN ('price_stop', 'pricing_halt')
+            )
+           UNION ALL
+           (SELECT e.action, e.actor_type, e.actor_membership_id, e.entity_type, e.entity_id, e.changes, e.recorded_at, e.audit_event_id,
+                   am.role AS actor_role, u.email AS member_email, u.display_name AS member_name,
+                   (e.changes ->> 'at')::timestamptz AS at_ts
+              FROM audit.audit_event e
+              LEFT JOIN tenant_data.membership am ON am.tenant_id = e.tenant_id AND am.membership_id = e.actor_membership_id
+              LEFT JOIN tenant_data.membership tm ON tm.tenant_id = e.tenant_id AND tm.membership_id = e.entity_id
+              LEFT JOIN platform.app_user u ON u.user_id = tm.user_id
+             WHERE e.tenant_id = $1 AND e.entity_type = 'membership' AND e.action = 'membership.role_changed'
+            )
+           UNION ALL
+           -- Шаг 89: события канала — Walmart снял предложение с публикации; предложение называется названием продавца или SKU
+           (SELECT 'channel.offer_unpublished', 'SYSTEM', NULL::uuid, 'offer_pricing_health', h.offer_pricing_health_id,
+                   jsonb_build_object('at', h.event_time, 'channel', h.channel,
+                                      'channelAccountId', h.channel_account_id, 'marketplace', h.marketplace,
+                                      'offerName', coalesce(p.title, om.external_sku, h.channel_product_ref),
+                                      'elsewhereMinor', h.competitive_price_threshold_minor, 'currency', h.currency),
+                   h.recorded_at, h.offer_pricing_health_id, NULL::text, NULL::text, NULL::text, h.event_time
+              FROM channel_data.offer_pricing_health h
+              LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = h.tenant_id AND om.channel_account_id = h.channel_account_id
+                                                     AND om.marketplace = h.marketplace AND om.channel_product_ref = h.channel_product_ref AND om.status = 'ACTIVE'
+              LEFT JOIN tenant_data.product p ON p.tenant_id = om.tenant_id AND p.product_id = om.product_id
+             WHERE h.tenant_id = $1 AND h.issue_type = 'WALMART_UNPUBLISHED_UNCOMPETITIVE_PRICE'
+            )
+         ) a WHERE ($2::timestamptz IS NULL OR a.at_ts >= $2::timestamptz) AND ($3::timestamptz IS NULL OR a.at_ts < $3::timestamptz)`;
+      const args = [tenantId, query.since ?? null, query.until ?? null];
+      const { rows: [c] } = await tx.query(`SELECT count(*)::int AS n FROM (${union}) w`, args);
+      const { rows } = await tx.query(`${union} ORDER BY a.changes ->> 'at' DESC, a.recorded_at DESC, a.audit_event_id DESC OFFSET $4 LIMIT $5`,
+        [...args, Math.max(0, query.offset), Math.max(1, query.limit)]);
+      return { items: rows.map(auditRow), total: Number(c.n) };
     });
   }
 

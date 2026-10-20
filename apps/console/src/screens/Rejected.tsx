@@ -65,16 +65,21 @@ const STAT_KEYS = ['dangerous', 'corrected', 'unresolvable', 'floorAboveCeiling'
  * периоде есть опасный случай, причина — категорией и чипом «×N»; группы причин — фильтры таблицы (новый период сбрасывает фильтр:
  * компонент пересоздаётся по ключу периода)
  */
-export function RejectedScreenView({ view, only = null, period = { preset: '7d' } }: { view: RejectedView; only?: 'STOP' | 'RULES' | null; period?: Period }) {
+export function RejectedScreenView({ view, only = null, period = { preset: '7d' }, reason, onReason }: {
+  view: RejectedView; only?: 'STOP' | 'RULES' | null; period?: Period;
+  /** Шаг 104 [Р-229]: фильтр причины — у страницы Protections, чтобы выгрузка видела тот же фильтр, что таблица */
+  reason?: string | null; onReason?: (code: string | null) => void;
+}) {
   const m = useMessages();
   const r = m.ui.rejected;
   const p = m.ui.protections;
   const c = r.columns;
   const phrase = periodPhrase(period, m);
   const items = only === 'STOP' ? view.items.filter((i) => i.kind === 'STOP') : only === 'RULES' ? view.items.filter((i) => i.kind !== 'STOP') : view.items;
-  const [filter, setFilter] = useState<string | null>(null);
+  const [own, setOwn] = useState<string | null>(null);
+  const filter = reason !== undefined ? reason : own;
   const [offset, setOffset] = useState(0);
-  const choose = (code: string | null) => { setFilter(code); setOffset(0); };
+  const choose = (code: string | null) => { (onReason ?? setOwn)(code); setOffset(0); };
   const filtered = filter ? items.filter((i) => i.reason.code === filter) : items;
   // Шаг 96 (Б12): повторы — строкой «×N» (то же предложение, тот же вид, та же причина), страницы по 50
   const groups = collapseRepeats(filtered, (i) => `${i.unit?.writeScopeId ?? i.productRef ?? ''}|${i.kind}|${i.reason.code}|${i.intervention ?? ''}`);
@@ -160,8 +165,8 @@ export function RejectedScreenView({ view, only = null, period = { preset: '7d' 
   );
 }
 
-export function RejectedScreen({ worldId, only, period }: { worldId: string; only: 'STOP' | 'RULES'; period: Period }) {
+export function RejectedScreen({ worldId, only, period, reason, onReason }: { worldId: string; only: 'STOP' | 'RULES'; period: Period; reason?: string | null; onReason?: (code: string | null) => void }) {
   const m = useMessages();
   const [resource, retry] = useResource<RejectedView>(`${worldPath(worldId, 'rejected')}?${periodSearch(period)}`, m.locale);
-  return <Load shape="table" resource={resource} retry={retry}>{(view) => <RejectedScreenView view={view} only={only} period={period} />}</Load>;
+  return <Load shape="table" resource={resource} retry={retry}>{(view) => <RejectedScreenView view={view} only={only} period={period} {...(onReason ? { reason: reason ?? null, onReason } : {})} />}</Load>;
 }

@@ -1621,6 +1621,15 @@ export const es: Messages = {
       unassignText: 'La oferta conserva su precio actual; con los precios automáticos desactivados no se calcula nada. La versión en sí se conserva.',
       unassigned: 'Estrategia quitada.',
     },
+    /** Шаг 104 [Р-229]: выгрузка экрана в файл */
+    export: {
+      button: 'Exportar', csv: 'CSV', xlsx: 'XLSX', label: 'Exportar lo que muestra esta pantalla',
+      headerNote: 'Los encabezados de columna del archivo siempre están en inglés.',
+      guest: 'La exportación no está disponible en la demo pública',
+      created: 'El archivo se está preparando en segundo plano. Puede salir de esta página.',
+      tooMany: (rows: number, limit: number) => `Esta exportación tendría ${rows} filas, más que el límite de ${limit}. Acote el periodo.`,
+      empty: 'Nada que exportar: la pantalla no muestra filas.',
+    },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
       links: { title: 'Iniciar un cambio masivo', bounds: 'Definir precio mínimo y máximo de muchas ofertas', strategies: 'Asignar una estrategia a muchas ofertas', costs: 'Importar costos unitarios' },
@@ -1629,6 +1638,7 @@ export const es: Messages = {
         COST_IMPORT: 'Importar costos unitarios', REPRICING_ENABLE: 'Activar precios automáticos', STOCK_IMPORT: 'Importar inventario', STOCK_SYNC_ENABLE: 'Activar sincronización de inventario', BOUNDS_EDIT: 'Cambiar límites', BOUNDS_PLAN: 'Calcular las diferencias de límites',
         STRATEGY_ASSIGN: 'Asignar estrategia', STRATEGY_PREVIEW: 'Vista previa de estrategia', PRICE_EVIDENCE: 'Exportar prueba de precios',
         PRICE_FEED_EXPORT: 'Exportar los cambios de precio',
+        SCREEN_EXPORT: 'Exportar una pantalla',
         IMPORT_TEMPLATE: 'Preparar una plantilla de importación', IMPORT_CHECK: 'Revisar un archivo de importación',
       },
       queued: 'En cola: la operación empieza en breve.',
@@ -1647,7 +1657,7 @@ export const es: Messages = {
       doneBounds: (offers: number, changed: number) => `Hecho: límites revisados para ${offers} ${offers === 1 ? 'oferta' : 'ofertas'}, ${changed} cambiados.`,
       doneStrategy: (offers: number, version: number) => `Hecho: versión ${version} asignada a ${offers} ${offers === 1 ? 'oferta' : 'ofertas'}.`,
       doneFeedExport: (rows: number, bytes: number) => `Hecho: ${rows} entradas, ${Math.round(bytes / 1024)} KB; el archivo está listo para descargar.`,
-      createdFeedExport: 'Los cambios de precio se están exportando en segundo plano. Puede salir de esta página.',
+      doneScreenExport: (rows: number, bytes: number) => `Hecho: ${rows} ${rows === 1 ? 'fila' : 'filas'}, ${Math.round(bytes / 1024)} KB; el archivo está listo para descargar.`,
       reportReady: (rows: number) => `Filas no aplicadas: ${rows}; la lista completa está lista como archivo.`,
       donePreview: (offers: number) => `Hecho: calculado para ${offers} ${offers === 1 ? 'oferta' : 'ofertas'}.`,
       doneEnable: (enabled: number, already: number, skipped: number) => `Hecho: precios automáticos activados para ${enabled} ofertas${already > 0 ? `, ${already} ya estaban en marcha` : ''}${skipped > 0 ? `, ${skipped} no se pudieron activar (vea la lista)` : ''}.`,
@@ -1681,6 +1691,7 @@ export const es: Messages = {
         NO_ROWS: 'no hay filas que aplicar', BAD_REQUEST: 'la solicitud está incompleta', BAD_DRAFT: 'el borrador de la estrategia está incompleto',
         BAD_SCOPES: 'no hay ofertas seleccionadas', CONFLICT: 'los límites cambiaron mientras tanto',
         MFA_REQUIRED: 'falta el segundo factor', MFA_REQUIRED_WINDOW: 'se cambiaron más de cinco ofertas en los últimos diez minutos: inicie sesión con un segundo factor para continuar', FORBIDDEN: 'el rol no permite hacer esto', JOB_FAILED: 'error inesperado',
+        TOO_MANY_ROWS: 'más de 50 000 filas: acote el periodo',
         UNKNOWN_JOB_KIND: 'el proceso en segundo plano no conoce esta operación',
         TOO_MANY_ATTEMPTS: 'la operación falló varias veces y ya no se reintenta',
         DATA_CHANGED: 'sus datos cambiaron después de la revisión; revise el archivo de nuevo', HAS_ERRORS: 'el archivo tiene filas con errores; no se aplicó nada',
@@ -1862,7 +1873,6 @@ export const es: Messages = {
       // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит
       searchLimited: (shown: number, total: number) => `${total} ofertas coinciden; la lista muestra las primeras ${shown}.`,
       pageTitle: 'Cambios de precio', empty: 'Todavía no hay cambios de precio. Aparecen cuando los precios automáticos están activados y se envía un precio a un canal.',
-      exportAll: (n: number) => `Las ${n} entradas como archivo`,
       columns: { when: 'Cuándo', offer: 'Oferta', from: 'De', to: 'A', change: 'Cambio', status: 'Estado', source: 'Fuente', reason: 'Motivo' },
       counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number; shadowHeld: number }) => `${c.shadowHeld > 0 ? `Retenidos por el modo sombra ${c.shadowHeld} · aplicados` : 'Aplicados'} ${c.applied} · en curso ${c.inFlight} · no enviados ${c.notSent} · reemplazados ${c.superseded}`,
       statuses: { PENDING: 'En cola', DISPATCHED: 'Enviado', ACCEPTED: 'Aceptado, sin confirmar', APPLIED: 'Aplicado', NOT_APPLIED: 'No aplicado', FAILED: 'Fallido', BLOCKED: 'Bloqueado', SUPERSEDED: 'Reemplazado por un precio más reciente', DISCARDED_STALE: 'No enviado', BUDGET_EXHAUSTED: 'Presupuesto de ediciones agotado', SHADOW_HELD: 'Retenido por el modo sombra' },
@@ -1994,6 +2004,7 @@ export const es: Messages = {
       haltReview: (when: string) => `Revisión con una muestra nueva después de ${when}`, haltReleasedAuto: (when: string) => `automáticamente por una muestra nueva ${when}`,
       notStopped: ['Sincronización de inventario', 'Una actualización ya enviada al canal: se acepta su resultado'],
       auditTitle: 'Registro de auditoría: detenciones, roles y eventos del canal',
+      auditColumns: { when: 'Cuándo', action: 'Acción', who: 'Quién', subject: 'Sobre', note: 'Nota' },
       auditEmpty: 'Todavía no hay detenciones, cambios de rol ni eventos del canal. Cada detención, reanudación y cambio de rol aparece aquí con su autor, y cada oferta que un canal retiró de la venta, con el motivo.',
       auditActions: { 'pricing.stop_created': 'Precios detenidos', 'pricing.stop_released': 'Precios reanudados', 'pricing.halt_created': 'Sitio suspendido por el sistema', 'pricing.halt_released': 'Suspensión del sitio levantada', 'pricing.distrust_created': 'Canal marcado como no confiable por el sistema: todos los precios retenidos', 'pricing.distrust_released': 'Desconfianza en el canal levantada', 'membership.role_changed': 'Rol cambiado', 'channel.offer_unpublished': 'Oferta despublicada: precio no competitivo' },
       /** Шаг 89: почему канал снял предложение — словами и с ценой «в другом месте», если канал её назвал */

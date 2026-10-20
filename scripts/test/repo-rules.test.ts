@@ -121,6 +121,11 @@ test('Р-145: список видов, отдающих файл, одинако
     const body = marker.exec(text)?.[1] ?? '';
     return [...body.matchAll(/'([A-Z_]+)'/g)].map((h) => h[1]!).sort();
   };
+  // Шаг 104: список в базе дополняется строками `UNION ALL SELECT unnest(ARRAY[...])` (прежний текст цитирует каталог мутаций) — читаются все
+  const dbKinds = (text: string) => {
+    const body = /FUNCTION security\.file_producing_job_kinds\(\)[\s\S]*?\$fn\$([\s\S]*?)\$fn\$/.exec(text)?.[1] ?? '';
+    return [...body.matchAll(/unnest\(ARRAY\[([^\]]*)\]/g)].flatMap((x) => [...x[1]!.matchAll(/'([A-Z_]+)'/g)].map((h) => h[1]!)).sort();
+  };
   /**
    * Шаг 99: список переопределяется миграциями (0113, 0193) — действует ПОСЛЕДНЯЯ, что его определяет. Правило берёт её, а не первую:
    * иначе оно сверяло бы код с отменённым списком
@@ -128,12 +133,11 @@ test('Р-145: список видов, отдающих файл, одинако
   const { readdirSync } = await import('node:fs');
   const defining = readdirSync(new URL('migrations/', root)).filter((f) => f.endsWith('.sql')).sort()
     .filter((f) => /FUNCTION security\.file_producing_job_kinds\(\)/.test(read(`migrations/${f}`)));
-  const inDb = kindsIn(read(`migrations/${defining.at(-1)}`),
-    /file_producing_job_kinds\(\)[\s\S]*?unnest\(ARRAY\[([^\]]*)\]/);
+  const inDb = dbKinds(read(`migrations/${defining.at(-1)}`));
   const inCode = kindsIn(read('packages/pricing-pipeline/src/store.ts'),
     /FILE_PRODUCING_JOB_KINDS[^=]*=\s*\[([^\]]*)\]/);
   // Зубы: правило обязано что-то прочитать, а не сравнить два пустых списка
-  assert.ok(defining.length >= 2 && inDb.length === 4 && inCode.length === 4, `списки прочитаны (${defining.at(-1)}): база ${inDb}, код ${inCode}`);
+  assert.ok(defining.length >= 3 && inDb.length === 5 && inCode.length === 5, `списки прочитаны (${defining.at(-1)}): база ${inDb}, код ${inCode}`);
   assert.deepEqual(inCode, inDb, 'список видов с файлом разошёлся между базой и кодом: база откажет уже после работы задания');
 });
 

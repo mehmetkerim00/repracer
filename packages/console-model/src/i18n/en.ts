@@ -1622,6 +1622,15 @@ export const en = {
       unassignText: 'The offer keeps its current price; with repricing off nothing is calculated. The version itself stays.',
       unassigned: 'Strategy removed.',
     },
+    /** Шаг 104 [Р-229]: выгрузка экрана в файл */
+    export: {
+      button: 'Export', csv: 'CSV', xlsx: 'XLSX', label: 'Export what this screen shows',
+      headerNote: 'Column headers in the file are always in English.',
+      guest: 'Export is not available in the public demo',
+      created: 'The file is being prepared in the background. You can leave this page.',
+      tooMany: (rows: number, limit: number) => `This export would have ${rows} rows — more than the limit of ${limit}. Narrow the period.`,
+      empty: 'Nothing to export: the screen shows no rows.',
+    },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
       links: { title: 'Start a bulk change', bounds: 'Set minimum & maximum price for many offers', strategies: 'Assign a strategy to many offers', costs: 'Import unit costs' },
@@ -1630,6 +1639,7 @@ export const en = {
         COST_IMPORT: 'Import unit costs', REPRICING_ENABLE: 'Enable repricing', STOCK_IMPORT: 'Import stock', STOCK_SYNC_ENABLE: 'Enable stock synchronization', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
         STRATEGY_ASSIGN: 'Assign strategy', STRATEGY_PREVIEW: 'Preview strategy', PRICE_EVIDENCE: 'Export price evidence',
         PRICE_FEED_EXPORT: 'Export the price feed',
+        SCREEN_EXPORT: 'Export a screen',
         IMPORT_TEMPLATE: 'Build an import template', IMPORT_CHECK: 'Check an import file',
       },
       queued: 'Queued — the operation starts shortly.',
@@ -1648,7 +1658,7 @@ export const en = {
       doneBounds: (offers: number, changed: number) => `Done: bounds checked for ${offers} ${offers === 1 ? 'offer' : 'offers'}, ${changed} changed.`,
       doneStrategy: (offers: number, version: number) => `Done: version ${version} assigned to ${offers} ${offers === 1 ? 'offer' : 'offers'}.`,
       doneFeedExport: (rows: number, bytes: number) => `Done: ${rows} entries, ${Math.round(bytes / 1024)} KB — the file is ready to download.`,
-      createdFeedExport: 'The price feed is being exported in the background. You can leave this page.',
+      doneScreenExport: (rows: number, bytes: number) => `Done: ${rows} ${rows === 1 ? 'row' : 'rows'}, ${Math.round(bytes / 1024)} KB — the file is ready to download.`,
       reportReady: (rows: number) => `Rows not applied: ${rows} — the full list is ready as a file.`,
       donePreview: (offers: number) => `Done: computed for ${offers} ${offers === 1 ? 'offer' : 'offers'}.`,
       doneEnable: (enabled: number, already: number, skipped: number) => `Done: repricing enabled for ${enabled} offers${already > 0 ? `, ${already} were already running` : ''}${skipped > 0 ? `, ${skipped} could not be enabled — see the list` : ''}.`,
@@ -1682,6 +1692,7 @@ export const en = {
         NO_ROWS: 'no rows to apply', BAD_REQUEST: 'the request is incomplete', BAD_DRAFT: 'the strategy draft is incomplete',
         BAD_SCOPES: 'no offers selected', CONFLICT: 'the bounds changed in the meantime',
         MFA_REQUIRED: 'the second factor is missing', MFA_REQUIRED_WINDOW: 'more than five offers were changed in the last ten minutes: sign in with a second factor to continue', FORBIDDEN: 'the role may not do this', JOB_FAILED: 'unexpected error',
+        TOO_MANY_ROWS: 'more than 50,000 rows — narrow the period',
         UNKNOWN_JOB_KIND: 'the background process does not know this operation',
         TOO_MANY_ATTEMPTS: 'the operation failed repeatedly and is not retried any further',
         DATA_CHANGED: 'your data changed after the check — check the file again', HAS_ERRORS: 'the file has rows with errors — nothing was applied',
@@ -1866,7 +1877,6 @@ export const en = {
       // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит
       searchLimited: (shown: number, total: number) => `${total} offers match — the list shows the first ${shown} of them.`,
       pageTitle: 'Price changes', empty: 'No price changes yet. They appear once repricing is on and a price is sent to a channel.',
-      exportAll: (n: number) => `All ${n} entries as a file`,
       columns: { when: 'When', offer: 'Offer', from: 'From', to: 'To', change: 'Change', status: 'Status', source: 'Source', reason: 'Reason' },
       counts: (c: { applied: number; inFlight: number; notSent: number; superseded: number; shadowHeld: number }) => `${c.shadowHeld > 0 ? `Held by shadow mode ${c.shadowHeld} · applied` : 'Applied'} ${c.applied} · in progress ${c.inFlight} · not sent ${c.notSent} · replaced ${c.superseded}`,
       statuses: { PENDING: 'Queued', DISPATCHED: 'Sent', ACCEPTED: 'Accepted, not confirmed', APPLIED: 'Applied', NOT_APPLIED: 'Not applied', FAILED: 'Failed', BLOCKED: 'Blocked', SUPERSEDED: 'Replaced by a newer price', DISCARDED_STALE: 'Not sent', BUDGET_EXHAUSTED: 'Edit budget used up', SHADOW_HELD: 'Held by shadow mode' },
@@ -1998,6 +2008,7 @@ export const en = {
       haltReview: (when: string) => `Fresh sample check after ${when}`, haltReleasedAuto: (when: string) => `automatically by a fresh sample ${when}`,
       notStopped: ['Stock synchronization', 'An update already sent to the channel: its outcome is accepted'],
       auditTitle: 'Audit log: stops, roles and channel events',
+      auditColumns: { when: 'When', action: 'Action', who: 'Who', subject: 'Subject', note: 'Note' },
       auditEmpty: 'No stops, role changes or channel events yet. Every stop, resume and role change is listed here with its author, and every offer a channel took off sale with the reason.',
       auditActions: { 'pricing.stop_created': 'Pricing stopped', 'pricing.stop_released': 'Pricing resumed', 'pricing.halt_created': 'Storefront halted by the system', 'pricing.halt_released': 'Storefront halt released', 'pricing.distrust_created': 'Channel distrusted by the system — all prices held', 'pricing.distrust_released': 'Distrust of the channel released', 'membership.role_changed': 'Role changed', 'channel.offer_unpublished': 'Offer unpublished: uncompetitive price' },
       /** Шаг 89: почему канал снял предложение — словами и с ценой «в другом месте», если канал её назвал */

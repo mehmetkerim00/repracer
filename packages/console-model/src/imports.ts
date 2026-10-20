@@ -2,6 +2,7 @@ import { currencyInCell, parseFeeRateBp, parseMoneyMinor, TABLE_ENCODINGS, type 
 import type { ImportKind, ImportRunRow } from '@repracer/pricing-pipeline/store';
 import { storefrontPriceForMarginBp, type StrategyDefinition } from '@repracer/pricing-model';
 import { costInScopeCurrency } from './bounds.ts';
+import type { PageInfo } from './page.ts';
 import type { Messages } from './i18n/index.ts';
 import { fingerprint } from './strategies.ts';
 import { channelOf, storefrontName, unitOf, type ConsoleScope, type StandWorld, type Tone } from './world.ts';
@@ -720,6 +721,8 @@ export interface ImportHistoryItem {
 export interface ImportHistoryView {
   kind: ImportKind;
   items: ImportHistoryItem[];
+  /** Шаг 104 [Р-229]: журнал за период — страницей (прежде — последние 20 без листания) */
+  page?: PageInfo;
 }
 
 const OUTCOME_TONE: Readonly<Record<ImportRunRow['outcome'], Tone>> = { CHECKED: 'progress', APPLIED: 'ok', REFUSED: 'stop' };

@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { BulkJobView, ImportCheckView, ImportHistoryView, ImportKind } from '@repracer/console-model';
+import { IMPORTS_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type BulkJobView, type ImportCheckView, type ImportHistoryView, type ImportKind, type ListQuery, type Period } from '@repracer/console-model';
 import { downloadFile, requestJson, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
-import { Badge, commonZone, ErrorBox, errorText, FileDrop, humanWhen, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, FileDrop, humanWhen, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { PeriodPicker } from '../date-range.tsx';
+import { ExportControl, exportQuery } from '../export.tsx';
 import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { JobProgress } from './Jobs.tsx';
 
@@ -125,13 +127,26 @@ export function ImportCheck({ view, onMapping, onEncoding }: {
   );
 }
 
-export function ImportHistory({ view }: { view: ImportHistoryView }) {
+/**
+ * Шаг 104 [Р-229]: журнал импортов — за период и страницами (прежде — последние 20 без листания), выгрузка — по периоду. Без `controls`
+ * (тесты экранов) — таблица, как была
+ */
+export function ImportHistory({ view, controls }: {
+  view: ImportHistoryView;
+  controls?: { worldId: string; period: Period; onPeriod: (p: Period) => void; query: ListQuery; onQuery: (q: ListQuery) => void };
+}) {
   const m = useMessages();
   const t = m.ui.imports;
   const zone = commonZone(view.items.map((r) => r.when));
   return (
     <section className="card import-history">
       <h4>{t.historyTitle}</h4>
+      {controls ? (
+        <div className="toolbar field-toolbar">
+          <PeriodPicker value={controls.period} maxDays={IMPORTS_KEEP_DAYS} onChange={controls.onPeriod} />
+          <ExportControl worldId={controls.worldId} screen="imports" query={exportQuery(controls.period, { kind: view.kind })} empty={view.items.length === 0} />
+        </div>
+      ) : null}
       {view.items.length === 0 ? <p className="muted empty">{t.historyEmpty}</p> : (
         <UniformTable rows={view.items} rowKey={(r) => r.runId} className="import-history-table" columns={[
           // Шаг 100 (D): как у прочих журналов — пояс один раз в шапке, в строке коротко («Oct 17, 08:16»)
@@ -144,6 +159,7 @@ export function ImportHistory({ view }: { view: ImportHistoryView }) {
           { key: 'time', label: t.historyColumns.time, className: 'num', render: (r) => r.duration, text: (r) => r.duration },
         ]} />
       )}
+      {controls && view.page ? <Pager page={view.page} query={controls.query} onQuery={controls.onQuery} /> : null}
     </section>
   );
 }
@@ -174,9 +190,13 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
   const stock = kind === 'STOCK';
   const extra = stock ? { stockSourceId: sourceId } : {};
 
-  const loadHistory = () => void requestJson<ImportHistoryView>(`${worldPath(worldId, 'imports')}?kind=${kind}`, { locale: m.locale })
+  // Шаг 104 [Р-229]: журнал — за период (по умолчанию 30 дней) и страницей
+  const [historyPeriod, setHistoryPeriod] = useState<Period>({ preset: '30d' });
+  const [historyQuery, setHistoryQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const loadHistory = () => void requestJson<ImportHistoryView>(
+    `${worldPath(worldId, 'imports')}?kind=${kind}&${periodSearch(historyPeriod)}&offset=${historyQuery.offset}&limit=${historyQuery.limit}`, { locale: m.locale })
     .then(setHistory).catch((e: unknown) => setError(errorText(e, m)));
-  useEffect(loadHistory, [worldId, kind, m.locale]);
+  useEffect(loadHistory, [worldId, kind, m.locale, historyPeriod, historyQuery.offset, historyQuery.limit]);
 
   const post = (path: string, body: Record<string, unknown>) => requestJson<JobCreatedResponse>(worldPath(worldId, 'imports', path), { method: 'POST', body: { kind, ...body }, locale: m.locale });
   const template = (format: 'csv' | 'xlsx') => {
@@ -268,7 +288,8 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
           onMapping={(field, index) => { const next = { ...(mapping ?? {}), [field]: index }; setMapping(next); check({ mapping: next }); }}
           onEncoding={(chosen) => { setEncoding(chosen); setMapping(null); check({ encoding: chosen, mapping: null }); }} />
       ) : null}
-      {history ? <ImportHistory view={history} /> : null}
+      {history ? <ImportHistory view={history} controls={{ worldId, period: historyPeriod, onPeriod: (p) => { setHistoryPeriod(p); setHistoryQuery({ ...historyQuery, offset: 0 }); },
+        query: historyQuery, onQuery: setHistoryQuery }} /> : null}
     </section>
   );
 }

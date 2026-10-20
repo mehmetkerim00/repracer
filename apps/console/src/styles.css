@@ -310,6 +310,11 @@ label { color: var(--text); }
 .field-toolbar > .field:has(> select) { flex-basis: 12rem; min-width: 10rem; }
 /* галочка в ряду фильтров — на линии полей: блок высотой поля, строка галочки — по его середине */
 .field-toolbar > .check-field { align-self: flex-end; min-height: var(--control-h); align-content: center; }
+/* шаг 104 [Р-229]: выгрузка — поле ряда фильтров (CSV и XLSX рядом); подпись о заголовках и ход задания — своими строками во всю ширину панели */
+.field-toolbar > .field:has(> .export-formats) { flex: 0 0 auto; min-width: 0; }
+.export-formats { margin: 0; flex-wrap: nowrap; }
+.toolbar > .export-note, .toolbar > .export-progress { flex-basis: 100%; }
+.export-note { margin: 0; font-size: var(--font-size-sm); color: var(--text-2); }
 /* поиск предложения: поле поиска, список и счётчик — столбиком одной ширины */
 .offer-picker { display: inline-flex; flex-direction: column; gap: var(--space-1); width: 300px; }
 .offer-picker input[type='search'], .offer-picker select { width: 100%; max-width: none; }
@@ -1035,7 +1040,9 @@ p.notice.live-blocked { margin: 0; }
  * весь экран, один месяц, касание 44 px. Начало и конец — заливкой акцента, дни внутри — мягким акцентом, сегодня — подчёркнуто
  */
 .drp { position: relative; }
-.drp-trigger { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+/* шаг 104: в узкой рамке (журнал импортов в карточке на 375) кнопка не шире поля — даты уходят второй строкой целиком, а не за край */
+.drp-trigger { display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-2); row-gap: 0; max-width: 100%; text-align: start; }
+.drp-trigger > span { white-space: nowrap; }
 .drp-trigger .octicon { color: var(--text-2); }
 .drp-trigger .drp-preset { color: var(--text-2); }
 .drp-pop {

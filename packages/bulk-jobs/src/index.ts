@@ -39,6 +39,8 @@ export interface BulkJobFile {
   comments?: ReadonlyArray<{ cells: readonly string[]; onDataSheet?: boolean }>;
   /** Шаг 99: XLSX — имена листов данных и справки и строки справки */
   sheets?: { data: string; help: string; helpLines: readonly string[] };
+  /** Шаг 104 [Р-229]: колонки чисел по имени заголовка — в XLSX числовые ячейки (в CSV число и так без защиты от формул) */
+  numericColumns?: readonly string[];
 }
 
 /** Р-151: метка файла демо-тенанта — в имени и в каждой строке */
@@ -183,7 +185,7 @@ export async function runNextBulkJob(options: BulkJobRunnerOptions): Promise<{ j
         const data = [file.header, ...(file.comments ?? []).filter((c) => c.onDataSheet).map((c) => c.cells), ...file.rows];
         const sheets = file.sheets ?? { data: 'Data', help: 'Help', helpLines: [] };
         const bytes = xlsxOf([
-          { name: sheets.data, rows: data, header: true },
+          { name: sheets.data, rows: data, header: true, numeric: new Set(file.header.flatMap((h, i) => (file.numericColumns?.includes(h) ? [i] : []))) },
           ...(sheets.helpLines.length > 0 ? [{ name: sheets.help, rows: sheets.helpLines.map((l) => [l]), widths: [120] }] : []),
         ]);
         await progress(work.total, 'PRODUCING');

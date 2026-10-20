@@ -366,7 +366,11 @@ test('шаг 96: периоды и поиск через консоль — те
   const feedSearch = await feed('period=7d&q=water');
   assert.ok(feedSearch.page.total > 0 && feedSearch.page.total < feedWeek.page.total && feedSearch.items.every((i) => /water/i.test(i.unit?.label ?? '')),
     `лента, поиск «water»: ${feedSearch.page.total} из ${feedWeek.page.total}`);
-  assert.equal((await call('POST', `/api/worlds/${w}/feed/export`, token, { query: { period: '24h', q: 'water' } })).status, 403, 'гость задания не создаёт [Р-160]');
+  // Шаг 104 [Р-229]: гость публичного демо не выгружает — кнопка видна, но отключена (список миров говорит «нельзя»), маршрут отказывает
+  // честной причиной; заданий у гостя нет вовсе [Р-160]
+  assert.equal((await call<WorldSummary[]>('GET', '/api/worlds', token)).body.find((x) => x.demo)?.canExport, false, 'the guest of the demo cannot export');
+  const guestExport = await call<{ error: { code: string; message: string } }>('POST', `/api/worlds/${w}/exports`, token, { screen: 'price-changes', format: 'csv', query: { period: '24h', q: 'water' } });
+  assert.equal(JSON.stringify([guestExport.status, guestExport.body.error.code, guestExport.body.error.message]), JSON.stringify([403, 'EXPORT_NOT_IN_DEMO', 'Export is not available in the public demo']));
 
   // Защита: отчёт о поле и список остановленного — за период; свой диапазон называется датами
   const report = await get<{ headline: string; clipped: boolean }>(`dangerous?from=${dateOf(now - 3 * 86_400_000)}&to=${dateOf(now)}`);

@@ -201,6 +201,13 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 Над таблицей Price changes в тени — фраза «Trial week: prices were computed but nothing was sent to your stores.» (шаг 96, А5): нули в
 сводке «applied 0 · in progress 0 · …» объясняет она, а не догадка зрителя.
 
+**Выгрузка** (шаг 104, Р-229). В конце ряда фильтров — поле **Export** с кнопками **CSV** и **XLSX** и строкой «Column headers in the file
+are always in English.» Нажатие — фоновое задание, под рядом фильтров его ход и «Download the file»: в файле ровно то, что на экране, с теми
+же фильтрами и периодом; в XLSX второй лист «About this export» (пространство, экран, период, фильтры, кто и когда, число строк). Та же
+кнопка — на Protections, Offers, Inventory, в журнале импортов и в журнале аудита на Stop pricing. Что сказать: заголовки английские при
+любом языке — на них держатся формулы и интеграции; больше 50 000 строк — честный отказ «narrow the period», а не обрезанный файл; каждая
+выгрузка — в журнале аудита. **В публичном демо** (вход гостем) кнопка видна, но отключена: «Export is not available in the public demo».
+
 **Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
 
 - **Итог** (шаг 83 — плашка янтарного фона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; sending to your store:

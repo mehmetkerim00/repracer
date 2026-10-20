@@ -2095,6 +2095,13 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return this.importRunLog.filter((r) => r.kind === query.kind).reverse().slice(0, Math.max(1, Math.min(200, query.limit))).map((r) => ({ ...r }));
   }
 
+  /** Шаг 104 [Р-229]: как PgPricingStore.importRunsPage — период [since, until), свежие первыми, страница и итог */
+  async importRunsPage(_tenantId: string, query: { kind: ImportRunInput['kind']; since?: Instant; until?: Instant; offset: number; limit: number }): Promise<{ items: ImportRunRow[]; total: number }> {
+    const all = this.importRunLog.filter((r) => r.kind === query.kind && (!query.since || Date.parse(r.recordedAt) >= Date.parse(query.since))
+      && (!query.until || Date.parse(r.recordedAt) < Date.parse(query.until))).reverse();
+    return { items: all.slice(query.offset, query.offset + query.limit).map((r) => ({ ...r })), total: all.length };
+  }
+
   /** Как PgPricingStore.unassignStrategy (OQ-169): только при выключенном репрайсинге */
   async unassignStrategy(_tenantId: string, input: StrategyUnassignInput, actor: AdminActor): Promise<StrategyUnassignResult> {
     if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
@@ -2638,6 +2645,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
 
   async auditRecent(_tenantId: string, limit: number): Promise<ConsoleAuditRow[]> {
     return [...this.audit].reverse().slice(0, limit).map((a) => ({ ...a }));
+  }
+
+  /** Шаг 104 [Р-229]: как PgPricingStore.auditPage — период по времени действия [since, until), свежие первыми, страница и итог */
+  async auditPage(_tenantId: string, query: { since?: Instant; until?: Instant; offset: number; limit: number }): Promise<{ items: ConsoleAuditRow[]; total: number }> {
+    const all = [...this.audit].reverse().filter((a) => (!query.since || Date.parse(a.at) >= Date.parse(query.since)) && (!query.until || Date.parse(a.at) < Date.parse(query.until)));
+    return { items: all.slice(query.offset, query.offset + query.limit).map((a) => ({ ...a })), total: all.length };
   }
 
   /**

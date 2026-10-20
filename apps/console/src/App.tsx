@@ -6,6 +6,7 @@ import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesC
 import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
 import { ZoneContext } from './date-range.tsx';
+import { ExportContext } from './export.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { CompetitionScreen } from './screens/Competition.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
@@ -240,6 +241,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
     <MessagesContext.Provider value={m}>
       {/* Шаг 96.1: календарь периода считает дни в поясе пространства — в том же, что сервер */}
       <ZoneContext.Provider value={world.timeZone}>
+      {/* Шаг 104 [Р-229]: выгружать экраны может любой участник; гость публичного демо — нет */}
+      <ExportContext.Provider value={world.canExport !== false}>
       {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них; шаг 77 — тонкой полосой под шапкой */}
       {world.demo ? <p className="demo-strip demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
       <div className={`world-layout${nav.open ? ' nav-open' : ''}`}>
@@ -304,6 +307,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         : <NotFound title={m.ui.app.notFoundTitle} text={m.ui.app.screenNotFound} back={m.ui.app.screens.channels} href={href(world.id, 'channels')} />}
       </div>
       </div>
+      </ExportContext.Provider>
       </ZoneContext.Provider>
     </MessagesContext.Provider>
   );

@@ -227,16 +227,17 @@ test('Р-160: гость не может НИЧЕГО изменить — от�
    * [Р-143]. Гостю его не даёт база (0124): иначе публичная кнопка запускала бы 27 МБ работы исполнителя на каждого
    * посетителя. Это единственный путь записи, который был открыт наблюдателю, — и именно поэтому он проверяется.
    */
-  for (const [what, path, body] of [
-    ['выгрузка доказательства', `/api/worlds/${w}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }],
-    ['выгрузка ленты цен', `/api/worlds/${w}/feed/export`, { from: '2026-01-01', to: '2026-01-31' }],
-    ['предпросмотр стратегии', `/api/worlds/${w}/strategies/preview`, { draft: { name: 'Gast-Vorschau', params: { type: 'FIXED', priceMinor: 1500 } }, all: true }],
-  ] as Array<[string, string, unknown]>) {
+  for (const [what, path, body, code] of [
+    ['выгрузка доказательства', `/api/worlds/${w}/compliance/evidence`, { from: '2026-01-01', to: '2026-01-31' }, 'FORBIDDEN'],
+    // Шаг 104 [Р-229]: выгрузка экрана — гостю недоступна своей причиной («Export is not available in the public demo»); страж базы — тот же
+    ['выгрузка экрана', `/api/worlds/${w}/exports`, { screen: 'price-changes', format: 'csv', query: { period: '7d' } }, 'EXPORT_NOT_IN_DEMO'],
+    ['предпросмотр стратегии', `/api/worlds/${w}/strategies/preview`, { draft: { name: 'Gast-Vorschau', params: { type: 'FIXED', priceMinor: 1500 } }, all: true }, 'FORBIDDEN'],
+  ] as Array<[string, string, unknown, string]>) {
     const job = await walk<{ error: { code: string } }>(`jobs (${what})`, 'POST', path, { token: guest, body });
     // Утверждается ИМЕННО отказ в праве, а не «какой-нибудь отказ»: 400 от кривого тела и 404 от переименованного
     // маршрута зеленели бы так же (находка 7 ревью шага 37)
     assert.equal(job.status, 403, `${what}: ${job.status} ${job.text.slice(0, 200)}`);
-    assert.equal(job.body.error.code, 'FORBIDDEN', `${what}: код отказа — ${job.text.slice(0, 200)}`);
+    assert.equal(job.body.error.code, code, `${what}: код отказа — ${job.text.slice(0, 200)}`);
   }
 
   // И ни одной строки задания от гостя в базе не осталось
