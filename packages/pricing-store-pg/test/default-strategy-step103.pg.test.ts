@@ -199,6 +199,13 @@ test('step 103 [Р-228]: the default and the assignments are readable for the sc
   const d = (await store.defaultStrategies(amazon.tenantId)).find((x) => x.channelAccountId === amazon.ids.dbId(AMAZON))!;
   assert.equal(JSON.stringify([d.strategyId, d.setByMembershipId, d.assigned, d.notAssigned]),
     JSON.stringify([amazon.ids.dbId('st-fixed'), amazon.ownerMembershipId, 1, [{ reason: 'CHANNEL_PRICING', count: 1 }]]));
+  // Источник стратегии на экранах — только у единиц, о которых решало правило: у новичка — строка правила с человеком, у единицы посева
+  // (строка человека, правило о ней не решало) — нет; полное состояние консоли журнал по всему каталогу не читает
+  const state = await store.readConsoleState(kaufland.tenantId, now() as never);
+  const ref = (id: string) => state.scopes.find((x) => x.writeScopeId === id)?.assignment ?? null;
+  const fresh = ref((await scopeOf(kaufland, 'SYN-103-NEW-1')).write_scope_id);
+  assert.equal(JSON.stringify([fresh?.source, fresh?.outcome, fresh?.rule?.setByMembershipId, ref(kaufland.ids.dbId('ws-2'))]),
+    JSON.stringify(['DEFAULT_RULE', 'ASSIGNED', kaufland.ownerMembershipId, null]), 'the source of a strategy — only where the default rule decided');
 });
 
 /** Строка журнала назначений от узкой роли правила — как её писала бы функция правила (проверки стража журнала) */

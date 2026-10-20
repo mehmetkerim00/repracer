@@ -632,19 +632,27 @@ async function clearanceChanges(tx: Tx, tenantId: string, by: { writeScopeId?: s
 
 /**
  * Шаг 103 [Р-228]: источник стратегии единиц — последняя строка журнала назначений (до момента `at`, если он задан: квитанция видит
- * назначение, действовавшее при решении). У правила умолчания — строка умолчания и человек, который его задал
+ * назначение, действовавшее при решении). У правила умолчания — строка умолчания и человек, который его задал.
+ *
+ * Читаются только единицы, о которых хоть раз решало правило умолчания: экранам источник нужен только для «by default rule» и
+ * «Not assigned», а у единицы без строки правила оба — нет. Без этого сужения полное состояние консоли на каталоге 50 000 читало журнал
+ * назначений по каждой единице (задание `scale` полного CI шага 103: 9,53 → 10,45 с при пределе 10); строки правила находит частичный
+ * индекс `strategy_assignment_rule_idx`
  */
 async function assignmentRefs(tx: Tx, tenantId: string, writeScopeIds: readonly string[], at: string | null = null): Promise<Map<string, StrategyAssignmentRef>> {
   if (writeScopeIds.length === 0) return new Map();
   const { rows } = await tx.query(
-    `SELECT DISTINCT ON (a.write_scope_id) a.write_scope_id, a.outcome, a.source, a.reason, a.pricing_strategy_id, a.pricing_strategy_version,
+    `WITH ruled AS (SELECT DISTINCT r.write_scope_id FROM tenant_data.strategy_assignment r
+                     WHERE r.tenant_id = $1 AND r.default_strategy_change_id IS NOT NULL AND r.write_scope_id = ANY($2::uuid[]))
+     SELECT DISTINCT ON (a.write_scope_id) a.write_scope_id, a.outcome, a.source, a.reason, a.pricing_strategy_id, a.pricing_strategy_version,
             a.channel_account_id, a.created_at, c.default_strategy_change_id AS rule_id, c.created_at AS rule_at, c.created_by_membership_id AS rule_by,
             u.display_name AS rule_by_name, u.email AS rule_by_email
-       FROM tenant_data.strategy_assignment a
+       FROM ruled
+       JOIN tenant_data.strategy_assignment a ON a.tenant_id = $1 AND a.write_scope_id = ruled.write_scope_id
        LEFT JOIN tenant_data.default_strategy_change c ON c.tenant_id = a.tenant_id AND c.default_strategy_change_id = a.default_strategy_change_id
        LEFT JOIN tenant_data.membership mb ON mb.tenant_id = c.tenant_id AND mb.membership_id = c.created_by_membership_id
        LEFT JOIN platform.app_user u ON u.user_id = mb.user_id
-      WHERE a.tenant_id = $1 AND a.write_scope_id = ANY($2::uuid[]) AND ($3::timestamptz IS NULL OR a.created_at <= $3::timestamptz)
+      WHERE ($3::timestamptz IS NULL OR a.created_at <= $3::timestamptz)
       ORDER BY a.write_scope_id, a.seq DESC`, [tenantId, [...writeScopeIds], at]);
   return new Map(rows.map((r) => [String(r.write_scope_id), {
     outcome: r.outcome, source: r.source, reason: (r.reason ?? null) as DefaultRuleReason | null,

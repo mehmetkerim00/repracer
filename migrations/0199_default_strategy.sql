@@ -151,7 +151,8 @@ INSERT INTO maintenance.retention_policy (table_name, method, bound)
 VALUES ('tenant_data.strategy_assignment', 'TENANT_CLOSURE_ONLY', 'MAX_AGE');
 -- Источник нынешней стратегии единицы — её последняя строка (экраны, квитанция, журнал единицы)
 CREATE INDEX strategy_assignment_scope_idx ON tenant_data.strategy_assignment (tenant_id, write_scope_id, seq DESC);
--- Решения правила по аккаунту — счётчики «назначено / не назначено» на карточке аккаунта
+-- Решения правила по аккаунту — счётчики «назначено / не назначено» на карточке аккаунта; и единицы, о которых решало правило, — источник
+-- «by default rule» и «Not assigned» экранов читается только по ним (полное состояние консоли не проходит журнал по всему каталогу)
 CREATE INDEX strategy_assignment_rule_idx ON tenant_data.strategy_assignment (tenant_id, default_strategy_change_id) WHERE default_strategy_change_id IS NOT NULL;
 
 -- Читают экраны (административный сервис); пишут только триггер единицы и функция правила — правами узкой роли: вставки, которую
