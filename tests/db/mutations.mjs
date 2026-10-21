@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0202_verify_schema_invariants_v56.sql';
+const VERIFY = 'migrations/0204_verify_schema_invariants_v57.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2873,3 +2873,20 @@ export const STEP104_ROWS = [
   },
 ];
 
+
+// Шаг 105.1 [Р-230]: доставка и продавец Buy Box в проекции снимка (0203) — форма: доставка не отрицательна и только при цене Buy Box,
+// продавец — только у чужого держателя и не длиннее 200 знаков
+const R1051 = T('buybox-state-step105-1.pg.test.ts');
+const FORM1051 = 'the database refuses a malformed Buy Box in the snapshot projection';
+export const STEP105_1_ROWS = [
+  {
+    row: 'шаг 105.1 (Р-230)', critical: false,
+    invariant: 'доставка Buy Box в проекции снимка не отрицательна и есть только при цене Buy Box; продавец Buy Box назван только у чужого держателя (не у нашего и не у неизвестного) и не пуст и не длиннее 200 знаков',
+    mutations: [
+      m(dropConstraint('competitor_state_buybox_shipping_nonnegative', 'channel_data.competitor_state'), node(R1051, FORM1051, 'a negative Buy Box shipping is refused', 'resolved')),
+      m(dropConstraint('competitor_state_buybox_shipping_with_price', 'channel_data.competitor_state'), node(R1051, FORM1051, 'Buy Box shipping without a Buy Box price is refused', 'resolved')),
+      m(dropConstraint('competitor_state_buybox_seller_other', 'channel_data.competitor_state'), node(R1051, FORM1051, 'a seller is named only for another holder', 'resolved')),
+      m(dropConstraint('competitor_state_buybox_seller_length', 'channel_data.competitor_state'), node(R1051, FORM1051, 'a seller name is at most 200 characters', 'resolved')),
+    ],
+  },
+];

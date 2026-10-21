@@ -530,6 +530,19 @@ test('step 105 (E1, E2, E4) [Р-230]: demo on PostgreSQL — Buy Box columns are
   assert.ok(amazon.length > 0 && amazon.every((id) => groups.get('UNKNOWN')!.includes(id) && !groups.get('OTHER')!.includes(id)), 'amazon.com offers are unknown, not another seller');
 });
 
+test('step 105.1 [Р-230]: demo on PostgreSQL — the amazon.com Buy Box price carries the shipping the channel named (Summary.BuyBoxPrices), not «shipping not named»', async () => {
+  const { token, w } = await guest105();
+  const c = messagesFor('en').ui.competition;
+  const amazon = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind === 'UNKNOWN');
+  assert.ok(amazon.length > 0, 'amazon.com offers with a snapshot');
+  for (const row of amazon) {
+    assert.equal(row.buybox!.priceLanded, true, `${row.unit.label}: the Buy Box price is with shipping`);
+    const view = (await call<Competition105>('GET', `/api/worlds/${w}/competition/${row.unit.writeScopeId}?period=7d`, token)).body;
+    assert.ok(view.buyBoxPrice !== null && view.buyBoxPrice !== c.buyBoxPriceNoShipping(row.buybox!.price ?? '') && view.buyBoxPrice.startsWith(c.buyBoxPrice('')),
+      `${row.unit.label}: Competition names the Buy Box price with shipping — ${view.buyBoxPrice}`);
+  }
+});
+
 test('step 105 (A) [Р-230]: demo on PostgreSQL — the database sorts and filters the whole catalog exactly as the row values say (SQL = the screen rule)', async () => {
   const { token, w } = await guest105();
   const catalog = await offers105(token, w, '&bb=1');

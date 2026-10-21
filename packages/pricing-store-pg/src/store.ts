@@ -531,7 +531,8 @@ const WINDOW_MOVE_LOG = `
 
 const STATE_JSON = `json_build_object(
   'source', cs.source, 'sourceEventId', cs.source_event_id, 'observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor,
-  'buyboxIsSelf', cs.buybox_is_self, 'offers', cs.offers, 'completeness', cs.completeness, 'completenessN', cs.completeness_n,
+  'buyboxIsSelf', cs.buybox_is_self, 'buyboxShippingMinor', cs.buybox_shipping_minor, 'buyboxSellerRef', cs.buybox_seller_ref,
+  'offers', cs.offers, 'completeness', cs.completeness, 'completenessN', cs.completeness_n,
   'currency', cs.currency, 'basis', cs.price_basis, 'suggestedMinor', cs.suggested_price_minor,
   'competitorSnapshotId', cs.competitor_snapshot_id, 'sanity', cs.sanity_summary)`;
 
@@ -829,8 +830,12 @@ function toSnapshot(key: ProductKey, s: Row): AcceptedSnapshot {
     ...(s.sourceEventId ? { sourceEventId: s.sourceEventId } : {}),
     observedAt: iso(s.observedAt),
     completeness: s.completeness === 'TOP_N' ? { kind: 'TOP_N', n: s.completenessN } : { kind: s.completeness },
-    // Шаг 97: держатель Buy Box не назван каналом — null, а не «не наш»
-    ...(s.buyboxMinor !== null ? { buybox: { price: money(Number(s.buyboxMinor)), isSelf: s.buyboxIsSelf ?? null } } : {}),
+    // Шаг 97: держатель Buy Box не назван каналом — null, а не «не наш». Шаг 105.1 (0203): доставка и продавец — только если канал их назвал
+    ...(s.buyboxMinor !== null ? { buybox: {
+      price: money(Number(s.buyboxMinor)), isSelf: s.buyboxIsSelf ?? null,
+      ...(s.buyboxShippingMinor !== null && s.buyboxShippingMinor !== undefined ? { shipping: money(Number(s.buyboxShippingMinor)) } : {}),
+      ...(s.buyboxSellerRef ? { sellerRef: s.buyboxSellerRef } : {}),
+    } } : {}),
     ...(s.suggestedMinor !== null ? { channelSuggestedPrice: money(Number(s.suggestedMinor)) } : {}),
     offers: s.offers,
     sanityRuleset: 'stored',
@@ -1085,7 +1090,14 @@ export class PgPricingStore implements PricingStore {
     // История — цены конкурентов: наш собственный Buy Box в якорь не попадает [Р-49]
     // Шаг 97: держатель не назван — цена Buy Box может быть нашей и в историю конкурентов не идёт
     const competitorBuybox = snapshot?.buybox && snapshot.buybox.isSelf === false ? buybox : null;
-    const money = snapshot?.buybox?.price ?? snapshot?.offers[0]?.price ?? snapshot?.channelSuggestedPrice ?? null;
+    /**
+     * Шаг 105.1 (0203): доставка и продавец Buy Box — только названное каналом. Доставка — в валюте цены Buy Box (проекция хранит одну
+     * валюту); продавец — только у чужого держателя, длина — как у отрезков держателя (0188)
+     */
+    const bbShipping = snapshot?.buybox?.shipping;
+    const buyboxShipping = bbShipping && bbShipping.currency === snapshot!.buybox!.price.currency && bbShipping.amountMinor >= 0 ? bbShipping.amountMinor : null;
+    const buyboxSeller = snapshot?.buybox?.isSelf === false && snapshot.buybox.sellerRef ? snapshot.buybox.sellerRef.slice(0, 200) : null;
+    const money =snapshot?.buybox?.price ?? snapshot?.offers[0]?.price ?? snapshot?.channelSuggestedPrice ?? null;
     const gtin = s.accepted?.gtin && /^[0-9]{8,14}$/.test(s.accepted.gtin) ? s.accepted.gtin : null;
 
     // Движение, проекция окна сдвига, проекция снимка и суточная история — одним оператором
@@ -1107,10 +1119,10 @@ export class PgPricingStore implements PricingStore {
          INSERT INTO channel_data.competitor_state AS cs
            (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, source_event_id, competitor_snapshot_id,
             observed_at, received_at, buybox_amount_minor, buybox_is_self, lowest_landed_minor, offer_count, offers, completeness, completeness_n, gtin,
-            currency, price_basis, suggested_price_minor, sanity_summary)
+            currency, price_basis, suggested_price_minor, sanity_summary, buybox_shipping_minor, buybox_seller_ref)
          SELECT $1::uuid, $2::uuid, acct.channel, $3::text, $4::text, $5::text, $11::text, $12::text, coalesce($27::uuid, gen_random_uuid()),
                 $6::timestamptz, $7::timestamptz, $13::bigint, $14::boolean, $15::bigint, $16::int, $17::jsonb, $18::text, $19::int, $20::text,
-                $21::text, $22::text, $23::bigint, $28::jsonb
+                $21::text, $22::text, $23::bigint, $28::jsonb, $29::bigint, $30::text
            FROM acct WHERE $24::boolean
          ON CONFLICT (tenant_id, channel_account_id, marketplace, channel_product_ref, condition) DO UPDATE SET
            source = EXCLUDED.source, source_event_id = EXCLUDED.source_event_id, competitor_snapshot_id = EXCLUDED.competitor_snapshot_id,
@@ -1118,7 +1130,8 @@ export class PgPricingStore implements PricingStore {
            buybox_is_self = EXCLUDED.buybox_is_self, lowest_landed_minor = EXCLUDED.lowest_landed_minor, offer_count = EXCLUDED.offer_count,
            offers = EXCLUDED.offers, completeness = EXCLUDED.completeness, completeness_n = EXCLUDED.completeness_n,
            gtin = coalesce(EXCLUDED.gtin, cs.gtin), currency = EXCLUDED.currency, price_basis = EXCLUDED.price_basis,
-           suggested_price_minor = EXCLUDED.suggested_price_minor, sanity_summary = EXCLUDED.sanity_summary
+           suggested_price_minor = EXCLUDED.suggested_price_minor, sanity_summary = EXCLUDED.sanity_summary,
+           buybox_shipping_minor = EXCLUDED.buybox_shipping_minor, buybox_seller_ref = EXCLUDED.buybox_seller_ref
          -- Два снимка одного товара могут прийти одновременно: более старый не перезаписывает проекцию
          WHERE cs.observed_at <= EXCLUDED.observed_at
          RETURNING 1),
@@ -1146,7 +1159,7 @@ export class PgPricingStore implements PricingStore {
        snapshot?.completeness.kind === 'TOP_N' ? snapshot.completeness.n : null, gtin,
        money?.currency ?? null, money?.basis ?? null, snapshot?.channelSuggestedPrice?.amountMinor ?? null,
        Boolean(snapshot && money), competitorBuybox, lowestPrice,
-       s.accepted?.competitorSnapshotId ?? null, s.accepted ? JSON.stringify(s.accepted.sanity) : null],
+       s.accepted?.competitorSnapshotId ?? null, s.accepted ? JSON.stringify(s.accepted.sanity) : null, buyboxShipping, buyboxSeller],
     );
 
     // Шаг 97 [Р-220]: отрезок держателя Buy Box — продлевается тем же держателем и продавцом без дыры длиннее горизонта, иначе открывается
@@ -2775,7 +2788,8 @@ export class PgPricingStore implements PricingStore {
       `WITH sc0 AS (SELECT s.write_scope_id, s.created_at, s.channel_account_id, m.marketplace, m.channel_product_ref, m.condition ${label}
                       ${SCOPE_FROM} ${where.map((w) => `AND ${w}`).join(' ')}),
             sc AS (SELECT * FROM sc0 WHERE ${hit}),
-            cs AS (SELECT sc.write_scope_id, c.buybox_amount_minor AS bb, c.buybox_is_self AS bb_self, c.offers
+            cs AS (SELECT sc.write_scope_id, c.buybox_amount_minor AS bb, c.buybox_is_self AS bb_self, c.buybox_shipping_minor AS bb_ship,
+                          c.buybox_seller_ref AS bb_seller, c.offers
                      FROM sc JOIN channel_data.competitor_state c
                        ON c.tenant_id = $1 AND c.channel_account_id = sc.channel_account_id AND c.marketplace = sc.marketplace
                       AND c.channel_product_ref = sc.channel_product_ref AND c.condition = sc.condition),
@@ -2784,16 +2798,18 @@ export class PgPricingStore implements PricingStore {
                                     CASE WHEN jsonb_typeof(o.v -> 'shipping') = 'object'
                                          THEN (o.v -> 'price' ->> 'amountMinor')::bigint + (o.v -> 'shipping' ->> 'amountMinor')::bigint END) AS landed,
                            coalesce((o.v ->> 'isSelf')::boolean, false) AS is_self, (o.v ->> 'holdsBuyBox')::boolean IS TRUE AS holds,
-                           coalesce(o.v ->> 'sellerRef', '') AS seller
+                           coalesce(o.v ->> 'sellerRef', '') AS seller, cs.bb_seller
                       FROM cs, jsonb_array_elements(cs.offers) WITH ORDINALITY AS o(v, i)),
             ranked AS (SELECT ofs.*, row_number() OVER (PARTITION BY write_scope_id ORDER BY coalesce(landed, price), seller COLLATE "C", ord) AS rk FROM ofs),
             -- По единице одной группировкой (соединение по единице, а не подзапрос по каждой строке: на 10 000 предложений тот был 25–30 с):
-            -- строки страницы Competition (первые 10 и наша ниже десятой), цена строки держателя, цена победителя с доставкой (первое чужое
-            -- предложение-держатель в порядке ответа канала), наша цена с доставкой (первая наша строка в порядке страницы)
+            -- строки страницы Competition (первые 10 и наша ниже десятой), цена строки держателя, цена победителя с доставкой по
+            -- предложению-держателю (первое чужое с признаком держателя в порядке ответа канала, иначе первое чужое с продавцом Buy Box —
+            -- шаг 105.1), наша цена с доставкой (первая наша строка в порядке страницы)
             agg AS (SELECT write_scope_id,
                            count(*) FILTER (WHERE rk <= 10 OR is_self) AS competitor_rows,
                            (array_agg(coalesce(landed, price) ORDER BY rk) FILTER (WHERE holds AND (rk <= 10 OR is_self)))[1] AS holder_minor,
-                           (array_agg(landed ORDER BY ord) FILTER (WHERE NOT is_self AND holds))[1] AS winner_landed,
+                           CASE WHEN bool_or(NOT is_self AND holds) THEN (array_agg(landed ORDER BY ord) FILTER (WHERE NOT is_self AND holds))[1]
+                                ELSE (array_agg(landed ORDER BY ord) FILTER (WHERE NOT is_self AND seller = bb_seller))[1] END AS winner_landed,
                            (array_agg(landed ORDER BY rk) FILTER (WHERE is_self))[1] AS own_landed
                       FROM ranked GROUP BY write_scope_id),
             -- Доля Buy Box (buyboxShare): состояние действует до следующего отрезка, не дольше горизонта, внутри окна [since, until)
@@ -2809,8 +2825,12 @@ export class PgPricingStore implements PricingStore {
             fx AS (
               SELECT sc.write_scope_id, sc.created_at, h.holder,
                      CASE WHEN h.holder = 'NO_DATA' THEN 0 ELSE coalesce(agg.competitor_rows, 0) END AS competitor_rows,
-                     CASE WHEN h.holder IN ('SELF', 'OTHER') THEN coalesce(agg.holder_minor, cs.bb) WHEN h.holder = 'UNKNOWN' THEN cs.bb END AS price_minor,
-                     CASE WHEN h.holder = 'OTHER' AND agg.winner_landed IS NOT NULL AND agg.own_landed IS NOT NULL THEN agg.own_landed - agg.winner_landed END AS gap_minor,
+                     -- Шаг 105.1 (0203): цена Buy Box — с доставкой, если канал её назвал; разрыв — от цены победителя с доставкой: доставка Buy Box,
+                     -- а без неё — строка держателя (правило экрана buyboxFacts)
+                     CASE WHEN h.holder IN ('SELF', 'OTHER') THEN coalesce(agg.holder_minor, cs.bb + coalesce(cs.bb_ship, 0))
+                          WHEN h.holder = 'UNKNOWN' THEN cs.bb + coalesce(cs.bb_ship, 0) END AS price_minor,
+                     CASE WHEN h.holder = 'OTHER' AND agg.own_landed IS NOT NULL
+                          THEN agg.own_landed - CASE WHEN cs.bb_ship IS NOT NULL THEN cs.bb + cs.bb_ship ELSE agg.winner_landed END END AS gap_minor,
                      CASE WHEN sc.channel_account_id = ANY (${named}::uuid[]) AND NOT (sc.channel_account_id = ANY (${noData}::uuid[])) THEN share.share_bp END AS share_bp
                 FROM sc
                 LEFT JOIN cs ON cs.write_scope_id = sc.write_scope_id
