@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
-import { CHAOS_FILES, filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, SCALE_FILES, SCOPES, SHADOW_FILES } from './test-scopes.mjs';
+import { CHAOS_FILES, FAST_SHARDS, fastShards, filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, SCALE_FILES, SCOPES, SHADOW_FILES } from './test-scopes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const inclusion = findUnincludedTests(root);
@@ -42,9 +42,24 @@ if (!SCOPES.includes(scope)) {
   console.error(`BUILD RED: неизвестная область прогона «${scope}» (${SCOPES.join(', ')})`);
   process.exit(1);
 }
-const selected = filesForScope(inclusion.included, scope);
+let selected = filesForScope(inclusion.included, scope);
 const deferred = inclusion.included.filter((f) => !selected.includes(f));
 console.log(`TEST SCOPE ${JSON.stringify({ scope, files: selected.length, deferred: deferred.length })}`);
+/**
+ * Шаг 106: шард быстрой области (`--shard=K/N`) — CI гоняет её FAST_SHARDS параллельными заданиями (test-scopes.mjs). Журнал выполненных
+ * файлов сверяется с файлами СВОЕГО шарда; что шарды вместе покрывают всю область, держит правило репозитория
+ */
+const shardArg = process.argv.find((a) => a.startsWith('--shard='))?.slice('--shard='.length);
+if (shardArg !== undefined) {
+  const m = /^(\d+)\/(\d+)$/.exec(shardArg);
+  const k = m ? Number(m[1]) : 0;
+  if (!m || scope !== 'fast' || Number(m[2]) !== FAST_SHARDS || k < 1 || k > FAST_SHARDS) {
+    console.error(`BUILD RED: шард «${shardArg}» — только у быстрой области, 1…${FAST_SHARDS} из ${FAST_SHARDS}`);
+    process.exit(1);
+  }
+  selected = fastShards(selected, (f) => relative(root, workspaceOf(f)).split(sep).join('/') || '.')[k - 1];
+  console.log(`TEST SHARD ${JSON.stringify({ shard: k, of: FAST_SHARDS, files: selected.length })}`);
+}
 for (const t of INFRASTRUCTURE_TESTS) {
   // Шаг 65: у хаоса, масштаба и тени — свои задания CI; остальные долгие — в задании long
   const job = SHADOW_FILES.has(t.file) ? 'shadow-day' : CHAOS_FILES.has(t.file) ? 'chaos' : SCALE_FILES.has(t.file) ? 'scale' : 'long';

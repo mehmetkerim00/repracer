@@ -154,3 +154,22 @@ test('getCompetitiveSummary at 0.033 rps: polling competitors is not a pricing i
   assert.equal(snapshots, 2);
   assert.equal(port.stats.summaryRateLimited, 8);
 });
+
+/**
+ * Шаг 106 (A-31): модель порта знает предел поиска — обнаружение по searchListingsItems отдаёт не больше 1000 листингов на все страницы
+ * (модель снимка, `numberOfResults`). Прогон, опирающийся на обнаружение поиском, у продавца с 1200 листингами честно видит 1000
+ */
+test('step 106 (A-31): the port model discovery stops at 1000 listings, as searchListingsItems does', async () => {
+  const { port, ctx } = world();
+  for (let i = 0; i < 1200; i++) port.addListing({ sku: `SYN-SKU-CAP-${String(i).padStart(4, '0')}`, asin: `B0SYNC${String(i).padStart(4, '0')}`, marketplaces: [AMAZON_DE], priceMinor: 1000 + i, quantity: 1 });
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let pages = 0; pages < 100; pages++) {
+    const p = await port.discoverOffers(ctx, { limit: 100, ...(cursor ? { cursor } : {}) });
+    seen.push(...p.items.map((o) => `${o.identity.marketplace}|${o.identity.externalSku}`));
+    if (!p.nextCursor) break;
+    cursor = p.nextCursor;
+  }
+  // 1200 новых и прежний листинг мира на двух витринах — 1202, поиск отдаёт 1000
+  assert.equal(JSON.stringify([seen.length, new Set(seen).size]), JSON.stringify([1000, 1000]), 'discovery sees 1000 of 1202 listings');
+});

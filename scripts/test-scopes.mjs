@@ -130,3 +130,52 @@ export function filesForScope(included, scope) {
   if (scope === 'long') return included.filter((f) => LONG_FILES.has(f) && !SHADOW_FILES.has(f) && !CHAOS_FILES.has(f) && !SCALE_FILES.has(f));
   return included.filter((f) => !LONG_FILES.has(f));
 }
+
+/**
+ * Шаг 106 (решение владельца после шага 105): быстрая область идёт ДВУМЯ параллельными заданиями CI, у каждого предел 40 минут. Предел
+ * не поднят — быстрый прогон растёт с каждым шагом, и подъём только отсрочил бы снятие: push-прогон шага 105 снят на 40-й минуте, тот же
+ * код в соседнем прогоне прошёл за 36 (раннер был на четверть медленнее по всему прогону, зависших тестов не было).
+ *
+ * Единица деления — общий прогон рабочего пространства или файл-замер (они идут по одному, MEASURED_FILES). Вес — минуты из журнала
+ * зелёного быстрого прогона шага 105 по запросу (39600159918); единице без веса — FAST_UNIT_DEFAULT_MINUTES. Деление жадное: тяжёлые
+ * единицы первыми в более лёгкий шард, при равенстве — в меньший номер; каждый файл — ровно в одном шарде (правило репозитория).
+ * Веса — не предел и не обещание: при сильном перекосе шардов в CI таблицу обновляют по свежему журналу.
+ */
+export const FAST_SHARDS = 2;
+const FAST_UNIT_DEFAULT_MINUTES = 0.1;
+const FAST_UNIT_MINUTES = {
+  'tests/contract': 9.3,
+  'apps/console': 7.9,
+  'apps/console/test/console-live.pg.test.ts': 6.5,
+  'apps/console/test/onboarding-live.pg.test.ts': 4.1,
+  'tests/contract/src/cost-import-live.pg.test.ts': 2.1,
+  'apps/operator': 0.8,
+  'packages/pricing-store-pg': 0.6,
+  'apps/console/test/pilot-live.pg.test.ts': 0.4,
+  'apps/console/test/pilot-us-live.pg.test.ts': 0.4,
+  'apps/console/test/pilot-ebay-live.pg.test.ts': 0.3,
+  'apps/console/test/stock-only-live.pg.test.ts': 0.3,
+  'apps/console/test/connect-live.pg.test.ts': 0.2,
+  'apps/console/test/guest-demo-live.pg.test.ts': 0.2,
+  'apps/operator/test/operator-live.pg.test.ts': 0.2,
+};
+
+/**
+ * Шарды быстрой области: массив из FAST_SHARDS списков файлов. `workspaceOf(file)` — рабочее пространство файла относительно корня
+ * ('.' — корень), как его считает test-all
+ */
+export function fastShards(files, workspaceOf) {
+  const units = new Map();
+  for (const f of files) {
+    const key = MEASURED_FILES.has(f) ? f : workspaceOf(f);
+    units.set(key, [...(units.get(key) ?? []), f]);
+  }
+  const order = [...units.keys()].sort((a, b) => ((FAST_UNIT_MINUTES[b] ?? FAST_UNIT_DEFAULT_MINUTES) - (FAST_UNIT_MINUTES[a] ?? FAST_UNIT_DEFAULT_MINUTES)) || a.localeCompare(b));
+  const shards = Array.from({ length: FAST_SHARDS }, () => ({ minutes: 0, files: [] }));
+  for (const key of order) {
+    const lightest = shards.reduce((best, s, i) => (s.minutes < shards[best].minutes ? i : best), 0);
+    shards[lightest].minutes += FAST_UNIT_MINUTES[key] ?? FAST_UNIT_DEFAULT_MINUTES;
+    shards[lightest].files.push(...units.get(key));
+  }
+  return shards.map((s) => s.files);
+}

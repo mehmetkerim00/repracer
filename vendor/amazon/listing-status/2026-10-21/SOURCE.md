@@ -27,7 +27,11 @@ Markdown-версии (документация отдаёт её по суфф�
   найти, нельзя купить» — `withoutStatus=BUYABLE`, `withStatus=DISCOVERABLE`. Значения фильтров совпадают с моделью снимка
   [`2026-09-29`](../../sp-api-models/2026-09-29/SOURCE.md). Точная причина — `getListingsItem` с `includedData=issues`.
 - **Предел `searchListingsItems`.** «This operation retrieves listings in batches, but is limited to 1000 listings total across all
-  pages». Этого предела нет ни в модели снимка, ни на странице `listings-items-api.md`. Вопрос — A-31.
+  pages». Тот же предел — в модели снимка [`2026-09-29`](../../sp-api-models/2026-09-29/SOURCE.md), в описании `numberOfResults`:
+  «The maximum number of items (SKUs) that can be returned and paged through is 1000»; сам `numberOfResults` — сколько найдено
+  («only results up to the page count limit is returned per request regardless of the number found»). На странице `listings-items-api.md`
+  предела нет. Что канал отвечает за пределом (нет токена или ошибка) — не сказано. Вопрос — A-31. *(Поправка шага 106: в первой
+  редакции этого файла было «нет ни в модели снимка» — неверно, предел искался по словам «1000 listings».)*
 - **Отчёты.** `GET_MERCHANT_LISTINGS_INACTIVE_DATA` содержит листинги с нулевым количеством, заблокированные, подавленные, ещё не
   открытые и с истёкшим сроком продажи. `GET_MERCHANTS_LISTINGS_FYP_REPORT` содержит только подавленные листинги, с причинами и с
   тем, как снять подавление. Отчёты не в реальном времени: свежесть данных об остатке до 3 ч, повторные вызовы — данные возрастом

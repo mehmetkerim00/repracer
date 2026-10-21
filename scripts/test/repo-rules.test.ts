@@ -919,3 +919,39 @@ test('шаг 80: подготовка демо держит машину бод�
   assert.equal(awakeBeforeDatabase('caffeinate -dims -w $$ &\nscripts/db/prepare.sh demo'), true);
   assert.ok(awakeBeforeDatabase(read('scripts/demo-prepare.sh')), 'scripts/demo-prepare.sh: caffeinate -w $$ before the database phase');
 });
+
+/**
+ * Шаг 106 (решение владельца после шага 105): быстрая область — двумя параллельными заданиями CI, у каждого предел 40 минут. Предел не
+ * поднят: быстрый прогон растёт с каждым шагом, и подъём только отсрочил бы снятие (push-прогон шага 105 снят на 40-й минуте при 36 у
+ * соседнего прогона того же кода). Правило [Р-146]: шарды делят быструю область без потерь и повторов — каждый файл ровно в одном
+ * шарде, ни один шард не пуст, — а CI запускает ровно `FAST_SHARDS` заданий, каждое со своим номером.
+ */
+test('шаг 106: быстрая область делится на шарды без потерь и повторов, и CI гоняет каждый шард', async () => {
+  const { FAST_SHARDS, fastShards, filesForScope } = await import('../test-scopes.mjs');
+  const { includedTestFiles } = await import('../check-test-inclusion.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const { existsSync } = await import('node:fs');
+  const { dirname, join, relative } = await import('node:path');
+  const rootPath = fileURLToPath(root);
+  const workspaceOf = (file: string) => {
+    let dir = dirname(join(rootPath, file));
+    while (dir !== rootPath.replace(/\/$/, '') && !existsSync(join(dir, 'package.json'))) dir = dirname(dir);
+    return relative(rootPath, dir) || '.';
+  };
+  const fast: string[] = filesForScope([...includedTestFiles(rootPath).included], 'fast');
+  const partition = (shards: string[][]) => {
+    const all = shards.flat();
+    return { lost: fast.filter((f) => !all.includes(f)), twice: all.filter((f, i) => all.indexOf(f) !== i), empty: shards.filter((s) => s.length === 0).length };
+  };
+  const shards: string[][] = fastShards(fast, workspaceOf);
+  assert.equal(shards.length, FAST_SHARDS);
+  assert.deepEqual(partition(shards), { lost: [], twice: [], empty: 0 }, 'каждый файл быстрой области — ровно в одном шарде');
+  // Зубы [Р-94]: потерянный и повторённый файл правило видит
+  assert.deepEqual(partition([shards[0]!.slice(1), shards[1]!]).lost, [shards[0]![0]]);
+  assert.deepEqual(partition([shards[0]!, [...shards[1]!, shards[0]![0]!]]).twice, [shards[0]![0]]);
+
+  const ci = read('.github/workflows/ci.yml');
+  const matrix = /shard:\s*\[([0-9,\s]+)\]/.exec(ci)?.[1]?.split(',').map((s) => Number(s.trim()));
+  assert.deepEqual(matrix, Array.from({ length: FAST_SHARDS }, (_, i) => i + 1), 'матрица задания fast — шарды 1…FAST_SHARDS');
+  assert.ok(ci.includes(`--scope=fast --ci --shard=\${{ matrix.shard }}/${FAST_SHARDS}`), 'задание fast передаёт свой шард test-all');
+});

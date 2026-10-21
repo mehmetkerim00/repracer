@@ -265,3 +265,45 @@ test('step 70: the model refuses a storefront of another region like the sandbox
   const unknown = read('SYNUNKNOWN01');
   assert.ok('reply' in unknown && unknown.reply.kind === 'response' && unknown.reply.status === 400);
 });
+
+/**
+ * Шаг 106 (A-31, решение владельца после шага 105): searchListingsItems отдаёт не больше 1000 SKU на все страницы — модель снимка
+ * (`numberOfResults`: «The maximum number of items (SKUs) that can be returned and paged through is 1000») и страница «Understanding Amazon
+ * listing status» (vendor/amazon/listing-status/2026-10-21). `numberOfResults` — сколько найдено, а не сколько отдано. Что отвечает канал
+ * на 1001-м SKU (нет токена, ошибка) — не сказано; модель консервативно перестаёт отдавать страницы. Обнаружение, опирающееся на поиск,
+ * у продавца с 1200 SKU честно видит 1000 — каталог больше 1000 при боевом подключении обнаруживается отчётом (в отложенном)
+ */
+test('step 106 (A-31): the search model pages through at most 1000 SKUs and still says how many it found — discovery sees 1000 of 1200', async () => {
+  const { channelFetch, amazonRequestChecker } = await import('./harness/channel.ts');
+  const { VirtualClock, worldDependencies } = await import('./harness/world.ts');
+  const { SimulatedAmazonChannel } = await import('./simulator/amazon-channel.ts');
+  const { neverWrittenAttributes } = await import('@repracer/channel-port');
+  const many = Array.from({ length: 1200 }, (_, i) => ({ sku: `SYN-SKU-CAP-${String(i).padStart(4, '0')}`, asin: `B0SYNC${String(i).padStart(4, '0')}`, marketplaces: [DE], priceMinor: 1000 + i, quantity: 1 }));
+  const w = world({ seed: 106, offers: many });
+  const clock = new VirtualClock(w.clock);
+  const violations: string[] = [];
+  const model = new SimulatedAmazonChannel(w.channelModel as AmazonChannelModelSpec, w.clock, ACCESS_TOKEN);
+  const adapter = amazonUnderTest({ deps: worldDependencies(w, clock, { logs: [], alerts: [] }), world: w, clock,
+    fetch: channelFetch(model, amazonRequestChecker(w, clock, neverWrittenAttributes('AMAZON')), clock, violations, []) });
+  const ctx = { tenantId: w.tenantId, channelAccountId: w.channelAccountId, correlationId: 'step106-cap', deadline: new Date(clock.nowMs() + 3_600_000).toISOString() } as never;
+  const skus: string[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  for (; pages < 200; pages++) {
+    const p = await adapter.discoverOffers(ctx, { limit: 20, ...(cursor ? { cursor } : {}) });
+    skus.push(...p.items.map((o) => o.identity.externalSku!));
+    if (!p.nextCursor) break;
+    cursor = p.nextCursor;
+    clock.advance(1_000);
+  }
+  assert.ok(pages < 200, 'discovery ended');
+  assert.equal(JSON.stringify([skus.length, new Set(skus).size]), JSON.stringify([1000, 1000]), 'the search gives the first 1000 SKUs once, not all 1200');
+  assert.deepEqual(violations, []);
+  // Последняя страница внутри предела — без токена; найдено по-прежнему 1200
+  const last = model.reply({ method: 'GET', rawUrl: '', path: `/listings/2021-08-01/items/${SELLER}`,
+    query: { marketplaceIds: DE, includedData: 'summaries', pageSize: '20', pageToken: 'syn-page-980' }, rawBody: '', body: null, headers: {} }, clock.nowMs());
+  assert.ok('reply' in last && last.reply.kind === 'response' && last.reply.status === 200);
+  const body = (last as { reply: { body: { numberOfResults: number; pagination: { nextToken?: string }; items: unknown[] } } }).reply.body;
+  assert.equal(JSON.stringify([body.numberOfResults, body.items.length, body.pagination.nextToken ?? null]), JSON.stringify([1200, 20, null]),
+    'numberOfResults says 1200 found; the page that reaches 1000 has no next token');
+});

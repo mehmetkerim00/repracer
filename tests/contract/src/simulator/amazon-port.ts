@@ -26,6 +26,7 @@ import type {
 } from '@repracer/channel-port';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { DEFAULT_ERROR_CLASS, isNeverWritten } from '@repracer/channel-port';
+import { SEARCH_LISTINGS_ITEMS_CAP } from './amazon-channel.ts';
 import { rankForBuyBox, type BuyBoxRuleSpec } from './buybox-rule.ts';
 import { defaultAmazonParams, type AmazonModelParams } from './params.ts';
 import { SeededRandom } from './random.ts';
@@ -398,14 +399,16 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     this.stats.discoveryCalls += 1;
     const all = [...this.listings.values()].sort((a, b) => (a.sku === b.sku ? a.marketplace.localeCompare(b.marketplace) : a.sku.localeCompare(b.sku)));
     const from = page.cursor ? Number(page.cursor) : 0;
-    const slice = all.slice(from, from + Math.max(1, page.limit));
+    // Шаг 106 (A-31): как searchListingsItems — не больше 1000 на все страницы; прогон, опирающийся на поиск, видит неполноту честно
+    const reachable = Math.min(all.length, SEARCH_LISTINGS_ITEMS_CAP);
+    const slice = all.slice(from, Math.min(from + Math.max(1, page.limit), reachable));
     const { currency, basis } = this.money();
     const items: DiscoveredOffer[] = slice.map((l) => ({
       identity: { ...(this.descriptor.region ? { region: this.descriptor.region } : {}), marketplace: l.marketplace, externalSku: l.sku, channelProductRef: l.asin },
       gtins: [], condition: 'new', fulfillment: 'MERCHANT', ...(l.title !== null ? { title: l.title } : {}), currentPrice: { amountMinor: l.priceMinor, currency, basis },
       currentQuantity: l.quantity, isLive: true, channelPricing: { automatedPricing: l.automatedPricing, channelBounds: false },
     }));
-    return { items, ...(from + slice.length < all.length ? { nextCursor: String(from + slice.length) } : {}) };
+    return { items, ...(from + slice.length < reachable ? { nextCursor: String(from + slice.length) } : {}) };
   }
   async readOrderLines(): Promise<Page<OrderLine>> { return { items: [] }; }
   async handleInbound(_delivery: InboundDelivery): Promise<InboundResult> {

@@ -124,6 +124,9 @@ class Bucket {
   }
 }
 
+/** Шаг 106 (A-31): предел searchListingsItems — «The maximum number of items (SKUs) that can be returned and paged through is 1000» */
+export const SEARCH_LISTINGS_ITEMS_CAP = 1000;
+
 export class SimulatedAmazonChannel implements ChannelBehaviour {
   readonly params: AmazonModelParams;
   readonly stats: AmazonSimulatorStats = { requests: {}, rateLimited: 0, accepted: 0, applied: 0, acceptedNeverApplied: 0, fbaQuantityWrites: 0 };
@@ -239,8 +242,13 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
         if (!request.query.pageToken && this.params.paging.emptyPageFirst) return json(200, { numberOfResults: skus.length, pagination: { nextToken: 'syn-page-0' }, items: [] }, limitHeader);
         const start = request.query.pageToken ? Number(/^syn-page-(\d+)$/.exec(request.query.pageToken)?.[1] ?? Number.NaN) : 0;
         if (!Number.isSafeInteger(start)) return json(400, synError('INVALID_INPUT', 'pageToken is not a token of this model'));
-        const page = skus.slice(start, start + size);
-        return json(200, { numberOfResults: skus.length, pagination: start + size < skus.length ? { nextToken: `syn-page-${start + size}` } : {},
+        /**
+         * Шаг 106 (A-31): поиск отдаёт не больше 1000 SKU на все страницы (модель снимка, `numberOfResults`), а `numberOfResults` — сколько
+         * найдено. Что канал отвечает за пределом — не сказано (проверить на живом аккаунте): модель консервативно перестаёт давать токен
+         */
+        const reachable = Math.min(skus.length, SEARCH_LISTINGS_ITEMS_CAP);
+        const page = skus.slice(start, Math.min(start + size, reachable));
+        return json(200, { numberOfResults: skus.length, pagination: start + size < reachable ? { nextToken: `syn-page-${start + size}` } : {},
           items: page.map((sku) => this.listingBody(sku, this.offersOfSku(sku, marketplaces), included)) }, limitHeader);
       }
       const sku = decodeURIComponent(listing[2]!);

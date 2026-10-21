@@ -3,6 +3,7 @@
 #
 # Р-137 (шаг 29), задача E шага 30: три задания, параллельные.
 #   fast   — на каждый коммит: типы, юнит-тесты и всё, чему хватает PostgreSQL. Столько ждать разбора опечатки не жалко.
+#            С шага 106 — двумя параллельными заданиями (шардами), у каждого предел 40 минут.
 #   guards — на каждый коммит: мутационная проверка КРИТИЧНЫХ защит [Р-95, OQ-203] — обе границы и пол маржи (Price Gate),
 #            проверка входов, диспетчер записей, роли подключения и второй фактор массового изменения. Отдельным заданием, а не
 #            внутри быстрого: она идёт около десяти минут, и быстрый прогон перестал бы быть быстрым.
@@ -25,6 +26,14 @@ jobs:
     runs-on: ubuntu-24.04
     # Шаг 45: живые прогоны подключения и пилота идут по одному (MEASURED_FILES) — быстрая область выросла до ~25 мин,
     # и прогон шага 44 по запросу упёрся в прежние 30 минут (тесты не падали, задание отменено пределом)
+    # Шаг 106 (решение владельца после шага 105): быстрая область — FAST_SHARDS параллельными заданиями, у каждого прежние 40 минут.
+    # Предел не поднят: быстрый прогон растёт с каждым шагом (30–37 мин одним заданием), и push-прогон шага 105 снят на 40-й минуте
+    # медленным раннером. Деление — scripts/test-scopes.mjs (fastShards), что шарды покрывают область без потерь — правило репозитория
+    name: fast (${{ matrix.shard }}/2)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     timeout-minutes: 40
     services:
       postgres:
@@ -53,21 +62,26 @@ jobs:
       # (сборка, типы) — отчётом, который сборку не краснит: новая уязвимость в сборщике не должна останавливать коммит без изменений кода
       - run: npm audit --omit=dev --audit-level=high
       - name: npm audit (dev, report only)
+        if: matrix.shard == 2
         run: npm audit --audit-level=high
         continue-on-error: true
       - name: Every test file is in the build (Р-89)
         run: node scripts/check-test-inclusion.mjs
       - name: Database — migrations, template, smoke tests of the schema
         run: scripts/db/prepare.sh repracer_eu
+      # Шаг 106: проверки всего репозитория — одним шардом, тестам это не нужно дважды
       - name: Every new protection has a catalog row (Р-108)
+        if: matrix.shard == 2
         run: node scripts/db/check-catalog-coverage.mjs
-      - run: npm run typecheck
+      - name: Typecheck
+        if: matrix.shard == 2
+        run: npm run typecheck
       # Шаг 37 [Р-159]: интерфейс собирается ДО тестов — прогон гостя поднимает настоящий процесс консоли, а он отдаёт
       # СОБРАННЫЕ файлы. Без этой сборки прогон проверял бы пустой каталог и молча терял смысл
       - name: Console UI build (Р-159)
         run: npm run build -w apps/console
-      - name: Tests without infrastructure beyond PostgreSQL (Р-137)
-        run: node scripts/test-all.mjs --scope=fast --ci
+      - name: Tests without infrastructure beyond PostgreSQL (Р-137), shard of the fast scope (step 106)
+        run: node scripts/test-all.mjs --scope=fast --ci --shard=${{ matrix.shard }}/2
 
   # Задача E шага 30 [OQ-203]: быстрый прогон не должен пропускать регрессию в защитах, которыми держится цена
   guards:
