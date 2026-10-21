@@ -232,6 +232,53 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
   await timed('screen: decisions page', SCREEN_SECONDS, () => store.decisionPage(tenant, { offset: 0, limit: 50 } as never), bytesOf);
   await timed('screen: price feed page', SCREEN_SECONDS, () => store.feedPage(tenant, now(), { offset: 0, limit: 50 } as never), bytesOf);
 
+  // ---------------------------------------------------------------- шаг 105 [Р-230]: Offers по колонкам Buy Box на каталоге со снимками
+  /**
+   * Сортировку и фильтр держателя по всему каталогу считает база по снимку каждого предложения и его отрезкам держателя. Мир масштаба
+   * снимков не получает (опрос конкурентов у него не идёт), поэтому снимок в 12 предложений и неделя отрезков держателя кладутся каждому
+   * предложению одним запросом наблюдателя — как их оставил бы опрос; данные синтетические
+   */
+  await timed(`seed: a 12-offer competitor snapshot and a week of Buy Box spans for each of ${OFFERS} offers`, Number.POSITIVE_INFINITY, async () => {
+    const at = k.clock.iso();
+    await observer.query(
+      `INSERT INTO channel_data.competitor_state (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, source, competitor_snapshot_id,
+                                                  observed_at, received_at, buybox_amount_minor, buybox_is_self, offers, completeness, completeness_n, currency, price_basis)
+       SELECT m.tenant_id, m.channel_account_id, 'KAUFLAND', m.marketplace, m.channel_product_ref, m.condition, 'KAUFLAND_BUY_BOX_CHANGED', gen_random_uuid(),
+              $2::timestamptz - (x.n % 600) * interval '1 second', $2::timestamptz, 1700 + (x.n % 50) + 5, x.n % 3 = 0,
+              (SELECT jsonb_agg(jsonb_build_object('rank', g, 'isSelf', g = 12, 'sellerRef', 'Scale Seller ' || g,
+                        'price', jsonb_build_object('amountMinor', 1700 + (x.n % 50) + g * 5, 'currency', 'EUR', 'basis', 'GROSS'))
+                      || CASE WHEN g % 2 = 0 THEN jsonb_build_object('shipping', jsonb_build_object('amountMinor', 0, 'currency', 'EUR', 'basis', 'GROSS')) ELSE '{}'::jsonb END
+                      || CASE WHEN g = 1 OR (g = 12 AND x.n % 3 = 0) THEN jsonb_build_object('holdsBuyBox', true) ELSE '{}'::jsonb END ORDER BY g)
+                 FROM generate_series(1, 12) g),
+              'TOP_N', 20, 'EUR', 'GROSS'
+         FROM (SELECT o.*, row_number() OVER (ORDER BY o.channel_product_ref) AS n FROM tenant_data.offer_mapping o WHERE o.tenant_id = $1 AND o.status <> 'ENDED') x
+         JOIN tenant_data.offer_mapping m ON m.tenant_id = x.tenant_id AND m.offer_mapping_id = x.offer_mapping_id
+       ON CONFLICT (tenant_id, channel_account_id, marketplace, channel_product_ref, condition) DO UPDATE
+          SET source = excluded.source, competitor_snapshot_id = excluded.competitor_snapshot_id, observed_at = excluded.observed_at, received_at = excluded.received_at,
+              buybox_amount_minor = excluded.buybox_amount_minor, buybox_is_self = excluded.buybox_is_self, offers = excluded.offers,
+              completeness = excluded.completeness, completeness_n = excluded.completeness_n`, [tenant, at]);
+    await observer.query(
+      `INSERT INTO channel_data.buybox_span (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, holder, started_at, last_seen_at, snapshots)
+       SELECT m.tenant_id, m.channel_account_id, m.marketplace, m.channel_product_ref, m.condition, CASE WHEN (d + length(m.channel_product_ref)) % 2 = 0 THEN 'SELF' ELSE 'OTHER' END,
+              $2::timestamptz - (7 - d) * interval '1 day', $2::timestamptz - (7 - d) * interval '1 day' + interval '20 hours', 10
+         FROM tenant_data.offer_mapping m, generate_series(0, 6) d WHERE m.tenant_id = $1 AND m.status <> 'ENDED'`, [tenant, at]);
+    await observer.query('ANALYZE channel_data.competitor_state; ANALYZE channel_data.buybox_span');
+  });
+  const since = new Date(Date.parse(k.clock.iso()) - 7 * 86_400_000).toISOString() as never;
+  const bbFilter = { buybox: { since, until: now(), noDataAccounts: [], namedAccounts: [account] } };
+  for (const [label, filter] of [['sorted by Buy Box share', { sort: { key: 'share', dir: 'desc' } }], ['holder «another seller», sorted by gap', { holder: 'OTHER', sort: { key: 'gap', dir: 'asc' } }]] as const) {
+    await timed(`screen: products ${label} (database selection over every snapshot and span + Buy Box cells of the page)`, SCREEN_SECONDS, async () => {
+      const page = await store.consoleCatalogPage(tenant, now(), { offset: 0, limit: 50, offers: { ...filter, ...bbFilter } as never });
+      assert.equal(page.scopeIds.length, 50, `${label}: a full page`);
+      const [state, data] = await Promise.all([store.readConsoleState(tenant, now(), { scopeIds: page.scopeIds }), store.competitionData(tenant, page.scopeIds, since, now())]);
+      assert.ok(data.every((d) => d.snapshot !== null), `${label}: every shown offer has its snapshot`);
+      return productList({ ...world, state } as never, m, { offset: 0, limit: 50 }, await store.scopeDecisionStats(tenant, page.scopeIds), page);
+    }, bytesOf);
+  }
+  const counted = await timed('export count: competitors of every offer (database count, the 50 000 cap before any job)', SCREEN_SECONDS,
+    () => store.consoleCatalogPage(tenant, now(), { offset: 0, limit: 1, offers: { ...bbFilter, countCompetitorRows: true } }), (r) => ({ rows: r.competitorRows ?? 0 }));
+  assert.equal(counted.competitorRows, OFFERS * 11, 'ten competitors and our row below the tenth for every offer');
+
   // ---------------------------------------------------------------- круги
   await timed('reconciliation sample (one call of the Amazon reconciliation circle reads the account)', SCREEN_SECONDS,
     () => store.pickReconciliationSample(tenant, account, 20, 0), (r) => ({ rows: r.total }));

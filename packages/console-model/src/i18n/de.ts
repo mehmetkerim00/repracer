@@ -1244,7 +1244,7 @@ export const de: Messages = {
       bulkEdit: 'Massenvorgänge',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Gesamt ${t.total}: an ${t.enabled}, in Arbeit ${t.applying}, gestoppt ${t.stopped}, aus ${t.off}.`,
       clock: (now: string) => `Simulierte Zeit: ${now}.`,
-      columns: { unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status' },
+      columns: { unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil 7 T' },
       whatToDo: 'Was tun',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. PriceTrail ändert den Preis dafür nie von sich aus.`,
       conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten', compact: 'Kompakte Zeilen' },
@@ -1261,6 +1261,21 @@ export const de: Messages = {
       notAssigned: (reason: string) => `Nicht zugewiesen: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Untergrenze über Höchstpreis', frozenDetail: 'Preise eingefroren — Höchstpreis anheben oder Abverkauf einschalten',
+      // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
+      buybox: {
+        you: 'Sie', unknown: 'Unbekannt', none: 'Niemand', noShipping: 'Versand nicht genannt',
+        asOf: (when: string, age: string) => `Letzte Wettbewerbsdaten ${when} — ${age}`,
+        age: (minutes: number) => (minutes < 1 ? 'gerade eben' : minutes < 60 ? `vor ${minutes} Min.` : minutes < 2880 ? `vor ${Math.floor(minutes / 60)} Std.` : `vor ${Math.floor(minutes / 1440)} Tagen`),
+        noSnapshot: 'Noch keine Wettbewerbsdaten', noData: (channel: string) => `${channel} liefert keine Wettbewerbsdaten`,
+        shareUnknown: (channel: string) => `${channel} nennt den Inhaber der Buy Box nicht — kein Anteil`,
+        sortBy: (label: string) => `Nach ${label} sortieren`,
+      },
+      filters: {
+        storefront: 'Storefront', allStorefronts: 'Alle Storefronts', holder: 'Buy Box', anyHolder: 'Alle',
+        holders: { SELF: 'Sie', OTHER: 'Anderer Verkäufer', NONE: 'Niemand', UNKNOWN: 'Inhaber unbekannt', NO_DATA: 'Keine Wettbewerbsdaten' },
+        search: 'Suche', searchPlaceholder: 'SKU, EAN oder Name',
+        matched: (n: number, total: number) => `${n} von ${total} Angeboten passen zum Filter`,
+      },
     },
     outcomes: { APPROVED: 'Freigegeben', NO_CHANGE: 'Keine Änderung', REJECTED: 'Abgelehnt', HELD: 'Zurückgehalten' },
     rules: {
@@ -1294,6 +1309,7 @@ export const de: Messages = {
       holderSelf: 'Sie halten die Buy Box', holderOther: (seller: string) => `${seller} hält die Buy Box`, holderNone: 'Gerade hält niemand die Buy Box',
       holderUnknown: (channel: string) => `Inhaber der Buy Box bei ${channel} unbekannt (vorerst)`, holderUnknownWhy: 'Der Kanal nennt den Buy-Box-Preis, aber nicht, wer ihn hält.',
       buyBoxPrice: (amount: string) => `Buy-Box-Preis mit Versand: ${amount}`,
+      buyBoxPriceNoShipping: (amount: string) => `Buy-Box-Preis: ${amount} (Versand nicht genannt)`,
       columns: { seller: 'Verkäufer', landed: 'Preis mit Versand', shipping: 'Versand', fulfilment: 'Versand durch', rating: 'Bewertung', buyBox: 'Buy Box', price: 'Preis' },
       uniform: (column: string, value: string) => `${column}: ${value} — bei allen gezeigten Angeboten.`,
       noShipping: 'Der Kanal hat für einige dieser Angebote keinen Versand genannt: ihre Preise sind ohne Versand.',
@@ -1568,11 +1584,12 @@ export const de: Messages = {
      */
     /** Шаг 104 [Р-229]: выгрузка экрана в файл */
     export: {
-      button: 'Exportieren', csv: 'CSV', xlsx: 'XLSX', label: 'Exportieren, was dieser Bildschirm zeigt',
+      competitors: 'Wettbewerber exportieren', button: 'Exportieren', csv: 'CSV', xlsx: 'XLSX', label: 'Exportieren, was dieser Bildschirm zeigt',
       headerNote: 'Die Spaltenüberschriften in der Datei sind immer auf Englisch.',
       guest: 'Der Export ist in der öffentlichen Demo nicht verfügbar',
       created: 'Die Datei wird im Hintergrund erstellt. Sie können diese Seite verlassen.',
       tooMany: (rows: number, limit: number) => `Dieser Export hätte ${rows} Zeilen — mehr als die Grenze von ${limit}. Grenzen Sie den Zeitraum ein.`,
+      tooManyFilter: (rows: number, limit: number) => `Dieser Export hätte ${rows} Zeilen — mehr als die Grenze von ${limit}. Grenzen Sie den Filter ein.`,
       empty: 'Nichts zu exportieren: der Bildschirm zeigt keine Zeilen.',
     },
     jobs: {
@@ -1636,6 +1653,7 @@ export const de: Messages = {
         BAD_SCOPES: 'keine Angebote ausgewählt', CONFLICT: 'die Grenzen haben sich inzwischen geändert',
         MFA_REQUIRED: 'der zweite Faktor fehlt', MFA_REQUIRED_WINDOW: 'in den letzten zehn Minuten wurden mehr als fünf Angebote geändert: zum Fortfahren mit zweitem Faktor anmelden', FORBIDDEN: 'die Rolle darf das nicht', JOB_FAILED: 'unerwarteter Fehler',
         TOO_MANY_ROWS: 'mehr als 50.000 Zeilen — grenzen Sie den Zeitraum ein',
+        TOO_MANY_ROWS_FILTER: 'mehr als 50.000 Zeilen — grenzen Sie den Filter ein',
         UNKNOWN_JOB_KIND: 'diesen Vorgang kennt der Hintergrundprozess nicht',
         TOO_MANY_ATTEMPTS: 'der Vorgang ist mehrfach gescheitert und wird nicht weiter versucht',
         DATA_CHANGED: 'Ihre Daten haben sich nach der Prüfung geändert — prüfen Sie die Datei erneut', HAS_ERRORS: 'die Datei hat Zeilen mit Fehlern — nichts wurde angewendet',

@@ -1297,7 +1297,7 @@ export const fr: Messages = {
       bulkEdit: 'Opérations groupées',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total} : activées ${t.enabled}, en cours ${t.applying}, arrêtées ${t.stopped}, désactivées ${t.off}.`,
       clock: (now: string) => `Heure simulée : ${now}.`,
-      columns: { unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut' },
+      columns: { unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box 7 j' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Que faire',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart masque cette offre parce que le même produit est moins cher ailleurs${elsewhere ? ` (${elsewhere})` : ''}. Pour qu’elle réapparaisse, rapprochez le prix walmart.com de ce prix — seulement si votre plancher le permet. PriceTrail ne modifie jamais le prix de lui-même pour cette raison.`,
@@ -1315,6 +1315,21 @@ export const fr: Messages = {
       notAssigned: (reason: string) => `Non attribuée : ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Plancher au-dessus du plafond', frozenDetail: 'prix gelés — relevez le prix maximum ou activez le déstockage',
+      // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
+      buybox: {
+        you: 'Vous', unknown: 'Inconnu', none: 'Personne', noShipping: 'livraison non indiquée',
+        asOf: (when: string, age: string) => `Dernières données de la concurrence\u00a0: ${when} — ${age}`,
+        age: (minutes: number) => (minutes < 1 ? 'à l’instant' : minutes < 60 ? `il y a ${minutes} min` : minutes < 2880 ? `il y a ${Math.floor(minutes / 60)} h` : `il y a ${Math.floor(minutes / 1440)} jours`),
+        noSnapshot: 'Pas encore de données de la concurrence', noData: (channel: string) => `${channel} ne fournit pas de données de la concurrence`,
+        shareUnknown: (channel: string) => `${channel} n’indique pas le détenteur de la Buy Box — pas de part`,
+        sortBy: (label: string) => `Trier par ${label}`,
+      },
+      filters: {
+        storefront: 'Site', allStorefronts: 'Tous les sites', holder: 'Buy Box', anyHolder: 'Tous',
+        holders: { SELF: 'Vous', OTHER: 'Un autre vendeur', NONE: 'Personne', UNKNOWN: 'Détenteur inconnu', NO_DATA: 'Pas de données de la concurrence' },
+        search: 'Rechercher', searchPlaceholder: 'SKU, EAN ou nom',
+        matched: (n: number, total: number) => `${n} offres sur ${total} correspondent au filtre`,
+      },
     },
     outcomes: { APPROVED: 'Approuvé', NO_CHANGE: 'Aucun changement', REJECTED: 'Rejeté', HELD: 'Retenu' },
     rules: {
@@ -1348,6 +1363,7 @@ export const fr: Messages = {
       holderSelf: 'Vous détenez la Buy Box', holderOther: (seller: string) => `${seller} détient la Buy Box`, holderNone: 'Personne ne détient la Buy Box en ce moment',
       holderUnknown: (channel: string) => `Détenteur de la Buy Box inconnu sur ${channel} (pour l’instant)`, holderUnknownWhy: 'Le canal donne le prix de la Buy Box, mais pas son détenteur.',
       buyBoxPrice: (amount: string) => `Prix de la Buy Box livraison comprise : ${amount}`,
+      buyBoxPriceNoShipping: (amount: string) => `Prix de la Buy Box\u00a0: ${amount} (livraison non indiquée)`,
       columns: { seller: 'Vendeur', landed: 'Prix livraison comprise', shipping: 'Livraison', fulfilment: 'Expédié par', rating: 'Évaluation', buyBox: 'Buy Box', price: 'Prix' },
       // Шаг 96.2 [Р-146]: колонка из одного значения — фразой подписи, а не колонкой
       uniform: (column: string, value: string) => `${column} : ${value} — pour toutes les offres listées.`,
@@ -1623,11 +1639,12 @@ export const fr: Messages = {
     },
     /** Шаг 104 [Р-229]: выгрузка экрана в файл */
     export: {
-      button: 'Exporter', csv: 'CSV', xlsx: 'XLSX', label: 'Exporter ce que montre cet écran',
+      competitors: 'Exporter les concurrents', button: 'Exporter', csv: 'CSV', xlsx: 'XLSX', label: 'Exporter ce que montre cet écran',
       headerNote: 'Les en-têtes de colonnes du fichier sont toujours en anglais.',
       guest: 'L’export n’est pas disponible dans la démo publique',
       created: 'Le fichier est préparé en arrière-plan. Vous pouvez quitter cette page.',
       tooMany: (rows: number, limit: number) => `Cet export aurait ${rows} lignes, au-delà de la limite de ${limit}. Réduisez la période.`,
+      tooManyFilter: (rows: number, limit: number) => `Cet export aurait ${rows} lignes, au-delà de la limite de ${limit}. Affinez le filtre.`,
       empty: 'Rien à exporter : l’écran n’affiche aucune ligne.',
     },
     jobs: {
@@ -1692,6 +1709,7 @@ export const fr: Messages = {
         BAD_SCOPES: 'aucune offre sélectionnée', CONFLICT: 'les limites ont changé entre-temps',
         MFA_REQUIRED: 'le second facteur manque', MFA_REQUIRED_WINDOW: 'plus de cinq offres ont été modifiées au cours des dix dernières minutes : connectez-vous avec un second facteur pour continuer', FORBIDDEN: 'le rôle ne permet pas cette action', JOB_FAILED: 'erreur inattendue',
         TOO_MANY_ROWS: 'plus de 50 000 lignes — réduisez la période',
+        TOO_MANY_ROWS_FILTER: 'plus de 50 000 lignes — affinez le filtre',
         UNKNOWN_JOB_KIND: 'le processus d’arrière-plan ne connaît pas cette opération',
         TOO_MANY_ATTEMPTS: 'l’opération a échoué à plusieurs reprises et n’est plus retentée',
         DATA_CHANGED: 'vos données ont changé après la vérification — vérifiez à nouveau le fichier', HAS_ERRORS: 'le fichier a des lignes en erreur — rien n’a été appliqué',

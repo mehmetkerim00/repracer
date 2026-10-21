@@ -1,7 +1,9 @@
 import {
-  auditExportRows, dangerousReport, decisionExportRows, EXPORT_MAX_ROWS, FEED_PAGE_MAX, feedExportRows, HOT_DECISIONS_DAYS, importExportRows, LIST_PAGE_MAX,
-  offerExportRows, productList, protectionExportRows, rejectedView, stockExportRows, type ExportFormat, type ExportScreen, type Messages, type StandWorld,
+  auditExportRows, buyboxFacts, competitorExportRows, dangerousReport, decisionExportRows, EXPORT_MAX_ROWS, FEED_PAGE_MAX, feedExportRows, HOT_DECISIONS_DAYS,
+  importExportRows, LIST_PAGE_MAX, offerExportRows, productList, protectionExportRows, rejectedView, stockExportRows, unitOf, type ExportFormat, type ExportScreen, type Messages,
+  type StandWorld,
 } from '@repracer/console-model';
+import { buyboxCellsOf, competitionDataById, selectOffers, type AccountCompetitorInfo, type OfferQuery } from './offer-selection.ts';
 import type { Instant } from '@repracer/channel-port';
 import type { DecisionPageQuery, FeedPageQuery, ImportKind, PricingStore } from '@repracer/pricing-pipeline';
 import type { StockStore } from '@repracer/stock-sync';
@@ -22,6 +24,11 @@ export interface ScreenExportQuery {
   stock?: { search?: string; withReservations?: boolean };
   imports?: { kind: ImportKind; since?: string; until?: string };
   audit?: { since?: string; until?: string };
+  /**
+   * Шаг 105 [Р-230]: Offers и конкуренты — фильтр и порядок экрана, что канал каждого аккаунта говорит о конкурентах (описание канала
+   * знает консоль), окно доли Buy Box и включены ли колонки Buy Box
+   */
+  offers?: { query: OfferQuery; accounts: Record<string, AccountCompetitorInfo>; shareRange: { since: string; until: string }; buybox: boolean };
 }
 
 export interface ScreenExportParams {
@@ -43,7 +50,7 @@ export interface ScreenExportParams {
 }
 
 export interface ScreenExportDeps {
-  store: Pick<PricingStore, 'feedPage' | 'decisionPage' | 'interventions' | 'importRunsPage' | 'auditPage'>;
+  store: Pick<PricingStore, 'feedPage' | 'decisionPage' | 'interventions' | 'importRunsPage' | 'auditPage' | 'competitionData'> & Partial<Pick<PricingStore, 'consoleCatalogPage'>>;
   stock?: Pick<StockStore, 'stockPage'>;
   tenantId: string;
   /** «Сейчас» мира — для запросов ленты, которым нужен момент */
@@ -68,10 +75,24 @@ export async function screenExportCount(p: ScreenExportParams, deps: ScreenExpor
     }
     case 'imports': return (await store.importRunsPage(tenantId, { ...importsQuery(p), offset: 0, limit: 1 })).total;
     case 'audit-log': return (await store.auditPage(tenantId, { ...auditQuery(p), offset: 0, limit: 1 })).total;
-    case 'offers': return productList(await deps.world(), deps.m, { offset: 0, limit: 1 }).page.total;
+    case 'offers': return (await selectOffers(selectionDeps(p, deps), offersOf(p).query, { offset: 0, limit: 1 })).matched;
+    case 'offer-competitors': return (await selectOffers(selectionDeps(p, deps), offersOf(p).query, { offset: 0, limit: 1 }, { countCompetitorRows: true })).competitorRows ?? 0;
     case 'stopped-by-people':
     case 'prevented-by-rules': return (await screenExportRows(p, deps)).length;
   }
+}
+
+/** Шаг 105: Offers без запроса фильтра (прежние задания шага 104) — весь каталог в порядке каталога, без колонок Buy Box */
+const offersOf = (p: ScreenExportParams): NonNullable<ScreenExportQuery['offers']> =>
+  p.query.offers ?? { query: { storefront: null, holder: null, q: '', sort: null }, accounts: {}, shareRange: { since: p.exportedAt, until: p.exportedAt }, buybox: false };
+const selectionDeps = (p: ScreenExportParams, deps: ScreenExportDeps) => {
+  const o = offersOf(p);
+  return { store: deps.store, tenantId: deps.tenantId, now: deps.now, useDatabase: Boolean(deps.store.consoleCatalogPage), world: deps.world, m: deps.m,
+    accounts: o.accounts, shareRange: o.shareRange };
+};
+/** Единицы выгрузки Offers в порядке экрана — все сразу (их не больше потолка: число проверено до строк) */
+async function offerIds(p: ScreenExportParams, deps: ScreenExportDeps): Promise<string[]> {
+  return (await selectOffers(selectionDeps(p, deps), offersOf(p).query, { offset: 0, limit: EXPORT_MAX_ROWS })).scopeIds;
 }
 
 const importsQuery = (p: ScreenExportParams) => {
@@ -90,7 +111,7 @@ export async function screenExportRows(p: ScreenExportParams, deps: ScreenExport
   const rows: string[][] = [];
   const add = async (more: readonly string[][]) => {
     rows.push(...more);
-    if (rows.length > EXPORT_MAX_ROWS) throw Object.assign(new Error('too many rows'), { cause: 'TOO_MANY_ROWS' });
+    if (rows.length > EXPORT_MAX_ROWS) throw Object.assign(new Error('too many rows'), { cause: p.screen === 'offers' || p.screen === 'offer-competitors' ? 'TOO_MANY_ROWS_FILTER' : 'TOO_MANY_ROWS' });
     await progress(rows.length);
   };
   switch (p.screen) {
@@ -132,11 +153,36 @@ export async function screenExportRows(p: ScreenExportParams, deps: ScreenExport
       return rows;
     }
     case 'offers': {
+      // Шаг 105: фильтр, порядок и колонки Buy Box экрана — та же выборка, что у экрана (`selectOffers`)
       const world = await deps.world();
-      for (let offset = 0, total = 1; offset < total; offset += LIST_PAGE_MAX) {
-        const view = productList(world, m, { offset, limit: LIST_PAGE_MAX });
-        total = view.page.total;
-        await add(offerExportRows(world, m, view.rows));
+      const o = offersOf(p);
+      const ids = await offerIds(p, deps);
+      for (let at = 0; at < ids.length; at += LIST_PAGE_MAX) {
+        const chunk = ids.slice(at, at + LIST_PAGE_MAX);
+        const cells = o.buybox
+          ? buyboxCellsOf(world, await store.competitionData(tenantId, chunk, o.shareRange.since as Instant, o.shareRange.until as Instant), { ...selectionDeps(p, deps) }, chunk)
+          : null;
+        const view = productList(world, m, { offset: 0, limit: chunk.length }, undefined,
+          { scopeIds: chunk, offset: 0, total: chunk.length, matched: chunk.length, enabled: 0, stopped: 0, off: 0, applying: 0, pricingHealthIssues: false }, { buybox: cells });
+        await add(offerExportRows(world, m, view.rows, { buybox: o.buybox, timeZone }));
+      }
+      return rows;
+    }
+    case 'offer-competitors': {
+      const world = await deps.world();
+      const o = offersOf(p);
+      const ids = await offerIds(p, deps);
+      for (let at = 0; at < ids.length; at += LIST_PAGE_MAX) {
+        const chunk = ids.slice(at, at + LIST_PAGE_MAX);
+        const data = competitionDataById(await store.competitionData(tenantId, chunk, o.shareRange.since as Instant, o.shareRange.until as Instant));
+        await add(competitorExportRows(m, timeZone, chunk.flatMap((id) => {
+          const scope = world.state.scopes.find((sc) => sc.writeScopeId === id);
+          if (!scope) return [];
+          const info = o.accounts[scope.channelAccountId];
+          const d = data.get(id) ?? { snapshot: null, spans: [] };
+          const facts = buyboxFacts({ snapshot: d.snapshot, spans: d.spans, range: o.shareRange, sources: info?.data ? [{ role: 'PRIMARY', hasBuyboxWinner: info.named }] : [] });
+          return [{ unit: unitOf(world, scope, m), snapshot: d.snapshot, holderNamed: facts.holderNamed, state: facts.state }];
+        })));
       }
       return rows;
     }

@@ -2,7 +2,7 @@ import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/chan
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow,
+import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
@@ -2576,6 +2576,16 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!s) return null;
     const state = this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }));
     return state?.snapshot ? { snapshot: state.snapshot, source: state.snapshot.source, observedAt: state.observedAt } : null;
+  }
+
+  /** Шаг 105 [Р-230]: снимок и отрезки многих единиц — тем же правилом, что поштучные `competitionSnapshot` и `buyboxSpans` */
+  async competitionData(tenantId: string, writeScopeIds: readonly string[], from: Instant, to: Instant): Promise<CompetitionDataRow[]> {
+    const out: CompetitionDataRow[] = [];
+    for (const id of new Set(writeScopeIds)) {
+      if (!this.scopes.has(id)) continue;
+      out.push({ writeScopeId: id, snapshot: await this.competitionSnapshot(tenantId, id), spans: await this.buyboxSpans(tenantId, id, from, to) });
+    }
+    return out;
   }
 
   async decisionDetail(_tenantId: string, decisionId: string): Promise<DecisionDetail | null> {

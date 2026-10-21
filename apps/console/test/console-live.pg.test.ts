@@ -290,6 +290,13 @@ test('Р-136: список товаров и список границ — эк�
   assert.notDeepEqual(second.body.rows[0]!.unit.writeScopeId, products.body.rows[0]!.unit.writeScopeId);
   const tooBig = await call('GET', api('products', undefined, '?limit=5000'));
   assert.equal(tooBig.status, 400, 'страница больше предела — отказ, а не молчаливая выдача каталога');
+  // Шаг 105 [Р-230]: колонки Buy Box, сортировка по доле и фильтр держателя — база считает их по всему каталогу; тот же предел экрана
+  const sorted = await measure<ProductListView>('products (колонки Buy Box, сортировка по доле)', 'GET', api('products', undefined, '?bb=1&sort=share&dir=desc'));
+  assert.equal(JSON.stringify([sorted.status, sorted.body.rows.length, sorted.body.page.total]), JSON.stringify([200, LIST_PAGE_DEFAULT, OFFERS]), 'the whole catalog is sorted, a page is shown');
+  assert.ok(sorted.body.rows.every((r) => r.buybox !== undefined), 'the rows carry the Buy Box columns');
+  const noData = await measure<ProductListView>('products (фильтр держателя, сортировка по разрыву)', 'GET', api('products', undefined, '?bb=1&holder=NO_DATA&sort=gap'));
+  assert.equal(noData.status, 200);
+  assert.equal(noData.body.matched, noData.body.page.total, 'the page counts the offers that match the filter');
   const bounds = await measure<BoundsIndexView>('bounds (список границ)', 'GET', api('bounds'));
   assert.equal(bounds.status, 200);
   assert.equal(bounds.body.items.length, LIST_PAGE_DEFAULT);

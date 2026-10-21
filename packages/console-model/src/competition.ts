@@ -74,7 +74,9 @@ export type DiagnosisReason =
   | { kind: 'RATING'; winnerPct: number; ownPct: number }
   | { kind: 'FLOOR'; floorMinor: number };
 
-const landed = (o: CompetitorOffer) => o.totalPrice?.amountMinor ?? (o.shipping ? o.price.amountMinor + o.shipping.amountMinor : null);
+/** Цена с доставкой: итог канала, иначе цена и доставка; доставку канал не назвал — неизвестна (null), а не «доставка 0» [Р-221] */
+export const landedOf = (o: CompetitorOffer): number | null => o.totalPrice?.amountMinor ?? (o.shipping ? o.price.amountMinor + o.shipping.amountMinor : null);
+const landed = landedOf;
 
 /**
  * Причины по данным снимка, когда Buy Box не наш и держатель назван. Разрыв цены — с доставкой и только когда обе landed-цены известны;
@@ -140,6 +142,79 @@ export function competitorColumns(rows: ReadonlyArray<{ fulfilment: string | nul
 }
 
 // ---------------------------------------------------------------------------
+// Факты Buy Box предложения [Р-230]: одни для страницы Competition и колонок Offers
+// ---------------------------------------------------------------------------
+
+/** Предложения снимка в порядке страницы: по цене с доставкой (неизвестна — по цене), при равенстве — по продавцу */
+export function orderedOffers(snapshot: CompetitorSnapshot): CompetitorOffer[] {
+  return [...snapshot.offers].sort((a, b) => (landed(a) ?? a.price.amountMinor) - (landed(b) ?? b.price.amountMinor) || (a.sellerRef ?? '').localeCompare(b.sellerRef ?? ''));
+}
+
+/** Строки таблицы страницы: первые 10 по цене с доставкой и наша строка, если она ниже десятой; у строки — её место в порядке */
+export const COMPETITION_TOP_N = 10;
+export function competitionRowOffers(ordered: readonly CompetitorOffer[]): Array<{ offer: CompetitorOffer; rank: number }> {
+  return ordered.flatMap((offer, i) => (i < COMPETITION_TOP_N || offer.isSelf ? [{ offer, rank: i + 1 }] : []));
+}
+
+export type BuyboxHolderKind = 'SELF' | 'OTHER' | 'NONE' | 'UNKNOWN';
+
+export interface BuyboxFacts {
+  /** NO_COMPETITOR_DATA — канал конкурентов не даёт (eBay); NO_SNAPSHOT — снимков ещё нет */
+  state: 'OK' | 'NO_COMPETITOR_DATA' | 'NO_SNAPSHOT';
+  /** Канал называет держателя (основной источник с победителем Buy Box); нет — держатель «неизвестен», доли нет (A-29) */
+  holderNamed: boolean;
+  holder: BuyboxHolderKind | null;
+  /** Держатель — другой продавец: его имя; канал имени не назвал — null */
+  seller: string | null;
+  /** Цена Buy Box: строки держателя на странице (с доставкой, если она известна), при неизвестном держателе — цена Buy Box канала */
+  price: { minor: number; landed: boolean } | null;
+  /** Разрыв «наша цена с доставкой − цена победителя с доставкой» — только где его называет страница: держатель другой, обе цены известны */
+  gapMinor: number | null;
+  /** Доля Buy Box за период; канал не называет держателя — null */
+  share: BuyboxShare | null;
+  observedAt: string | null;
+}
+
+export interface BuyboxFactsInput {
+  snapshot: { snapshot: CompetitorSnapshot; source: string; observedAt: string } | null;
+  spans: readonly ShareSpan[];
+  range: { since: string; until: string };
+  sources: ReadonlyArray<{ hasBuyboxWinner: boolean; role: string }>;
+}
+
+/**
+ * Правило держателя, цены, разрыва и доли — одно для страницы Competition и колонок Offers (шаг 105): колонка не может разойтись со
+ * страницей. Поиск и сортировку по всему каталогу на PostgreSQL считает база тем же правилом (`consoleCatalogPage`), равенство с этой
+ * функцией держит тест на демо США
+ */
+export function buyboxFacts(input: BuyboxFactsInput): BuyboxFacts {
+  const primary = input.sources.filter((s) => s.role === 'PRIMARY');
+  const holderNamed = primary.some((s) => s.hasBuyboxWinner);
+  const share = holderNamed ? buyboxShare(input.spans, Date.parse(input.range.since), Date.parse(input.range.until)) : null;
+  const none = { holder: null, seller: null, price: null, gapMinor: null, observedAt: null };
+  if (primary.length === 0) return { state: 'NO_COMPETITOR_DATA', holderNamed: false, share: null, ...none };
+  if (!input.snapshot) return { state: 'NO_SNAPSHOT', holderNamed, share, ...none };
+  const snap = input.snapshot.snapshot;
+  const bb = snap.buybox;
+  const holder: BuyboxHolderKind = !holderNamed || (bb && bb.isSelf === null) ? 'UNKNOWN' : !bb ? 'NONE' : bb.isSelf ? 'SELF' : 'OTHER';
+  const ordered = orderedOffers(snap);
+  // Цена победителя с доставкой — доставка Buy Box, а если канал назвал её только у предложения-держателя — его landed (как у диагностики)
+  const winnerOffer = snap.offers.find((o) => !o.isSelf && o.holdsBuyBox === true) ?? (bb?.sellerRef ? snap.offers.find((o) => !o.isSelf && o.sellerRef === bb.sellerRef) : undefined);
+  const winnerLanded = bb ? (bb.shipping ? bb.price.amountMinor + bb.shipping.amountMinor : winnerOffer ? landed(winnerOffer) : null) : null;
+  const self = ordered.find((o) => o.isSelf);
+  const ownLanded = self ? landed(self) : null;
+  const seller = holder === 'OTHER' ? bb?.sellerRef ?? snap.offers.find((o) => o.holdsBuyBox && !o.isSelf)?.sellerRef ?? null : null;
+  const holderRow = competitionRowOffers(ordered).find((r) => r.offer.holdsBuyBox === true)?.offer;
+  const price = holder === 'SELF' || holder === 'OTHER'
+    ? holderRow
+      ? { minor: landed(holderRow) ?? holderRow.price.amountMinor, landed: landed(holderRow) !== null }
+      : bb ? { minor: bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0), landed: bb.shipping !== undefined } : null
+    : holder === 'UNKNOWN' && bb ? { minor: bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0), landed: bb.shipping !== undefined } : null;
+  const gapMinor = holder === 'OTHER' && winnerLanded !== null && ownLanded !== null ? ownLanded - winnerLanded : null;
+  return { state: 'OK', holderNamed, holder, seller, price, gapMinor, share, observedAt: input.snapshot.observedAt };
+}
+
+// ---------------------------------------------------------------------------
 // Экран
 // ---------------------------------------------------------------------------
 
@@ -196,32 +271,32 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
   const c = m.ui.competition;
   const unit = unitOf(world, scope, m);
   const channelName = (m.values as Record<string, string | undefined>)[unit.channel] ?? unit.channel;
-  const primary = input.sources.filter((s) => s.role === 'PRIMARY');
-  const holderNamed = primary.some((s) => s.hasBuyboxWinner);
+  // Шаг 105 [Р-230]: держатель, цена, разрыв и доля — одним правилом с колонками Offers
+  const facts = buyboxFacts(input);
   const share = (): CompetitionView['share'] => {
-    if (!holderNamed) return { available: false, value: null, coverage: null, note: c.share.unknown(channelName), caption: c.share.caption, clipped: input.range.clipped };
-    const s = buyboxShare(input.spans, Date.parse(input.range.since), Date.parse(input.range.until));
+    if (!facts.holderNamed) return { available: false, value: null, coverage: null, note: c.share.unknown(channelName), caption: c.share.caption, clipped: input.range.clipped };
+    const s = facts.share!;
     return {
       available: s.shareBp !== null, value: s.shareBp === null ? null : m.percentBp(s.shareBp), coverage: c.share.coverage(m.percentBp(s.coverageBp)),
       note: s.shareBp === null ? c.share.noData : c.share.of, caption: c.share.caption, clipped: input.range.clipped,
     };
   };
-  if (primary.length === 0) {
+  if (facts.state === 'NO_COMPETITOR_DATA') {
     return { worldId: world.id, unit, state: 'NO_COMPETITOR_DATA', stateText: c.noCompetitorData(channelName), holder: null, observed: null, rows: [], columns: NO_COLUMNS, buyBoxPrice: null, position: null, gap: null,
       share: { available: false, value: null, coverage: null, note: c.noCompetitorData(channelName), caption: c.share.caption, clipped: false }, diagnosis: null };
   }
-  if (!input.snapshot) {
+  if (facts.state === 'NO_SNAPSHOT' || !input.snapshot) {
     return { worldId: world.id, unit, state: 'NO_SNAPSHOT', stateText: c.noSnapshot, holder: null, observed: null, rows: [], columns: NO_COLUMNS, buyBoxPrice: null, position: null, gap: null, share: share(), diagnosis: null };
   }
   const snap = input.snapshot.snapshot;
   const currency = scope.currency;
   const money = (v: number) => m.money(v, currency);
-  const ordered = [...snap.offers].sort((a, b) => (landed(a) ?? a.price.amountMinor) - (landed(b) ?? b.price.amountMinor) || (a.sellerRef ?? '').localeCompare(b.sellerRef ?? ''));
+  const ordered = orderedOffers(snap);
   const fulfilmentText = (o: CompetitorOffer) => {
     const k = fulfilmentKind(o.fulfillment);
     return k === null ? null : k === 'CHANNEL' ? c.fulfilment.channel(channelName) : c.fulfilment.merchant;
   };
-  const rows: CompetitionRow[] = ordered.slice(0, 10).concat(ordered.slice(10).filter((o) => o.isSelf)).map((o) => ({
+  const rows: CompetitionRow[] = competitionRowOffers(ordered).map(({ offer: o }) => ({
     seller: o.isSelf ? c.you : o.sellerRef ?? c.unnamedSeller,
     self: o.isSelf,
     landed: landed(o) !== null ? money(landed(o)!) : money(o.price.amountMinor),
@@ -229,31 +304,29 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
     shipping: o.shipping ? money(o.shipping.amountMinor) : null,
     fulfilment: fulfilmentText(o),
     rating: o.rating ? c.rating(m.percentBp(Math.round(o.rating.positivePct * 100)), o.rating.count) : null,
-    buyBox: o.holdsBuyBox === true ? true : holderNamed ? false : null,
+    buyBox: o.holdsBuyBox === true ? true : facts.holderNamed ? false : null,
     landedKnown: landed(o) !== null,
   }));
   const columns = { ...competitorColumns(rows, m), shipping: rows.some((r) => r.shipping !== null) };
   const bb = snap.buybox;
-  const holder: CompetitionView['holder'] = !holderNamed || (bb && bb.isSelf === null)
+  const holder: CompetitionView['holder'] = facts.holder === 'UNKNOWN'
     ? { kind: 'UNKNOWN', text: c.holderUnknown(channelName), why: c.holderUnknownWhy }
-    : !bb ? { kind: 'NONE', text: c.holderNone, why: null }
-      : bb.isSelf ? { kind: 'SELF', text: c.holderSelf, why: null }
-        : { kind: 'OTHER', text: c.holderOther(bb.sellerRef ?? snap.offers.find((o) => o.holdsBuyBox && !o.isSelf)?.sellerRef ?? c.unnamedSeller), why: null };
+    : facts.holder === 'NONE' ? { kind: 'NONE', text: c.holderNone, why: null }
+      : facts.holder === 'SELF' ? { kind: 'SELF', text: c.holderSelf, why: null }
+        : { kind: 'OTHER', text: c.holderOther(facts.seller ?? c.unnamedSeller), why: null };
   const ownIndex = ordered.findIndex((o) => o.isSelf);
-  // Цена победителя с доставкой — доставка Buy Box, а если канал назвал её только у предложения-держателя — его landed (как у диагностики)
-  const winnerOffer = snap.offers.find((o) => !o.isSelf && o.holdsBuyBox === true) ?? (bb?.sellerRef ? snap.offers.find((o) => !o.isSelf && o.sellerRef === bb.sellerRef) : undefined);
-  const winnerLanded = bb ? (bb.shipping ? bb.price.amountMinor + bb.shipping.amountMinor : winnerOffer ? landed(winnerOffer) : null) : null;
-  const self = ordered[ownIndex];
-  const ownLanded = self ? landed(self) : null;
-  const gap = holder.kind === 'OTHER' && winnerLanded !== null && ownLanded !== null
-    ? ownLanded > winnerLanded ? c.gapAbove(money(ownLanded - winnerLanded)) : c.gapNone : null;
+  const gap = facts.gapMinor === null ? null : facts.gapMinor > 0 ? c.gapAbove(money(facts.gapMinor)) : c.gapNone;
   const reasons = holder.kind === 'OTHER' ? buyboxDiagnosis(snap, input.floorMinor) : null;
   return {
     worldId: world.id, unit, state: 'OK', stateText: null, holder,
     observed: { at: input.snapshot.observedAt, when: m.when(input.snapshot.observedAt), source: input.sourceText(input.snapshot.source) },
     rows,
     columns,
-    buyBoxPrice: holder.kind === 'UNKNOWN' && bb ? c.buyBoxPrice(money(bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0))) : null,
+    /**
+     * Шаг 105 [Р-230]: доставку Buy Box канал не назвал — цена без доставки с пометкой, а не «с доставкой» и доставкой 0 (D, Р-221;
+     * у PostgreSQL снимок доставку Buy Box не хранит вовсе — в отложенном)
+     */
+    buyBoxPrice: holder.kind === 'UNKNOWN' && bb ? (bb.shipping ? c.buyBoxPrice(money(bb.price.amountMinor + bb.shipping.amountMinor)) : c.buyBoxPriceNoShipping(money(bb.price.amountMinor))) : null,
     position: ownIndex >= 0 ? c.position(ownIndex + 1, ordered.length) : c.notListed,
     gap,
     share: share(),

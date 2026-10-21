@@ -452,3 +452,117 @@ test('шаг 103: демо — стратегия по умолчанию amazon
   const changed = await call<{ error: { code: string } }>('POST', `/api/worlds/${w}/connections/default-strategy`, guest, { channelAccountId: ebay.channelAccountId, strategyId: null });
   assert.equal(changed.status, 403, JSON.stringify(changed.body));
 });
+
+/**
+ * Шаг 105 [Р-230] на PostgreSQL — демо США, где есть все случаи сразу: walmart.com называет держателя Buy Box (мы или другой продавец,
+ * доля по отрезкам), amazon.com — цену, но не держателя (A-29), ebay.com конкурентов не даёт (Р-190). Фильтр и сортировку по колонкам Buy
+ * Box считает база по всему каталогу; утверждается, что её порядок и группы — те же, что у значений строк, построенных правилом страницы
+ * Competition (SQL = правило экрана), и что строка колонок — страница Competition того же предложения
+ */
+type Bb105 = { holder: { kind: string; text: string }; seller: string | null; currency: string; price: string | null; priceMinor: number | null; priceLanded: boolean | null;
+  gap: string | null; gapMinor: number | null; share: string | null; shareBp: number | null; observedAt: string | null };
+type Row105 = { unit: { writeScopeId: string; externalUnitId: string; channel: string; label: string }; buybox?: Bb105 | null };
+type Competition105 = { state: string; holder: { kind: string; text: string } | null; buyBoxPrice: string | null; gap: string | null; observed: { at: string } | null;
+  rows: Array<{ seller: string; self: boolean; landed: string; landedKnown: boolean; buyBox: boolean | null; fulfilment: string | null; price: string; shipping: string | null }>;
+  share: { available: boolean; value: string | null } };
+
+/** Читает демо гость (техническая роль «только чтение»): колонки и сортировка — чтение; выгружать гостю нельзя (шаг 104) */
+async function guest105(): Promise<{ token: string; w: string }> {
+  const token = ((await (await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json()) as StandToken).accessToken;
+  const demo = (await call<WorldSummary[]>('GET', '/api/worlds', token)).body.find((x) => x.demo)!;
+  return { token, w: encodeURIComponent(demo.id) };
+}
+async function offers105(token: string, w: string, q: string): Promise<Row105[]> {
+  const out: Row105[] = [];
+  for (let offset = 0, total = 1; offset < total; offset += 200) {
+    const r = await call<{ rows: Row105[]; page: { total: number } }>('GET', `/api/worlds/${w}/products?offset=${offset}&limit=200${q}`, token);
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    total = r.body.page.total;
+    out.push(...r.body.rows);
+  }
+  return out;
+}
+
+test('step 105 (E1, E2, E4) [Р-230]: demo on PostgreSQL — Buy Box columns are the Competition page; share 7d equals; unknown is not «another seller»', async () => {
+  const { token, w } = await guest105();
+  const m = messagesFor('en');
+  const c = m.ui.competition;
+  const rows = await offers105(token, w, '&bb=1');
+  const kinds = new Map<string, number>();
+  let shares = 0;
+  for (const first of rows) {
+    assert.ok(first.buybox, `${first.unit.label}: the row carries the Buy Box columns`);
+    /**
+     * Демо живёт настоящим временем: между запросом строки и страницы приходит новый снимок или сдвигается окно доли. Сравнивается ОДИН
+     * снимок: страница и строка того же предложения запрашиваются подряд, пока момент снимка и доля не совпадут (не больше пяти раз)
+     */
+    let row = first;
+    let view = (await call<Competition105>('GET', `/api/worlds/${w}/competition/${first.unit.writeScopeId}?period=7d`, token)).body;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      row = (await offers105(token, w, `&bb=1&q=${encodeURIComponent(first.unit.externalUnitId)}`)).find((r) => r.unit.writeScopeId === first.unit.writeScopeId) ?? first;
+      const same = (row.buybox!.observedAt ?? null) === (view.observed?.at ?? null) && row.buybox!.share === (view.share.available ? view.share.value : null);
+      if (same) break;
+      view = (await call<Competition105>('GET', `/api/worlds/${w}/competition/${first.unit.writeScopeId}?period=7d`, token)).body;
+    }
+    const bb = row.buybox!;
+    const kind = view.state === 'NO_COMPETITOR_DATA' ? 'NO_DATA' : view.state === 'NO_SNAPSHOT' ? 'NO_SNAPSHOT' : view.holder!.kind;
+    assert.equal(bb.holder.kind, kind, `${row.unit.label}: holder`);
+    kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+    if (kind === 'OTHER') assert.equal(view.holder!.text, c.holderOther(bb.seller ?? ''), `${row.unit.label}: seller`);
+    const holderRow = view.rows.find((r) => r.buyBox === true);
+    if (kind === 'SELF' || kind === 'OTHER') assert.equal(JSON.stringify([bb.price, bb.priceLanded]), JSON.stringify([holderRow?.landed, holderRow?.landedKnown]), `${row.unit.label}: price of the holder row`);
+    else if (kind === 'UNKNOWN') assert.ok(bb.price !== null && (view.buyBoxPrice ?? '').includes(bb.price), `${row.unit.label}: ${bb.price} / ${view.buyBoxPrice}`);
+    else assert.equal(JSON.stringify([bb.price, bb.gap]), '[null,null]', `${row.unit.label}: dashes, not zeros`);
+    if (view.gap === null) assert.equal(bb.gap, null, `${row.unit.label}: no gap`);
+    else assert.equal(view.gap, bb.gapMinor! > 0 ? c.gapAbove(m.money(bb.gapMinor!, bb.currency)) : c.gapNone, `${row.unit.label}: signed gap agrees`);
+    // E2: доля в колонке — доля страницы за те же 7 дней
+    assert.equal(bb.share, view.share.available ? view.share.value : null, `${row.unit.label}: share 7d`);
+    if (bb.share !== null) shares += 1;
+  }
+  // Все случаи демо: названный держатель (walmart.com), неизвестный (amazon.com), нет данных конкурентов (ebay.com)
+  assert.ok((kinds.get('SELF') ?? 0) + (kinds.get('OTHER') ?? 0) > 0 && (kinds.get('UNKNOWN') ?? 0) > 0 && (kinds.get('NO_DATA') ?? 0) > 0, JSON.stringify([...kinds]));
+  assert.ok(shares > 0, 'a share 7d was compared where the channel names the holder');
+  // E4: группы фильтра держателя делят каталог без пересечений; amazon.com — «unknown», не «другой продавец»
+  const groups = new Map<string, string[]>();
+  for (const holder of ['SELF', 'OTHER', 'NONE', 'UNKNOWN', 'NO_DATA']) groups.set(holder, (await offers105(token, w, `&bb=1&holder=${holder}`)).map((r) => r.unit.writeScopeId));
+  assert.equal([...groups.values()].flat().length, rows.length, 'every offer in exactly one holder group');
+  const amazon = rows.filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind !== 'NO_SNAPSHOT').map((r) => r.unit.writeScopeId);
+  assert.ok(amazon.length > 0 && amazon.every((id) => groups.get('UNKNOWN')!.includes(id) && !groups.get('OTHER')!.includes(id)), 'amazon.com offers are unknown, not another seller');
+});
+
+test('step 105 (A) [Р-230]: demo on PostgreSQL — the database sorts and filters the whole catalog exactly as the row values say (SQL = the screen rule)', async () => {
+  const { token, w } = await guest105();
+  const catalog = await offers105(token, w, '&bb=1');
+  const position = new Map(catalog.map((r, i) => [r.unit.writeScopeId, i]));
+  const rank: Record<string, number> = { SELF: 0, OTHER: 1, NONE: 2, UNKNOWN: 3 };
+  const keyOf = (r: Row105, key: string): number | null => key === 'holder' ? rank[r.buybox!.holder.kind] ?? null
+    : key === 'price' ? r.buybox!.priceMinor : key === 'gap' ? r.buybox!.gapMinor : r.buybox!.shareBp;
+  for (const key of ['holder', 'price', 'gap', 'share']) {
+    for (const dir of ['asc', 'desc']) {
+      const sorted = await offers105(token, w, `&bb=1&sort=${key}&dir=${dir}`);
+      const expected = [...catalog].sort((a, b) => {
+        const [x, y] = [keyOf(a, key), keyOf(b, key)];
+        if (x === null || y === null) return x === y ? position.get(a.unit.writeScopeId)! - position.get(b.unit.writeScopeId)! : x === null ? 1 : -1;
+        return (dir === 'asc' ? x - y : y - x) || position.get(a.unit.writeScopeId)! - position.get(b.unit.writeScopeId)!;
+      });
+      assert.deepEqual(sorted.map((r) => r.unit.writeScopeId), expected.map((r) => r.unit.writeScopeId), `sort ${key} ${dir}`);
+    }
+  }
+  // Фильтр витрины и поиск — та же база: walmart.com и поиск по названию
+  const walmart = catalog.filter((r) => r.unit.channel === 'WALMART');
+  const storefront = (await call<{ filters: { storefronts: Array<{ value: string; label: string }> } }>('GET', `/api/worlds/${w}/products?offset=0&limit=1`, token)).body.filters.storefronts.find((s) => s.label.includes('walmart.com'));
+  assert.ok(storefront, 'walmart.com is a storefront choice');
+  assert.deepEqual((await offers105(token, w, `&bb=1&storefront=${encodeURIComponent(storefront!.value)}`)).map((r) => r.unit.writeScopeId), walmart.map((r) => r.unit.writeScopeId), 'storefront filter');
+  const lamps = catalog.filter((r) => r.unit.label.toLowerCase().includes('desk lamp'));
+  assert.ok(lamps.length > 1, 'several desk lamps');
+  assert.deepEqual((await offers105(token, w, `&bb=1&q=${encodeURIComponent('desk lamp')}`)).map((r) => r.unit.writeScopeId), lamps.map((r) => r.unit.writeScopeId), 'search');
+});
+
+test('step 105 (C) [Р-230]: demo on PostgreSQL — «Export competitors» is refused to the demo guest like every export (step 104)', async () => {
+  const { token, w } = await guest105();
+  const refused = await call<{ error: { code: string } }>('POST', `/api/worlds/${w}/exports`, token, { screen: 'offer-competitors', format: 'csv', query: {} });
+  assert.equal(JSON.stringify([refused.status, refused.body.error.code]), JSON.stringify([403, 'EXPORT_NOT_IN_DEMO']));
+  // На экране у гостя обе кнопки видны и отключены своей причиной — это держит браузерный смоук; задания нет ни одного
+  const jobs = await call<{ items: unknown[] }>('GET', `/api/worlds/${w}/jobs`, token);
+  assert.equal(jobs.body.items.length, 0, 'no job of the guest');
+});

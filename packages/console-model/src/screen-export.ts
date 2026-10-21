@@ -1,5 +1,8 @@
 import type { ConsoleAuditRow, ConsoleDecisionRow, FeedPageItem, ImportKind, ImportRunRow } from '@repracer/pricing-pipeline';
 import type { StockRow } from '@repracer/stock-sync';
+import type { CompetitorSnapshot } from '@repracer/channel-port';
+import { fulfilmentKind } from '@repracer/pricing-model';
+import { competitionRowOffers, landedOf, orderedOffers } from './competition.ts';
 import { effectiveFloor } from './bounds.ts';
 import type { DangerousItem, FloorHoldItem } from './dangerous-report.ts';
 import type { ExportRef } from './export-ref.ts';
@@ -21,7 +24,7 @@ import { scopeById, storefrontName, type StandWorld, type UnitRef } from './worl
  * на языке рабочего пространства. Не больше 50 000 строк: больше — честный отказ «narrow the period», а не молча обрезанный файл.
  */
 
-export const EXPORT_SCREENS = ['price-changes', 'decisions', 'stopped-by-people', 'prevented-by-rules', 'offers', 'inventory', 'imports', 'audit-log'] as const;
+export const EXPORT_SCREENS = ['price-changes', 'decisions', 'stopped-by-people', 'prevented-by-rules', 'offers', 'offer-competitors', 'inventory', 'imports', 'audit-log'] as const;
 export type ExportScreen = (typeof EXPORT_SCREENS)[number];
 export const EXPORT_FORMATS = ['csv', 'xlsx'] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
@@ -39,7 +42,7 @@ export const IMPORTS_KEEP_DAYS = 3650;
 /** Название экрана в файле (лист «About this export») — английское, как заголовки */
 export const EXPORT_SCREEN_TITLES: Readonly<Record<ExportScreen, string>> = {
   'price-changes': 'Price changes — prices sent', decisions: 'Price changes — all decisions', 'stopped-by-people': 'Protections — stopped by people',
-  'prevented-by-rules': 'Protections — prevented by rules', offers: 'Offers', inventory: 'Inventory', imports: 'Import history', 'audit-log': 'Stop pricing — audit log',
+  'prevented-by-rules': 'Protections — prevented by rules', offers: 'Offers', 'offer-competitors': 'Offers — competitors of the last snapshot', inventory: 'Inventory', imports: 'Import history', 'audit-log': 'Stop pricing — audit log',
 };
 
 const PROTECTION_HEADER = ['time', 'section', 'kind', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'price_was', 'price_wanted', 'price_set', 'bound',
@@ -52,16 +55,27 @@ export const EXPORT_HEADERS: Readonly<Record<ExportScreen, readonly string[]>> =
   'stopped-by-people': PROTECTION_HEADER,
   'prevented-by-rules': PROTECTION_HEADER,
   offers: ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'current_price', 'floor', 'floor_source', 'min_price', 'max_price', 'currency', 'strategy', 'repricing'],
+  // Шаг 105 [Р-230]: конкуренты последнего снимка по каждому показанному предложению — строки страницы Competition
+  'offer-competitors': ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'snapshot_at', 'rank', 'seller', 'is_you', 'holds_buy_box', 'landed_price', 'price',
+    'shipping', 'currency', 'fulfilment'],
   inventory: ['product_id', 'sku', 'product', 'gtin', 'on_hand', 'reserved', 'available', 'channel_managed', 'channels'],
   imports: ['time', 'import_run_id', 'import', 'outcome', 'reason_code', 'reason', 'file', 'file_sha256', 'rows_total', 'rows_changed', 'rows_unchanged',
     'rows_rejected', 'duration_seconds', 'by'],
   'audit-log': ['time', 'event_id', 'action', 'action_text', 'actor', 'subject', 'note', 'detail'],
 };
 
+/** Шаг 105 [Р-230]: колонки Buy Box выгрузки Offers — когда они включены на экране («что видишь, то и выгружаешь») */
+export const OFFER_BUYBOX_HEADERS = ['buy_box_holder', 'buy_box_seller', 'buy_box_price', 'buy_box_price_landed', 'buy_box_gap', 'buy_box_share_7d', 'buy_box_snapshot_at'] as const;
+
+/** Заголовки файла экрана: у Offers с включёнными колонками Buy Box — и они */
+export function exportHeaders(screen: ExportScreen, options: { buybox?: boolean } = {}): readonly string[] {
+  return screen === 'offers' && options.buybox ? [...EXPORT_HEADERS.offers, ...OFFER_BUYBOX_HEADERS] : EXPORT_HEADERS[screen];
+}
+
 /** Колонки чисел: в XLSX — числовые ячейки, чтобы формулы продавца считали */
 export const EXPORT_NUMERIC_COLUMNS: readonly string[] = ['price_from', 'price_to', 'change_percent', 'price', 'price_was', 'price_wanted', 'price_set', 'bound',
   'beyond_bound_percent', 'current_price', 'floor', 'min_price', 'max_price', 'on_hand', 'reserved', 'available', 'channel_managed', 'rows_total', 'rows_changed',
-  'rows_unchanged', 'rows_rejected', 'duration_seconds'];
+  'rows_unchanged', 'rows_rejected', 'duration_seconds', 'buy_box_price', 'buy_box_gap', 'buy_box_share_7d', 'rank', 'landed_price', 'shipping'];
 
 const pad = (n: number, w = 2) => String(Math.trunc(n)).padStart(w, '0');
 
@@ -177,16 +191,45 @@ export function protectionExportRows(m: Messages, timeZone: string | null, parts
   ];
 }
 
-/** Offers — строки списка предложений в его порядке; суммы — из предложения мира, пол — тем же расчётом, что колонка Floor */
-export function offerExportRows(world: StandWorld, m: Messages, rows: readonly ProductRow[]): string[][] {
+/**
+ * Offers — строки списка предложений в его порядке; суммы — из предложения мира, пол — тем же расчётом, что колонка Floor. Шаг 105: с
+ * колонками Buy Box (строки несут их) — и они: код держателя, продавец, цена числом, с доставкой ли, разрыв со знаком, доля в процентах,
+ * момент снимка; пусто — значения нет (прочерк экрана), а не ноль
+ */
+export function offerExportRows(world: StandWorld, m: Messages, rows: readonly ProductRow[], options: { buybox?: boolean; timeZone?: string | null } = {}): string[][] {
   return rows.map((r) => {
     const scope = scopeById(world, r.unit.writeScopeId);
-    if (!scope) return [r.unit.writeScopeId, ...unitCells(r.unit, m), '', '', '', '', '', '', '', ''];
-    const floor = effectiveFloor(scope, world);
-    const c = scope.currency;
-    const bound = (b: typeof scope.bounds.min) => (b.status === 'RESOLVED' ? amountText(b.amountMinor, c) : '');
-    return [scope.writeScopeId, ...unitCells(r.unit, m), amountText(scope.currentPriceMinor, c), amountText(floor.minor, c), floor.source ?? '',
-      bound(scope.bounds.min), bound(scope.bounds.max), c, scope.strategy ? strategyLabel(scope.strategy, c, m).label : '', scope.pricingMode];
+    const base = (() => {
+      if (!scope) return [r.unit.writeScopeId, ...unitCells(r.unit, m), '', '', '', '', '', '', '', ''];
+      const floor = effectiveFloor(scope, world);
+      const c = scope.currency;
+      const bound = (b: typeof scope.bounds.min) => (b.status === 'RESOLVED' ? amountText(b.amountMinor, c) : '');
+      return [scope.writeScopeId, ...unitCells(r.unit, m), amountText(scope.currentPriceMinor, c), amountText(floor.minor, c), floor.source ?? '',
+        bound(scope.bounds.min), bound(scope.bounds.max), c, scope.strategy ? strategyLabel(scope.strategy, c, m).label : '', scope.pricingMode];
+    })();
+    if (!options.buybox) return base;
+    const b = r.buybox;
+    if (!b) return [...base, '', '', '', '', '', '', ''];
+    return [...base, b.holder.kind, b.seller ?? '', amountText(b.priceMinor, b.currency), b.priceLanded === null ? '' : b.priceLanded ? 'yes' : 'no',
+      amountText(b.gapMinor, b.currency), amountText(b.shareBp, null), b.observedAt ? isoInZone(b.observedAt, options.timeZone ?? null) : ''];
+  });
+}
+
+/**
+ * Шаг 105 [Р-230]: конкуренты последнего снимка — по каждому предложению строки страницы Competition (первые 10 по цене с доставкой и
+ * наша строка ниже десятой) в их порядке: место, продавец («You» — наша строка; не назван — пусто), держит ли Buy Box (канал не говорит —
+ * пусто), цена с доставкой (доставка не названа — пусто), цена, доставка, исполнение FBA / FBM (канал не назвал — пусто)
+ */
+export function competitorExportRows(m: Messages, timeZone: string | null,
+  items: ReadonlyArray<{ unit: UnitRef; snapshot: { snapshot: CompetitorSnapshot; observedAt: string } | null; holderNamed: boolean; state: 'OK' | 'NO_COMPETITOR_DATA' | 'NO_SNAPSHOT' }>): string[][] {
+  return items.flatMap((x) => {
+    if (x.state !== 'OK' || !x.snapshot) return [];
+    return competitionRowOffers(orderedOffers(x.snapshot.snapshot)).map(({ offer: o, rank }) => {
+      const k = fulfilmentKind(o.fulfillment);
+      return [x.unit.writeScopeId, ...unitCells(x.unit, m), isoInZone(x.snapshot!.observedAt, timeZone), String(rank), o.isSelf ? 'You' : o.sellerRef ?? '',
+        o.isSelf ? 'yes' : 'no', o.holdsBuyBox === true ? 'yes' : x.holderNamed ? 'no' : '', amountText(landedOf(o), o.price.currency), amountText(o.price.amountMinor, o.price.currency),
+        o.shipping ? amountText(o.shipping.amountMinor, o.shipping.currency) : '', o.price.currency, k === 'CHANNEL' ? 'FBA' : k === 'MERCHANT' ? 'FBM' : ''];
+    });
   });
 }
 

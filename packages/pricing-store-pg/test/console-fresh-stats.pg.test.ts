@@ -94,7 +94,15 @@ test('step 67 (Р-146): with no catalog statistics, every console read over the 
   assert.ok(facts.result.search!.total > 0 && facts.result.keyed!.length === 1, `the facts found what the catalog has: ${JSON.stringify({ search: facts.result.search!.total, keyed: facts.result.keyed })}`);
   const whole = await timed(() => store.readConsoleState(tenant, now));
   assert.equal(whole.result.scopes.length, UNITS);
-  const seconds = { page: page.seconds, listed: listed.seconds, facts: facts.seconds, whole: whole.seconds };
+  // Шаг 105 [Р-230]: выборка Offers — поиск, держатель, сортировка по доле и счёт строк выгрузки конкурентов — по всему каталогу той же транзакцией
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString() as never;
+  const offers = await timed(() => store.consoleCatalogPage(tenant, now, { offset: 0, limit: 50, offers: {
+    search: { q: '670', labelTemplate: '{p} · {s}', marketplaceWords: {}, channelNames: { KAUFLAND: 'Kaufland' }, unknownChannel: 'UNKNOWN_CHANNEL' },
+    holder: 'NO_DATA', sort: { key: 'share', dir: 'desc' }, countCompetitorRows: true,
+    buybox: { since, until: now, noDataAccounts: [], namedAccounts: [world.ids.dbId(ACCOUNT)] } } }));
+  assert.equal(JSON.stringify([offers.result.matched, offers.result.scopeIds.length, offers.result.competitorRows]), JSON.stringify([UNITS, 50, 0]),
+    'every offer has no snapshot yet — «no competitor data», no competitor rows');
+  const seconds = { page: page.seconds, listed: listed.seconds, facts: facts.seconds, whole: whole.seconds, offers: offers.seconds };
   // Без защиты каждое из них — секунды и десятки секунд уже на 400 предложениях (контроль выше); с защитой — доли секунды
   assert.ok(Object.values(seconds).every((s) => s < 3), `every catalog read stays linear without statistics: ${JSON.stringify(seconds)}`);
 });

@@ -2075,3 +2075,87 @@ test('step 104 (D) [Р-229]: «Export» with CSV and XLSX on every screen with d
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
+
+/**
+ * Шаг 105 [Р-230]: сводка Buy Box на Offers — ряд фильтров (витрина, держатель Buy Box, поиск) и две выгрузки (Export и Export
+ * competitors) в нём; колонки Buy Box — за выбором Columns, по умолчанию выключены; включённые — заголовками-кнопками сортировки по всему
+ * каталогу. Четыре языка, обе темы, 1440 и 375: ряд фильтров не ломается (поле не выше содержимого, геометрия полей, ничто не выступает
+ * за рамку, касание 44 px), страница не уезжает вбок
+ */
+test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box columns behind Columns and sortable, four languages, both themes, 375 keeps the row', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+  };
+  await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+  await go('products');
+  const fieldLabels = `[...document.querySelectorAll('form.export-bar .field-label')].map((l) => l.textContent.trim())`;
+  const headers = `[...document.querySelectorAll('table.products thead th')].map((h) => h.textContent.trim())`;
+  for (const m of [en, de, es, fr]) {
+    if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
+    await go('products');
+    const p = m.ui.products;
+    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
+    // Колонки Buy Box выключены по умолчанию и есть в выборе Columns
+    const shown = await b.evaluate<string[]>(headers);
+    assert.ok(![p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare].some((c) => shown.includes(c)), `${m.locale}: Buy Box columns are off by default — ${shown.join(' | ')}`);
+    const picker = await b.evaluate<string[]>(`[...document.querySelectorAll('details.column-picker .menu label')].map((l) => l.textContent.trim())`);
+    assert.ok([p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare].every((c) => picker.includes(c)), `${m.locale}: the four columns in Columns — ${picker.join(' | ')}`);
+    if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
+  }
+  // Включить четыре колонки: заголовки-кнопки, у каждого — сторона сортировки aria-sort; нажатие сортирует, второе — в обратную сторону
+  await go('products');
+  const p = en.ui.products;
+  // Первая включённая колонка Buy Box перезапрашивает экран (колонки считаются, только когда показаны) — по одной, с ожиданием экрана
+  for (const label of [p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare]) {
+    await waitFor(b, `!!document.querySelector('details.column-picker')`, 'the column picker');
+    await b.evaluate(`(document.querySelector('details.column-picker').open = true, true)`);
+    await b.evaluate(`([...document.querySelectorAll('details.column-picker .menu label')].find((l) => l.textContent.trim() === ${JSON.stringify(label)}).click(), true)`);
+    await settled(b, `column ${label}`);
+  }
+  await b.evaluate(`(document.querySelector('details.column-picker').open = false, true)`);
+  await waitFor(b, `${headers}.includes(${JSON.stringify(p.columns.bbShare)})`, 'the Buy Box columns are shown');
+  await waitFor(b, `!!document.querySelector('td.bb-holder')`, 'the Buy Box cells are there');
+  assert.ok(await b.evaluate<boolean>(`[...document.querySelectorAll('td.bb-holder')].every((td) => td.title.length > 0)`), 'every holder cell says the snapshot age or why there is no data');
+  const sortState = `[...document.querySelectorAll('table.products thead th[aria-sort]')].map((h) => h.getAttribute('aria-sort'))`;
+  assert.deepEqual(await b.evaluate<string[]>(sortState), ['none', 'none', 'none', 'none'], 'four sortable headers, nothing sorted yet');
+  await b.evaluate(`(document.querySelectorAll('table.products thead th[aria-sort] button')[1].click(), true)`);
+  await waitFor(b, `${sortState}[1] === 'ascending'`, 'price sorted ascending');
+  await b.evaluate(`(document.querySelectorAll('table.products thead th[aria-sort] button')[1].click(), true)`);
+  await waitFor(b, `${sortState}[1] === 'descending'`, 'price sorted descending');
+  // Фильтр держателя «нет данных конкурентов» — строка «N of M offers match the filter»
+  await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')][1];
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'NO_DATA'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor(b, `/ offers match the filter$/.test(document.querySelector('.section-sub')?.textContent ?? '')`, 'the page says how many offers match');
+  await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')][1];
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ''); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await settled(b, 'filter cleared');
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await go('products');
+      const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+      assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: no sideways scroll — ${fit.out.join('; ')}`);
+      assert.deepEqual(await b.evaluate<string[]>(FIELD_SLACK), [], `${scheme} ${width}: a field of the filter row is taller than its content`);
+      assert.deepEqual(await b.evaluate<string[]>(FORM_GEOMETRY), [], `${scheme} ${width}: form geometry`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out of its frame`);
+      if (width === 375) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${scheme}: touch targets`);
+    }
+  }
+  await b.setColorScheme('light');
+  await b.setViewport(1440, 900);
+  await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});

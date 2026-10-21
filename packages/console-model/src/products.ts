@@ -4,6 +4,7 @@ import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
 import type { ConsoleCatalogPage, ScopeDecisionStats } from '@repracer/pricing-pipeline';
+import { storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferSort } from './offer-buybox.ts';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
 
@@ -45,6 +46,15 @@ export interface ProductRow {
   frozen: string | null;
   /** Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию новому предложению — причина словами, иначе null */
   notAssigned: string | null;
+  /** Шаг 105 [Р-230]: колонки Buy Box — только когда зритель их включил (их считают по снимку и отрезкам; выключенные — не нужны) */
+  buybox?: BuyboxCells | null;
+}
+
+/** Шаг 105 [Р-230]: фильтр строки Offers — витрина, держатель Buy Box, поиск; без фильтра — весь каталог */
+export interface OfferFilter {
+  storefront: string | null;
+  holder: OfferHolderFilterValue | null;
+  q: string;
 }
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
@@ -62,6 +72,11 @@ export interface ProductListView {
   /** Р-136: страница показанных строк — каталог целевого клиента целиком в ответ не помещается */
   page: PageInfo;
   gaps: Gap[];
+  /** Шаг 105 [Р-230]: фильтр строки и выбор витрин; сортировка по колонке Buy Box; сколько предложений прошли фильтр (без фильтра — null) */
+  filters: OfferFilter & { storefronts: Array<{ value: string; label: string }> };
+  sort: OfferSort | null;
+  matched: number | null;
+  buyboxShown: boolean;
 }
 
 export function strategyLabel(def: StrategyDefinition | null, currency: string, m: Messages): StrategyLabel {
@@ -237,14 +252,16 @@ export function catalogRows(scopes: readonly ConsoleScope[], catalog: ConsoleCat
  * Р-154: статистика решений — только для ПОКАЗАННЫХ строк, запросом по индексу единицы; каталог целиком её не несёт.
  * Экрану без неё (границы) передавать нечего — тогда столбец решений честно пуст, а не «0».
  */
-export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[], catalog?: ConsoleCatalogPage): ProductListView {
+export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[], catalog?: ConsoleCatalogPage,
+  options: { filter?: OfferFilter; sort?: OfferSort | null; buybox?: ReadonlyMap<string, BuyboxCells> | null } = {}): ProductListView {
   const { state } = world;
   const p = m.ui.products;
   /**
    * Р-136: строится только показанная страница. Шаг 66 (OQ-248): страницу и итоги может выбрать база — тогда в состоянии мира только
    * единицы страницы (в порядке каталога), а итоги по всему каталогу пришли числами
    */
-  const { shown, page } = catalog ? { shown: catalogRows(state.scopes, catalog), page: pageInfo({ ...listQuery(query), offset: catalog.offset }, catalog.total, m) } : productPage(world, m, query);
+  // Шаг 105: листается то, что прошло фильтр (`matched`); итоги — по всему каталогу
+  const { shown, page } = catalog ? { shown: catalogRows(state.scopes, catalog), page: pageInfo({ ...listQuery(query), offset: catalog.offset }, catalog.matched ?? catalog.total, m) } : productPage(world, m, query);
   const statsById = new Map((stats ?? []).map((s) => [s.writeScopeId, s]));
   // «Применяется сейчас» считается по записям в полёте: они есть у немногих офферов, и это дешевле перебора каталога
   const scopesWithWrites = new Set(state.writes.map((w) => w.writeScopeId));
@@ -281,6 +298,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       clearance: scope.clearance ? p.clearancePill : null,
       frozen: floor.aboveCeiling ? p.floorAboveCeiling : null,
       notAssigned: notAssignedText(scope, m),
+      ...(options.buybox ? { buybox: options.buybox.get(scope.writeScopeId) ?? null } : {}),
     };
   });
   return {
@@ -289,15 +307,39 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     // Итоги — по ВСЕМУ каталогу, а не по показанной странице: «включено 3 из 10 000» продавец читает как состояние дел
     totals: catalog
       ? { total: catalog.total, enabled: catalog.enabled, applying: catalog.applying, stopped: catalog.stopped, off: catalog.off }
-      : {
-          total: state.scopes.length,
-          enabled: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'ok').length,
-          applying: shownApplying,
-          stopped: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'stop').length,
-          off: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'off').length,
-        },
+      : { ...catalogTotals(world, m), applying: shownApplying },
     rows,
     page,
     gaps: [...((catalog ? catalog.pricingHealthIssues : state.pricingHealth.length > 0) ? [gap(m, 'PRICING_HEALTH_ISSUES')] : [])],
+    filters: { ...(options.filter ?? NO_FILTER), storefronts: storefrontChoices(world, m) },
+    sort: options.sort ?? null,
+    matched: options.filter && filterActive(options.filter) && catalog ? catalog.matched : null,
+    buyboxShown: Boolean(options.buybox),
   };
+}
+
+export const NO_FILTER: OfferFilter = { storefront: null, holder: null, q: '' };
+export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.holder !== null || f.q !== '';
+
+/** Итоги каталога целиком — правило экрана Offers без базы; на PostgreSQL их считает база (`consoleCatalogPage`) */
+export function catalogTotals(world: StandWorld, m: Messages): { total: number; enabled: number; applying: number; stopped: number; off: number } {
+  const { state } = world;
+  const scopesWithWrites = new Set(state.writes.map((w) => w.writeScopeId));
+  return {
+    total: state.scopes.length,
+    enabled: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'ok').length,
+    applying: state.scopes.filter((sc) => scopesWithWrites.has(sc.writeScopeId)).filter((sc) => ['progress', 'warn'].includes(applyingCell(sc, state.writes, m).tone)).length,
+    stopped: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'stop').length,
+    off: state.scopes.filter((sc) => enabledCell(sc, m).tone === 'off').length,
+  };
+}
+
+/**
+ * Поиск предложения по подписи экрана, номеру единицы, ключу канала и EAN — правило без базы; на PostgreSQL то же правило — запросом
+ * (`consoleCatalogFacts.search`, страница каталога шага 105). `q` — уже в нижнем регистре и без пробелов по краям
+ */
+export function offerMatchesSearch(world: StandWorld, scope: ConsoleScope, q: string, m: Messages): boolean {
+  if (q === '') return true;
+  const unit = unitOf(world, scope, m);
+  return [unit.label, scope.externalUnitId, scope.channelProductRef, scope.gtin ?? ''].some((v) => String(v).toLowerCase().includes(q));
 }

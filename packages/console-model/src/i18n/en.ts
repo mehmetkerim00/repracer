@@ -1297,7 +1297,7 @@ export const en = {
       bulkEdit: 'Bulk operations',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,
       clock: (now: string) => `Simulated time: ${now}.`,
-      columns: { unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status' },
+      columns: { unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'BB share 7d' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'What to do',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart hides this offer because the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''}. To show it again, bring the walmart.com price close to that price — only if your floor allows. PriceTrail never changes the price for this on its own.`,
@@ -1315,6 +1315,21 @@ export const en = {
       notAssigned: (reason: string) => `Not assigned: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Floor above ceiling', frozenDetail: 'prices frozen — raise the maximum price or enable clearance',
+      // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
+      buybox: {
+        you: 'You', unknown: 'Unknown', none: 'No one', noShipping: 'shipping not named',
+        asOf: (when: string, age: string) => `Last snapshot ${when} — ${age}`,
+        age: (minutes: number) => (minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 2880 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1440)} days ago`),
+        noSnapshot: 'No competitor snapshot yet', noData: (channel: string) => `${channel} gives no competitor data`,
+        shareUnknown: (channel: string) => `${channel} does not name the Buy Box holder — no share`,
+        sortBy: (label: string) => `Sort by ${label}`,
+      },
+      filters: {
+        storefront: 'Storefront', allStorefronts: 'All storefronts', holder: 'Buy Box', anyHolder: 'Any',
+        holders: { SELF: 'You', OTHER: 'Another seller', NONE: 'No one', UNKNOWN: 'Holder unknown', NO_DATA: 'No competitor data' },
+        search: 'Search', searchPlaceholder: 'SKU, EAN or name',
+        matched: (n: number, total: number) => `${n} of ${total} offers match the filter`,
+      },
     },
     outcomes: { APPROVED: 'Approved', NO_CHANGE: 'No change', REJECTED: 'Rejected', HELD: 'Held' },
     rules: {
@@ -1348,6 +1363,7 @@ export const en = {
       holderSelf: 'You hold the Buy Box', holderOther: (seller: string) => `${seller} holds the Buy Box`, holderNone: 'Nobody holds the Buy Box right now',
       holderUnknown: (channel: string) => `Buy Box holder unknown on ${channel} (for now)`, holderUnknownWhy: 'The channel gives the Buy Box price but not who holds it.',
       buyBoxPrice: (amount: string) => `Buy Box price with shipping: ${amount}`,
+      buyBoxPriceNoShipping: (amount: string) => `Buy Box price: ${amount} (shipping not named)`,
       columns: { seller: 'Seller', landed: 'Price with shipping', shipping: 'Shipping', fulfilment: 'Fulfilled by', rating: 'Rating', buyBox: 'Buy Box', price: 'Price' },
       // Шаг 96.2 [Р-146]: колонка из одного значения — фразой подписи, а не колонкой
       uniform: (column: string, value: string) => `${column}: ${value} — every offer listed.`,
@@ -1624,11 +1640,12 @@ export const en = {
     },
     /** Шаг 104 [Р-229]: выгрузка экрана в файл */
     export: {
-      button: 'Export', csv: 'CSV', xlsx: 'XLSX', label: 'Export what this screen shows',
+      competitors: 'Export competitors', button: 'Export', csv: 'CSV', xlsx: 'XLSX', label: 'Export what this screen shows',
       headerNote: 'Column headers in the file are always in English.',
       guest: 'Export is not available in the public demo',
       created: 'The file is being prepared in the background. You can leave this page.',
       tooMany: (rows: number, limit: number) => `This export would have ${rows} rows — more than the limit of ${limit}. Narrow the period.`,
+      tooManyFilter: (rows: number, limit: number) => `This export would have ${rows} rows — more than the limit of ${limit}. Narrow the filter.`,
       empty: 'Nothing to export: the screen shows no rows.',
     },
     jobs: {
@@ -1693,6 +1710,7 @@ export const en = {
         BAD_SCOPES: 'no offers selected', CONFLICT: 'the bounds changed in the meantime',
         MFA_REQUIRED: 'the second factor is missing', MFA_REQUIRED_WINDOW: 'more than five offers were changed in the last ten minutes: sign in with a second factor to continue', FORBIDDEN: 'the role may not do this', JOB_FAILED: 'unexpected error',
         TOO_MANY_ROWS: 'more than 50,000 rows — narrow the period',
+        TOO_MANY_ROWS_FILTER: 'more than 50,000 rows — narrow the filter',
         UNKNOWN_JOB_KIND: 'the background process does not know this operation',
         TOO_MANY_ATTEMPTS: 'the operation failed repeatedly and is not retried any further',
         DATA_CHANGED: 'your data changed after the check — check the file again', HAS_ERRORS: 'the file has rows with errors — nothing was applied',

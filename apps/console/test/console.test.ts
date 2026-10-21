@@ -1405,3 +1405,307 @@ test('step 104 (E4) [Р-229]: column headers are English on a Spanish and a Fren
     assert.match(zipEntry(book, 'xl/worksheets/sheet1.xml') ?? '', new RegExp(`<c r="${priceColumn}2"><v>-?\\d+\\.\\d{2}</v></c>`), `${locale}: the price cell is a number`);
   }
 });
+
+/**
+ * Шаг 105 [Р-230]: сводка Buy Box на Offers. Колонки (держатель, цена Buy Box, разрыв со знаком, доля за 7 дней) — данные последнего
+ * снимка и отрезков держателя; источник правды — страница Competition того же предложения (E1, E2). Строка колонок сверяется с ней
+ * по смыслу и по тексту: держатель — тем же видом и продавцом, цена — той же суммой, что строка держателя на странице (или «цена Buy Box»
+ * при неизвестном держателе), разрыв — со знаком там, где страница его называет, доля — тем же значением за те же 7 дней.
+ *
+ * Миры стенда бедны снимками (у Kaufland — два участника, у мира Amazon снимков нет), поэтому тесты шага берут СВОИ копии миров и подают
+ * им снимки настоящим путём решения (`processSnapshot`): Kaufland — 12 предложений, Buy Box у другого продавца, наша строка ниже десятой;
+ * Amazon — 12 предложений у каждой из трёх единиц, держатель не назван (A-29), исполнение AFN/MFN. Копии — чтобы побочные решения не
+ * видели остальные тесты файла
+ */
+type BuyboxCellsT = {
+  holder: { kind: string; text: string }; seller: string | null; currency: string;
+  price: string | null; priceMinor: number | null; priceLanded: boolean | null;
+  gap: string | null; gapMinor: number | null; share: string | null; shareBp: number | null; observedAt: string | null; title: string;
+};
+type OfferRowT = { unit: { writeScopeId: string; externalUnitId: string; channel: string; label: string }; buybox?: BuyboxCellsT | null };
+type OffersViewT = { rows: OfferRowT[]; page: { total: number }; matched: number | null; filters: { storefronts: Array<{ value: string; label: string }> } };
+const RICH = ['kaufland/pipeline/happy-path', 'amazon/pipeline/console-channel-trust'];
+let rich: { worlds: LiveWorld[]; handle: ReturnType<typeof createStandApi> } | null = null;
+
+async function richStand() {
+  if (rich) return rich;
+  const ws = await buildStandWorlds({ filter: (sc) => RICH.includes(sc.id) });
+  const handle105 = createStandApi(ws, {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(ws) }),
+    simulator: { token: (a) => issuer.token(a.subject, { email: a.email, extra: { name: a.displayName } }), expiresInSeconds: 900 },
+  });
+  const viewer = { membershipId: 'probe', role: 'OWNER', userId: 'probe' } as never;
+  let event = 0;
+  for (const live of ws) {
+    const scopes = (await live.view(viewer)).state.scopes;
+    const account = live.accounts[0]!;
+    for (const [n, sc] of scopes.entries()) {
+      // Третьему предложению Amazon снимка нет: прочерки рядом со значениями — порядок «без значения — в конце» есть с чем проверить
+      if (account.channel === 'AMAZON' && n === 2) continue;
+      const current = sc.currentPriceMinor ?? 2000;
+      const money = (amountMinor: number) => ({ amountMinor, currency: sc.currency, basis: 'GROSS' });
+      const amazon = account.channel === 'AMAZON';
+      // Двенадцать предложений вокруг нашей цены: одиннадцать чужих дешевле (наша строка — ниже десятой), у каждого второго — без доставки
+      const others = Array.from({ length: 11 }, (_, i) => {
+        const price = current - 60 + i * 5;
+        const shipping = i % 2 === 0 ? 0 : null;
+        return { rank: i + 1, sellerRef: `Rich Seller ${String.fromCharCode(65 + i)}`, isSelf: false, price: money(price),
+          ...(shipping !== null ? { shipping: money(shipping), totalPrice: money(price + shipping) } : {}),
+          ...(amazon ? { fulfillment: i % 3 === 0 ? 'AFN' : 'MFN' } : { holdsBuyBox: i === 0 }) };
+      });
+      const self = { rank: 12, sellerRef: 'Synthetic Seller', isSelf: true, price: money(current), shipping: money(0), totalPrice: money(current),
+        ...(amazon ? { fulfillment: 'MFN' } : { holdsBuyBox: false }) };
+      const leader = others[0]!;
+      const snapshot = {
+        marketplace: sc.marketplace, channelProductRef: sc.channelProductRef, condition: sc.condition,
+        source: amazon ? 'AMAZON_ANY_OFFER_CHANGED' : 'KAUFLAND_BUY_BOX_CHANGED', sourceEventId: `rich-105-${++event}`, observedAt: live.clock.iso(),
+        completeness: { kind: 'TOP_N', n: 20 },
+        // Amazon называет цену Buy Box, но не держателя; у первой единицы доставка Buy Box названа, у прочих — нет
+        buybox: amazon ? { price: leader.price, isSelf: null, ...(n === 0 ? { shipping: money(0) } : {}) } : { price: leader.price, isSelf: false, sellerRef: leader.sellerRef, ...(leader.shipping ? { shipping: leader.shipping } : {}) },
+        offers: [...others, self],
+      };
+      await live.pipeline.processSnapshot(live.callContext(account.channelAccountId), snapshot as never);
+    }
+  }
+  rich = { worlds: ws, handle: handle105 };
+  return rich;
+}
+async function richOwner(): Promise<Auth> {
+  const r = await (await richStand()).handle({ method: 'POST', url: '/api/stand-issuer/token?locale=en', body: { role: 'OWNER' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return { authorization: `Bearer ${(r.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
+}
+async function rget<T>(auth: Auth, url: string): Promise<T> {
+  const r = await rich!.handle({ method: 'GET', url, body: undefined, ...auth });
+  assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.body).slice(0, 400)}`);
+  return r.body as T;
+}
+const richLive = (id: string) => rich!.worlds.find((w) => w.id === id)!;
+async function richExport(auth: Auth, id: string, screen: string, query: Record<string, string>) {
+  const created = await rich!.handle({ method: 'POST', url: api(id, 'exports'), body: { screen, format: 'csv', query }, ...auth });
+  assert.equal(created.status, 200, `${screen}: ${JSON.stringify(created.body)}`);
+  const jobId = (created.body as JobCreatedResponse).jobId;
+  const job = await runJob(richLive(id), jobId, 'en');
+  assert.equal(job.status, 'SUCCEEDED', `${screen}: ${job.error ?? job.headline}`);
+  return csvTable((await richLive(id).store.bulkJobArtifact(richLive(id).tenantId, jobId))!.content);
+}
+async function allOffers(auth: Auth, id: string, q: string): Promise<OfferRowT[]> {
+  const out: OfferRowT[] = [];
+  for (let offset = 0, total = 1; offset < total; offset += 200) {
+    const page = await rget<OffersViewT>(auth, `${api(id, 'products')}?offset=${offset}&limit=200${q}`);
+    total = page.page.total;
+    out.push(...page.rows);
+  }
+  return out;
+}
+
+/** E1/E2: колонки строки Offers = страница Competition того же предложения за те же 7 дней */
+function assertColumnsAreTheCompetitionPage(row: OfferRowT, view: CompetitionView, where: string): void {
+  const m = messagesFor('en');
+  const c = m.ui.competition;
+  const bb = row.buybox;
+  assert.ok(bb, `${where}: the row carries the Buy Box columns when they are on`);
+  const kind = view.state === 'NO_COMPETITOR_DATA' ? 'NO_DATA' : view.state === 'NO_SNAPSHOT' ? 'NO_SNAPSHOT' : view.holder!.kind;
+  assert.equal(bb.holder.kind, kind, `${where}: holder kind`);
+  if (kind === 'OTHER') assert.ok(bb.seller !== null && view.holder!.text === c.holderOther(bb.seller), `${where}: the seller — ${bb.seller} / ${view.holder!.text}`);
+  // Цена Buy Box: при названном держателе — сумма строки держателя на странице, при неизвестном — строка «цена Buy Box»
+  const holderRow = view.rows.find((r) => r.buyBox === true);
+  if (kind === 'SELF' || kind === 'OTHER') {
+    assert.ok(holderRow, `${where}: the page marks the holder's row`);
+    assert.equal(bb.price, holderRow!.landed, `${where}: Buy Box price = the holder's row`);
+    assert.equal(bb.priceLanded, holderRow!.landedKnown, `${where}: landed or price only`);
+  } else if (kind === 'UNKNOWN') {
+    assert.ok(bb.price !== null && view.buyBoxPrice !== null && view.buyBoxPrice.includes(bb.price), `${where}: Buy Box price — ${bb.price} / ${view.buyBoxPrice}`);
+    // D: доставку Buy Box канал не назвал — цена без доставки с пометкой, а не «с доставкой» и доставкой 0
+    assert.equal(view.buyBoxPrice, bb.priceLanded ? c.buyBoxPrice(bb.price) : c.buyBoxPriceNoShipping(bb.price), `${where}: shipping named or not`);
+  } else {
+    assert.equal(JSON.stringify([bb.price, bb.gap]), JSON.stringify([null, null]), `${where}: no snapshot or no competitor data — dashes, not zeros`);
+  }
+  // Разрыв со знаком — только где страница называет разрыв (держатель — другой продавец, обе цены с доставкой известны)
+  if (view.gap === null) assert.equal(bb.gap, null, `${where}: no gap on the page — none in the column`);
+  else {
+    assert.ok(bb.gapMinor !== null, `${where}: the page names a gap — the column has it`);
+    assert.equal(view.gap, bb.gapMinor! > 0 ? c.gapAbove(m.money(bb.gapMinor!, bb.currency)) : c.gapNone, `${where}: the signed gap agrees with the page`);
+    assert.match(bb.gap!, bb.gapMinor! > 0 ? /^\+/ : bb.gapMinor! < 0 ? /^−/ : /^[^+−]/, `${where}: the gap carries its sign — ${bb.gap}`);
+  }
+  // Доля за 7 дней — то же значение, что на странице за 7 дней; где доля не считается — прочерк
+  assert.equal(bb.share, view.share.available ? view.share.value : null, `${where}: share 7d`);
+}
+
+test('step 105 (E1, E2) [Р-230]: the Buy Box columns of Offers are the Competition page of the same offer — holder, price, signed gap, share 7d', async () => {
+  const owner = await richOwner();
+  const kinds = new Set<string>();
+  let gaps = 0;
+  for (const id of RICH) {
+    const rows = await allOffers(owner, id, '&bb=1');
+    assert.ok(rows.length > 0, `${id}: offers`);
+    for (const row of rows) {
+      const view = await rget<CompetitionView>(owner, `${api(id, 'competition', row.unit.writeScopeId)}?period=7d`);
+      assertColumnsAreTheCompetitionPage(row, view, `${id} ${row.unit.label}`);
+      kinds.add(row.buybox!.holder.kind);
+      if (row.buybox!.gap !== null) gaps += 1;
+    }
+    // Колонки по умолчанию выключены: без bb=1 строк колонок нет и считать их незачем
+    assert.ok((await allOffers(owner, id, '')).every((r) => r.buybox === undefined || r.buybox === null), `${id}: columns are off by default`);
+  }
+  assert.ok(kinds.has('UNKNOWN') && kinds.has('OTHER') && gaps > 0, `a named holder with a gap and an unknown holder were compared — ${[...kinds].join(', ')}, gaps ${gaps}`);
+});
+
+test('step 105 (E4) [Р-230]: «unknown» is not «another seller» — the holder filter splits the catalog without overlap; the sort keeps unknown apart', async () => {
+  const owner = await richOwner();
+  for (const id of RICH) {
+    const all = await allOffers(owner, id, '&bb=1');
+    const byFilter = new Map<string, string[]>();
+    for (const holder of ['SELF', 'OTHER', 'NONE', 'UNKNOWN', 'NO_DATA']) {
+      const rows = await allOffers(owner, id, `&bb=1&holder=${holder}`);
+      const expected = holder === 'NO_DATA' ? ['NO_DATA', 'NO_SNAPSHOT'] : [holder];
+      assert.ok(rows.every((r) => expected.includes(r.buybox!.holder.kind)), `${id} ${holder}: ${rows.map((r) => r.buybox!.holder.kind).join(',')}`);
+      byFilter.set(holder, rows.map((r) => r.unit.writeScopeId));
+    }
+    const union = [...byFilter.values()].flat();
+    assert.equal(union.length, all.length, `${id}: every offer in exactly one holder group`);
+    assert.deepEqual(new Set(union), new Set(all.map((r) => r.unit.writeScopeId)), `${id}: the groups cover the catalog`);
+    // Amazon называет цену Buy Box, но не держателя (A-29): его предложения — «unknown», а не «другой продавец»
+    for (const r of all.filter((x) => x.unit.channel === 'AMAZON' && x.buybox!.holder.kind !== 'NO_SNAPSHOT')) {
+      assert.equal(r.buybox!.holder.kind, 'UNKNOWN', `${id} ${r.unit.label}: Amazon holder`);
+      assert.ok(!byFilter.get('OTHER')!.includes(r.unit.writeScopeId), `${id} ${r.unit.label}: unknown is not «another seller»`);
+      assert.equal(r.buybox!.gap, null, `${id} ${r.unit.label}: no gap to an unknown holder`);
+    }
+  }
+  const amazon = await allOffers(owner, 'amazon/pipeline/console-channel-trust', '&bb=1&holder=UNKNOWN');
+  assert.equal(amazon.length, 2, 'the two Amazon offers with a snapshot have an unknown holder');
+  assert.equal((await allOffers(owner, 'amazon/pipeline/console-channel-trust', '&bb=1&holder=NO_DATA')).length, 1, 'the offer without a snapshot is «no competitor data», not «unknown»');
+});
+
+test('step 105 (A) [Р-230]: Offers sorts the whole catalog by the Buy Box columns — no value last in both directions; ties keep the catalog order', async () => {
+  const owner = await richOwner();
+  const rank: Record<string, number> = { SELF: 0, OTHER: 1, NONE: 2, UNKNOWN: 3 };
+  const keyOf = (r: OfferRowT, key: string): number | null => {
+    const b = r.buybox!;
+    return key === 'holder' ? rank[b.holder.kind] ?? null : key === 'price' ? b.priceMinor : key === 'gap' ? b.gapMinor : b.shareBp;
+  };
+  let distinct = 0;
+  let mixed = 0;
+  for (const id of RICH) {
+    const catalog = await allOffers(owner, id, '&bb=1');
+    const position = new Map(catalog.map((r, i) => [r.unit.writeScopeId, i]));
+    for (const key of ['holder', 'price', 'gap', 'share']) {
+      for (const dir of ['asc', 'desc']) {
+        const sorted = await allOffers(owner, id, `&bb=1&sort=${key}&dir=${dir}`);
+        const expected = [...catalog].sort((a, b) => {
+          const [x, y] = [keyOf(a, key), keyOf(b, key)];
+          if (x === null || y === null) return x === y ? position.get(a.unit.writeScopeId)! - position.get(b.unit.writeScopeId)! : x === null ? 1 : -1;
+          return (dir === 'asc' ? x - y : y - x) || position.get(a.unit.writeScopeId)! - position.get(b.unit.writeScopeId)!;
+        });
+        assert.deepEqual(sorted.map((r) => r.unit.writeScopeId), expected.map((r) => r.unit.writeScopeId), `${id}: sort ${key} ${dir}`);
+      }
+    }
+    if (new Set(catalog.map((r) => r.buybox!.priceMinor)).size > 1) distinct += 1;
+    if (catalog.some((r) => r.buybox!.priceMinor === null) && catalog.some((r) => r.buybox!.priceMinor !== null)) mixed += 1;
+  }
+  assert.ok(distinct > 0, 'a world with different Buy Box prices was sorted — the order is not a tautology');
+  assert.ok(mixed > 0, 'a world with prices next to dashes was sorted — «no value last» is checked');
+  // Витрина и поиск: amazon.de — все три, поиск по номеру единицы — одна
+  const amazonRows = await allOffers(owner, 'amazon/pipeline/console-channel-trust', '&bb=1');
+  const view = await rget<OffersViewT>(owner, `${api('amazon/pipeline/console-channel-trust', 'products')}?offset=0&limit=1`);
+  assert.equal(view.filters.storefronts.length, 1, JSON.stringify(view.filters.storefronts));
+  assert.equal((await allOffers(owner, 'amazon/pipeline/console-channel-trust', `&storefront=${encodeURIComponent(view.filters.storefronts[0]!.value)}`)).length, 3, 'the storefront filter keeps the three offers');
+  const one = await allOffers(owner, 'amazon/pipeline/console-channel-trust', `&q=${amazonRows[1]!.unit.externalUnitId}`);
+  assert.deepEqual(one.map((r) => r.unit.writeScopeId), [amazonRows[1]!.unit.writeScopeId], 'search finds one offer');
+  const filtered = await rget<OffersViewT>(owner, `${api('amazon/pipeline/console-channel-trust', 'products')}?offset=0&limit=50&q=${amazonRows[1]!.unit.externalUnitId}`);
+  assert.equal(JSON.stringify([filtered.matched, filtered.page.total]), JSON.stringify([1, 1]), 'the page says how many offers match the filter');
+});
+
+test('step 105 (B) [Р-230]: the Offers export carries the Buy Box columns when they are on — the same values as the screen; off — the file of step 104', async () => {
+  const owner = await richOwner();
+  for (const id of RICH) {
+    const rows = await allOffers(owner, id, '&bb=1&sort=price&dir=desc');
+    const on = await richExport(owner, id, 'offers', { bb: '1', sort: 'price', dir: 'desc' });
+    assert.deepEqual(column(on, 'write_scope_id'), rows.map((r) => r.unit.writeScopeId), `${id}: the screen order`);
+    assert.deepEqual(column(on, 'buy_box_holder'), rows.map((r) => r.buybox!.holder.kind), `${id}: holder`);
+    assert.deepEqual(column(on, 'buy_box_seller'), rows.map((r) => r.buybox!.seller ?? ''), `${id}: seller`);
+    assert.deepEqual(column(on, 'buy_box_price'), rows.map((r) => r.buybox!.priceMinor === null ? '' : (r.buybox!.priceMinor / 100).toFixed(2)), `${id}: price — a number, empty where none`);
+    assert.deepEqual(column(on, 'buy_box_price_landed'), rows.map((r) => r.buybox!.priceLanded === null ? '' : r.buybox!.priceLanded ? 'yes' : 'no'), `${id}: with shipping or not`);
+    assert.deepEqual(column(on, 'buy_box_gap'), rows.map((r) => r.buybox!.gapMinor === null ? '' : (r.buybox!.gapMinor / 100).toFixed(2)), `${id}: signed gap`);
+    assert.deepEqual(column(on, 'buy_box_share_7d'), rows.map((r) => r.buybox!.shareBp === null ? '' : (r.buybox!.shareBp / 100).toFixed(2)), `${id}: share 7d, percent`);
+    const off = await richExport(owner, id, 'offers', {});
+    assert.deepEqual(off[0], [...EXPORT_HEADERS.offers], `${id}: columns off — the headers of step 104`);
+  }
+});
+
+/**
+ * E3: выгрузка конкурентов — строка в строку снимок: по каждому показанному (отфильтрованному) предложению в порядке экрана — первые 10
+ * предложений снимка по цене с доставкой и наша строка, если она ниже десятой; продавец, цена с доставкой (пусто, если доставка не
+ * названа), исполнение, держит ли Buy Box (пусто, если канал не говорит), наша строка помечена. Ожидание собрано из снимка хранилища
+ * своим правилом, независимо от кода выгрузки
+ */
+test('step 105 (E3) [Р-230]: «Export competitors» is the last snapshot row for row — top 10 by landed price and our row, for every shown offer', async () => {
+  const owner = await richOwner();
+  let compared = 0;
+  let ownBelowTenth = 0;
+  for (const id of RICH) {
+    const live = richLive(id);
+    const shown = await allOffers(owner, id, '&sort=price&dir=asc&bb=1');
+    const expected: string[][] = [];
+    for (const row of shown) {
+      const got = await live.store.competitionSnapshot(live.tenantId, row.unit.writeScopeId);
+      const view = await rget<CompetitionView>(owner, `${api(id, 'competition', row.unit.writeScopeId)}?period=7d`);
+      if (!got || view.state !== 'OK') continue;
+      const landed = (o: (typeof got.snapshot.offers)[number]) => o.totalPrice?.amountMinor ?? (o.shipping ? o.price.amountMinor + o.shipping.amountMinor : null);
+      const ordered = [...got.snapshot.offers].sort((a, b) => (landed(a) ?? a.price.amountMinor) - (landed(b) ?? b.price.amountMinor) || (a.sellerRef ?? '').localeCompare(b.sellerRef ?? ''));
+      const named = view.holder?.kind !== 'UNKNOWN';
+      ordered.forEach((o, i) => {
+        if (i >= 10 && !o.isSelf) return;
+        if (i >= 10) ownBelowTenth += 1;
+        const n = (v: number | null | undefined) => (v === null || v === undefined ? '' : (v / 100).toFixed(2));
+        // Исполнение — словами снимка канала: исполняет канал (FBA) или продавец (FBM); канал не назвал — пусто
+        const f = (o.fulfillment ?? '').toLowerCase();
+        const fulfilment = ['afn', 'fulfilled_by_kaufland', 'channel'].includes(f) ? 'FBA' : ['mfn', 'fulfilled_by_merchant', 'merchant'].includes(f) ? 'FBM' : '';
+        expected.push([row.unit.writeScopeId, String(i + 1), o.isSelf ? 'You' : o.sellerRef ?? '', o.isSelf ? 'yes' : 'no',
+          o.holdsBuyBox === true ? 'yes' : named ? 'no' : '', n(landed(o)), n(o.price.amountMinor), n(o.shipping?.amountMinor), o.price.currency, fulfilment]);
+      });
+    }
+    const file = await richExport(owner, id, 'offer-competitors', { sort: 'price', dir: 'asc' });
+    const pick = ['write_scope_id', 'rank', 'seller', 'is_you', 'holds_buy_box', 'landed_price', 'price', 'shipping', 'currency', 'fulfilment'].map((h) => {
+      const i = file[0]!.indexOf(h);
+      assert.ok(i >= 0, `${id}: column ${h} in ${file[0]!.join(',')}`);
+      return i;
+    });
+    assert.deepEqual(file.slice(1).map((r) => pick.map((i) => r[i] ?? '')), expected, `${id}: the export is the snapshots row for row`);
+    compared += expected.length;
+  }
+  assert.ok(compared >= 30 && ownBelowTenth > 0, `rows were compared — ${compared}, our row below the tenth — ${ownBelowTenth}`);
+});
+
+/**
+ * Шаг 105 [Р-230] (C): потолок 50 000 строк у обеих выгрузок Offers — и у конкурентов (первые 10 и наша строка на предложение). У Offers
+ * периода нет: отказ говорит «сузьте фильтр». Число строк на PostgreSQL считает база страницей каталога; здесь страница подменена так,
+ * чтобы назвать 50 001 строку, — отказ сервера до задания и отказ задания, если строк стало больше после нажатия
+ */
+test('step 105 (C) [Р-230]: more than 50 000 rows in either Offers export — refused with «narrow the filter», before the job and by the job', async () => {
+  const owner = await richOwner();
+  const id = 'amazon/pipeline/console-channel-trust';
+  const live = richLive(id);
+  const store = live.store as unknown as Record<string, unknown>;
+  const fake = async () => ({ scopeIds: [], offset: 0, total: 3, matched: EXPORT_MAX_ROWS + 1, competitorRows: EXPORT_MAX_ROWS + 1, enabled: 0, stopped: 0, off: 0, applying: 0, pricingHealthIssues: false });
+  store.consoleCatalogPage = fake;
+  try {
+    for (const screen of ['offers', 'offer-competitors']) {
+      const refused = await rich!.handle({ method: 'POST', url: api(id, 'exports'), body: { screen, format: 'csv', query: {} }, ...owner });
+      assert.equal(refused.status, 409, JSON.stringify(refused.body));
+      assert.match((refused.body as { error: { message: string } }).error.message, /50001 rows .* limit of 50000\. Narrow the filter\.$/, `${screen}: narrow the filter`);
+    }
+  } finally {
+    delete store.consoleCatalogPage;
+  }
+  const created = await rich!.handle({ method: 'POST', url: api(id, 'exports'), body: { screen: 'offer-competitors', format: 'csv', query: {} }, ...owner });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  store.consoleCatalogPage = fake;
+  try {
+    const job = await runJob(live, (created.body as JobCreatedResponse).jobId, 'en');
+    assert.equal(job.status, 'FAILED', job.headline);
+    assert.match(String(job.error ?? ''), /more than 50,000 rows — narrow the filter/, 'the job names the reason');
+  } finally {
+    delete store.consoleCatalogPage;
+  }
+});

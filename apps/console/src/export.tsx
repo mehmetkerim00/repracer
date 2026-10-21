@@ -23,10 +23,14 @@ export function exportQuery(period: Period | null, rest: Readonly<Record<string,
  * 96.2). Файл готовит фоновое задание единственным путём выгрузки [Р-145]; скачивание — запросом с токеном [Р-142]. У гостя демо кнопка
  * видна, но отключена — с причиной
  */
-export function ExportControl({ worldId, screen, query, empty = false }: {
+export function ExportControl({ worldId, screen, query, empty = false, label, note = true }: {
   worldId: string; screen: ExportScreen; query: Readonly<Record<string, string>>;
   /** Экран не показывает ни одной строки — выгружать нечего */
   empty?: boolean;
+  /** Шаг 105: подпись поля, когда выгрузок на экране две («Export competitors» рядом с «Export») */
+  label?: string;
+  /** Строка «заголовки — по-английски»: одна на ряд — у второй выгрузки ряда её нет */
+  note?: boolean;
 }) {
   const m = useMessages();
   const x = m.ui.export;
@@ -50,14 +54,14 @@ export function ExportControl({ worldId, screen, query, empty = false }: {
   const why = !allowed ? x.guest : empty ? x.empty : undefined;
   return (
     <>
-      <Field group label={x.button}>
+      <Field group label={label ?? x.button}>
         <div className="buttons export-formats" data-export={screen}>
           {EXPORT_FORMATS.map((f) => (
-            <button key={f} type="button" disabled={why !== undefined || busy} title={why} aria-label={`${x.button} ${x[f]}`} onClick={() => void start(f)}>{x[f]}</button>
+            <button key={f} type="button" disabled={why !== undefined || busy} title={why} aria-label={`${label ?? x.button} ${x[f]}`} onClick={() => void start(f)}>{x[f]}</button>
           ))}
         </div>
       </Field>
-      <p className={`export-note${allowed ? '' : ' export-blocked'}`}>{allowed ? x.headerNote : x.guest}</p>
+      {note ? <p className={`export-note${allowed ? '' : ' export-blocked'}`}>{allowed ? x.headerNote : x.guest}</p> : null}
       {error ? <div className="export-progress"><ErrorBox message={error} /></div> : null}
       {jobId ? <div className="export-progress"><JobProgress worldId={worldId} jobId={jobId} /></div> : null}
     </>

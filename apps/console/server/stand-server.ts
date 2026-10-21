@@ -9,12 +9,12 @@ import {
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
-  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, filterActive, OFFER_HOLDER_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
 } from '@repracer/console-model';
 import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
 import { TABLE_ENCODINGS } from '@repracer/cost-import';
-import { APPLY_JOB_OF, screenExportCount, type ScreenExportParams } from '@repracer/bulk-jobs/handlers';
+import { APPLY_JOB_OF, buyboxCellsOf, screenExportCount, selectOffers, type AccountCompetitorInfo, type OfferQuery, type ScreenExportParams } from '@repracer/bulk-jobs/handlers';
 import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_PEOPLE, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
@@ -773,6 +773,34 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const catalogPageFor = (query: ListQuery): Promise<ConsoleCatalogPage | null> =>
       targeted ? targeted.consoleCatalogPage!(live.tenantId, live.clock.iso() as never, query) : Promise.resolve(null);
     /**
+     * Шаг 105 [Р-230]: что канал каждого аккаунта говорит о конкурентах — из описания канала, тем же правилом, что страница Competition:
+     * основной источник есть (иначе — «нет данных», eBay) и называет ли он держателя Buy Box (Amazon — нет, A-29)
+     */
+    const accountCompetitors = (): Record<string, AccountCompetitorInfo> => Object.fromEntries(live.accounts.map((a) => {
+      const primary = (descriptorOf(a.channel).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE' && x.role === 'PRIMARY');
+      return [a.channelAccountId, { channel: a.channel, data: primary.length > 0, named: primary.some((x) => x.hasBuyboxWinner) }];
+    }));
+    /** Окно доли Buy Box в колонке — те же 7 дней, что у страницы Competition по умолчанию */
+    const shareRange = () => periodRange(OFFER_SHARE_PERIOD, live.clock.iso(), display?.timeZone ?? null, BUYBOX_SHARE_KEEP_DAYS);
+    /** Фильтр и порядок Offers из адреса: витрина «аккаунт|витрина», держатель, поиск, колонка и сторона; неизвестное — null (400) */
+    const parseOfferQuery = (params: URLSearchParams): (OfferQuery & { storefrontValue: string | null; bb: boolean }) | null => {
+      const storefront = params.get('storefront') ?? '';
+      const holder = params.get('holder');
+      const q = (params.get('q') ?? '').trim();
+      const sort = params.get('sort');
+      const dir = params.get('dir');
+      const bb = params.get('bb');
+      if (q.length > 100 || (holder !== null && !(OFFER_HOLDER_FILTERS as readonly string[]).includes(holder)) || (sort !== null && !(OFFER_SORT_KEYS as readonly string[]).includes(sort))
+        || (dir !== null && dir !== 'asc' && dir !== 'desc') || (bb !== null && bb !== '1')) return null;
+      const [acc, mk] = storefront.split('|');
+      const sf = storefront === '' ? null : acc && mk && live.accounts.some((a) => a.channelAccountId === acc && a.marketplaces.includes(mk)) ? { channelAccountId: acc, marketplace: mk } : undefined;
+      if (sf === undefined) return null;
+      return { storefront: sf, storefrontValue: sf ? storefront : null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
+        sort: sort ? { key: sort as NonNullable<OfferQuery['sort']>['key'], dir: (dir ?? 'asc') as 'asc' | 'desc' } : null, bb: bb === '1' };
+    };
+    const offerDeps = () => ({ store: live.store, tenantId: live.tenantId, now: live.clock.iso(), useDatabase: targeted !== null, world: () => load(null), m,
+      accounts: accountCompetitors(), shareRange: shareRange() });
+    /**
      * Поиск предложения по подписи экрана, SKU, ключу канала и EAN. Шаг 67 (OQ-248): в базе — по тем же полям и той же подписи
      * (`unitLabel` шаблоном, имя канала аккаунта), первые `limit` в порядке каталога; мир в памяти — тем же правилом по каталогу.
      * Шаг 96 (Б11): им же журнал цен фильтрует таблицу по мере ввода
@@ -926,12 +954,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         }
         case 'products': {
           const query = parseListQuery(url.searchParams);
-          if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-          const catalog = await catalogPageFor(query);
+          const oq = parseOfferQuery(url.searchParams);
+          if (!query || !oq) return fail(400, 'BAD_PAGE', s.badRequest);
+          // Шаг 105 [Р-230]: фильтр строки и сортировка по колонке Buy Box — выборкой по всему каталогу (база или правило экрана)
+          const filter = { storefront: oq.storefrontValue, holder: oq.holder, q: oq.q };
+          const deps = offerDeps();
+          const catalog = filterActive(filter) || oq.sort ? await selectOffers(deps, oq, query) : await catalogPageFor(query);
           const world = await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog });
           // Р-154: статистика решений — только для показанных строк, по индексу единицы
           const shown = catalog ? catalog.scopeIds : productPage(world, m, query).shown.map((x) => x.writeScopeId);
-          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined));
+          // Колонки Buy Box — только включённые: снимок и отрезки показанных строк одним обращением, правило страницы Competition
+          const buybox = oq.bb ? buyboxCellsOf(world, await live.store.competitionData(world.tenantId, shown, deps.shareRange.since as never, deps.shareRange.until as never), deps, shown) : null;
+          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined, { filter, sort: oq.sort, buybox }));
         }
         case 'decisions': {
           if (param === null) {
@@ -1201,7 +1235,21 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return { query: { protections: { since: range.since, until: range.until, clipped: range.clipped, phrase: periodPhrase(period, m), reason } },
             filters: { reason: reason ?? '' }, ...windowed(range.since, range.until) };
         }
-        case 'offers': return { query: {}, filters: {}, period: null, periodPart: day(now) };
+        // Шаг 105 [Р-230]: Offers и конкуренты — фильтр и порядок экрана, колонки Buy Box — когда включены (у конкурентов колонок нет)
+        case 'offers':
+        case 'offer-competitors': {
+          const oq = parseOfferQuery(params);
+          if (!oq) return null;
+          const range = shareRange();
+          const sf = oq.storefrontValue ? productList(await load([]), m, { offset: 0, limit: 1 }).filters.storefronts.find((x) => x.value === oq.storefrontValue)?.label ?? oq.storefrontValue : '';
+          const { storefrontValue: _sv, bb, ...query } = oq;
+          return {
+            query: { offers: { query, accounts: accountCompetitors(), shareRange: { since: range.since, until: range.until }, buybox: exportScreen === 'offers' && bb } },
+            filters: { storefront: sf, buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
+              ...(exportScreen === 'offers' ? { buy_box_columns: bb ? 'on' : '' } : {}) },
+            period: null, periodPart: day(now),
+          };
+        }
         case 'inventory': {
           const reserved = params.get('reserved');
           if (reserved !== null && reserved !== '1') return null;
@@ -1283,10 +1331,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         exportedBy: principal.name ?? principal.email ?? (m.values as Record<string, string | undefined>)[viewer.role] ?? viewer.role, exportedAt: now, ...resolved,
       };
       const deps = { store: live.store, ...(live.stock ? { stock: live.stock } : {}), tenantId: live.tenantId, now, world: () => load(null), m, timeZone: tz };
-      // Offers — число предложений каталога (база, иначе мир); Protections — срез вмешательств ограничен (5 000) и потолка не достигает
-      const total = exportScreen === 'offers' ? (targeted ? (await catalogPageFor({ offset: 0, limit: 1 }))?.total ?? 0 : world.state.scopes.length)
-        : exportScreen === 'stopped-by-people' || exportScreen === 'prevented-by-rules' ? null : await screenExportCount(exportParams, deps);
-      if (total !== null && total > EXPORT_MAX_ROWS) return fail(409, 'TOO_MANY_ROWS', x.tooMany(total, EXPORT_MAX_ROWS));
+      // Protections — срез вмешательств ограничен (5 000) и потолка не достигает; Offers и конкуренты — той же выборкой, что экран (шаг 105)
+      const total = exportScreen === 'stopped-by-people' || exportScreen === 'prevented-by-rules' ? null : await screenExportCount(exportParams, deps);
+      // Шаг 105: у Offers и конкурентов периода нет — отказ говорит «сузьте фильтр»
+      if (total !== null && total > EXPORT_MAX_ROWS) return fail(409, 'TOO_MANY_ROWS', (exportScreen === 'offers' || exportScreen === 'offer-competitors' ? x.tooManyFilter : x.tooMany)(total, EXPORT_MAX_ROWS));
       return createJob('SCREEN_EXPORT', exportParams as unknown as Record<string, unknown>, total, x.created);
     }
 

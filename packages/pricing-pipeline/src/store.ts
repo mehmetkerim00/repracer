@@ -979,7 +979,7 @@ export interface PricingStore {
    * Шаг 66 (OQ-248): страница каталога и его итоги — базой, без каталога в памяти сервера. Порядок — тот же, что у каталога
    * состояния; смещение за концом подтягивается к последней странице. Хранилищу в памяти не нужно: его каталог мал
    */
-  consoleCatalogPage?(tenantId: string, now: Instant, query: { offset: number; limit: number }): Promise<ConsoleCatalogPage>;
+  consoleCatalogPage?(tenantId: string, now: Instant, query: { offset: number; limit: number; offers?: OfferPageFilter }): Promise<ConsoleCatalogPage>;
   /**
    * Шаг 67 (OQ-248): то, что экрану нужно знать о каталоге ЦЕЛИКОМ, — числа, первые предложения, поиск, использование стратегий,
    * влияние остановки, ценообразование канала — базой, без каталога в памяти сервера. Хранилищу в памяти не нужно: его каталог мал
@@ -995,6 +995,11 @@ export interface PricingStore {
   buyboxSpans(tenantId: string, writeScopeId: string, from: Instant, to: Instant): Promise<BuyboxSpanRow[]>;
   /** Шаг 97 [Р-218]: последний принятый снимок товара единицы — нынешняя картина рынка страницы Competition; нет снимка — null */
   competitionSnapshot(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null>;
+  /**
+   * Шаг 105 [Р-230]: снимок и отрезки держателя за [from, to) у многих единиц одним обращением — колонки Buy Box показанной страницы Offers и
+   * выгрузки; по смыслу — `competitionSnapshot` и `buyboxSpans` каждой единицы
+   */
+  competitionData(tenantId: string, writeScopeIds: readonly string[], from: Instant, to: Instant): Promise<CompetitionDataRow[]>;
   scopeDecisionStats(tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]>;
   interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice>;
   feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage>;
@@ -1392,7 +1397,40 @@ export interface ConsoleCatalogPage {
    * единиц, и признак «есть вообще» считает база
    */
   pricingHealthIssues: boolean;
+  /** Шаг 105 [Р-230]: предложений, прошедших фильтр экрана (без фильтра — весь каталог); по нему листаются страницы */
+  matched: number;
+  /** Шаг 105 [Р-230]: строк выгрузки конкурентов у прошедших фильтр (первые 10 снимка и наша строка) — по запросу `countCompetitorRows` */
+  competitorRows?: number;
 }
+
+/** Шаг 105 [Р-230]: группа держателя Buy Box фильтра Offers; NO_DATA — канал конкурентов не даёт или снимка ещё нет */
+export type OfferHolderFilter = 'SELF' | 'OTHER' | 'NONE' | 'UNKNOWN' | 'NO_DATA';
+export type OfferSortKey = 'holder' | 'price' | 'gap' | 'share';
+
+/**
+ * Шаг 105 [Р-230]: фильтр и порядок страницы Offers. Держатель, цена Buy Box, разрыв и доля — правило страницы Competition (`buyboxFacts`
+ * модели экранов), переписанное запросом; равенство держит тест на всех мирах стенда. Что канал называет — свойство аккаунта, его
+ * знает консоль по описанию канала: аккаунты без данных конкурентов и аккаунты, чей канал называет держателя
+ */
+export interface OfferPageFilter {
+  storefront?: { channelAccountId: string; marketplace: string };
+  holder?: OfferHolderFilter;
+  /** Поиск — по подписи экрана, SKU, ключу канала и EAN, как у поиска предложения (`consoleCatalogFacts.search`) */
+  search?: { q: string; labelTemplate: string; marketplaceWords: Readonly<Record<string, string>>; channelNames: Readonly<Record<string, string>>; unknownChannel: string };
+  sort?: { key: OfferSortKey; dir: 'asc' | 'desc' };
+  /** Окно доли Buy Box (те же 7 дней, что у страницы Competition) и что канал аккаунта называет */
+  buybox: { since: Instant; until: Instant; noDataAccounts: readonly string[]; namedAccounts: readonly string[] };
+  /** Посчитать строки выгрузки конкурентов (потолок 50 000 — до создания задания) */
+  countCompetitorRows?: boolean;
+}
+
+/** Шаг 105 [Р-230]: снимок и отрезки держателя единицы — то, из чего страница Competition и колонки Offers считают Buy Box */
+export interface CompetitionData {
+  snapshot: { snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null;
+  spans: BuyboxSpanRow[];
+}
+/** Строка пакетного чтения: единица и её снимок с отрезками (массив, а не Map: обёртка стенда переводит идентификаторы в данных) */
+export interface CompetitionDataRow extends CompetitionData { writeScopeId: string }
 
 /**
  * Шаг 67 (OQ-248): что экран спрашивает о каталоге целиком. Каждое поле — правило экрана, переписанное запросом базы; равенство с

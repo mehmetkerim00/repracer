@@ -47,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow,
+  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, CompetitionData, CompetitionDataRow, OfferPageFilter,
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason } from '@repracer/pricing-pipeline';
@@ -2682,7 +2682,7 @@ export class PgPricingStore implements PricingStore {
    * человеком, недоверие каналу, единица не ACTIVE, системная остановка при стратегии из цен конкурентов), иначе включено.
    * Равенство с `enabledCell` на настоящем каталоге держит тест `console-catalog-page.pg.test.ts`
    */
-  async consoleCatalogPage(tenantId: string, now: Instant, query: { offset: number; limit: number }): Promise<ConsoleCatalogPage> {
+  async consoleCatalogPage(tenantId: string, now: Instant, query: { offset: number; limit: number; offers?: OfferPageFilter }): Promise<ConsoleCatalogPage> {
     void now;
     return inTenant(this.admin('consoleCatalogPage'), tenantId, async (tx) => {
       await PgPricingStore.wholeCatalogPlan(tx);
@@ -2709,16 +2709,148 @@ export class PgPricingStore implements PricingStore {
                 , EXISTS (SELECT 1 FROM channel_data.offer_pricing_health h WHERE h.tenant_id = $1) AS pricing_health
            FROM tone`, [tenantId, [...COMPETITOR_DERIVED_RULES]]);
       const total = Number(t!.total);
+      // Шаг 105 [Р-230]: фильтр и порядок Offers — запросом по всему каталогу; без них — прежняя страница в порядке каталога
+      const picked = query.offers ? await PgPricingStore.offerSelection(tx, tenantId, query.offers) : null;
+      const selected = picked ? picked.ids : null;
+      const matched = selected ? selected.length : total;
       // Страница за концом списка — последняя, как у `pageOf` (ревью шага 29, находка 13)
-      const lastStart = total === 0 ? 0 : Math.floor((total - 1) / query.limit) * query.limit;
+      const lastStart = matched === 0 ? 0 : Math.floor((matched - 1) / query.limit) * query.limit;
       const offset = Math.min(query.offset, lastStart);
-      const { rows } = await tx.query(
-        `SELECT s.write_scope_id ${SCOPE_FROM} ORDER BY s.created_at, s.write_scope_id LIMIT $2 OFFSET $3`, [tenantId, query.limit, offset]);
+      const scopeIds = selected ? selected.slice(offset, offset + query.limit)
+        : (await tx.query(`SELECT s.write_scope_id ${SCOPE_FROM} ORDER BY s.created_at, s.write_scope_id LIMIT $2 OFFSET $3`, [tenantId, query.limit, offset])).rows.map((r) => String(r.write_scope_id));
       return {
-        scopeIds: rows.map((r) => String(r.write_scope_id)), offset, total,
+        scopeIds, offset, total, matched, ...(picked?.competitorRows !== undefined ? { competitorRows: picked.competitorRows } : {}),
         enabled: Number(t!.enabled), stopped: Number(t!.stopped), off: Number(t!.off), applying: Number(t!.applying),
         pricingHealthIssues: t!.pricing_health === true,
       };
+    });
+  }
+
+  /**
+   * Шаг 105 [Р-230]: единицы Offers, прошедшие фильтр, в порядке экрана — все, не страница (по ним листается страница и считается «найдено»).
+   * Держатель, цена Buy Box, разрыв и доля — правило `buyboxFacts` модели экранов, переписанное запросом по снимку, который хранит база
+   * (`competitor_state`: у Buy Box — цена и «наш / не наш», без доставки и продавца), и отрезкам держателя за окно доли. Порядок предложений
+   * снимка — как у страницы Competition: цена с доставкой (неизвестна — цена), продавец, место в ответе канала. Нет значения — в конце в обе
+   * стороны, при равенстве — порядок каталога. Равенство с правилом экрана на всех мирах стенда держит `console-screens-targeted.pg.test.ts`
+   */
+  private static async offerSelection(tx: Tx, tenantId: string, f: OfferPageFilter): Promise<{ ids: string[]; competitorRows?: number }> {
+    const params: unknown[] = [tenantId];
+    const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
+    const where: string[] = [];
+    if (f.storefront) where.push(`m.channel_account_id = ${p(f.storefront.channelAccountId)}::uuid AND m.marketplace = ${p(f.storefront.marketplace)}`);
+    const search = f.search && f.search.q !== '' ? f.search : null;
+    const label = search
+      ? `, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref, coalesce(p.gtin, '') AS gtin, coalesce(p.title, p.sku) AS product,
+         CASE WHEN s.channel = 'KAUFLAND' AND m.marketplace ~ '^[a-z]{2}$' THEN 'kaufland.' || m.marketplace
+              ELSE coalesce(${p(JSON.stringify(search.marketplaceWords))}::jsonb ->> m.marketplace, coalesce(${p(JSON.stringify(search.channelNames))}::jsonb ->> s.channel, ${p(search.unknownChannel)}) || ' ' || m.marketplace) END AS storefront`
+      : '';
+    // Поиск — тем же правилом, что поиск предложения (`consoleCatalogFacts.search`): подпись экрана, номер единицы, ключ канала, EAN
+    const hit = search
+      ? `(strpos(lower(replace(replace(${p(search.labelTemplate)}, '{p}', product), '{s}', storefront)), ${p(search.q)}) > 0
+          OR strpos(lower(unit), $${params.length}) > 0 OR strpos(lower(ref), $${params.length}) > 0 OR strpos(lower(gtin), $${params.length}) > 0)`
+      : 'true';
+    const facts = f.holder !== undefined || f.sort !== undefined || f.countCompetitorRows === true;
+    if (!facts) {
+      const { rows } = await tx.query(
+        `WITH sc AS (SELECT s.write_scope_id, s.created_at ${label} ${SCOPE_FROM} ${where.map((w) => `AND ${w}`).join(' ')})
+         SELECT write_scope_id FROM sc WHERE ${hit} ORDER BY created_at, write_scope_id`, params);
+      return { ids: rows.map((r) => String(r.write_scope_id)) };
+    }
+    const noData = p([...f.buybox.noDataAccounts]);
+    const named = p([...f.buybox.namedAccounts]);
+    const sinceMs = p(Date.parse(f.buybox.since));
+    const untilMs = p(Date.parse(f.buybox.until));
+    const since = p(f.buybox.since);
+    const until = p(f.buybox.until);
+    const horizonMs = BUYBOX_SPAN_HORIZON_HOURS * 3_600_000;
+    const holderCase = `CASE WHEN sc.channel_account_id = ANY (${noData}::uuid[]) THEN 'NO_DATA'
+                             WHEN cs.write_scope_id IS NULL THEN 'NO_SNAPSHOT'
+                             WHEN NOT (sc.channel_account_id = ANY (${named}::uuid[])) OR (cs.bb IS NOT NULL AND cs.bb_self IS NULL) THEN 'UNKNOWN'
+                             WHEN cs.bb IS NULL THEN 'NONE' WHEN cs.bb_self THEN 'SELF' ELSE 'OTHER' END`;
+    const sortExpr = !f.sort ? null
+      : f.sort.key === 'holder' ? `CASE fx.holder WHEN 'SELF' THEN 0 WHEN 'OTHER' THEN 1 WHEN 'NONE' THEN 2 WHEN 'UNKNOWN' THEN 3 END`
+        : f.sort.key === 'price' ? 'fx.price_minor' : f.sort.key === 'gap' ? 'fx.gap_minor' : 'fx.share_bp';
+    const holderWhere = f.holder === undefined ? 'true' : f.holder === 'NO_DATA' ? `fx.holder IN ('NO_DATA', 'NO_SNAPSHOT')` : `fx.holder = ${p(f.holder)}`;
+    const { rows } = await tx.query(
+      `WITH sc0 AS (SELECT s.write_scope_id, s.created_at, s.channel_account_id, m.marketplace, m.channel_product_ref, m.condition ${label}
+                      ${SCOPE_FROM} ${where.map((w) => `AND ${w}`).join(' ')}),
+            sc AS (SELECT * FROM sc0 WHERE ${hit}),
+            cs AS (SELECT sc.write_scope_id, c.buybox_amount_minor AS bb, c.buybox_is_self AS bb_self, c.offers
+                     FROM sc JOIN channel_data.competitor_state c
+                       ON c.tenant_id = $1 AND c.channel_account_id = sc.channel_account_id AND c.marketplace = sc.marketplace
+                      AND c.channel_product_ref = sc.channel_product_ref AND c.condition = sc.condition),
+            ofs AS (SELECT cs.write_scope_id, o.i AS ord, (o.v -> 'price' ->> 'amountMinor')::bigint AS price,
+                           coalesce((o.v -> 'totalPrice' ->> 'amountMinor')::bigint,
+                                    CASE WHEN jsonb_typeof(o.v -> 'shipping') = 'object'
+                                         THEN (o.v -> 'price' ->> 'amountMinor')::bigint + (o.v -> 'shipping' ->> 'amountMinor')::bigint END) AS landed,
+                           coalesce((o.v ->> 'isSelf')::boolean, false) AS is_self, (o.v ->> 'holdsBuyBox')::boolean IS TRUE AS holds,
+                           coalesce(o.v ->> 'sellerRef', '') AS seller
+                      FROM cs, jsonb_array_elements(cs.offers) WITH ORDINALITY AS o(v, i)),
+            ranked AS (SELECT ofs.*, row_number() OVER (PARTITION BY write_scope_id ORDER BY coalesce(landed, price), seller COLLATE "C", ord) AS rk FROM ofs),
+            -- По единице одной группировкой (соединение по единице, а не подзапрос по каждой строке: на 10 000 предложений тот был 25–30 с):
+            -- строки страницы Competition (первые 10 и наша ниже десятой), цена строки держателя, цена победителя с доставкой (первое чужое
+            -- предложение-держатель в порядке ответа канала), наша цена с доставкой (первая наша строка в порядке страницы)
+            agg AS (SELECT write_scope_id,
+                           count(*) FILTER (WHERE rk <= 10 OR is_self) AS competitor_rows,
+                           (array_agg(coalesce(landed, price) ORDER BY rk) FILTER (WHERE holds AND (rk <= 10 OR is_self)))[1] AS holder_minor,
+                           (array_agg(landed ORDER BY ord) FILTER (WHERE NOT is_self AND holds))[1] AS winner_landed,
+                           (array_agg(landed ORDER BY rk) FILTER (WHERE is_self))[1] AS own_landed
+                      FROM ranked GROUP BY write_scope_id),
+            -- Доля Buy Box (buyboxShare): состояние действует до следующего отрезка, не дольше горизонта, внутри окна [since, until)
+            spans AS (SELECT sc.write_scope_id, b.holder, floor(extract(epoch FROM b.started_at) * 1000)::bigint AS st, floor(extract(epoch FROM b.last_seen_at) * 1000)::bigint AS ls,
+                             lead(floor(extract(epoch FROM b.started_at) * 1000)::bigint) OVER (PARTITION BY sc.write_scope_id ORDER BY b.started_at) AS nx
+                        FROM sc JOIN channel_data.buybox_span b
+                          ON b.tenant_id = $1 AND b.channel_account_id = sc.channel_account_id AND b.marketplace = sc.marketplace
+                         AND b.channel_product_ref = sc.channel_product_ref AND b.condition = sc.condition
+                       WHERE b.started_at < ${until}::timestamptz AND b.last_seen_at >= ${since}::timestamptz - interval '${BUYBOX_SPAN_HORIZON_HOURS} hours'),
+            share AS (SELECT write_scope_id, CASE WHEN sum(ov) > 0 THEN round(sum(CASE WHEN holder = 'SELF' THEN ov ELSE 0 END)::numeric * 10000 / sum(ov))::int END AS share_bp
+                        FROM (SELECT write_scope_id, holder, greatest(0, least(coalesce(nx, 9000000000000000), ls + ${horizonMs}, ${untilMs}::bigint) - greatest(st, ${sinceMs}::bigint)) AS ov FROM spans) y
+                       GROUP BY write_scope_id),
+            fx AS (
+              SELECT sc.write_scope_id, sc.created_at, h.holder,
+                     CASE WHEN h.holder = 'NO_DATA' THEN 0 ELSE coalesce(agg.competitor_rows, 0) END AS competitor_rows,
+                     CASE WHEN h.holder IN ('SELF', 'OTHER') THEN coalesce(agg.holder_minor, cs.bb) WHEN h.holder = 'UNKNOWN' THEN cs.bb END AS price_minor,
+                     CASE WHEN h.holder = 'OTHER' AND agg.winner_landed IS NOT NULL AND agg.own_landed IS NOT NULL THEN agg.own_landed - agg.winner_landed END AS gap_minor,
+                     CASE WHEN sc.channel_account_id = ANY (${named}::uuid[]) AND NOT (sc.channel_account_id = ANY (${noData}::uuid[])) THEN share.share_bp END AS share_bp
+                FROM sc
+                LEFT JOIN cs ON cs.write_scope_id = sc.write_scope_id
+                LEFT JOIN agg ON agg.write_scope_id = sc.write_scope_id
+                LEFT JOIN share ON share.write_scope_id = sc.write_scope_id
+                CROSS JOIN LATERAL (SELECT ${holderCase} AS holder) h)
+       SELECT fx.write_scope_id, fx.competitor_rows FROM fx WHERE ${holderWhere}
+        ORDER BY ${sortExpr ? `${sortExpr} ${f.sort!.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, ` : ''}fx.created_at, fx.write_scope_id`, params);
+    return {
+      ids: rows.map((r) => String(r.write_scope_id)),
+      ...(f.countCompetitorRows ? { competitorRows: rows.reduce((n, r) => n + Number(r.competitor_rows), 0) } : {}),
+    };
+  }
+
+  /** Шаг 105 [Р-230]: снимок и отрезки многих единиц — те же, что `competitionSnapshot` и `buyboxSpans` поштучно, двумя запросами */
+  async competitionData(tenantId: string, writeScopeIds: readonly string[], from: Instant, to: Instant): Promise<CompetitionDataRow[]> {
+    const ids = [...new Set(writeScopeIds)].filter((id) => UUID_FORM.test(id));
+    const out = new Map<string, CompetitionData>();
+    if (ids.length === 0) return [];
+    return inTenant(this.admin('competitionData'), tenantId, async (tx) => {
+      const keys = `SELECT DISTINCT ON (o.price_write_scope_id) o.price_write_scope_id AS id, o.channel_account_id, o.marketplace, o.channel_product_ref, o.condition
+                      FROM tenant_data.offer_mapping o WHERE o.tenant_id = $1 AND o.price_write_scope_id = ANY ($2::uuid[]) AND o.status <> 'ENDED'`;
+      const [{ rows: snaps }, { rows: spans }] = await Promise.all([
+        tx.query(`WITH m AS (${keys}) SELECT m.id, m.channel_account_id, m.marketplace, m.channel_product_ref, m.condition, ${STATE_JSON} AS state
+                    FROM m JOIN channel_data.competitor_state cs ON cs.tenant_id = $1 AND cs.channel_account_id = m.channel_account_id AND cs.marketplace = m.marketplace
+                     AND cs.channel_product_ref = m.channel_product_ref AND cs.condition = m.condition`, [tenantId, ids]),
+        tx.query(`WITH m AS (${keys}) SELECT m.id, b.holder, b.winner_seller_ref, b.started_at, b.last_seen_at, b.snapshots FROM channel_data.buybox_span b JOIN m
+                     ON b.channel_account_id = m.channel_account_id AND b.marketplace = m.marketplace AND b.channel_product_ref = m.channel_product_ref AND b.condition = m.condition
+                  WHERE b.tenant_id = $1 AND b.started_at < $4::timestamptz AND b.last_seen_at >= $3::timestamptz - interval '${BUYBOX_SPAN_HORIZON_HOURS} hours'
+                  ORDER BY m.id, b.started_at`, [tenantId, ids, from, to]),
+      ]);
+      for (const id of ids) out.set(id, { snapshot: null, spans: [] });
+      for (const r of snaps) {
+        const snapshot = toSnapshot({ channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: r.condition }, r.state);
+        out.get(String(r.id))!.snapshot = { snapshot, source: r.state.source, observedAt: iso(r.state.observedAt) };
+      }
+      for (const r of spans) {
+        out.get(String(r.id))!.spans.push({ holder: r.holder, sellerRef: r.winner_seller_ref ?? null, startedAt: iso(r.started_at), lastSeenAt: iso(r.last_seen_at), snapshots: Number(r.snapshots) });
+      }
+      return [...out].map(([writeScopeId, d]) => ({ writeScopeId, ...d }));
     });
   }
 
