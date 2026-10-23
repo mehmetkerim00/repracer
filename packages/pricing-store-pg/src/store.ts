@@ -152,6 +152,37 @@ SELECT i.write_scope_id, i.created_at, d.decided_at, d.final_amount_minor, x ->>
    AND x ->> 'code' IN ('CREEP_UP', 'CREEP_STEP_BACK', 'BUYBOX_WIN_TARGET')`;
 
 /** Подставляет состояние подъёма единицам «Win the Buy Box»; у прочих стратегий — без запроса */
+/** Шаг 107: канал единицы, из строки контекста — у контекста оценки поля канала нет, а рамки цены канала называет только Amazon */
+const channelOfContext = new WeakMap<ScopeEvaluationContext, string>();
+
+/**
+ * Шаг 107 [Р-233]: рамки цены, заданные продавцом в канале, по последнему наблюдению предложения единицы — только со значениями в валюте
+ * единицы (иначе предложение заблокировано целиком, 0205). Отдельным простым проходом и только у единиц Amazon (рамки называет только он),
+ * а не подзапросом общего запроса контекста: тот читается на каждую оценку и каждую единицу предпросмотра, и лишний подзапрос в нём —
+ * планирование на каждое чтение (класс шага 97.1; первая редакция шага 107 — предпросмотр 10 000 предложений в CI с 125 до 147 с)
+ */
+const CHANNEL_BOUNDS_SQL = `
+SELECT m.price_write_scope_id AS write_scope_id, o.channel_min_minor, o.channel_max_minor
+  FROM tenant_data.offer_mapping m
+  JOIN tenant_data.write_scope s ON s.tenant_id = m.tenant_id AND s.write_scope_id = m.price_write_scope_id
+  JOIN LATERAL (SELECT x.channel_bounds, x.channel_min_minor, x.channel_max_minor, x.bounds_currency FROM channel_data.offer_channel_pricing x
+                 WHERE x.tenant_id = m.tenant_id AND x.channel_account_id = m.channel_account_id AND x.marketplace = m.marketplace AND x.external_sku = m.external_sku
+                 ORDER BY x.observed_at DESC, x.recorded_at DESC LIMIT 1) o ON true
+ WHERE m.tenant_id = $1 AND m.price_write_scope_id = ANY ($2::uuid[]) AND m.external_sku IS NOT NULL
+   AND o.channel_bounds AND o.bounds_currency = s.currency`;
+
+async function withChannelBounds(tx: Tx, tenantId: string, contexts: ScopeEvaluationContext[]): Promise<void> {
+  for (const c of contexts) c.channelBounds = null;
+  const amazon = contexts.filter((c) => channelOfContext.get(c) === 'AMAZON');
+  if (amazon.length === 0) return;
+  const { rows } = await tx.query(CHANNEL_BOUNDS_SQL, [tenantId, amazon.map((c) => c.scope.writeScopeId)]);
+  const byScope = new Map((rows as Row[]).map((r) => [String(r.write_scope_id), r]));
+  for (const c of amazon) {
+    const r = byScope.get(c.scope.writeScopeId);
+    if (r) c.channelBounds = { minMinor: r.channel_min_minor === null ? null : Number(r.channel_min_minor), maxMinor: r.channel_max_minor === null ? null : Number(r.channel_max_minor) };
+  }
+}
+
 async function withCreep(tx: Tx, tenantId: string, now: Instant, contexts: ScopeEvaluationContext[]): Promise<void> {
   // Состояние подъёма нужно только стратегии с подъёмом: шаг назад и пауза бывают только после ступени подъёма
   const win = contexts.filter((c) => c.scope.strategy?.params.type === 'WIN_BUYBOX' && c.scope.strategy.params.creepUp);
@@ -529,20 +560,6 @@ const WINDOW_MOVE_LOG = `
              AND NOT (mv.channel_product_ref = $5 AND mv.condition = $6)
            ORDER BY mv.channel_product_ref, mv.condition, mv.evaluated_at DESC) w`;
 
-/**
- * Шаг 107 [Р-233]: рамки цены, заданные продавцом в канале, по последнему наблюдению предложения единицы — только со значениями в валюте
- * единицы (иначе предложение заблокировано целиком, 0205). Только в контексте решения: состояние консоли (весь каталог) их не читает
- */
-const DECISION_SCOPE_JSON = `((${SCOPE_JSON})::jsonb || jsonb_build_object('channelBounds',
-  (SELECT jsonb_build_object('minMinor', o.channel_min_minor, 'maxMinor', o.channel_max_minor)
-     FROM tenant_data.offer_mapping m
-     JOIN LATERAL (SELECT x.channel_bounds, x.channel_min_minor, x.channel_max_minor, x.bounds_currency FROM channel_data.offer_channel_pricing x
-                    WHERE x.tenant_id = m.tenant_id AND x.channel_account_id = m.channel_account_id AND x.marketplace = m.marketplace AND x.external_sku = m.external_sku
-                    ORDER BY x.observed_at DESC, x.recorded_at DESC LIMIT 1) o ON true
-    WHERE m.tenant_id = $1 AND m.price_write_scope_id = sc.write_scope_id AND m.external_sku IS NOT NULL
-      AND o.channel_bounds AND o.bounds_currency = sc.currency
-    LIMIT 1)))`;
-
 const STATE_JSON = `json_build_object(
   'source', cs.source, 'sourceEventId', cs.source_event_id, 'observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor,
   'buyboxIsSelf', cs.buybox_is_self, 'buyboxShippingMinor', cs.buybox_shipping_minor, 'buyboxSellerRef', cs.buybox_seller_ref,
@@ -555,7 +572,7 @@ function contextSql(window: string): string {
 WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM}
                AND m.channel_account_id = $3 AND m.marketplace = $4 AND m.channel_product_ref = $5 AND m.condition = $6)
 SELECT
-  (SELECT coalesce(json_agg(${DECISION_SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') FROM sc) AS scopes,
+  (SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') FROM sc) AS scopes,
   (SELECT json_build_object('currency', mk.currency, 'basis', mk.price_basis)
      FROM tenant_data.channel_account a JOIN platform.marketplace mk ON mk.channel = a.channel AND mk.marketplace = $4
     WHERE a.tenant_id = $1 AND a.channel_account_id = $3) AS storefront,
@@ -587,7 +604,7 @@ SELECT
 
 const SCOPE_BY_ID_SQL = `
 WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM} AND s.write_scope_id = $3 LIMIT 1)
-SELECT (SELECT ${DECISION_SCOPE_JSON} FROM sc) AS scope,
+SELECT (SELECT ${SCOPE_JSON} FROM sc) AS scope,
        (SELECT ${STATE_JSON} FROM channel_data.competitor_state cs JOIN sc
            ON cs.channel_account_id = sc.channel_account_id AND cs.marketplace = sc.marketplace
           AND cs.channel_product_ref = sc.channel_product_ref AND cs.condition = sc.condition
@@ -813,7 +830,7 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     ? { changeId: cl.changeId, floorMinor: Number(cl.floorMinor), currency: cl.currency, endsAt: cl.endsAt ? iso(cl.endsAt) : null, note: cl.note ?? '',
         enabledAt: iso(cl.enabledAt), enabledByMembershipId: cl.enabledBy ?? null }
     : null;
-  return {
+  const context: ScopeEvaluationContext = {
     scope,
     bounds: toBounds(bounds, scope.currency, scope.basis),
     contextVersion: contextVersion(bounds, channelHalt?.haltId ?? null, channelDistrust?.distrustId ?? null, priceStop?.stopId ?? null, clearance?.changeId ?? null),
@@ -830,11 +847,9 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     changesInLastHour: Number(j.changes ?? 0),
     ...(j.budgetExhausted ? { budgetExhausted: { resetsAt: (j.budgetExhausted as Row).resetsAt ?? null, budgetDay: (j.budgetExhausted as Row).budgetDay ?? null } } : {}),
     clearance,
-    channelBounds: j.channelBounds
-      ? { minMinor: (j.channelBounds as Row).minMinor === null ? null : Number((j.channelBounds as Row).minMinor),
-          maxMinor: (j.channelBounds as Row).maxMinor === null ? null : Number((j.channelBounds as Row).maxMinor) }
-      : null,
   };
+  channelOfContext.set(context, String(r.channel));
+  return context;
 }
 
 /** Шаг 107 [Р-233]: значения рамок канала из строки наблюдения; без валюты — не прочитаны (поля нет) */
@@ -992,6 +1007,7 @@ export class PgPricingStore implements PricingStore {
       const r = rows[0]!;
       const scopes = (r.scopes as Row[]).map((j) => toScopeContext(j, now));
       await withCreep(tx, tenantId, now, scopes);
+      await withChannelBounds(tx, tenantId, scopes);
       const primary = scopes.find((s) => s.scope.pricingMode === 'ENGINE') ?? scopes[0] ?? null;
       const storefront = r.storefront as Row | null;
       const last = r.last_accepted as Row | null;
@@ -1032,6 +1048,7 @@ export class PgPricingStore implements PricingStore {
       if (!r?.scope) return null;
       const context = toScopeContext(r.scope, now);
       await withCreep(tx, tenantId, now, [context]);
+      await withChannelBounds(tx, tenantId, [context]);
       const s = context.scope;
       const snapshot = r.state ? toSnapshot({ channelAccountId: s.channelAccountId, marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }, r.state) : null;
       const snapshotRef: StoredSnapshotRef | null = r.state?.competitorSnapshotId
