@@ -319,6 +319,9 @@ label { color: var(--text); }
 th > .sort-head { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 th > .sort-head:hover { color: var(--text); }
 th.num > .sort-head { justify-content: flex-end; }
+/* Шаг 107 [Р-232]: имя продавца — внешняя ссылка; иконка «откроется в новой вкладке» рядом с именем */
+.seller-link { display: inline-flex; align-items: center; gap: var(--space-1); }
+.seller-link .octicon { color: var(--text-2); flex: none; }
 /* поиск предложения: поле поиска, список и счётчик — столбиком одной ширины */
 .offer-picker { display: inline-flex; flex-direction: column; gap: var(--space-1); width: 300px; }
 .offer-picker input[type='search'], .offer-picker select { width: 100%; max-width: none; }

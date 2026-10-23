@@ -15,6 +15,7 @@ import { runNextBulkJob } from '@repracer/bulk-jobs';
 import { handlersFor, runPendingJobs } from './run-jobs.ts';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts';
+import { prepareStep107, SELLER107, type Step107World } from './step107-world.ts';
 
 /**
  * Шаг 76 (предполётный прогон демо, ревью — находка 7): страница консоли исполняется настоящим браузером. Страница была ПУСТОЙ с шага 29
@@ -77,6 +78,9 @@ let extendedApi: ReturnType<typeof createStandApi>;
 let currentApi: ReturnType<typeof createStandApi>;
 /** Шаг 100 (A): стенд, где у входящего ровно одно рабочее пространство */
 let soloApi: ReturnType<typeof createStandApi>;
+/** Шаг 107 [Р-232, Р-233]: своё пространство Amazon — продавцы с SellerId в снимке и рамки цены канала у двух предложений */
+let step107Api: ReturnType<typeof createStandApi>;
+let step107: Step107World;
 /** Шаг 99: мир смоука — по нему исполняются задания импорта (исполнителя у смоука нет, задания зовутся из теста) */
 let smokeLive: LiveWorld;
 /** Шаг 96: подменённый ответ отчёта о поле (страницы по 50 и схлопывание повторов); null — настоящий ответ стенда */
@@ -229,6 +233,14 @@ before(async () => {
   usApi = createStandApi(all, identity, { market: 'us', connect, people: STAND_PEOPLE });
   extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true, people: STAND_PEOPLE });
   soloApi = createStandApi([w0], identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
+  // Шаг 107: мир Amazon стенда — своим каталогом и входом, как у теста консоли; профиль eu (витрина amazon.de)
+  const amazon107 = await buildStandWorlds({ filter: (sc) => sc.id === SELLER107 });
+  step107Api = createStandApi(amazon107, {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(amazon107) }),
+    simulator: identity.simulator,
+  }, { defaultLocale: 'en', market: 'eu', people: STAND_PEOPLE });
+  const token107 = await step107Api({ method: 'POST', url: '/api/stand-issuer/token?locale=en', body: { role: 'OWNER' } });
+  step107 = await prepareStep107(amazon107[0]!, step107Api, { authorization: `Bearer ${(token107.body as { accessToken: string }).accessToken}`, cookie: 'repracer_locale=en' });
   currentApi = euApi;
   // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
   stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous })
@@ -2159,3 +2171,101 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
   await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
+
+/**
+ * Шаг 107 [Р-232, Р-233]: имя продавца с настоящим SellerId — внешняя ссылка в новой вкладке (target и rel, значок, подсказка на языке
+ * экрана), имя без идентификатора — текст; страница пола — блок «Channel price bounds» с предупреждением ровно у конфликта; Offers —
+ * пилюля конфликта; окно распродажи — предупреждение о Min канала ДО галочки, и галочка относится к этому тексту. Четыре языка, обе
+ * темы, 375 и 1440 — ничего не выступает и страница не уезжает вбок
+ */
+test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab; channel bounds next to ours with the warning at a conflict; the clearance warning before the checkbox', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = step107Api;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    await settled(b, 'first screen');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    const go = async (route: string) => {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+      await settled(b, route);
+    };
+    const links = `[...document.querySelectorAll('.world-content a.seller-link')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href'),
+      target: a.getAttribute('target'), rel: a.getAttribute('rel'), label: a.getAttribute('aria-label'), icon: !!a.querySelector('svg') }))`;
+    for (const m of [en, de, es, fr]) {
+      if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
+      await go(`competition/${encodeURIComponent(step107.writeScopeId)}`);
+      const found = await b.evaluate<Array<{ text: string; href: string; target: string; rel: string; label: string; icon: boolean }>>(links);
+      assert.deepEqual(found.map((l) => [l.text, l.href, l.target, l.rel, l.icon]).sort(), [
+        ['A2SYN1070000AA', 'https://www.amazon.de/sp?seller=A2SYN1070000AA', '_blank', 'noopener noreferrer', true],
+        ['A2SYN1070000AB', 'https://www.amazon.de/sp?seller=A2SYN1070000AB', '_blank', 'noopener noreferrer', true],
+      ], `${m.locale}: a link exactly at a seller id`);
+      assert.ok(found.every((l) => l.label === m.ui.competition.sellerPage(l.text)), `${m.locale}: the link says where it goes`);
+      assert.equal(await b.evaluate<boolean>(`[...document.querySelectorAll('.world-content td')].some((td) => td.textContent.trim() === 'Simulated competitor 2' && !td.querySelector('a'))`), true,
+        `${m.locale}: a name without an id stays text`);
+      await go(`bounds/${encodeURIComponent(step107.conflictScopeId)}`);
+      const block = await b.evaluate<{ title: string; notices: string[] }>(`(() => { const s = document.querySelector('section.channel-bounds');
+        return { title: s.querySelector('h3').textContent.trim(), notices: [...s.querySelectorAll('.notice.warn')].map((n) => n.textContent.trim()) }; })()`);
+      assert.equal(block.title, m.ui.bounds.channelBounds.title, `${m.locale}: the block`);
+      assert.equal(block.notices.length, 1, `${m.locale}: one warning — the floor below the channel minimum`);
+      await go(`bounds/${encodeURIComponent(step107.insideScopeId)}`);
+      assert.equal(await b.evaluate<number>(`document.querySelectorAll('section.channel-bounds .notice.warn').length`), 0, `${m.locale}: no warning without a conflict`);
+      await go('products');
+      const pills = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.offer .badge.tone-warn')].map((x) => x.textContent.trim())`);
+      assert.deepEqual(pills.filter((x) => x === m.ui.products.belowChannelMin), [m.ui.products.belowChannelMin], `${m.locale}: the pill on Offers — ${pills.join(' | ')}`);
+      if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
+    }
+    // Окно распродажи: пол ниже Min канала — предупреждение ДО галочки; галочка — к этому тексту; пол не ниже — предупреждения нет
+    await go(`bounds/${encodeURIComponent(step107.conflictScopeId)}`);
+    const type = (value: string) => b.evaluate(`(() => { const i = document.querySelector('section.clearance input[inputmode="decimal"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    const order = `(() => { const w = document.querySelector('section.clearance .channel-min-warning'); const c = document.querySelector('section.clearance input[type=checkbox]');
+      return { warning: w ? w.textContent.trim() : null, before: !!w && !!(w.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING),
+        checkbox: [...document.querySelectorAll('section.clearance label')].find((l) => l.htmlFor === c.id)?.textContent.trim() ?? '' }; })()`;
+    await type('1.00');
+    await waitFor(b, `!!document.querySelector('section.clearance .channel-min-warning')`, 'the warning appears at a floor below the channel minimum');
+    const shown = await b.evaluate<{ warning: string | null; before: boolean; checkbox: string }>(order);
+    assert.equal(shown.before, true, 'the warning is read before the checkbox');
+    assert.match(shown.warning ?? '', /^The channel's own minimum for this offer is .+\. With a clearance floor of €1\.00, prices below .+ are still sent/);
+    assert.match(shown.checkbox, /and the channel deactivates this offer below /, 'the checkbox names the channel minimum');
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        await settled(b, `${scheme} ${width}: floor page`);
+        const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+        assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: the floor page does not scroll sideways — ${fit.out.join('; ')}`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out of its frame`);
+        // Предупреждения — тоном внимания (токен Primer attention), а не справочным синим
+        assert.deepEqual(await b.evaluate<boolean[]>(`(() => { const probe = document.createElement('span'); probe.style.color = 'var(--warning)'; document.body.append(probe);
+          const attention = getComputedStyle(probe).color; probe.remove();
+          return [...document.querySelectorAll('.channel-bounds-conflict, .channel-min-warning')].map((n) => getComputedStyle(n).color === attention); })()`), [true, true],
+          `${scheme} ${width}: both warnings use the attention token`);
+      }
+    }
+    await b.setColorScheme('light');
+    await b.setViewport(1440, 900);
+    await type('99999.00');
+    await waitFor(b, `document.querySelector('section.clearance .channel-min-warning') === null`, 'no warning without a conflict');
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        await go(`competition/${encodeURIComponent(step107.writeScopeId)}`);
+        const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+        assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: Competition does not scroll sideways — ${fit.out.join('; ')}`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out of its frame`);
+      }
+    }
+    await b.setColorScheme('light');
+    await b.setViewport(1440, 900);
+  } finally {
+    currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+

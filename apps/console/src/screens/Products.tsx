@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, useMessages } from '../components.tsx';
+import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages } from '../components.tsx';
 import { CheckField, Field, FormActions } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
@@ -93,7 +93,7 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
   const dash = <span className="muted">–</span>;
   const bbCells = (b: BuyboxCells | null | undefined) => (
     <>
-      {col.bbHolder ? <td className="bb-holder" title={b?.title}>{b ? (b.holder.kind === 'NO_DATA' || b.holder.kind === 'NO_SNAPSHOT' ? dash : b.holder.text) : dash}</td> : null}
+      {col.bbHolder ? <td className="bb-holder" title={b?.title}>{b ? (b.holder.kind === 'NO_DATA' || b.holder.kind === 'NO_SNAPSHOT' ? dash : b.holder.kind === 'OTHER' ? <SellerName name={b.holder.text} url={b.sellerUrl} /> : b.holder.text) : dash}</td> : null}
       {col.bbPrice ? <td className="num cur" title={b?.title}>{b?.price ? <>{b.price}{b.priceNote ? <div className="muted small">{b.priceNote}</div> : null}</> : dash}</td> : null}
       {col.bbGap ? <td className="num cur" title={b?.title}>{b?.gap ?? dash}</td> : null}
       {col.bbShare ? <td className="num" title={b?.title}>{b?.share ?? dash}</td> : null}
@@ -171,6 +171,8 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
                   {r.clearance ? <> <Badge tone="warn">{r.clearance}</Badge></> : null}
                   {/* Шаг 102: пол выше потолка — цены заморожены законно, но не молча */}
                   {r.frozen ? <> <Badge tone="stop">{r.frozen}</Badge></> : null}
+                  {/* Шаг 107 [Р-233]: конфликт с рамками цены, заданными продавцом в канале — подробности на странице пола */}
+                  {r.channelBounds ? <> <Badge tone="warn">{r.channelBounds}</Badge></> : null}
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
                   {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
                   <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition && r.unit.condition.toLowerCase() !== 'new'

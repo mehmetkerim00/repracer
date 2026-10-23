@@ -276,6 +276,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       ladderPace: { lastStepAt: scope.lastLadderStepAt ?? null, paceSeconds: adapter.descriptor?.scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS },
       // Шаг 97 [Р-219]: подъём «Win the Buy Box» — не чаще того же периода; после потери — пауза
       creep: scope.creep ?? null,
+      // Шаг 107 [Р-233]: цена вне рамок, заданных продавцом в канале, не уходит (кроме движения к рамкам и распродажи ниже Min канала)
+      channelBounds: sc.channelBounds ?? null,
       currentPriceMinor: scope.currentPriceMinor,
       // Р-171: в тени сравнение идёт и с уже удержанным предложением — иначе оно повторялось бы на каждом опросе
       ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),

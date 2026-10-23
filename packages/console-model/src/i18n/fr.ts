@@ -20,7 +20,7 @@ const titles: Record<AnyReasonCode, string> = {
   FIXED_PRICE: 'Prix fixe', MARGIN_TARGET: 'Prix à marge cible', BUYBOX_MATCH: 'S’aligner sur la Buy Box', BUYBOX_UNDERCUT: 'Passer sous la Buy Box',
   LOWEST_MATCH: 'S’aligner sur le prix le plus bas', LOWEST_UNDERCUT: 'Passer sous le prix le plus bas', CAPPED_AT_MIN_PRICE: 'Cible ramenée à votre prix minimum',
   CAPPED_AT_MAX_PRICE: 'Cible ramenée à votre prix maximum', CAPPED_AT_MARGIN_FLOOR: 'Cible ramenée au plancher de marge', CLEARANCE_FLOOR: 'Mode déstockage', CAPPED_AT_CLEARANCE_FLOOR: 'Cible ramenée au plancher de déstockage', RAISED_TO_FLOOR: 'Relevé au plancher', RAISED_TOWARD_FLOOR: 'Relevé d’un palier vers le plancher', ALREADY_AT_TARGET: 'Déjà à la cible', WITHIN_DEADBAND: 'Écart sous le seuil', SHADOW_ALREADY_PROPOSED: 'Déjà proposé en mode fantôme', LADDER_PACED: 'Prochain palier vers le plancher plus tard',
-  ALREADY_WINNING_BUYBOX: 'Buy Box déjà remportée', NO_COMPETITOR_OFFERS: 'Aucun concurrent', TARGET_OUTSIDE_BOUNDS_HOLD: 'Cible hors limites — prix maintenu',
+  ALREADY_WINNING_BUYBOX: 'Buy Box déjà remportée', NO_COMPETITOR_OFFERS: 'Aucun concurrent', TARGET_OUTSIDE_BOUNDS_HOLD: 'Cible hors limites — prix maintenu', CHANNEL_BOUNDS_HOLD: 'Hors des limites de prix du canal — non envoyé', CLEARANCE_BELOW_CHANNEL_MIN: 'Déstockage sous le minimum du canal',
   BUYBOX_WIN_TARGET: 'Remporter la Buy Box', CREEP_UP: 'Relevé d’un palier en tenant la Buy Box', CREEP_STEP_BACK: 'Buy Box perdue — retour au dernier prix gagnant',
   CAPPED_AT_CREEP_CEILING: 'Maintenu sous le prix qui a fait perdre la Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Détenteur de la Buy Box non indiqué — prix maintenu',
   ANCHOR_UNDERCUT: 'Prix depuis votre référence', COMPETITORS_FILTERED: 'Concurrents filtrés par mode d’expédition', NO_ELIGIBLE_COMPETITORS: 'Aucun concurrent après votre filtre — prix maintenu',
@@ -130,6 +130,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
   CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Mode déstockage : le plancher ${f.money('floorMinor')} est sous le seuil de rentabilité ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} par unité).` : f.has('breakEvenMinor') ? `Mode déstockage : plancher ${f.money('floorMinor')}, seuil de rentabilité ${f.money('breakEvenMinor')}.` : `Mode déstockage : plancher ${f.money('floorMinor')} — le seuil de rentabilité n’est pas calculable.`),
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `La cible ${f.money('targetMinor')} est sous votre plancher de déstockage ${f.money('floorMinor')} — fixée au plancher de déstockage.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Votre plancher de déstockage ${f.money('floorMinor')} est sous le minimum défini sur le canal (${f.money('channelMinMinor')}) : les prix inférieurs sont envoyés, comme vous l’avez confirmé, et le canal peut désactiver cette offre.`,
   RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
     ? `Votre prix ${f.money('currentMinor')} était sous votre seuil de rentabilité — relevé à ${f.money('floorMinor')}${raiseAfter(f)}.`
     : f.get('bound') === 'clearance'
@@ -161,6 +162,9 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_AT_MAX: (f) => `Vous détenez la Buy Box à ${f.money('currentMinor')}, votre prix maximum ${f.money('maxMinor')} — pas de hausse.`,
   NO_COMPETITOR_OFFERS: () => 'Aucune offre concurrente — rien à suivre.',
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `La cible ${f.money('targetMinor')} est hors de ${f.money('minMinor')}–${f.money('maxMinor')} ; la stratégie est réglée pour maintenir le prix.`,
+  CHANNEL_BOUNDS_HOLD: (f) => (f.get('side') === 'MAX'
+    ? `Le prix ${f.money('targetMinor')} est au-dessus du maximum défini sur le canal (${f.money('channelMaxMinor')}) : le canal désactiverait cette offre, le prix n’a donc pas été envoyé.`
+    : `Le prix ${f.money('targetMinor')} est sous le minimum défini sur le canal (${f.money('channelMinMinor')}) : le canal désactiverait cette offre, le prix n’a donc pas été envoyé.`),
   COMPETITOR_REQUIREMENT_NOT_MET: (f) => `Stratégie non évaluée — il manque dans les données du canal : ${f.list('unmet')}${opt(f, 'requiredCompleteness', () => ` (requis : ${f.value('requiredCompleteness')}${opt(f, 'requiredN', () => ` ${f.count('requiredN')}`)}, obtenu : ${f.has('actualCompleteness') ? f.value('actualCompleteness') : noValue}${opt(f, 'actualN', () => ` ${f.count('actualN')}`)})`)}${opt(f, 'ageSeconds', () => ` ; âge des données ${f.seconds('ageSeconds')}${opt(f, 'maxStalenessSeconds', () => `, limite ${f.seconds('maxStalenessSeconds')}`)}`)}.`,
   COST_INPUTS_MISSING: (f) => `Stratégie non évaluée : il manque ${f.value('missing')}.`,
   MARGIN_UNATTAINABLE: (f) => `La marge cible ${f.bp('marginBp')} est inatteignable : commission ${f.bp('feeRateBp')}, commission fixe ${f.money('fixedFeeMinor')}, coût unitaire ${f.money('unitCostMinor')}${opt(f, 'vatRateBp', () => `, TVA ${f.bp('vatRateBp')}`)}.`,
@@ -311,9 +315,11 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MAX_PRICE: (f) => `La cible issue des prix concurrents dépassait votre prix maximum — ramenée à ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `La cible issue des prix concurrents était sous votre plancher de marge — fixée au plancher de marge ${f.money('floorMinor')} (marge ${f.bp('minMarginBp')}).`,
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `La cible issue des prix concurrents était sous votre plancher de déstockage — fixée au plancher de déstockage ${f.money('floorMinor')}.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Votre plancher de déstockage ${f.money('floorMinor')} était sous le minimum défini sur le canal : les prix inférieurs ont été envoyés, comme vous l’avez confirmé, et le canal pouvait désactiver cette offre. La décision ne conserve les montants du canal que 3 jours ; le minimum n’est donc plus affiché.`,
   ALREADY_AT_TARGET: () => 'Le prix était déjà égal à la cible.',
   WITHIN_DEADBAND: (f) => `L’écart avec la cible était sous le seuil de ${f.money('deadbandMinor')} — le prix reste inchangé.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `La cible était hors de ${f.money('minMinor')}–${f.money('maxMinor')} ; la stratégie est réglée pour maintenir le prix.`,
+  CHANNEL_BOUNDS_HOLD: (f) => `Le prix était ${f.get('side') === 'MAX' ? 'au-dessus du maximum défini sur le canal' : 'sous le minimum défini sur le canal'} : le canal aurait désactivé cette offre, il n’a donc pas été envoyé. La décision ne conserve les montants du canal que 3 jours ; ils ne sont donc plus affichés.`,
   COMPETITOR_REQUIREMENT_NOT_MET: () => 'Stratégie non évaluée : les données du canal ne fournissaient pas ce dont la stratégie a besoin.',
   ENGINE_CURRENCY_MISMATCH: (f) => `Stratégie non évaluée : autre devise que celle de l’offre (${f.raw('expected')}) pour ${f.value('source')}.`,
   DIVERGENCE_CASE_OPENED: (f) => `Dossier d’écart ouvert : le canal affichait un autre prix que ${f.money('expectedMinor')}, celui que nous attendons.`,
@@ -360,7 +366,7 @@ const values: Record<ValueKey, string> = {
   CHANNEL_REPRICER_ACTIVE: 'la tarification automatique propre au canal est active pour cette offre', CHANNEL_BOUNDS_PRESENT: 'l’offre a des limites de prix définies sur le canal',
   RESPONSE_MISMATCH: 'le canal a répondu au sujet d’une autre offre ou d’un autre site que ceux demandés : la réponse n’a pas été utilisée',
   TELL_PLATFORM_TEAM: 'Prévenez-nous : le canal a répondu au sujet d’une autre offre que celle demandée — la cause est du côté du canal ou dans notre contrôle, et le support du canal ne peut pas la corriger',
-  DISABLE_CHANNEL_REPRICER: 'Retirez de l’offre la règle de tarification automatique du canal (notre moteur ne fonctionne pas tant qu’elle est en place)', REMOVE_CHANNEL_BOUNDS: 'Supprimez les prix minimum et maximum définis sur le canal : nos limites doivent être les seules',
+  DISABLE_CHANNEL_REPRICER: 'Retirez de l’offre la règle de tarification automatique du canal (notre moteur ne fonctionne pas tant qu’elle est en place)', REMOVE_CHANNEL_BOUNDS: 'Supprimez les prix minimum et maximum définis sur le canal : leurs valeurs n’ont pas été lues, elles ne peuvent donc pas être comparées à votre plancher et à votre prix maximum',
   ACTION_NOT_ALLOWED: 'action non autorisée par le canal', PRECONDITION_FAILED: 'condition préalable du canal non remplie', EDIT_BUDGET_EXHAUSTED: 'budget de modifications épuisé',
   OFFER_NOT_LIVE: 'offre non en ligne', POLICY_VIOLATION: 'violation des règles du canal', TENANT_MISMATCH: 'le compte appartient à un autre espace de travail', SIGNATURE_INVALID: 'signature invalide',
   UNSUPPORTED: 'non pris en charge par le canal', UNKNOWN: 'erreur inconnue', MAX_ATTEMPTS: 'nombre maximal de tentatives', NOT_APPLIED: 'non appliqué',
@@ -1315,6 +1321,7 @@ export const fr: Messages = {
       notAssigned: (reason: string) => `Non attribuée : ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Plancher au-dessus du plafond', frozenDetail: 'prix gelés — relevez le prix maximum ou activez le déstockage',
+      belowChannelMin: 'Sous le minimum du canal', aboveChannelMax: 'Au-dessus du maximum du canal',
       // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
       buybox: {
         you: 'Vous', unknown: 'Inconnu', none: 'Personne', noShipping: 'livraison non indiquée',
@@ -1368,7 +1375,7 @@ export const fr: Messages = {
       // Шаг 96.2 [Р-146]: колонка из одного значения — фразой подписи, а не колонкой
       uniform: (column: string, value: string) => `${column} : ${value} — pour toutes les offres listées.`,
       noShipping: 'Le canal n’a pas indiqué la livraison pour certaines de ces offres : leurs prix sont sans livraison.',
-      you: 'Vous', unnamedSeller: 'vendeur sans nom', buyBoxBadge: 'Buy Box', notNamed: 'non indiqué',
+      you: 'Vous', unnamedSeller: 'vendeur sans nom', buyBoxBadge: 'Buy Box', sellerPage: (seller: string) => `${seller} — ouvrir la page du vendeur dans un nouvel onglet`, notNamed: 'non indiqué',
       fulfilment: { channel: (channel: string) => channel === 'Amazon' ? 'Amazon (FBA)' : channel, merchant: 'Vendeur' },
       rating: (pct: string, count: number) => `${pct} (${count} avis)`,
       position: (rank: number, total: number) => `Votre offre est n° ${rank} sur ${total} par prix livraison comprise`,
@@ -1531,6 +1538,21 @@ export const fr: Messages = {
       floorFromBreakEven: (min: string) => `seuil de rentabilité : au-dessus de votre prix minimum ${min}`,
       floorFromClearance: (min: string) => `plancher de déstockage : remplace votre prix minimum ${min} et le plancher de marge tant que le déstockage est actif`,
       frozen: (floor: string, max: string) => `Plancher au-dessus du plafond — prix gelés. Votre plancher ${floor} dépasse votre prix maximum ${max} : aucun prix ne convient et aucun changement de prix n’est envoyé. Relevez le prix maximum ou activez le déstockage.`,
+      // Шаг 107 [Р-233]: рамки цены, заданные продавцом в самом канале (Amazon Min/Max на SKU), рядом с нашими
+      channelBounds: {
+        title: 'Limites de prix du canal',
+        lead: 'Le minimum et le maximum définis pour cette offre sur le canal lui-même. À un prix en dehors, le canal désactive l’offre.',
+        min: 'Minimum du canal', max: 'Maximum du canal', notSetSide: 'non défini',
+        notProvided: 'Non fournies par le canal.',
+        notSet: (when: string) => `Aucune définie sur le canal (constaté le ${when}). Le canal peut tout de même appliquer des limites qu’il n’affiche pas.`,
+        notRead: (when: string) => `Définies sur le canal (constaté le ${when}), mais les valeurs n’ont pas été lues : le repricing de cette offre reste bloqué tant qu’elles ne peuvent pas être lues.`,
+        seen: (when: string) => `Constaté le ${when}.`,
+        withoutShipping: 'Hors livraison : comparées à votre plancher et à votre prix maximum, eux aussi hors livraison.',
+        inside: 'Votre plancher et votre prix maximum sont dans les limites du canal.',
+        belowMin: (floor: string, min: string) => `Sous le minimum du canal lui-même — le canal désactivera cette offre. Votre plancher ${floor} est sous le minimum du canal ${min} ; les prix sous ${min} ne sont pas envoyés.`,
+        belowMinClearance: (floor: string, min: string) => `Sous le minimum du canal lui-même — le canal désactivera cette offre. Votre plancher de déstockage ${floor} est sous le minimum du canal ${min} ; les prix sous ${min} sont envoyés, comme vous l’avez confirmé en activant le déstockage.`,
+        aboveMax: (max: string, channelMax: string) => `Au-dessus du maximum du canal lui-même — le canal désactivera cette offre. Votre prix maximum ${max} dépasse le maximum du canal ${channelMax} ; les prix au-dessus de ${channelMax} ne sont pas envoyés.`,
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Plancher de déstockage — autoriser la vente sous le seuil de rentabilité',
@@ -1540,6 +1562,9 @@ export const fr: Messages = {
         lossPerUnit: 'Perte par unité', noLoss: 'aucune — à ce plancher une vente couvre encore ses coûts',
         maxLoss: 'Perte totale maximale', stock: (pieces: number) => `avec le stock actuel de ${pieces} ${pieces === 1 ? 'unité' : 'unités'}`, stockUnknown: 'stock inconnu — seule la perte par unité est affichée',
         ack: (breakEven: string) => `Je comprends : chaque vente sous ${breakEven} fait perdre de l’argent`,
+        // Шаг 107 [Р-233]: пол распродажи ниже Min канала — предупреждение до галочки; цена всё равно уходит (решение владельца)
+        channelMinWarning: (floor: string, min: string) => `Le minimum du canal lui-même pour cette offre est ${min}. Avec un plancher de déstockage de ${floor}, les prix sous ${min} sont tout de même envoyés, et le canal désactivera cette offre à ces prix.`,
+        ackWithChannel: (breakEven: string, min: string) => `Je comprends : chaque vente sous ${breakEven} fait perdre de l’argent, et sous ${min} le canal désactive cette offre`,
         note: 'Pourquoi', noteHint: 'Obligatoire — conservé dans le journal d’audit avec votre nom.', notePlaceholder: 'Écouler le stock d’été',
         endsAt: 'Terminer automatiquement', endsAtHint: 'Facultatif — après cette date, le plancher redevient le plancher calculé.',
         enable: 'Activer le déstockage', mfaHint: 'Déplace le plancher : un second facteur est requis.', readOnly: 'Seul le propriétaire ou un responsable peut activer le déstockage.',

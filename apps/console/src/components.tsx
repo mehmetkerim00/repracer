@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
+import { Octicon } from './icons.tsx';
 
 /** Словарь интерфейса текущего языка [Р-72]: все подписи экранов — отсюда */
 export const MessagesContext = createContext<Messages>(messagesFor('de'));
@@ -420,5 +421,20 @@ export function LocalPager({ total, offset, onOffset }: { total: number; offset:
       <button type="button" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - REPORT_PAGE_SIZE))}>{m.ui.feed.previous}</button>
       <button type="button" disabled={to >= total} onClick={() => onOffset(offset + REPORT_PAGE_SIZE)}>{m.ui.feed.next}</button>
     </div>
+  );
+}
+
+/**
+ * Шаг 107 [Р-232]: имя продавца-конкурента — внешняя ссылка на его страницу на площадке, если модель её дала (только из идентификатора
+ * канала); иначе — текст. Новая вкладка, без доступа страницы к нашему окну (`noopener`) и без адреса консоли в Referer (`noreferrer`)
+ */
+export function SellerName({ name, url }: { name: string; url: string | null | undefined }) {
+  const m = useMessages();
+  if (!url) return <>{name}</>;
+  const label = m.ui.competition.sellerPage(name);
+  return (
+    <a className="seller-link" href={url} target="_blank" rel="noopener noreferrer" title={label} aria-label={label}>
+      {name}<Octicon name="link-external" size={12} />
+    </a>
   );
 }

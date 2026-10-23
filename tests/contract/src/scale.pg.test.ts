@@ -9,6 +9,7 @@ import {
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
+import { MEDIAN_RUNS, medianOf } from './scale-median.ts';
 
 /**
  * Шаг 65, часть 3: МАСШТАБ. Каталог продавца в N предложений (`REPRACER_SCALE_OFFERS`, по умолчанию 50 000; таблица 10 000 → 50 000 —
@@ -33,7 +34,7 @@ let db: IsolatedDatabase;
 let k: KauflandLiveWorld;
 let observer: PgPool;
 let store: PgPricingStore;
-const measured: Array<{ operation: string; seconds: number; bytes?: number; rows?: number; heapMb?: number; queue?: string; limit: number }> = [];
+const measured: Array<{ operation: string; seconds: number; runs?: number[]; bytes?: number; rows?: number; heapMb?: number; queue?: string; limit: number }> = [];
 
 /**
  * Единица Kaufland — последние шесть цифр товара БЕЗ ведущих нулей (как у демо): канал отдаёт `id_unit` числом, и посев «000001» против
@@ -88,6 +89,23 @@ async function timed<T>(operation: string, limit: number, fn: () => Promise<T>, 
   const seconds = Math.round((performance.now() - started) / 10) / 100;
   measured.push({ operation, seconds, limit, queue, ...(size ? size(result) : {}) });
   return result;
+}
+/**
+ * Шаг 107 (решение владельца): замер у предела времени — медиана трёх прогонов подряд на том же раннере; предел прежний. Каждый прогон —
+ * со своей ловушкой статистики очереди, как у одиночного замера (шаг 66)
+ */
+async function timedMedian<T>(operation: string, limit: number, fn: () => Promise<T>, size?: (r: T) => { bytes?: number; rows?: number; heapMb?: number }): Promise<T> {
+  const runs: number[] = [];
+  let result: T | undefined;
+  let queue = '';
+  for (let i = 0; i < MEDIAN_RUNS; i++) {
+    queue = await trappedQueueStatistics();
+    const started = performance.now();
+    result = await fn();
+    runs.push(Math.round((performance.now() - started) / 10) / 100);
+  }
+  measured.push({ operation: `${operation} — median of ${MEDIAN_RUNS} consecutive runs`, seconds: medianOf(runs), runs, limit, queue, ...(size ? size(result!) : {}) });
+  return result!;
 }
 const bytesOf = (v: unknown) => ({ bytes: Buffer.byteLength(JSON.stringify(v)) });
 
@@ -160,7 +178,8 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
    * ещё читают (стратегии, поиск предложения, комплаенс, остановка, карточка границ) — своей строкой: это память сервера на их запрос
    */
   // Шаг 67: каталог целиком собирают только маршруты записи массовых операций («весь каталог», стратегии, границы, импорт) — остаток OQ-248
-  await timed('server: full catalog state — bulk write routes still loading it (all: true, strategy assign, bounds, import)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
+  // Шаг 107 (решение владельца): ходит у предела 10 с на медленном раннере — медиана трёх прогонов подряд, предел прежний (строка в отложенном)
+  await timedMedian('server: full catalog state — bulk write routes still loading it (all: true, strategy assign, bounds, import)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
   const world = { id: 'scale', title: 'scale', description: '', tenantId: tenant, now: k.clock.iso(), accounts: [{ channelAccountId: account, channel: 'KAUFLAND', marketplaces: ['de'] }],
     viewer: { membershipId: k.seeded.ownerMembershipId, role: 'OWNER' } };
   const m = messagesFor('en');

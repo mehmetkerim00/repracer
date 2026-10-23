@@ -57,6 +57,11 @@ export interface AmazonSkuSpec {
   sku: string; asin: string; marketplaces: string[]; priceMinor: number; quantity: number; title?: string | null;
   /** Шаг 103 [Р-120, Р-228]: у листинга правило автоматического ценообразования Amazon — обнаружение называет его, движок не назначается */
   automatedPricing?: boolean;
+  /**
+   * Шаг 107 [Р-233]: рамки цены, заданные продавцом на SKU (Min/Max), — синтетические значения в валюте витрины, без доставки; обнаружение
+   * называет их со значениями, как будет читать живой адаптер (A-30). Деактивацию листинга вне рамок модель не воспроизводит — в отложенном
+   */
+  channelBounds?: { minMinor: number | null; maxMinor: number | null };
 }
 /**
  * Шаг 97 [H]: `channelFulfilled` — предложение исполняет Amazon (FBA), `rating` — SellerFeedbackRating продавца (синтетический),
@@ -76,7 +81,7 @@ export interface AmazonPortModelSpec {
   selfChannelFulfilled?: boolean;
 }
 
-interface Listing { sku: string; asin: string; marketplace: string; title: string | null; automatedPricing: boolean; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
+interface Listing { sku: string; asin: string; marketplace: string; title: string | null; automatedPricing: boolean; channelBounds: AmazonSkuSpec['channelBounds'] | null; priceMinor: number; quantity: number; pendingPrice: { minor: number; at: number } | null; pendingQuantity: { value: number; at: number } | null; edits: number[] }
 
 class Bucket {
   private tokens: number;
@@ -389,8 +394,8 @@ export class SimulatedAmazonPort implements ChannelAdapter {
   addListing(s: AmazonSkuSpec): void {
     const title = s.title === undefined ? `Synthetic product ${s.sku}` : s.title;
     for (const m of s.marketplaces) {
-      this.listings.set(`${m}|${s.sku}`, { sku: s.sku, asin: s.asin, marketplace: m, title, automatedPricing: s.automatedPricing ?? false, priceMinor: s.priceMinor,
-        quantity: s.quantity, pendingPrice: null, pendingQuantity: null, edits: [] });
+      this.listings.set(`${m}|${s.sku}`, { sku: s.sku, asin: s.asin, marketplace: m, title, automatedPricing: s.automatedPricing ?? false, channelBounds: s.channelBounds ?? null,
+        priceMinor: s.priceMinor, quantity: s.quantity, pendingPrice: null, pendingQuantity: null, edits: [] });
     }
   }
 
@@ -406,7 +411,8 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     const items: DiscoveredOffer[] = slice.map((l) => ({
       identity: { ...(this.descriptor.region ? { region: this.descriptor.region } : {}), marketplace: l.marketplace, externalSku: l.sku, channelProductRef: l.asin },
       gtins: [], condition: 'new', fulfillment: 'MERCHANT', ...(l.title !== null ? { title: l.title } : {}), currentPrice: { amountMinor: l.priceMinor, currency, basis },
-      currentQuantity: l.quantity, isLive: true, channelPricing: { automatedPricing: l.automatedPricing, channelBounds: false },
+      currentQuantity: l.quantity, isLive: true,
+      channelPricing: { automatedPricing: l.automatedPricing, channelBounds: l.channelBounds !== null, ...(l.channelBounds ? { boundValues: { ...l.channelBounds, currency } } : {}) },
     }));
     return { items, ...(from + slice.length < reachable ? { nextCursor: String(from + slice.length) } : {}) };
   }

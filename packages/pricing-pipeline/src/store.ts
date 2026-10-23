@@ -2,7 +2,7 @@ import type { CompetitorView, FloorRaiseReason, OmnibusPriorPrice, PreviousOffer
 import type { CreepState } from '@repracer/strategy-engine';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
-import type { CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
+import type { ChannelBoundValues, CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type {
@@ -126,6 +126,11 @@ export interface ScopeEvaluationContext {
   budgetExhausted?: { resetsAt: Instant | null; budgetDay: string | null } | null;
   /** Шаг 102 [Р-227]: действующий режим распродажи единицы — пол распродажи заменяет весь пол; null — режима нет */
   clearance?: ClearanceRef | null;
+  /**
+   * Шаг 107 [Р-233]: рамки цены, заданные продавцом в канале, по последнему наблюдению — только со значениями в валюте единицы (иначе
+   * предложение блокируется целиком, Р-120, и до оценки не доходит); null — рамок нет
+   */
+  channelBounds?: { minMinor: number | null; maxMinor: number | null } | null;
 }
 
 /** Шаг 102 [Р-227]: включённый режим распродажи — строка журнала включения (`tenant_data.clearance_change`) */
@@ -725,6 +730,8 @@ export interface OfferChannelPricingObservation {
   externalSku: string;
   automatedPricing: boolean;
   channelBounds: boolean;
+  /** Шаг 107 [Р-233]: значения рамок, которые назвал канал; нет поля — значения не прочитаны (блок предложения целиком, Р-120) */
+  boundValues?: ChannelBoundValues | null;
   source: 'DISCOVERY' | 'PRE_WRITE_READ' | 'READBACK';
   observedAt: Instant;
 }

@@ -1,3 +1,4 @@
+import { sellerLink } from './seller-link.ts';
 import type { ConsoleAuditRow, ConsoleDecisionRow, FeedPageItem, ImportKind, ImportRunRow } from '@repracer/pricing-pipeline';
 import type { StockRow } from '@repracer/stock-sync';
 import type { CompetitorSnapshot } from '@repracer/channel-port';
@@ -55,8 +56,9 @@ export const EXPORT_HEADERS: Readonly<Record<ExportScreen, readonly string[]>> =
   'stopped-by-people': PROTECTION_HEADER,
   'prevented-by-rules': PROTECTION_HEADER,
   offers: ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'current_price', 'floor', 'floor_source', 'min_price', 'max_price', 'currency', 'strategy', 'repricing'],
-  // Шаг 105 [Р-230]: конкуренты последнего снимка по каждому показанному предложению — строки страницы Competition
-  'offer-competitors': ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'snapshot_at', 'rank', 'seller', 'is_you', 'holds_buy_box', 'landed_price', 'price',
+  // Шаг 105 [Р-230]: конкуренты последнего снимка по каждому показанному предложению — строки страницы Competition; шаг 107 [Р-232]:
+  // страница продавца — только из идентификатора канала, иначе пусто
+  'offer-competitors': ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'snapshot_at', 'rank', 'seller', 'seller_url', 'is_you', 'holds_buy_box', 'landed_price', 'price',
     'shipping', 'currency', 'fulfilment'],
   inventory: ['product_id', 'sku', 'product', 'gtin', 'on_hand', 'reserved', 'available', 'channel_managed', 'channels'],
   imports: ['time', 'import_run_id', 'import', 'outcome', 'reason_code', 'reason', 'file', 'file_sha256', 'rows_total', 'rows_changed', 'rows_unchanged',
@@ -221,12 +223,14 @@ export function offerExportRows(world: StandWorld, m: Messages, rows: readonly P
  * пусто), цена с доставкой (доставка не названа — пусто), цена, доставка, исполнение FBA / FBM (канал не назвал — пусто)
  */
 export function competitorExportRows(m: Messages, timeZone: string | null,
-  items: ReadonlyArray<{ unit: UnitRef; snapshot: { snapshot: CompetitorSnapshot; observedAt: string } | null; holderNamed: boolean; state: 'OK' | 'NO_COMPETITOR_DATA' | 'NO_SNAPSHOT' }>): string[][] {
+  items: ReadonlyArray<{ unit: UnitRef; snapshot: { snapshot: CompetitorSnapshot; observedAt: string } | null; holderNamed: boolean; state: 'OK' | 'NO_COMPETITOR_DATA' | 'NO_SNAPSHOT' }>,
+  demo = false): string[][] {
   return items.flatMap((x) => {
     if (x.state !== 'OK' || !x.snapshot) return [];
     return competitionRowOffers(orderedOffers(x.snapshot.snapshot)).map(({ offer: o, rank }) => {
       const k = fulfilmentKind(o.fulfillment);
       return [x.unit.writeScopeId, ...unitCells(x.unit, m), isoInZone(x.snapshot!.observedAt, timeZone), String(rank), o.isSelf ? 'You' : o.sellerRef ?? '',
+        sellerLink({ channel: x.unit.channel, marketplace: x.unit.marketplace, sellerRef: o.sellerRef, self: o.isSelf, demo }) ?? '',
         o.isSelf ? 'yes' : 'no', o.holdsBuyBox === true ? 'yes' : x.holderNamed ? 'no' : '', amountText(landedOf(o), o.price.currency), amountText(o.price.amountMinor, o.price.currency),
         o.shipping ? amountText(o.shipping.amountMinor, o.shipping.currency) : '', o.price.currency, k === 'CHANNEL' ? 'FBA' : k === 'MERCHANT' ? 'FBM' : ''];
     });

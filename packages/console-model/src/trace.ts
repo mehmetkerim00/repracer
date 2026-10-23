@@ -1,3 +1,4 @@
+import { sellerLink } from './seller-link.ts';
 import type { DecisionDetail, DecisionPage } from '@repracer/pricing-pipeline';
 import type { CompetitorView, ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, StrategyDefinition, StrategyParams } from '@repracer/pricing-model';
 import { classifyBoundIntervention, expandExplanation, explanationRowOf, STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
@@ -44,7 +45,7 @@ export interface TraceCompetitors {
   /** Одна фраза-повод сверху квитанции: «Triggered by Harbor Goods: $18.00 → $17.50»; null — никто не двигался или таблицы нет (срок хранения истёк) */
   trigger: string | null;
   rows: Array<{
-    seller: string; self: boolean; landed: string; fulfilment: string | null; buyBox: boolean | null; rating: string | null;
+    seller: string; sellerUrl: string | null; self: boolean; landed: string; fulfilment: string | null; buyBox: boolean | null; rating: string | null;
     move: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was: string | null; landedKnown: boolean;
     /** Шаг 101 [Р-226]: строка не участвовала в расчёте — словами («excluded by your filter»); строка остаётся, приглушённой */
     excluded: string | null;
@@ -166,11 +167,14 @@ export function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messa
   const c = m.ui.trace.competitors;
   const view = d.competitorView ?? null;
   if (!view) return { trigger: null, rows: [], columns: competitorColumns([], m), note: c.expired, filter: null };
-  const channel = channelOf(world, scopeById(world, d.writeScopeId)?.channelAccountId ?? '');
+  const scope = scopeById(world, d.writeScopeId);
+  const channel = channelOf(world, scope?.channelAccountId ?? '');
   const channelName = (m.values as Record<string, string | undefined>)[channel] ?? channel;
   const money = (v: number | null | undefined) => (v === null || v === undefined ? null : m.money(v, view.currency));
   const rows = view.offers.map((o) => ({
       seller: o.self ? c.you : o.seller ?? c.unnamedSeller, self: o.self,
+      // Шаг 107 [Р-232]: страница продавца — только из идентификатора канала
+      sellerUrl: sellerLink({ channel, marketplace: scope?.marketplace ?? '', sellerRef: o.seller, self: o.self, demo: world.state.demo }),
       landed: money(o.landedMinor ?? o.priceMinor)!,
       fulfilment: o.fulfilment === 'CHANNEL' ? m.ui.competition.fulfilment.channel(channelName) : o.fulfilment === 'MERCHANT' ? m.ui.competition.fulfilment.merchant : null,
       buyBox: o.holdsBuyBox ?? null,
@@ -244,7 +248,10 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
     // Р-74: только код причины; остальные шаги называют, почему их нет
     gaps.push(gap(m, 'NO_OP_NOT_EXPLAINED'));
     for (const key of ['SNAPSHOT', 'SANITY', 'ANCHORS'] as const) steps.push({ key, title: t.titles[key], status: 'UNKNOWN', summary: t.noOpNotExplained, items: [], gaps: [] });
-    steps.push({ key: 'STRATEGY', title: t.titles.STRATEGY, status: 'OK', summary: t.keep(kept), items: [], gaps: [] });
+    // Шаг 107 [Р-233]: пока горячее намерение того же решения живо (3 дня, Р-28), причина «без изменения» — фразой с суммами (у удержания
+    // вне рамок канала — обе суммы); у решения старше — только код [Р-74]
+    const why = d.noChangeReason && fresh.has(d.noChangeReason) ? describe({ code: d.noChangeReason, params: fresh.get(d.noChangeReason)! }, m) : null;
+    steps.push({ key: 'STRATEGY', title: t.titles.STRATEGY, status: 'OK', summary: t.keep(kept), items: why ? [{ label: kept, reason: why }] : [], gaps: [] });
     steps.push({ key: 'GATE', title: t.titles.GATE, status: 'UNKNOWN', summary: t.noOpNotExplained, items: [], gaps: [] });
   } else if (!e) {
     gaps.push(gap(m, 'NO_EXPLANATION'));

@@ -579,3 +579,46 @@ test('step 105 (C) [Р-230]: demo on PostgreSQL — «Export competitors» is re
   const jobs = await call<{ items: unknown[] }>('GET', `/api/worlds/${w}/jobs`, token);
   assert.equal(jobs.body.items.length, 0, 'no job of the guest');
 });
+
+/**
+ * Шаг 107 [Р-233, Р-231, Р-232] через консоль как гость: у трёх товаров amazon.com демо — синтетические рамки цены, заданные продавцом в канале,
+ * записанные настоящим путём обнаружения. Страница пола показывает их рядом с нашими: «внутри рамок», конфликт Min и конфликт распродажи; у
+ * остальных — честно без значений. Цена ниже Min канала не уходит («без изменения» с обеими суммами), распродажа ниже Min — уходит, и квитанция
+ * называет конфликт. В демо продавцы синтетические — ни одной ссылки на страницу продавца
+ */
+test('step 107 [Р-233, Р-231, Р-232]: demo on PostgreSQL — channel bounds next to ours, the hold outside them, the clearance conflict in the receipt, no seller links', async () => {
+  const { token, w } = await guest105();
+  const rows = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON') as Array<Row105 & { channelBounds: string | null }>;
+  const pages = await Promise.all(rows.map(async (r) => ({ row: r, view: (await call<BoundsView>('GET', `/api/worlds/${w}/bounds/${r.unit.writeScopeId}`, token)).body })));
+  const withValues = pages.filter((p) => p.view.channelBounds.state === 'VALUES');
+  assert.equal(withValues.length, 3, 'three amazon.com offers of the demo carry channel bounds with values');
+  const inside = withValues.filter((p) => p.view.channelBounds.ok !== null);
+  const conflict = withValues.filter((p) => p.view.channelBounds.conflicts.length > 0 && p.view.clearance.pill === null);
+  const clearance = withValues.filter((p) => p.view.clearance.pill !== null);
+  assert.equal(JSON.stringify([inside.length, conflict.length, clearance.length]), '[1,1,1]');
+  assert.equal(JSON.stringify([inside[0]!.view.channelBounds.min, inside[0]!.view.channelBounds.max]), JSON.stringify(['$9.00', '$60.00']));
+  assert.equal(conflict[0]!.view.channelBounds.conflicts[0]!.text,
+    'Below the channel\'s own minimum — the channel will deactivate this offer. Your floor $14.00 is below the channel minimum $16.00; prices below $16.00 are not sent.');
+  assert.match(clearance[0]!.view.channelBounds.conflicts[0]!.text, /Your clearance floor \$10\.00 is below the channel minimum \$12\.00; prices below \$12\.00 are sent/);
+  // Без значений — честно: «нет рамок» или «не предоставлено», без сумм
+  assert.ok(pages.filter((p) => p.view.channelBounds.state !== 'VALUES').every((p) => p.view.channelBounds.min === null && p.view.channelBounds.conflicts.length === 0));
+  // Пилюля Offers — ровно у предложений с конфликтом
+  assert.equal(JSON.stringify(rows.filter((r) => r.channelBounds !== null).map((r) => r.channelBounds).sort()), JSON.stringify(['Below the channel minimum', 'Below the channel minimum']));
+  // Цена ниже Min канала не уходит: «без изменения» с обеими суммами в квитанции
+  const list = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${conflict[0]!.row.unit.writeScopeId}&period=7d`, token)).body;
+  const held = list.items.filter((d) => d.reason.includes('Outside the channel\'s own price bounds'));
+  assert.ok(held.length > 0, `holds outside the channel bounds: ${JSON.stringify(list.items.slice(0, 3).map((d) => d.reason))}`);
+  const heldTrace = JSON.stringify((await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${held[0]!.decisionId}`, token)).body);
+  assert.match(heldTrace, /is below the channel's own minimum \$16\.00 — the channel would deactivate this offer, so the price was not sent/);
+  // Распродажа ниже Min канала — цена уходит, конфликт в квитанции решения режима
+  const cl = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${clearance[0]!.row.unit.writeScopeId}`, token)).body.items[0]!;
+  const clTrace = JSON.stringify((await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${cl.decisionId}`, token)).body);
+  assert.match(clTrace, /Your clearance floor \$10\.00 is below the channel's own minimum/);
+  // Р-232: продавцы демо синтетические — ни одной ссылки ни на странице Competition, ни в колонке держателя, ни в квитанции
+  for (const r of rows) {
+    const view = (await call<{ rows: Array<{ sellerUrl?: string | null }> }>('GET', `/api/worlds/${w}/competition/${r.unit.writeScopeId}?period=7d`, token)).body;
+    assert.ok(view.rows.every((x) => !x.sellerUrl), `${r.unit.label}: no seller link in the demo`);
+    assert.ok(!(r.buybox as { sellerUrl?: string | null } | null | undefined)?.sellerUrl, `${r.unit.label}: no seller link in the holder column`);
+  }
+  assert.ok(!/amazon\.com\/sp\?seller=/.test(clTrace + heldTrace), 'no seller link in the receipts of the demo');
+});

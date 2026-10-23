@@ -2,6 +2,7 @@ import { convertMinor, marginBpAtPrice, storefrontPriceForMarginBp, type CostInp
 import type { ClearanceState } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
 import { boundText } from './products.ts';
+import { channelBoundsView, type ChannelBoundsView } from './channel-bounds.ts';
 import { gap, scopeById, unitOf, type ConsoleScope, type Gap, type StandWorld, type UnitRef } from './world.ts';
 
 /**
@@ -39,6 +40,8 @@ export interface BoundsView {
   effectiveFloor: { amount: string; minor: number | null; source: string };
   /** Шаг 102 [Р-227]: пол выше потолка — «цены заморожены: поднимите потолок или включите распродажу»; иначе null */
   frozen: string | null;
+  /** Шаг 107 [Р-233]: рамки цены, заданные продавцом в канале, рядом с нашими — значения, «not provided» и предупреждения о конфликте */
+  channelBounds: ChannelBoundsView;
   /**
    * Шаг 102 [Р-227]: режим распродажи — безубыточность, убыток на штуку и общий при текущем остатке, кто включил и зачем, история.
    * Числа формы (пол, убыток) экран пересчитывает при вводе той же формулой: убыток на штуку = безубыточность − пол распродажи
@@ -254,6 +257,7 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages,
     marginFloor,
     effectiveFloor: { amount: money(floor.minor), minor: floor.minor, source: floorSource },
     frozen: floor.aboveCeiling && scope.bounds.max.status === 'RESOLVED' ? b.frozen(money(floor.minor), money(scope.bounds.max.amountMinor)) : null,
+    channelBounds: channelBoundsView(world, scope, m),
     clearance,
     // Р-138: оценка продавца и тарифная таблица показываются рядом; помечена та, по которой считается пол
     feeEstimates: feeEstimatesView(scope, m),

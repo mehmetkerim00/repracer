@@ -112,6 +112,8 @@ export const ENGINE_REASON_CODES = [
   'COMPETITORS_FILTERED',
   // Шаг 102 [Р-227]: режим распродажи — пол распродажи ниже безубыточности (первый шаг цепочки каждого решения в режиме)
   'CLEARANCE_FLOOR',
+  // Шаг 107 [Р-233]: пол распродажи ниже Min канала — цена уходит (решение владельца), конфликт записан в каждом решении режима
+  'CLEARANCE_BELOW_CHANNEL_MIN',
   // шаги расчёта
   'CAPPED_AT_MIN_PRICE',
   'CAPPED_AT_MAX_PRICE',
@@ -136,6 +138,8 @@ export const ENGINE_REASON_CODES = [
   // Шаг 101 [Р-226]: после фильтра «Compete with» конкурентов нет — цена держится; к «всем» фильтр не откатывается
   'NO_ELIGIBLE_COMPETITORS',
   'TARGET_OUTSIDE_BOUNDS_HOLD',
+  // Шаг 107 [Р-233]: цена вне рамок, заданных продавцом в канале (Amazon Min/Max на SKU), деактивирует листинг — не уходит
+  'CHANNEL_BOUNDS_HOLD',
   // Шаг 97 [Р-221]: «Match the Buy Box» — канал не называет держателя (Amazon, A-29), а наша цена равна цене Buy Box: возможно, Buy Box
   // наш, и подрезать самих себя нельзя — цена держится
   'BUYBOX_HOLDER_UNKNOWN',
@@ -332,6 +336,8 @@ export const UNRESOLVABLE_BOUNDS = [...BOUND_NAMES, 'break_even'] as const;
  * не задана) и пол распродажи
  */
 export const FLOOR_BOUNDS = ['min', 'margin_floor', 'clearance', 'break_even'] as const;
+/** Шаг 107 [Р-233]: какую рамку канала нарушила бы цена */
+export const CHANNEL_BOUND_SIDES = ['MIN', 'MAX'] as const;
 /** Шаг 102 [Р-227]: отказ Gate «ниже пола» в режиме распродажи — пол распродажи, а не min_price */
 export const CLEARANCE_FLOORS = ['CLEARANCE'] as const;
 /**
@@ -480,6 +486,11 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
    */
   CLEARANCE_FLOOR: { floorMinor: money('TENANT'), breakEvenMinor: money('TENANT', O), lossPerUnitMinor: money('TENANT', O), currency: currency() },
   CAPPED_AT_CLEARANCE_FLOOR: { targetMinor: money('CHANNEL_DERIVED'), floorMinor: money('TENANT'), currency: currency() },
+  /**
+   * Шаг 107 [Р-233]: пол распродажи ниже Min, заданного продавцом в канале. Рамка прочитана из канала (Amazon Information, 18 месяцев, Р-3) —
+   * в вечное объяснение не идёт; пол распродажи — данные продавца, остаётся: квитанция и через год говорит «конфликт с рамкой канала был»
+   */
+  CLEARANCE_BELOW_CHANNEL_MIN: { floorMinor: money('TENANT'), channelMinMinor: money('CHANNEL'), currency: currency() },
   RAISED_TO_FLOOR: {
     currentMinor: money('TENANT'), floorMinor: money('TENANT'), bound: oneOf(FLOOR_BOUNDS, 'TENANT'), minMarginBp: bp('TENANT', O),
     after: oneOf(RAISE_AFTER, 'TENANT', O), currency: currency(),
@@ -501,6 +512,10 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
     competeWith: oneOf(FULFILMENT_KINDS, 'CHANNEL_DERIVED'), offersTotal: count('CHANNEL'), offersUnknown: count('CHANNEL'), buyboxHolder: oneOf(BUYBOX_HOLDER_STATES, 'CHANNEL', O),
   },
   TARGET_OUTSIDE_BOUNDS_HOLD: { targetMinor: money('CHANNEL_DERIVED'), minMinor: money('TENANT'), maxMinor: money('TENANT'), currency: currency() },
+  /** Шаг 107 [Р-233]: цена вне рамок канала не уходит; цель стратегии может быть выведена из цены конкурента, рамка — данные канала */
+  CHANNEL_BOUNDS_HOLD: {
+    targetMinor: money('CHANNEL_DERIVED'), side: oneOf(CHANNEL_BOUND_SIDES, 'TENANT'), channelMinMinor: money('CHANNEL', O), channelMaxMinor: money('CHANNEL', O), currency: currency(),
+  },
   COMPETITOR_REQUIREMENT_NOT_MET: {
     unmet: listOf(UNMET_REQUIREMENTS, 'CHANNEL'), requiredCompleteness: oneOf(COMPLETENESS_KINDS, 'CONFIG', ON), requiredN: count('CONFIG', ON),
     actualCompleteness: oneOf(COMPLETENESS_KINDS, 'CHANNEL', ON), actualN: count('CHANNEL', ON), maxStalenessSeconds: seconds('CONFIG', ON), ageSeconds: seconds('CHANNEL', ON),

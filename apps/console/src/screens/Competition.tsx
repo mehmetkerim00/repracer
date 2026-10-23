@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BUYBOX_SHARE_KEEP_DAYS, periodSearch, type CompetitionView, type CompetitorColumns, type Period } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, href, Load, NotFound, useMessages } from '../components.tsx';
+import { Badge, href, Load, NotFound, SellerName, useMessages } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 
 /**
@@ -10,6 +10,8 @@ import { PeriodPicker } from '../date-range.tsx';
  */
 export interface CompetitorTableRow {
   seller: string; self: boolean; landed: string; landedKnown: boolean;
+  /** Шаг 107 [Р-232]: страница продавца на площадке — только из идентификатора канала */
+  sellerUrl?: string | null;
   shipping?: string | null; fulfilment: string | null; rating: string | null; buyBox: boolean | null;
   move?: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was?: string | null;
   /** Шаг 101 [Р-226]: строка вне расчёта — приглушена, с пометкой словами */
@@ -39,7 +41,7 @@ export function CompetitorTable({ rows, columns, shipping = false, foot }: {
         <tbody>
           {rows.map((r, i) => (
             <tr key={`${r.seller}-${i}`} className={`${r.self ? 'self-row' : ''}${r.move === 'GONE' ? ' gone-row' : ''}${r.excluded ? ' excluded-row' : ''}`}>
-              <td className="seller">{r.self ? <strong>{r.seller}</strong> : r.seller}{r.excluded ? <span className="excluded-note">{r.excluded}</span> : null}</td>
+              <td className="seller">{r.self ? <strong>{r.seller}</strong> : <SellerName name={r.seller} url={r.sellerUrl} />}{r.excluded ? <span className="excluded-note">{r.excluded}</span> : null}</td>
               <td className="num cur landed">
                 {r.move === 'UP' || r.move === 'DOWN'
                   ? <><span className="was">{r.was}</span> → <strong>{r.landed}</strong> <span className={`move move-${r.move.toLowerCase()}`} aria-label={t.moved[r.move]}>{r.move === 'DOWN' ? '↓' : '↑'}</span></>

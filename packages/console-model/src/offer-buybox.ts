@@ -1,3 +1,4 @@
+import { sellerLink } from './seller-link.ts';
 import type { Messages } from './i18n/index.ts';
 import { BUYBOX_SHARE_KEEP_DAYS, buyboxFacts, type BuyboxFacts, type BuyboxFactsInput } from './competition.ts';
 import { storefrontName, type StandWorld } from './world.ts';
@@ -26,6 +27,8 @@ export interface BuyboxCells {
   holder: { kind: OfferHolderKind; text: string };
   /** Держатель — другой продавец: его имя; не назван — null */
   seller: string | null;
+  /** Шаг 107 [Р-232]: страница держателя на площадке — только из идентификатора канала; иначе null */
+  sellerUrl: string | null;
   currency: string;
   /** Цена Buy Box: с доставкой, если доставка известна, иначе цена с пометкой; нет — null (прочерк) */
   price: string | null;
@@ -52,7 +55,7 @@ export function signedMoney(minor: number, currency: string, m: Messages): strin
   return minor > 0 ? `+${m.money(minor, currency)}` : minor < 0 ? `−${m.money(-minor, currency)}` : m.money(0, currency);
 }
 
-export function buyboxCells(f: BuyboxFacts, ctx: { currency: string; channel: string; now: string }, m: Messages): BuyboxCells {
+export function buyboxCells(f: BuyboxFacts, ctx: { currency: string; channel: string; marketplace: string; demo: boolean; now: string }, m: Messages): BuyboxCells {
   const b = m.ui.products.buybox;
   const channelName = (m.values as Record<string, string | undefined>)[ctx.channel] ?? ctx.channel;
   const kind = offerHolderKind(f);
@@ -64,6 +67,7 @@ export function buyboxCells(f: BuyboxFacts, ctx: { currency: string; channel: st
   return {
     holder: { kind, text },
     seller: kind === 'OTHER' ? f.seller : null,
+    sellerUrl: kind === 'OTHER' ? sellerLink({ channel: ctx.channel, marketplace: ctx.marketplace, sellerRef: f.seller, self: false, demo: ctx.demo }) : null,
     currency: ctx.currency,
     price: f.price ? m.money(f.price.minor, ctx.currency) : null,
     priceMinor: f.price?.minor ?? null,
@@ -104,7 +108,7 @@ export function sortOffers<T extends { cells: BuyboxCells }>(items: readonly T[]
 }
 
 /** Ячейки Buy Box единицы по её снимку и отрезкам — правило страницы Competition */
-export function offerBuyboxCells(input: BuyboxFactsInput, ctx: { currency: string; channel: string; now: string }, m: Messages): BuyboxCells {
+export function offerBuyboxCells(input: BuyboxFactsInput, ctx: { currency: string; channel: string; marketplace: string; demo: boolean; now: string }, m: Messages): BuyboxCells {
   return buyboxCells(buyboxFacts(input), ctx, m);
 }
 

@@ -1,5 +1,6 @@
 import { can, COMPETITOR_DERIVED_RULES, type BoundResolution, type StrategyDefinition } from '@repracer/pricing-model';
 import { effectiveFloor } from './bounds.ts';
+import { channelBoundsPill, channelPricingBlocks } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
@@ -44,6 +45,8 @@ export interface ProductRow {
   clearance: string | null;
   /** Шаг 102 [Р-227]: пол выше потолка — пилюля и «цены заморожены: поднимите потолок или включите распродажу» */
   frozen: string | null;
+  /** Шаг 107 [Р-233]: конфликт с рамками цены канала — «Below the channel minimum» / «Above the channel maximum»; null — конфликта нет */
+  channelBounds: string | null;
   /** Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию новому предложению — причина словами, иначе null */
   notAssigned: string | null;
   /** Шаг 105 [Р-230]: колонки Buy Box — только когда зритель их включил (их считают по снимку и отрезкам; выключенные — не нужны) */
@@ -208,7 +211,10 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
   const notes: ChannelNote[] = [];
   const pricing = world.state.offerChannelPricing.find((o) => o.channelAccountId === scope.channelAccountId && o.marketplace === scope.marketplace && o.externalSku === scope.externalUnitId);
   if (pricing?.automatedPricing) notes.push({ code: 'AUTOMATED_PRICING', tone: 'stop', label: n.automatedPricing, detail: n.automatedPricingDetail(m.when(pricing.observedAt)) });
-  if (pricing?.channelBounds) notes.push({ code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
+  // Шаг 107 [Р-231]: рамки со значениями в валюте предложения — не блок; их конфликт — пилюля строки и блок страницы пола [Р-233]
+  if (pricing?.channelBounds && !pricing.automatedPricing && channelPricingBlocks(pricing, scope.currency)) {
+    notes.push({ code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
+  }
   const health = world.state.pricingHealth.find((h) => h.channelAccountId === scope.channelAccountId && h.marketplace === scope.marketplace
     && h.channelProductRef === scope.channelProductRef && h.condition === scope.condition);
   /**
@@ -297,6 +303,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       channelNotes: channelNotes(world, scope, m),
       clearance: scope.clearance ? p.clearancePill : null,
       frozen: floor.aboveCeiling ? p.floorAboveCeiling : null,
+      channelBounds: channelBoundsPill(world, scope, m),
       notAssigned: notAssignedText(scope, m),
       ...(options.buybox ? { buybox: options.buybox.get(scope.writeScopeId) ?? null } : {}),
     };

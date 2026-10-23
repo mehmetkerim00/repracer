@@ -2,6 +2,7 @@ import { currencyInCell, parseFeeRateBp, parseMoneyMinor, TABLE_ENCODINGS, type 
 import type { ImportKind, ImportRunRow } from '@repracer/pricing-pipeline/store';
 import { storefrontPriceForMarginBp, type StrategyDefinition } from '@repracer/pricing-model';
 import { costInScopeCurrency } from './bounds.ts';
+import { channelPricingBlocks } from './channel-bounds.ts';
 import type { PageInfo } from './page.ts';
 import type { Messages } from './i18n/index.ts';
 import { fingerprint } from './strategies.ts';
@@ -467,7 +468,7 @@ export function buildImportPlan(kind: ImportKind, sheet: Pick<Sheet, 'rows' | 'l
     if (!chosen.active) { fail('STRATEGY_NOT_ACTIVE', { field: 'strategy', raw: name }); continue; }
     // Р-120: у предложения своё ценообразование канала — стратегию не назначит база (0082)
     const owned = world.state.offerChannelPricing.find((o) => o.channelAccountId === scope.channelAccountId && o.marketplace === scope.marketplace && o.externalSku === scope.externalUnitId);
-    if (owned && (owned.automatedPricing || owned.channelBounds)) { fail('CHANNEL_PRICING', { field: 'strategy', raw: name }); continue; }
+    if (owned && channelPricingBlocks(owned, scope.currency)) { fail('CHANNEL_PRICING', { field: 'strategy', raw: name }); continue; }
     // Р-39: канал не даёт нужных этой стратегии данных конкурентов — та же проверка, что у предпросмотра стратегии
     const availability = context.strategyAvailable?.(scope, chosen.definition.params);
     if (availability && !availability.available) {

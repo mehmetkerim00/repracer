@@ -14,6 +14,7 @@ import { inflateRawSync } from 'node:zlib';
 import { parseCsv, parseXlsx } from '@repracer/cost-import';
 import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode, standTokenSecondsOf } from '../server/stand-server.ts';
 import { runJob, runPendingJobs } from './run-jobs.ts';
+import { prepareStep107, SELLER107, SELLER_ID_107 } from './step107-world.ts';
 
 /**
  * Интерфейс на мирах стенда (хранилище в памяти): вход через токен поставщика identity [Р-78] (на стенде — имитатор),
@@ -1708,4 +1709,102 @@ test('step 105 (C) [Р-230]: more than 50 000 rows in either Offers export — r
   } finally {
     delete store.consoleCatalogPage;
   }
+});
+
+/**
+ * Шаг 107 [Р-232]: имя продавца-конкурента — ссылка на его страницу на площадке, только из настоящего идентификатора канала. Своя копия
+ * мира Amazon (как у шага 105 — своя копия); первой единице назначается «Match the Buy Box» тем же путём, что у продавца (предпросмотр и
+ * сохранение), — решение из данных конкурентов несёт картину рынка в квитанцию. У части предложений продавец назван SellerId
+ * (латинские заглавные и цифры), у части — именем с пробелами, как у симулятора; наша строка — «You». Ссылка — только у SellerId
+ */
+let s107: { world: LiveWorld; handle: ReturnType<typeof createStandApi>; writeScopeId: string; marketplace: string; conflictScopeId: string; insideScopeId: string } | null = null;
+async function sellerStand107() {
+  if (s107) return s107;
+  const ws = await buildStandWorlds({ filter: (sc) => sc.id === SELLER107 });
+  const handle = createStandApi(ws, {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(ws) }),
+    simulator: { token: (a) => issuer.token(a.subject, { email: a.email, extra: { name: a.displayName } }), expiresInSeconds: 900 },
+  });
+  const live = ws[0]!;
+  const token = await handle({ method: 'POST', url: '/api/stand-issuer/token?locale=en', body: { role: 'OWNER' } });
+  const auth = { authorization: `Bearer ${(token.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
+  s107 = { world: live, handle, ...(await prepareStep107(live, handle, auth)) };
+  return s107;
+}
+async function owner107(): Promise<Auth> {
+  const r = await (await sellerStand107()).handle({ method: 'POST', url: '/api/stand-issuer/token?locale=en', body: { role: 'OWNER' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return { authorization: `Bearer ${(r.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
+}
+const sellerPage107 = (marketplace: string, id: string) => `https://www.${marketplace === 'ATVPDKIKX0DER' ? 'amazon.com' : 'amazon.de'}/sp?seller=${id}`;
+const expect107 = (marketplace: string, seller: string) => ((SELLER_ID_107 as readonly string[]).includes(seller) ? sellerPage107(marketplace, seller) : null);
+
+test('step 107 (1, 2, C) [Р-232]: Competition and the receipt link a real Amazon seller id to its page; names and «You» stay text', async () => {
+  const s = await sellerStand107();
+  const auth = await owner107();
+  const get107 = async <T>(url: string): Promise<T> => {
+    const r = await s.handle({ method: 'GET', url, body: undefined, ...auth });
+    assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.body).slice(0, 300)}`);
+    return r.body as T;
+  };
+  const view = await get107<CompetitionView>(`${api(s.world.id, 'competition', s.writeScopeId)}?period=7d`);
+  const links = view.rows.map((r) => [r.seller, (r as { sellerUrl?: string | null }).sellerUrl ?? null]);
+  assert.deepEqual(links, view.rows.map((r) => [r.seller, r.self ? null : expect107(s.marketplace, r.seller)]), 'Competition: a link exactly where the channel named a seller id');
+  assert.ok(links.some(([, url]) => url !== null) && links.some(([seller, url]) => seller === 'Simulated competitor 2' && url === null), JSON.stringify(links));
+  // Квитанция решения из этого снимка — те же правила
+  // Решение из этого снимка — последнее решение единицы (в мире действует недоверие каналу: Gate отклоняет, квитанция всё равно есть)
+  const decision = (await get107<DecisionListView>(`${api(s.world.id, 'decisions')}?period=30d`)).items.find((d) => d.unit?.writeScopeId === s.writeScopeId);
+  assert.ok(decision, 'a decision from the snapshot');
+  const trace = await get107<DecisionTrace>(api(s.world.id, 'decisions', decision!.decisionId));
+  const rows = (trace.steps.find((x) => x.key === 'SNAPSHOT')?.competitors?.rows ?? []) as Array<{ seller: string; self: boolean; sellerUrl?: string | null }>;
+  assert.ok(rows.length >= 3, `the receipt names the competitors: ${rows.length}`);
+  assert.deepEqual(rows.map((r) => [r.seller, r.sellerUrl ?? null]), rows.map((r) => [r.seller, r.self ? null : expect107(s.marketplace, r.seller)]), 'the receipt: the same rule');
+});
+
+test('step 107 (3) [Р-232]: «Export competitors» has a seller URL column with only real links', async () => {
+  const s = await sellerStand107();
+  const auth = await owner107();
+  const created = await s.handle({ method: 'POST', url: api(s.world.id, 'exports'), body: { screen: 'offer-competitors', format: 'csv', query: {} }, ...auth });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const jobId = (created.body as JobCreatedResponse).jobId;
+  const job = await runJob(s.world, jobId, 'en');
+  assert.equal(job.status, 'SUCCEEDED', job.error ?? job.headline);
+  const table = csvTable((await s.world.store.bulkJobArtifact(s.world.tenantId, jobId))!.content);
+  const sellers = column(table, 'seller');
+  const urls = column(table, 'seller_url');
+  assert.equal(urls.length, sellers.length, 'a seller_url cell on every row');
+  const isYou = column(table, 'is_you');
+  assert.deepEqual(urls, sellers.map((seller, i) => (isYou[i] === 'yes' ? '' : expect107(s.marketplace, seller) ?? '')), 'only real links, empty otherwise');
+  assert.ok(urls.some((u) => u !== '') && urls.some((u) => u === ''), JSON.stringify(urls));
+});
+
+test('step 107 (C) [Р-232]: a named Buy Box holder on Offers links only by a real channel id — a Kaufland pseudonym stays text', async () => {
+  const owner = await richOwner();
+  const rows = await allOffers(owner, 'kaufland/pipeline/happy-path', '&bb=1');
+  const others = rows.filter((r) => r.buybox?.holder.kind === 'OTHER');
+  assert.ok(others.length > 0, 'a named holder');
+  assert.ok(others.every((r) => ((r.buybox as { sellerUrl?: string | null }).sellerUrl ?? null) === null), 'Kaufland: no seller page');
+});
+
+test('step 107 [Р-233, Р-231]: the floor page and Offers through the console — channel bounds next to ours, the warning exactly at a conflict, «not provided» without channel data', async () => {
+  const s = await sellerStand107();
+  const auth = await owner107();
+  const get = async <T>(url: string): Promise<T> => {
+    const r = await s.handle({ method: 'GET', url, body: undefined, ...auth });
+    assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.body).slice(0, 300)}`);
+    return r.body as T;
+  };
+  const conflict = (await get<BoundsView>(api(s.world.id, 'bounds', s.conflictScopeId))).channelBounds;
+  const inside = (await get<BoundsView>(api(s.world.id, 'bounds', s.insideScopeId))).channelBounds;
+  const none = (await get<BoundsView>(api(s.world.id, 'bounds', s.writeScopeId))).channelBounds;
+  assert.deepEqual([conflict.state, conflict.conflicts.map((c) => c.side), inside.state, inside.conflicts.length, inside.ok !== null],
+    ['VALUES', ['MIN'], 'VALUES', 0, true]);
+  assert.match(conflict.conflicts[0]!.text, /^Below the channel's own minimum — the channel will deactivate this offer\. Your floor .+ is below the channel minimum .+; prices below .+ are not sent\.$/);
+  // Предложение без наблюдения рамок — честно «not provided», без сумм
+  assert.ok(none.state === 'NOT_PROVIDED' || none.state === 'NOT_SET', none.state);
+  assert.equal(none.min, null);
+  // Offers: пилюля — ровно у предложения с конфликтом; известные рамки — не «Issues from the channel» (не блок, Р-231)
+  const rows = (await get<ProductListView>(`${api(s.world.id, 'products')}?offset=0&limit=50`)).rows;
+  assert.deepEqual(rows.filter((r) => r.channelBounds !== null).map((r) => [r.unit.writeScopeId, r.channelBounds]), [[s.conflictScopeId, 'Below the channel minimum']]);
+  assert.ok(rows.every((r) => !r.channelNotes.some((n) => n.code === 'CHANNEL_BOUNDS')), 'bounds with known values are not a channel block');
 });

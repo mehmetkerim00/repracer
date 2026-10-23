@@ -182,7 +182,7 @@ export async function screenExportRows(p: ScreenExportParams, deps: ScreenExport
           const d = data.get(id) ?? { snapshot: null, spans: [] };
           const facts = buyboxFacts({ snapshot: d.snapshot, spans: d.spans, range: o.shareRange, sources: info?.data ? [{ role: 'PRIMARY', hasBuyboxWinner: info.named }] : [] });
           return [{ unit: unitOf(world, scope, m), snapshot: d.snapshot, holderNamed: facts.holderNamed, state: facts.state }];
-        })));
+        }), world.state.demo));
       }
       return rows;
     }

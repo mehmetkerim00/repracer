@@ -68,6 +68,12 @@ export interface EngineInput {
    * после потери (CREEP_STEP_BACK: когда, на какой цене Buy Box ушёл). Период — тот же `ladderPace.paceSeconds` (плановый пересчёт канала)
    */
   creep?: CreepState | null;
+  /**
+   * Шаг 107 [Р-233, Р-231]: рамки цены, заданные продавцом в канале (Amazon Min/Max на SKU), в валюте единицы и без доставки — как наша
+   * цена записи. Это не наши границы [Р-114], но цена вне них деактивирует листинг: такая цена не уходит (CHANNEL_BOUNDS_HOLD), кроме
+   * движения к рамкам из-за них и распродажи ниже Min канала. null у стороны — канал рамки этой стороны не назвал
+   */
+  channelBounds?: { minMinor: number | null; maxMinor: number | null } | null;
   now: Instant;
   trigger: { type: TriggerType; sourceEventId?: string };
   intentTtlSeconds?: number;
@@ -328,6 +334,12 @@ export function runStrategy(input: EngineInput): EngineResult {
     const step = raiseStep();
     return propose(step.to, [...chain, step.reason], reference, true);
   };
+  // Шаг 107 [Р-233]: рамки канала — только целые положительные суммы; иное не рамка (сторона не названа)
+  const channelMin = Number.isSafeInteger(input.channelBounds?.minMinor) && input.channelBounds!.minMinor! > 0 ? input.channelBounds!.minMinor! : null;
+  const channelMax = Number.isSafeInteger(input.channelBounds?.maxMinor) && input.channelBounds!.maxMinor! > 0 ? input.channelBounds!.maxMinor! : null;
+  /** Шаг 107 [Р-233, Р-227]: пол распродажи ниже Min канала — решение владельца «предупреждение»; конфликт записан в каждом решении режима */
+  const clearanceConflict = clearance && channelMin !== null && clearance.floorMinor < channelMin
+    ? r('CLEARANCE_BELOW_CHANNEL_MIN', { floorMinor: clearance.floorMinor, channelMinMinor: channelMin, currency }) : null;
   const marketFollowing = params.type === 'MATCH_BUYBOX' || params.type === 'BEAT_LOWEST' || params.type === 'WIN_BUYBOX';
   const clearanceReason = clearance
     ? r('CLEARANCE_FLOOR', {
@@ -719,6 +731,20 @@ export function runStrategy(input: EngineInput): EngineResult {
       }
     }
     /**
+     * Шаг 107 [Р-233]: цена вне рамок канала деактивирует листинг — она не уходит, обе суммы названы. Не держится движение к рамкам из-за
+     * них (хуже не становится: лестница к полу от цены ниже Min канала не застревает) и распродажа ниже Min канала (решение владельца:
+     * предупреждение — цена уходит, конфликт записан в квитанции)
+     */
+    const side = channelMin !== null && proposed < channelMin ? 'MIN' : channelMax !== null && proposed > channelMax ? 'MAX' : null;
+    const toward = current !== null && ((side === 'MIN' && proposed > current) || (side === 'MAX' && proposed < current));
+    if (side !== null && !toward && !(side === 'MIN' && clearance)) {
+      const held = r('CHANNEL_BOUNDS_HOLD', side === 'MIN'
+        ? { targetMinor: proposed, side, channelMinMinor: channelMin!, currency }
+        : { targetMinor: proposed, side, channelMaxMinor: channelMax!, currency });
+      if (current === null) return notEvaluated(held);
+      return intent('NO_OP', current, held, [...chain, held], reference, ruleCode);
+    }
+    /**
      * Р-171: то же самое предложение уже удержано тенью — повторять его незачем. Проверка стоит ПОСЛЕ сравнения с текущей
      * ценой; в тени именно она превращает поток дублей в один held-write на изменение. В бою поле пустое: хранилище отдаёт
      * предложение тени только у аккаунта в тени (шаг 64 — до этого оно оставалось после перевода в бой, и цена, уже
@@ -749,7 +775,7 @@ export function runStrategy(input: EngineInput): EngineResult {
         basis: writeScope.basis,
         reason: main,
         // Шаг 102 [Р-227]: каждое решение в режиме распродажи открывается им — квитанция не прячет режим никогда
-        explanation: clearance ? [clearanceReason!, ...chain] : chain,
+        explanation: clearance ? [clearanceReason!, ...(clearanceConflict ? [clearanceConflict] : []), ...chain] : chain,
         inputs: {
           ...(snapshot?.sourceEventId ? { snapshotSourceEventId: snapshot.sourceEventId } : {}),
           ...(snapshot ? { snapshotObservedAt: snapshot.observedAt, snapshotSource: snapshot.source } : {}),

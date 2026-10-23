@@ -53,7 +53,7 @@ export function buyboxCellsOf(world: StandWorld, rows: readonly CompetitionDataR
     const info = deps.accounts[scope.channelAccountId];
     const d = data.get(id) ?? { snapshot: null, spans: [] };
     out.set(id, offerBuyboxCells({ snapshot: d.snapshot, spans: d.spans, range: deps.shareRange, sources: sourcesOf(info) },
-      { currency: scope.currency, channel: info?.channel ?? channelOf(world, scope.channelAccountId), now: deps.now }, deps.m));
+      { currency: scope.currency, channel: info?.channel ?? channelOf(world, scope.channelAccountId), marketplace: scope.marketplace, demo: world.state.demo, now: deps.now }, deps.m));
   }
   return out;
 }

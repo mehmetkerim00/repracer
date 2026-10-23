@@ -1,3 +1,4 @@
+import { sellerLink } from './seller-link.ts';
 import type { CompetitorOffer, CompetitorSnapshot } from '@repracer/channel-port';
 import { fulfilmentKind } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
@@ -220,6 +221,8 @@ export function buyboxFacts(input: BuyboxFactsInput): BuyboxFacts {
 
 export interface CompetitionRow {
   seller: string;
+  /** Шаг 107 [Р-232]: страница продавца на площадке — только из идентификатора, который дал канал; иначе null (имя текстом) */
+  sellerUrl: string | null;
   self: boolean;
   /** Цена с доставкой; доставку канал не назвал — только цена и пометка */
   landed: string;
@@ -298,6 +301,7 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
   };
   const rows: CompetitionRow[] = competitionRowOffers(ordered).map(({ offer: o }) => ({
     seller: o.isSelf ? c.you : o.sellerRef ?? c.unnamedSeller,
+    sellerUrl: sellerLink({ channel: unit.channel, marketplace: unit.marketplace, sellerRef: o.sellerRef, self: o.isSelf, demo: world.state.demo }),
     self: o.isSelf,
     landed: landed(o) !== null ? money(landed(o)!) : money(o.price.amountMinor),
     price: money(o.price.amountMinor),

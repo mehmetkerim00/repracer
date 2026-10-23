@@ -55,6 +55,19 @@ const FBA_ONLY_PRODUCT = 0;
 const CLEARANCE_PRODUCT = 1;
 const CLEARANCE_COST_MINOR = 1100;
 const CLEARANCE_FLOOR_MINOR = 1000;
+/**
+ * Шаг 107 [Р-233, Р-231]: рамки цены, заданные продавцом на SKU в Amazon (Min/Max, без доставки), — синтетические, у трёх товаров amazon.com
+ * (номер среди товаров → рамки). Пол amazon.com — min_price $14.00, потолок — $50.00:
+ *  - не сужают наш диапазон (Min $9.00, Max $60.00) — законная настройка продавца, цена ходит как прежде;
+ *  - Min $16.00 выше нашего пола — конфликт: цена ниже $16.00 не уходит («без изменения» с обеими суммами), пилюля в Offers;
+ *  - товар распродажи: Min $12.00 выше пола распродажи $10.00 — предупреждение, цена уходит, конфликт в каждой квитанции режима.
+ * Живое чтение значений рамок — с первым живым аккаунтом (A-30); настоящий адаптер до него читает «рамки есть» без значений
+ */
+const CHANNEL_BOUNDS_DEMO: ReadonlyMap<number, { minMinor: number | null; maxMinor: number | null }> = new Map([
+  [2, { minMinor: 900, maxMinor: 6000 }],
+  [3, { minMinor: 1600, maxMinor: null }],
+  [CLEARANCE_PRODUCT, { minMinor: 1200, maxMinor: null }],
+]);
 /** Насколько лоукостер FBM дешевле держателя Buy Box FBA: меньше бонуса исполнения каналом модели ($0.50) — Buy Box остаётся у FBA */
 const FBM_DISCOUNT_MINOR = 25;
 /** Шаг 103 [Р-228]: умолчание amazon.com главного демо и названия двух новых листингов (синтетические) */
@@ -269,7 +282,8 @@ export async function startDemoUsMarket(input: {
     seed: 68, params: { anyOfferChanged: { delayMs: 30_000, lossShare: 0 } }, descriptor: AMAZON_SIM_DESCRIPTOR_US,
     // Шаг 97 [H]: победитель — по формуле (FBA −0,50), а уведомление держателя не называет (A-29) — экран Competition говорит это прямо
     buyBox: LANDED_CHANNEL_BONUS,
-    skus: amazonScopes.map((s) => ({ sku: s.sku, asin: s.channelProductRef!, marketplaces: [AMAZON_US], priceMinor: 1850, quantity: 5 })),
+    skus: amazonScopes.map((s, k) => ({ sku: s.sku, asin: s.channelProductRef!, marketplaces: [AMAZON_US], priceMinor: 1850, quantity: 5,
+      ...(CHANNEL_BOUNDS_DEMO.has(k) ? { channelBounds: CHANNEL_BOUNDS_DEMO.get(k)! } : {}) })),
     competitors: [...amazonScopes.map((s, i) => ({
       // Шаг 97 [H]: продавец пула — вымышленное имя, исполнение каналом (FBA) и рейтинг, как SellerFeedbackRating
       sellerRef: sellersFor(i)[0]!.name, channelFulfilled: sellersFor(i)[0]!.channelFulfilled,
@@ -411,6 +425,28 @@ export async function startDemoUsMarket(input: {
     if (found.catalogued !== fresh.size) throw new Error(`new amazon.com offers: ${found.catalogued} of ${fresh.size} catalogued (${found.stop})`);
     log(`demo US: ${found.catalogued} new amazon.com offers found, default strategy «${DEFAULT_STRATEGY_NAME}»`);
   };
+
+  /**
+   * Шаг 107 [Р-233]: рамки цены у листингов amazon.com — настоящим путём обнаружения (`discoverOffers` → наблюдение ценообразования канала);
+   * обход видит только листинги с рамками и без цены и количества: сверка цен предложений демо (цены в тени не отправлялись) дала бы ложные
+   * «внешние правки»
+   */
+  const boundsOnly = new Proxy(port, {
+    get(target, key) {
+      if (key === 'discoverOffers') {
+        return async (c: AdapterCallContext, page: Parameters<typeof target.discoverOffers>[1]) => {
+          const found = await target.discoverOffers(c, page);
+          return { ...found, items: found.items.filter((x) => x.channelPricing?.channelBounds)
+            .map(({ currentPrice: _price, currentQuantity: _quantity, ...rest }) => rest) };
+        };
+      }
+      const v = Reflect.get(target, key, target) as unknown;
+      return typeof v === 'function' ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+  const seenBounds = await createPricingPipeline({ store: store as never, adapter: boundsOnly, alerts, logger: deps.logger, now: nowIso as never })
+    .discoverOffers({ ...ctx(a.amazonAccountId), deadline: new Date(Date.parse(nowIso()) + 10 * MINUTE_MS).toISOString() as never }, {});
+  if (seenBounds.recorded !== CHANNEL_BOUNDS_DEMO.size) throw new Error(`amazon.com channel bounds: ${seenBounds.recorded} of ${CHANNEL_BOUNDS_DEMO.size} recorded (${seenBounds.stop})`);
 
   let pressed: DemoUsMarket['pressed'] = null;
   if (virtualMs !== null) {

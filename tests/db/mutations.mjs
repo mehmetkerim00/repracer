@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0204_verify_schema_invariants_v57.sql';
+const VERIFY = 'migrations/0206_verify_schema_invariants_v58.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2887,6 +2887,33 @@ export const STEP105_1_ROWS = [
       m(dropConstraint('competitor_state_buybox_shipping_with_price', 'channel_data.competitor_state'), node(R1051, FORM1051, 'Buy Box shipping without a Buy Box price is refused', 'resolved')),
       m(dropConstraint('competitor_state_buybox_seller_other', 'channel_data.competitor_state'), node(R1051, FORM1051, 'a seller is named only for another holder', 'resolved')),
       m(dropConstraint('competitor_state_buybox_seller_length', 'channel_data.competitor_state'), node(R1051, FORM1051, 'a seller name is at most 200 characters', 'resolved')),
+    ],
+  },
+];
+
+// Шаг 107 [Р-233, Р-231]: значения рамок цены канала у наблюдения (0205) и блок предложения целиком — только у рамок с неизвестными значениями
+const R107 = T('channel-bounds-step107.pg.test.ts');
+const SHAPE107 = 'the observation keeps values only next to bounds, with the currency, positive and ordered';
+const GUARD107 = 'channel bounds with values the channel named no longer block the offer';
+export const STEP107_ROWS = [
+  {
+    row: 'шаг 107 (Р-233)', critical: false,
+    invariant: 'значения рамок канала — только у рамок, с валютой ровно тогда, когда названа хоть одна сторона; суммы положительные, Min не выше Max',
+    mutations: [
+      m(dropConstraint('offer_channel_pricing_bound_values_shape', 'channel_data.offer_channel_pricing'), node(R107, SHAPE107, 'values without bounds', '^OK$')),
+      m(dropConstraint('offer_channel_pricing_bound_values_range', 'channel_data.offer_channel_pricing'), node(R107, SHAPE107, 'the minimum above the maximum', '^OK$')),
+    ],
+  },
+  {
+    row: 'шаг 107 (Р-231, Р-120)', critical: true,
+    invariant: 'рамки канала без прочитанных значений или со значениями не в валюте предложения блокируют предложение целиком — при назначении стратегии, включении движка и привязке предложения (fail-closed)',
+    mutations: [
+      m(replaceInFunction('channel_data.offer_channel_pricing_active(uuid,uuid)', "WHEN o.channel_bounds AND o.bounds_currency IS DISTINCT FROM s.currency THEN 'CHANNEL_BOUNDS_PRESENT'", "WHEN false THEN 'CHANNEL_BOUNDS_PRESENT'"),
+        node(R107, GUARD107, 'values not read: the whole offer stays blocked (fail-closed)', '^OK$')),
+      m(replaceInFunction('channel_data.offer_channel_pricing_active(uuid,uuid)', "WHEN o.channel_bounds AND o.bounds_currency IS DISTINCT FROM s.currency THEN", 'WHEN o.channel_bounds AND o.bounds_currency IS NULL THEN'),
+        node(R107, GUARD107, 'values in another currency: blocked', '^OK$')),
+      m(replaceInFunction('tenant_data.offer_mapping_channel_pricing_guard()', "WHEN x.channel_bounds AND x.bounds_currency IS DISTINCT FROM currency THEN 'CHANNEL_BOUNDS_PRESENT'", "WHEN false THEN 'CHANNEL_BOUNDS_PRESENT'"),
+        node(T('channel-pricing-guard.pg.test.ts'), 'step 107 [Р-231]', 'step 107: bounds without values block the mapping', 'resolved')),
     ],
   },
 ];

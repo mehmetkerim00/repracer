@@ -20,7 +20,7 @@ const titles: Record<AnyReasonCode, string> = {
   FIXED_PRICE: 'Precio fijo', MARGIN_TARGET: 'Precio para el margen objetivo', BUYBOX_MATCH: 'Igualar la Buy Box', BUYBOX_UNDERCUT: 'Quedar por debajo de la Buy Box',
   LOWEST_MATCH: 'Igualar el precio más bajo', LOWEST_UNDERCUT: 'Quedar por debajo del precio más bajo', CAPPED_AT_MIN_PRICE: 'Objetivo limitado a su precio mínimo',
   CAPPED_AT_MAX_PRICE: 'Objetivo limitado a su precio máximo', CAPPED_AT_MARGIN_FLOOR: 'Objetivo limitado al piso de margen', CLEARANCE_FLOOR: 'Modo liquidación', CAPPED_AT_CLEARANCE_FLOOR: 'Objetivo limitado al piso de liquidación', RAISED_TO_FLOOR: 'Subido hasta el piso', RAISED_TOWARD_FLOOR: 'Subido un paso hacia el piso', ALREADY_AT_TARGET: 'Ya está en el objetivo', WITHIN_DEADBAND: 'Cambio por debajo del umbral', SHADOW_ALREADY_PROPOSED: 'Ya propuesto en modo sombra', LADDER_PACED: 'Siguiente paso hacia el piso, más tarde',
-  ALREADY_WINNING_BUYBOX: 'Ya tiene la Buy Box', NO_COMPETITOR_OFFERS: 'Sin competidores', TARGET_OUTSIDE_BOUNDS_HOLD: 'Objetivo fuera de los límites — se mantiene',
+  ALREADY_WINNING_BUYBOX: 'Ya tiene la Buy Box', NO_COMPETITOR_OFFERS: 'Sin competidores', TARGET_OUTSIDE_BOUNDS_HOLD: 'Objetivo fuera de los límites — se mantiene', CHANNEL_BOUNDS_HOLD: 'Fuera de los límites de precio del canal — no se envía', CLEARANCE_BELOW_CHANNEL_MIN: 'Liquidación por debajo del mínimo del canal',
   BUYBOX_WIN_TARGET: 'Ganar la Buy Box', CREEP_UP: 'Subido un paso mientras gana', CREEP_STEP_BACK: 'Buy Box perdida — vuelta al último precio ganador',
   CAPPED_AT_CREEP_CEILING: 'Por debajo del precio que perdió la Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Titular de la Buy Box no indicado — se mantiene',
   ANCHOR_UNDERCUT: 'Precio según su referencia', COMPETITORS_FILTERED: 'Competidores filtrados por logística', NO_ELIGIBLE_COMPETITORS: 'Sin competidores tras su filtro — se mantiene',
@@ -130,6 +130,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
   CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Modo liquidación: el piso de ${f.money('floorMinor')} está por debajo del punto de equilibrio de ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} por unidad).` : f.has('breakEvenMinor') ? `Modo liquidación: piso de ${f.money('floorMinor')}, punto de equilibrio de ${f.money('breakEvenMinor')}.` : `Modo liquidación: piso de ${f.money('floorMinor')} — el punto de equilibrio no se puede calcular.`),
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `El objetivo ${f.money('targetMinor')} está por debajo de su piso de liquidación de ${f.money('floorMinor')} — se fija en el piso de liquidación.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Su piso de liquidación de ${f.money('floorMinor')} está por debajo del mínimo definido en el canal (${f.money('channelMinMinor')}): los precios inferiores se envían, como usted confirmó, y el canal puede desactivar esta oferta.`,
   RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
     ? `Su precio ${f.money('currentMinor')} estaba por debajo de su punto de equilibrio — subido a ${f.money('floorMinor')}${raiseAfter(f)}.`
     : f.get('bound') === 'clearance'
@@ -161,6 +162,9 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_AT_MAX: (f) => `Usted tiene la Buy Box en ${f.money('currentMinor')}, que es su precio máximo (${f.money('maxMinor')}) — sin subida.`,
   NO_COMPETITOR_OFFERS: () => 'No hay ofertas de la competencia: nada que seguir.',
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `El objetivo ${f.money('targetMinor')} está fuera de ${f.money('minMinor')}–${f.money('maxMinor')}; la estrategia está configurada para mantener el precio.`,
+  CHANNEL_BOUNDS_HOLD: (f) => (f.get('side') === 'MAX'
+    ? `El precio ${f.money('targetMinor')} está por encima del máximo definido en el canal (${f.money('channelMaxMinor')}): el canal desactivaría esta oferta, así que el precio no se envió.`
+    : `El precio ${f.money('targetMinor')} está por debajo del mínimo definido en el canal (${f.money('channelMinMinor')}): el canal desactivaría esta oferta, así que el precio no se envió.`),
   COMPETITOR_REQUIREMENT_NOT_MET: (f) => `Estrategia no evaluada: los datos del canal no aportan ${f.list('unmet')}${opt(f, 'requiredCompleteness', () => ` (necesita ${f.value('requiredCompleteness')}${opt(f, 'requiredN', () => ` ${f.count('requiredN')}`)}, recibió ${f.has('actualCompleteness') ? f.value('actualCompleteness') : noValue}${opt(f, 'actualN', () => ` ${f.count('actualN')}`)})`)}${opt(f, 'ageSeconds', () => `; antigüedad de los datos ${f.seconds('ageSeconds')}${opt(f, 'maxStalenessSeconds', () => `, límite ${f.seconds('maxStalenessSeconds')}`)}`)}.`,
   COST_INPUTS_MISSING: (f) => `Estrategia no evaluada: falta ${f.value('missing')}.`,
   MARGIN_UNATTAINABLE: (f) => `No se puede alcanzar el margen objetivo de ${f.bp('marginBp')}: comisión ${f.bp('feeRateBp')}, comisión fija ${f.money('fixedFeeMinor')}, costo unitario ${f.money('unitCostMinor')}${opt(f, 'vatRateBp', () => `, IVA ${f.bp('vatRateBp')}`)}.`,
@@ -311,9 +315,11 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MAX_PRICE: (f) => `El objetivo calculado con los precios de la competencia estaba por encima de su precio máximo — se limitó a ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `El objetivo calculado con los precios de la competencia estaba por debajo de su piso de margen — se fijó en el piso de margen de ${f.money('floorMinor')} (margen ${f.bp('minMarginBp')}).`,
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `El objetivo calculado con los precios de la competencia estaba por debajo de su piso de liquidación — se fijó en ${f.money('floorMinor')}.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Su piso de liquidación de ${f.money('floorMinor')} estaba por debajo del mínimo definido en el canal: los precios inferiores se enviaron, como usted confirmó, y el canal podía desactivar esta oferta. La decisión conserva durante 3 días los importes del canal, por eso el mínimo ya no se muestra.`,
   ALREADY_AT_TARGET: () => 'El precio ya era igual al objetivo.',
   WITHIN_DEADBAND: (f) => `La diferencia con el objetivo estaba por debajo del umbral de ${f.money('deadbandMinor')} — el precio se mantiene.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `El objetivo estaba fuera de ${f.money('minMinor')}–${f.money('maxMinor')}; la estrategia está configurada para mantener el precio.`,
+  CHANNEL_BOUNDS_HOLD: (f) => `El precio estaba ${f.get('side') === 'MAX' ? 'por encima del máximo definido en el canal' : 'por debajo del mínimo definido en el canal'}: el canal habría desactivado esta oferta, así que no se envió. La decisión conserva durante 3 días los importes del canal, por eso ya no se muestran.`,
   COMPETITOR_REQUIREMENT_NOT_MET: () => 'Estrategia no evaluada: los datos del canal no aportaron lo que la estrategia necesita.',
   ENGINE_CURRENCY_MISMATCH: (f) => `Estrategia no evaluada: la moneda no coincide (${f.value('source')} en otra moneda; oferta: ${f.raw('expected')}).`,
   DIVERGENCE_CASE_OPENED: (f) => `Caso de discrepancia abierto: el canal mostraba un precio distinto del esperado (${f.money('expectedMinor')}).`,
@@ -360,7 +366,7 @@ const values: Record<ValueKey, string> = {
   CHANNEL_REPRICER_ACTIVE: 'los precios automáticos del propio canal están activos para esta oferta', CHANNEL_BOUNDS_PRESENT: 'la oferta tiene límites de precio definidos en el canal',
   RESPONSE_MISMATCH: 'el canal respondió sobre una oferta o un sitio distintos de los que pedimos: la respuesta no se usó',
   TELL_PLATFORM_TEAM: 'Avísenos: el canal respondió sobre una oferta distinta de la que pedimos; la causa está en el canal o en nuestra verificación, y el soporte del canal no puede resolverlo',
-  DISABLE_CHANNEL_REPRICER: 'Quite de la oferta la regla de precios automáticos del canal (nuestro motor no funciona mientras esté activa)', REMOVE_CHANNEL_BOUNDS: 'Quite el precio mínimo y el máximo definidos en el canal: nuestros límites deben ser los únicos',
+  DISABLE_CHANNEL_REPRICER: 'Quite de la oferta la regla de precios automáticos del canal (nuestro motor no funciona mientras esté activa)', REMOVE_CHANNEL_BOUNDS: 'Quite el precio mínimo y el máximo definidos en el canal: sus valores no se leyeron, así que no se pueden comparar con su piso y su precio máximo',
   ACTION_NOT_ALLOWED: 'acción no permitida por el canal', PRECONDITION_FAILED: 'no se cumple una condición previa del canal', EDIT_BUDGET_EXHAUSTED: 'presupuesto de ediciones agotado',
   OFFER_NOT_LIVE: 'oferta no publicada', POLICY_VIOLATION: 'infracción de las políticas del canal', TENANT_MISMATCH: 'la cuenta pertenece a otro espacio de trabajo', SIGNATURE_INVALID: 'firma no válida',
   UNSUPPORTED: 'no compatible con el canal', UNKNOWN: 'error desconocido', MAX_ATTEMPTS: 'máximo de intentos', NOT_APPLIED: 'no aplicado',
@@ -1315,6 +1321,7 @@ export const es: Messages = {
       notAssigned: (reason: string) => `Sin asignar: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Piso por encima del techo', frozenDetail: 'precios congelados: suba el precio máximo o active la liquidación',
+      belowChannelMin: 'Por debajo del mínimo del canal', aboveChannelMax: 'Por encima del máximo del canal',
       // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
       buybox: {
         you: 'Usted', unknown: 'Desconocido', none: 'Nadie', noShipping: 'envío sin indicar',
@@ -1368,7 +1375,7 @@ export const es: Messages = {
       // Шаг 96.2 [Р-146]: колонка из одного значения — фразой подписи, а не колонкой
       uniform: (column: string, value: string) => `${column}: ${value}, en todas las ofertas de la lista.`,
       noShipping: 'El canal no indicó el envío de algunas de estas ofertas: sus precios no incluyen envío.',
-      you: 'Usted', unnamedSeller: 'vendedor sin nombre', buyBoxBadge: 'Buy Box', notNamed: 'sin nombre',
+      you: 'Usted', unnamedSeller: 'vendedor sin nombre', buyBoxBadge: 'Buy Box', sellerPage: (seller: string) => `${seller} — abrir la página del vendedor en una pestaña nueva`, notNamed: 'sin nombre',
       fulfilment: { channel: (channel: string) => channel === 'Amazon' ? 'Amazon (FBA)' : channel, merchant: 'Vendedor' },
       rating: (pct: string, count: number) => `${pct} de ${count}`,
       position: (rank: number, total: number) => `Su oferta está en el puesto ${rank} de ${total} por precio con envío`,
@@ -1531,6 +1538,21 @@ export const es: Messages = {
       floorFromBreakEven: (min: string) => `punto de equilibrio: por encima de su precio mínimo de ${min}`,
       floorFromClearance: (min: string) => `piso de liquidación: reemplaza su precio mínimo de ${min} y el piso de margen mientras dure la liquidación`,
       frozen: (floor: string, max: string) => `Piso por encima del techo: precios congelados. Su piso de ${floor} está por encima de su precio máximo de ${max}: ningún precio cabe y no se envía ningún cambio de precio. Suba el precio máximo o active la liquidación.`,
+      // Шаг 107 [Р-233]: рамки цены, заданные продавцом в самом канале (Amazon Min/Max на SKU), рядом с нашими
+      channelBounds: {
+        title: 'Límites de precio del canal',
+        lead: 'El mínimo y el máximo definidos para esta oferta en el propio canal. Con un precio fuera de ellos, el canal desactiva la oferta.',
+        min: 'Mínimo del canal', max: 'Máximo del canal', notSetSide: 'sin definir',
+        notProvided: 'El canal no los proporciona.',
+        notSet: (when: string) => `Ninguno definido en el canal (visto ${when}). El canal aún puede aplicar límites propios que no muestra.`,
+        notRead: (when: string) => `Definidos en el canal (visto ${when}), pero sus valores no se leyeron: el repricing de esta oferta sigue bloqueado hasta poder leerlos.`,
+        seen: (when: string) => `Visto ${when}.`,
+        withoutShipping: 'Sin envío: se comparan con su piso y su precio máximo, que tampoco incluyen el envío.',
+        inside: 'Su piso y su precio máximo están dentro de los límites del canal.',
+        belowMin: (floor: string, min: string) => `Por debajo del mínimo del propio canal: el canal desactivará esta oferta. Su piso de ${floor} está por debajo del mínimo del canal de ${min}; los precios inferiores a ${min} no se envían.`,
+        belowMinClearance: (floor: string, min: string) => `Por debajo del mínimo del propio canal: el canal desactivará esta oferta. Su piso de liquidación de ${floor} está por debajo del mínimo del canal de ${min}; los precios inferiores a ${min} se envían, como usted confirmó al activar la liquidación.`,
+        aboveMax: (max: string, channelMax: string) => `Por encima del máximo del propio canal: el canal desactivará esta oferta. Su precio máximo de ${max} está por encima del máximo del canal de ${channelMax}; los precios superiores a ${channelMax} no se envían.`,
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Piso de liquidación — permitir vender por debajo del punto de equilibrio',
@@ -1540,6 +1562,9 @@ export const es: Messages = {
         lossPerUnit: 'Pérdida por unidad', noLoss: 'ninguna — en este piso cada venta aún cubre sus costos',
         maxLoss: 'Pérdida total máxima', stock: (pieces: number) => `con el inventario actual de ${pieces} ${pieces === 1 ? 'unidad' : 'unidades'}`, stockUnknown: 'inventario desconocido — solo se muestra la pérdida por unidad',
         ack: (breakEven: string) => `Entiendo: cada venta por debajo de ${breakEven} pierde dinero`,
+        // Шаг 107 [Р-233]: пол распродажи ниже Min канала — предупреждение до галочки; цена всё равно уходит (решение владельца)
+        channelMinWarning: (floor: string, min: string) => `El mínimo del propio canal para esta oferta es ${min}. Con un piso de liquidación de ${floor}, los precios inferiores a ${min} se envían igualmente, y con ellos el canal desactivará esta oferta.`,
+        ackWithChannel: (breakEven: string, min: string) => `Entiendo: cada venta por debajo de ${breakEven} pierde dinero, y por debajo de ${min} el canal desactiva esta oferta`,
         note: 'Por qué', noteHint: 'Obligatorio — queda en el registro de auditoría con su nombre.', notePlaceholder: 'Liquidar el inventario de verano',
         endsAt: 'Terminar automáticamente', endsAtHint: 'Opcional — después de esta fecha el piso vuelve a ser el calculado.',
         enable: 'Activar la liquidación', mfaHint: 'Mueve el piso: requiere un segundo factor.', readOnly: 'Solo el propietario o un gerente puede activar la liquidación.',

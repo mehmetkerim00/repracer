@@ -20,7 +20,7 @@ const titles: Record<AnyReasonCode, string> = {
   FIXED_PRICE: 'Festpreis', MARGIN_TARGET: 'Preis für Zielmarge', BUYBOX_MATCH: 'Buy Box angleichen', BUYBOX_UNDERCUT: 'Buy Box unterbieten',
   LOWEST_MATCH: 'Niedrigsten Preis angleichen', LOWEST_UNDERCUT: 'Niedrigsten Preis unterbieten', CAPPED_AT_MIN_PRICE: 'Ziel auf Ihren Mindestpreis begrenzt',
   CAPPED_AT_MAX_PRICE: 'Ziel auf Ihren Höchstpreis begrenzt', CAPPED_AT_MARGIN_FLOOR: 'Ziel auf die Mindestmargen-Untergrenze begrenzt', CLEARANCE_FLOOR: 'Abverkaufsmodus', CAPPED_AT_CLEARANCE_FLOOR: 'Ziel auf die Abverkaufs-Untergrenze begrenzt', RAISED_TO_FLOOR: 'Auf die Untergrenze angehoben', RAISED_TOWARD_FLOOR: 'Einen Schritt zur Untergrenze angehoben', ALREADY_AT_TARGET: 'Ziel bereits erreicht', WITHIN_DEADBAND: 'Änderung unter Schwelle', SHADOW_ALREADY_PROPOSED: 'Im Schattenmodus bereits vorgeschlagen', LADDER_PACED: 'Nächster Schritt zur Untergrenze später',
-  ALREADY_WINNING_BUYBOX: 'Buy Box bereits gewonnen', NO_COMPETITOR_OFFERS: 'Keine Wettbewerber', TARGET_OUTSIDE_BOUNDS_HOLD: 'Ziel außerhalb der Grenzen — beibehalten',
+  ALREADY_WINNING_BUYBOX: 'Buy Box bereits gewonnen', NO_COMPETITOR_OFFERS: 'Keine Wettbewerber', TARGET_OUTSIDE_BOUNDS_HOLD: 'Ziel außerhalb der Grenzen — beibehalten', CHANNEL_BOUNDS_HOLD: 'Außerhalb der Preisgrenzen im Kanal — nicht gesendet', CLEARANCE_BELOW_CHANNEL_MIN: 'Abverkauf unter dem Mindestpreis im Kanal',
   BUYBOX_WIN_TARGET: 'Buy Box gewinnen', CREEP_UP: 'Beim Gewinnen einen Schritt angehoben', CREEP_STEP_BACK: 'Buy Box verloren — zurück zum letzten Gewinnerpreis',
   CAPPED_AT_CREEP_CEILING: 'Unter dem Preis gehalten, bei dem die Buy Box verloren ging', BUYBOX_HOLDER_UNKNOWN: 'Buy-Box-Inhaber nicht genannt — beibehalten',
   ANCHOR_UNDERCUT: 'Preis vom Bezugspunkt', COMPETITORS_FILTERED: 'Wettbewerber nach Versandart gefiltert', NO_ELIGIBLE_COMPETITORS: 'Nach Ihrem Filter keine Wettbewerber — beibehalten',
@@ -130,6 +130,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
   CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Abverkaufsmodus: Untergrenze ${f.money('floorMinor')} liegt unter der Gewinnschwelle ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} je Stück).` : f.has('breakEvenMinor') ? `Abverkaufsmodus: Untergrenze ${f.money('floorMinor')}, Gewinnschwelle ${f.money('breakEvenMinor')}.` : `Abverkaufsmodus: Untergrenze ${f.money('floorMinor')} — die Gewinnschwelle ist nicht berechenbar.`),
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `Ziel ${f.money('targetMinor')} liegt unter Ihrer Abverkaufs-Untergrenze ${f.money('floorMinor')} — auf die Abverkaufs-Untergrenze gesetzt.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Ihre Abverkaufs-Untergrenze ${f.money('floorMinor')} liegt unter dem im Kanal festgelegten Mindestpreis ${f.money('channelMinMinor')}: Preise darunter werden wie bestätigt gesendet, und der Kanal kann das Angebot deaktivieren.`,
   RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
     ? `Ihr Preis ${f.money('currentMinor')} lag unter der Gewinnschwelle — auf die Gewinnschwelle ${f.money('floorMinor')} angehoben${raiseAfter(f)}.`
     : f.get('bound') === 'clearance'
@@ -160,6 +161,9 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_AT_MAX: (f) => `Sie halten die Buy Box bei ${f.money('currentMinor')}, Ihrem Höchstpreis ${f.money('maxMinor')} — keine Anhebung.`,
   NO_COMPETITOR_OFFERS: () => 'Keine Wettbewerbsangebote — nichts zum Folgen.',
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `Ziel ${f.money('targetMinor')} liegt außerhalb von ${f.money('minMinor')}–${f.money('maxMinor')}; die Strategie behält den Preis bei.`,
+  CHANNEL_BOUNDS_HOLD: (f) => (f.get('side') === 'MAX'
+    ? `Preis ${f.money('targetMinor')} liegt über dem im Kanal festgelegten Höchstpreis ${f.money('channelMaxMinor')} — der Kanal würde das Angebot deaktivieren, daher wurde der Preis nicht gesendet.`
+    : `Preis ${f.money('targetMinor')} liegt unter dem im Kanal festgelegten Mindestpreis ${f.money('channelMinMinor')} — der Kanal würde das Angebot deaktivieren, daher wurde der Preis nicht gesendet.`),
   COMPETITOR_REQUIREMENT_NOT_MET: (f) => `Strategie nicht berechnet: die Kanaldaten liefern nicht ${f.list('unmet')}${opt(f, 'requiredCompleteness', () => ` (benötigt ${f.value('requiredCompleteness')}${opt(f, 'requiredN', () => ` ${f.count('requiredN')}`)}, erhalten ${f.has('actualCompleteness') ? f.value('actualCompleteness') : noValue}${opt(f, 'actualN', () => ` ${f.count('actualN')}`)})`)}${opt(f, 'ageSeconds', () => `; Datenalter ${f.seconds('ageSeconds')}${opt(f, 'maxStalenessSeconds', () => `, Grenze ${f.seconds('maxStalenessSeconds')}`)}`)}.`,
   COST_INPUTS_MISSING: (f) => `Strategie nicht berechnet: ${f.value('missing')} fehlt.`,
   MARGIN_UNATTAINABLE: (f) => `Die Zielmarge ${f.bp('marginBp')} ist nicht erreichbar: Gebühr ${f.bp('feeRateBp')}, Fixgebühr ${f.money('fixedFeeMinor')}, Stückkosten ${f.money('unitCostMinor')}${opt(f, 'vatRateBp', () => `, USt. ${f.bp('vatRateBp')}`)}.`,
@@ -296,9 +300,11 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MAX_PRICE: (f) => `Das Ziel aus Wettbewerbspreisen lag über Ihrem Höchstpreis — begrenzt auf ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrer Mindestmargen-Untergrenze — auf die Untergrenze ${f.money('floorMinor')} gesetzt (Marge ${f.bp('minMarginBp')}).`,
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `Das Ziel aus Wettbewerbspreisen lag unter Ihrer Abverkaufs-Untergrenze — auf die Abverkaufs-Untergrenze ${f.money('floorMinor')} gesetzt.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Ihre Abverkaufs-Untergrenze ${f.money('floorMinor')} lag unter dem im Kanal festgelegten Mindestpreis: Preise darunter wurden wie bestätigt gesendet, und der Kanal konnte das Angebot deaktivieren. Beträge aus dem Kanal behält die Entscheidung 3 Tage, daher wird der Mindestpreis nicht mehr gezeigt.`,
   ALREADY_AT_TARGET: () => 'Der Preis entsprach bereits dem Ziel.',
   WITHIN_DEADBAND: (f) => `Die Differenz zum Ziel lag unter der Schwelle ${f.money('deadbandMinor')} — der Preis bleibt.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `Das Ziel lag außerhalb von ${f.money('minMinor')}–${f.money('maxMinor')}; die Strategie behält den Preis bei.`,
+  CHANNEL_BOUNDS_HOLD: (f) => `Der Preis lag ${f.get('side') === 'MAX' ? 'über dem im Kanal festgelegten Höchstpreis' : 'unter dem im Kanal festgelegten Mindestpreis'} — der Kanal hätte das Angebot deaktiviert, daher wurde er nicht gesendet. Beträge aus dem Kanal behält die Entscheidung 3 Tage, daher werden sie nicht mehr gezeigt.`,
   COMPETITOR_REQUIREMENT_NOT_MET: () => 'Strategie nicht berechnet: die Kanaldaten lieferten nicht, was die Strategie braucht.',
   ENGINE_CURRENCY_MISMATCH: (f) => `Strategie nicht berechnet: ${f.value('source')} war in einer anderen Währung als das Angebot (${f.raw('expected')}).`,
   DIVERGENCE_CASE_OPENED: (f) => `Abweichungsfall eröffnet: der Kanal zeigte einen anderen Preis als die erwarteten ${f.money('expectedMinor')}.`,
@@ -345,7 +351,7 @@ const values: Record<ValueKey, string> = {
   CHANNEL_REPRICER_ACTIVE: 'die automatische Preisgestaltung des Kanals ist für dieses Angebot aktiv', CHANNEL_BOUNDS_PRESENT: 'für das Angebot sind im Kanal Preisgrenzen gesetzt',
   RESPONSE_MISMATCH: 'der Kanal hat zu einem anderen Angebot oder einer anderen Storefront geantwortet als angefragt: die Antwort wurde nicht verwendet',
   TELL_PLATFORM_TEAM: 'Sagen Sie uns Bescheid: Der Kanal hat zu einem anderen Angebot geantwortet als angefragt — die Ursache liegt beim Kanal oder in unserer Prüfung, der Support des Kanals kann das nicht beheben',
-  DISABLE_CHANNEL_REPRICER: 'Die Regel für automatische Preisgestaltung im Kanal vom Angebot entfernen (unsere Engine arbeitet nicht, solange sie gesetzt ist)', REMOVE_CHANNEL_BOUNDS: 'Den im Kanal gesetzten Mindest- und Höchstpreis entfernen: unsere Grenzen müssen die einzigen sein',
+  DISABLE_CHANNEL_REPRICER: 'Die Regel für automatische Preisgestaltung im Kanal vom Angebot entfernen (unsere Engine arbeitet nicht, solange sie gesetzt ist)', REMOVE_CHANNEL_BOUNDS: 'Den im Kanal gesetzten Mindest- und Höchstpreis entfernen: ihre Werte wurden nicht gelesen, daher lassen sie sich nicht mit Ihrer Untergrenze und Ihrem Höchstpreis vergleichen',
   ACTION_NOT_ALLOWED: 'Aktion vom Kanal nicht erlaubt', PRECONDITION_FAILED: 'Vorbedingung des Kanals nicht erfüllt', EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht',
   OFFER_NOT_LIVE: 'Angebot nicht online', POLICY_VIOLATION: 'Verstoß gegen Kanalrichtlinie', TENANT_MISMATCH: 'Konto gehört zu einem anderen Arbeitsbereich', SIGNATURE_INVALID: 'ungültige Signatur',
   UNSUPPORTED: 'vom Kanal nicht unterstützt', UNKNOWN: 'unbekannter Fehler', MAX_ATTEMPTS: 'maximale Versuche', NOT_APPLIED: 'nicht übernommen',
@@ -1261,6 +1267,7 @@ export const de: Messages = {
       notAssigned: (reason: string) => `Nicht zugewiesen: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Untergrenze über Höchstpreis', frozenDetail: 'Preise eingefroren — Höchstpreis anheben oder Abverkauf einschalten',
+      belowChannelMin: 'Unter dem Mindestpreis im Kanal', aboveChannelMax: 'Über dem Höchstpreis im Kanal',
       // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
       buybox: {
         you: 'Sie', unknown: 'Unbekannt', none: 'Niemand', noShipping: 'Versand nicht genannt',
@@ -1313,7 +1320,7 @@ export const de: Messages = {
       columns: { seller: 'Verkäufer', landed: 'Preis mit Versand', shipping: 'Versand', fulfilment: 'Versand durch', rating: 'Bewertung', buyBox: 'Buy Box', price: 'Preis' },
       uniform: (column: string, value: string) => `${column}: ${value} — bei allen gezeigten Angeboten.`,
       noShipping: 'Der Kanal hat für einige dieser Angebote keinen Versand genannt: ihre Preise sind ohne Versand.',
-      you: 'Sie', unnamedSeller: 'unbenannter Verkäufer', buyBoxBadge: 'Buy Box', notNamed: 'nicht genannt',
+      you: 'Sie', unnamedSeller: 'unbenannter Verkäufer', buyBoxBadge: 'Buy Box', sellerPage: (seller: string) => `${seller} — Verkäuferseite in neuem Tab öffnen`, notNamed: 'nicht genannt',
       fulfilment: { channel: (channel: string) => channel === 'Amazon' ? 'Amazon (FBA)' : channel, merchant: 'Verkäufer' },
       rating: (pct: string, count: number) => `${pct} von ${count}`,
       position: (rank: number, total: number) => `Ihr Angebot ist Nr. ${rank} von ${total} nach Preis mit Versand`,
@@ -1473,6 +1480,21 @@ export const de: Messages = {
       floorFromBreakEven: (min: string) => `Gewinnschwelle: über Ihrem Mindestpreis ${min}`,
       floorFromClearance: (min: string) => `Abverkaufs-Untergrenze: ersetzt Ihren Mindestpreis ${min} und die Mindestmargen-Untergrenze, solange der Abverkauf läuft`,
       frozen: (floor: string, max: string) => `Untergrenze über Höchstpreis — Preise eingefroren. Ihre Untergrenze ${floor} liegt über Ihrem Höchstpreis ${max}: Kein Preis passt, und keine Preisänderung wird gesendet. Heben Sie den Höchstpreis an oder schalten Sie den Abverkauf ein.`,
+      // Шаг 107 [Р-233]: рамки цены, заданные продавцом в самом канале (Amazon Min/Max на SKU), рядом с нашими
+      channelBounds: {
+        title: 'Preisgrenzen im Kanal',
+        lead: 'Mindest- und Höchstpreis, die für dieses Angebot im Kanal selbst festgelegt sind. Bei einem Preis außerhalb deaktiviert der Kanal das Angebot.',
+        min: 'Mindestpreis im Kanal', max: 'Höchstpreis im Kanal', notSetSide: 'nicht festgelegt',
+        notProvided: 'Vom Kanal nicht geliefert.',
+        notSet: (when: string) => `Im Kanal keine festgelegt (gesehen ${when}). Der Kanal kann dennoch eigene Grenzen anwenden, die er nicht zeigt.`,
+        notRead: (when: string) => `Im Kanal festgelegt (gesehen ${when}), aber die Werte wurden nicht gelesen — das Repricing dieses Angebots bleibt gesperrt, bis sie gelesen werden können.`,
+        seen: (when: string) => `Gesehen ${when}.`,
+        withoutShipping: 'Ohne Versand — verglichen mit Ihrer Untergrenze und Ihrem Höchstpreis, die ebenfalls ohne Versand sind.',
+        inside: 'Ihre Untergrenze und Ihr Höchstpreis liegen innerhalb der Preisgrenzen im Kanal.',
+        belowMin: (floor: string, min: string) => `Unter dem Mindestpreis im Kanal — der Kanal deaktiviert dieses Angebot. Ihre Untergrenze ${floor} liegt unter dem Mindestpreis im Kanal ${min}; Preise unter ${min} werden nicht gesendet.`,
+        belowMinClearance: (floor: string, min: string) => `Unter dem Mindestpreis im Kanal — der Kanal deaktiviert dieses Angebot. Ihre Abverkaufs-Untergrenze ${floor} liegt unter dem Mindestpreis im Kanal ${min}; Preise unter ${min} werden gesendet, wie Sie beim Einschalten des Abverkaufs bestätigt haben.`,
+        aboveMax: (max: string, channelMax: string) => `Über dem Höchstpreis im Kanal — der Kanal deaktiviert dieses Angebot. Ihr Höchstpreis ${max} liegt über dem Höchstpreis im Kanal ${channelMax}; Preise über ${channelMax} werden nicht gesendet.`,
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Abverkaufs-Untergrenze — Verkauf unter der Gewinnschwelle erlauben',
@@ -1482,6 +1504,9 @@ export const de: Messages = {
         lossPerUnit: 'Verlust je Stück', noLoss: 'keiner — auf dieser Untergrenze deckt ein Verkauf noch seine Kosten',
         maxLoss: 'Höchster Gesamtverlust', stock: (pieces: number) => `beim aktuellen Bestand von ${pieces} Stück`, stockUnknown: 'Bestand unbekannt — nur der Verlust je Stück wird gezeigt',
         ack: (breakEven: string) => `Mir ist klar: Jeder Verkauf unter ${breakEven} ist ein Verlust`,
+        // Шаг 107 [Р-233]: пол распродажи ниже Min канала — предупреждение до галочки; цена всё равно уходит (решение владельца)
+        channelMinWarning: (floor: string, min: string) => `Der Mindestpreis im Kanal für dieses Angebot ist ${min}. Mit einer Abverkaufs-Untergrenze von ${floor} werden Preise unter ${min} trotzdem gesendet, und der Kanal deaktiviert das Angebot bei diesen Preisen.`,
+        ackWithChannel: (breakEven: string, min: string) => `Ich verstehe: Jeder Verkauf unter ${breakEven} bringt Verlust, und unter ${min} deaktiviert der Kanal dieses Angebot`,
         note: 'Warum', noteHint: 'Pflicht — bleibt mit Ihrem Namen im Audit-Protokoll.', notePlaceholder: 'Sommerware abverkaufen',
         endsAt: 'Automatisch beenden', endsAtHint: 'Optional — nach diesem Datum ist die Untergrenze wieder die berechnete.',
         enable: 'Abverkauf einschalten', mfaHint: 'Verschiebt die Untergrenze: braucht einen zweiten Faktor.', readOnly: 'Nur der Inhaber oder ein Manager kann den Abverkauf einschalten.',

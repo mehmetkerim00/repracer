@@ -33,9 +33,13 @@ async function world() {
     fixtureChannel: 'AMAZON', fixtureRegion: 'EU', fixtureExternalAccountId: `A1SYNG${tag}`, marketplaces: [DE], clock: new Date().toISOString(), seed: { scopes: [scope(sku)] },
   });
   const accountId = w.ids.dbId(ACCOUNT);
-  const observe = (externalSku: string) => inTenant(pool, w.tenantId, (tx) => tx.query(
-    `INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
-     VALUES ($1, $2, 'AMAZON', $3, $4, true, false, 'DISCOVERY', now())`, [w.tenantId, accountId, DE, externalSku]));
+  // Шаг 107 [Р-231]: рамки канала без значений (как читает настоящий адаптер) или со значениями в валюте предложения
+  const observe = (externalSku: string, kind: 'REPRICER' | 'BOUNDS_UNREAD' | 'BOUNDS_KNOWN' = 'REPRICER') => inTenant(pool, w.tenantId, (tx) => tx.query(
+    `INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds,
+                                                     channel_min_minor, channel_max_minor, bounds_currency, source, observed_at)
+     VALUES ($1, $2, 'AMAZON', $3, $4, $5, $6, $7, $8, $9, 'DISCOVERY', now())`,
+    [w.tenantId, accountId, DE, externalSku, kind === 'REPRICER', kind !== 'REPRICER', kind === 'BOUNDS_KNOWN' ? 1200 : null, kind === 'BOUNDS_KNOWN' ? 3000 : null,
+      kind === 'BOUNDS_KNOWN' ? 'EUR' : null]));
   return { w, sku, ws: w.ids.dbId(`ws-${sku}`), accountId, observe, owner: w.ids.dbId(standUserOf('membership-owner')) };
 }
 
@@ -50,13 +54,12 @@ test('finding 1 [Р-120]: channel-owned pricing does not block switching reprici
     'Р-120: repricing is not switched on for an offer the channel prices itself');
 });
 
-test('finding 3 [Р-120]: an offer the channel prices itself is not mapped to a write scope that already prices with a strategy', async () => {
-  const { w, ws, accountId, observe, owner } = await world();
-  const fresh = `SYN-SKU-N${randomBytes(3).toString('hex').toUpperCase()}`;
-  await observe(fresh);
-  // Обход, найденный ревьюером: единица со стратегией включается в ENGINE до привязки предложения (стражу назначения нечего проверять),
-  // затем привязывается предложение, у которого канал уже ведёт цену
-  const mapped = inTenant(admin, w.tenantId, async (tx) => {
+/**
+ * Обход, найденный ревьюером: единица со стратегией включается в ENGINE до привязки предложения (стражу назначения нечего проверять),
+ * затем привязывается предложение, у которого канал уже ведёт цену
+ */
+function mapFresh({ w, ws, accountId, owner }: Awaited<ReturnType<typeof world>>, fresh: string) {
+  return inTenant(admin, w.tenantId, async (tx) => {
     const { rows: [created] } = await tx.query(
       `INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind) VALUES ($1, gen_random_uuid(), $2, 'SIMPLE') RETURNING product_id`, [w.tenantId, `syn-${fresh}`]);
     const { rows: [scopeRow] } = await tx.query(
@@ -85,5 +88,21 @@ test('finding 3 [Р-120]: an offer the channel prices itself is not mapped to a 
        VALUES ($1, $2, $3, 'AMAZON', 'EU', $4, $5, $6, 'B000023902', 'NEW', 'ACTIVE', $7)`,
       [w.tenantId, created.product_id, accountId, DE, `offer:${fresh}`, fresh, scopeRow.write_scope_id]);
   }, owner, { mfa: true });
-  await assert.rejects(mapped, /has channel-owned pricing \(CHANNEL_REPRICER_ACTIVE\)/, 'finding 3: an offer with channel-owned pricing is mapped to a strategy write scope');
+}
+
+test('finding 3 [Р-120]: an offer the channel prices itself is not mapped to a write scope that already prices with a strategy', async () => {
+  const w = await world();
+  const fresh = `SYN-SKU-N${randomBytes(3).toString('hex').toUpperCase()}`;
+  await w.observe(fresh);
+  await assert.rejects(mapFresh(w, fresh), /has channel-owned pricing \(CHANNEL_REPRICER_ACTIVE\)/, 'finding 3: an offer with channel-owned pricing is mapped to a strategy write scope');
+});
+
+test('step 107 [Р-231]: the mapping guard blocks channel bounds without values and lets bounds with known values through', async () => {
+  const w = await world();
+  const unread = `SYN-SKU-U${randomBytes(3).toString('hex').toUpperCase()}`;
+  await w.observe(unread, 'BOUNDS_UNREAD');
+  await assert.rejects(mapFresh(w, unread), /has channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/, 'step 107: bounds without values block the mapping');
+  const known = `SYN-SKU-K${randomBytes(3).toString('hex').toUpperCase()}`;
+  await w.observe(known, 'BOUNDS_KNOWN');
+  assert.equal(await outcome(mapFresh(w, known)), 'OK', 'step 107: bounds with known values do not block the mapping');
 });

@@ -19,7 +19,7 @@ const titles: Record<AnyReasonCode, string> = {
   FIXED_PRICE: 'Fixed price', MARGIN_TARGET: 'Target margin price', BUYBOX_MATCH: 'Match the Buy Box', BUYBOX_UNDERCUT: 'Undercut the Buy Box',
   LOWEST_MATCH: 'Match the lowest price', LOWEST_UNDERCUT: 'Undercut the lowest price', CAPPED_AT_MIN_PRICE: 'Target capped at your minimum price',
   CAPPED_AT_MAX_PRICE: 'Target capped at your maximum price', CAPPED_AT_MARGIN_FLOOR: 'Target capped at the margin floor', CLEARANCE_FLOOR: 'Clearance mode', CAPPED_AT_CLEARANCE_FLOOR: 'Target capped at the clearance floor', RAISED_TO_FLOOR: 'Raised to the floor', RAISED_TOWARD_FLOOR: 'Raised one step toward the floor', ALREADY_AT_TARGET: 'Already at target', WITHIN_DEADBAND: 'Change below threshold', SHADOW_ALREADY_PROPOSED: 'Already proposed in shadow mode', LADDER_PACED: 'Next step to the floor later',
-  ALREADY_WINNING_BUYBOX: 'Already winning the Buy Box', NO_COMPETITOR_OFFERS: 'No competitors', TARGET_OUTSIDE_BOUNDS_HOLD: 'Target outside bounds — kept',
+  ALREADY_WINNING_BUYBOX: 'Already winning the Buy Box', NO_COMPETITOR_OFFERS: 'No competitors', TARGET_OUTSIDE_BOUNDS_HOLD: 'Target outside bounds — kept', CHANNEL_BOUNDS_HOLD: 'Outside the channel\'s own price bounds — not sent', CLEARANCE_BELOW_CHANNEL_MIN: 'Clearance below the channel\'s own minimum',
   BUYBOX_WIN_TARGET: 'Win the Buy Box', CREEP_UP: 'Raised one step while winning', CREEP_STEP_BACK: 'Buy Box lost — back to the last winning price',
   CAPPED_AT_CREEP_CEILING: 'Kept below the price that lost the Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Buy Box holder not named — kept',
   ANCHOR_UNDERCUT: 'Price from your anchor', COMPETITORS_FILTERED: 'Competitors filtered by fulfillment', NO_ELIGIBLE_COMPETITORS: 'No competitors left after your filter — kept',
@@ -129,6 +129,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   // Шаг 102 [Р-227]: режим распродажи — пол ниже безубыточности намеренно; убыток на штуку называется суммой
   CLEARANCE_FLOOR: (f) => (f.has('lossPerUnitMinor') ? `Clearance mode: floor ${f.money('floorMinor')} is below break-even ${f.money('breakEvenMinor')} (−${f.money('lossPerUnitMinor')} per piece).` : f.has('breakEvenMinor') ? `Clearance mode: floor ${f.money('floorMinor')}, break-even ${f.money('breakEvenMinor')}.` : `Clearance mode: floor ${f.money('floorMinor')} — break-even is not computed.`),
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `Target ${f.money('targetMinor')} is below your clearance floor ${f.money('floorMinor')} — set to the clearance floor.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Your clearance floor ${f.money('floorMinor')} is below the channel's own minimum ${f.money('channelMinMinor')}: prices below it are sent, as you confirmed, and the channel may deactivate this offer.`,
   RAISED_TO_FLOOR: (f) => costRaise(f) + (f.get('bound') === 'break_even'
     ? `Your price ${f.money('currentMinor')} was below break-even — raised to break-even ${f.money('floorMinor')}${raiseAfter(f)}.`
     : f.get('bound') === 'clearance'
@@ -160,6 +161,9 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_AT_MAX: (f) => `You hold the Buy Box at ${f.money('currentMinor')}, your maximum price ${f.money('maxMinor')} — no raise.`,
   NO_COMPETITOR_OFFERS: () => 'No competitor offers — nothing to follow.',
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `Target ${f.money('targetMinor')} is outside ${f.money('minMinor')}–${f.money('maxMinor')}; the strategy is set to keep the price.`,
+  CHANNEL_BOUNDS_HOLD: (f) => (f.get('side') === 'MAX'
+    ? `Price ${f.money('targetMinor')} is above the channel's own maximum ${f.money('channelMaxMinor')} — the channel would deactivate this offer, so the price was not sent.`
+    : `Price ${f.money('targetMinor')} is below the channel's own minimum ${f.money('channelMinMinor')} — the channel would deactivate this offer, so the price was not sent.`),
   COMPETITOR_REQUIREMENT_NOT_MET: (f) => `Strategy not evaluated: the channel data does not provide ${f.list('unmet')}${opt(f, 'requiredCompleteness', () => ` (needs ${f.value('requiredCompleteness')}${opt(f, 'requiredN', () => ` ${f.count('requiredN')}`)}, got ${f.has('actualCompleteness') ? f.value('actualCompleteness') : noValue}${opt(f, 'actualN', () => ` ${f.count('actualN')}`)})`)}${opt(f, 'ageSeconds', () => `; data age ${f.seconds('ageSeconds')}${opt(f, 'maxStalenessSeconds', () => `, limit ${f.seconds('maxStalenessSeconds')}`)}`)}.`,
   COST_INPUTS_MISSING: (f) => `Strategy not evaluated: ${f.value('missing')} is missing.`,
   MARGIN_UNATTAINABLE: (f) => `The target margin ${f.bp('marginBp')} cannot be reached: fee ${f.bp('feeRateBp')}, fixed fee ${f.money('fixedFeeMinor')}, unit cost ${f.money('unitCostMinor')}${opt(f, 'vatRateBp', () => `, VAT ${f.bp('vatRateBp')}`)}.`,
@@ -311,9 +315,11 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CAPPED_AT_MAX_PRICE: (f) => `The target from competitor prices was above your maximum price — capped at ${f.money('maxMinor')}.`,
   CAPPED_AT_MARGIN_FLOOR: (f) => `The target from competitor prices was below your margin floor — set to the margin floor ${f.money('floorMinor')} (margin ${f.bp('minMarginBp')}).`,
   CAPPED_AT_CLEARANCE_FLOOR: (f) => `The target from competitor prices was below your clearance floor — set to the clearance floor ${f.money('floorMinor')}.`,
+  CLEARANCE_BELOW_CHANNEL_MIN: (f) => `Your clearance floor ${f.money('floorMinor')} was below the channel's own minimum: prices below it were sent, as you confirmed, and the channel could deactivate this offer. Amounts from the channel are kept with the decision for 3 days, so the minimum is no longer shown.`,
   ALREADY_AT_TARGET: () => 'The price already equalled the target.',
   WITHIN_DEADBAND: (f) => `The difference to the target was below the threshold ${f.money('deadbandMinor')} — the price stays.`,
   TARGET_OUTSIDE_BOUNDS_HOLD: (f) => `The target was outside ${f.money('minMinor')}–${f.money('maxMinor')}; the strategy is set to keep the price.`,
+  CHANNEL_BOUNDS_HOLD: (f) => `The price was ${f.get('side') === 'MAX' ? 'above the channel\'s own maximum' : 'below the channel\'s own minimum'} — the channel would deactivate this offer, so it was not sent. Amounts from the channel are kept with the decision for 3 days, so they are no longer shown.`,
   COMPETITOR_REQUIREMENT_NOT_MET: () => 'Strategy not evaluated: the channel data did not give what the strategy needs.',
   ENGINE_CURRENCY_MISMATCH: (f) => `Strategy not evaluated: ${f.value('source')} was in another currency than the offer (${f.raw('expected')}).`,
   DIVERGENCE_CASE_OPENED: (f) => `Divergence case opened: the channel showed another price than the ${f.money('expectedMinor')} we expect.`,
@@ -360,7 +366,7 @@ const values: Record<ValueKey, string> = {
   CHANNEL_REPRICER_ACTIVE: 'the channel\'s own automated pricing is active for this offer', CHANNEL_BOUNDS_PRESENT: 'the offer has price bounds set in the channel',
   RESPONSE_MISMATCH: 'the channel answered about a different offer or storefront than we asked for: the answer was not used',
   TELL_PLATFORM_TEAM: 'Tell us: the channel answered about a different offer than we asked for — the cause is on the channel side or in our check, and the support of the channel cannot fix it',
-  DISABLE_CHANNEL_REPRICER: 'Remove the automated pricing rule from the offer in the channel (our engine does not work while it is set)', REMOVE_CHANNEL_BOUNDS: 'Remove the minimum and maximum price set in the channel: our bounds must be the only ones',
+  DISABLE_CHANNEL_REPRICER: 'Remove the automated pricing rule from the offer in the channel (our engine does not work while it is set)', REMOVE_CHANNEL_BOUNDS: 'Remove the minimum and maximum price set in the channel: their values were not read, so they cannot be checked against your floor and maximum price',
   ACTION_NOT_ALLOWED: 'action not allowed by the channel', PRECONDITION_FAILED: 'channel precondition not met', EDIT_BUDGET_EXHAUSTED: 'edit budget used up',
   OFFER_NOT_LIVE: 'offer not live', POLICY_VIOLATION: 'channel policy violation', TENANT_MISMATCH: 'the account belongs to another workspace', SIGNATURE_INVALID: 'invalid signature',
   UNSUPPORTED: 'not supported by the channel', UNKNOWN: 'unknown error', MAX_ATTEMPTS: 'maximum attempts', NOT_APPLIED: 'not applied',
@@ -1315,6 +1321,7 @@ export const en = {
       notAssigned: (reason: string) => `Not assigned: ${reason}`,
       // Шаг 102: безубыточность выше потолка — пометка строки, а не молча замороженный товар
       floorAboveCeiling: 'Floor above ceiling', frozenDetail: 'prices frozen — raise the maximum price or enable clearance',
+      belowChannelMin: 'Below the channel minimum', aboveChannelMax: 'Above the channel maximum',
       // Шаг 105 [Р-230]: сводка Buy Box — колонки за выбором Columns, фильтры строки и сортировка по колонкам
       buybox: {
         you: 'You', unknown: 'Unknown', none: 'No one', noShipping: 'shipping not named',
@@ -1368,7 +1375,7 @@ export const en = {
       // Шаг 96.2 [Р-146]: колонка из одного значения — фразой подписи, а не колонкой
       uniform: (column: string, value: string) => `${column}: ${value} — every offer listed.`,
       noShipping: 'The channel gave no shipping for some of these offers: their prices are without shipping.',
-      you: 'You', unnamedSeller: 'unnamed seller', buyBoxBadge: 'Buy Box', notNamed: 'not named',
+      you: 'You', unnamedSeller: 'unnamed seller', buyBoxBadge: 'Buy Box', sellerPage: (seller: string) => `${seller} — open the seller’s page in a new tab`, notNamed: 'not named',
       fulfilment: { channel: (channel: string) => channel === 'Amazon' ? 'Amazon (FBA)' : channel, merchant: 'Seller' },
       rating: (pct: string, count: number) => `${pct} of ${count}`,
       position: (rank: number, total: number) => `Your offer is #${rank} of ${total} by price with shipping`,
@@ -1531,6 +1538,21 @@ export const en = {
       floorFromBreakEven: (min: string) => `break-even: above your minimum price ${min}`,
       floorFromClearance: (min: string) => `clearance floor: replaces your minimum price ${min} and the margin floor while clearance is on`,
       frozen: (floor: string, max: string) => `Floor above ceiling — prices frozen. Your floor ${floor} is above your maximum price ${max}: no price fits, and no price change is sent. Raise the maximum price or enable clearance.`,
+      // Шаг 107 [Р-233]: рамки цены, заданные продавцом в самом канале (Amazon Min/Max на SKU), рядом с нашими
+      channelBounds: {
+        title: 'Channel price bounds',
+        lead: 'The minimum and maximum set for this offer in the channel itself. At a price outside them the channel deactivates the offer.',
+        min: 'Channel minimum', max: 'Channel maximum', notSetSide: 'not set',
+        notProvided: 'Not provided by the channel.',
+        notSet: (when: string) => `None set in the channel (seen ${when}). The channel may still apply limits it does not show.`,
+        notRead: (when: string) => `Set in the channel (seen ${when}), but the values were not read — repricing for this offer stays blocked until they can be read.`,
+        seen: (when: string) => `Seen ${when}.`,
+        withoutShipping: 'Without shipping — compared with your floor and maximum price, which are without shipping too.',
+        inside: 'Your floor and maximum price are inside the channel bounds.',
+        belowMin: (floor: string, min: string) => `Below the channel's own minimum — the channel will deactivate this offer. Your floor ${floor} is below the channel minimum ${min}; prices below ${min} are not sent.`,
+        belowMinClearance: (floor: string, min: string) => `Below the channel's own minimum — the channel will deactivate this offer. Your clearance floor ${floor} is below the channel minimum ${min}; prices below ${min} are sent, as you confirmed when you enabled clearance.`,
+        aboveMax: (max: string, channelMax: string) => `Above the channel's own maximum — the channel will deactivate this offer. Your maximum price ${max} is above the channel maximum ${channelMax}; prices above ${channelMax} are not sent.`,
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Clearance floor — allow selling below break-even',
@@ -1540,6 +1562,9 @@ export const en = {
         lossPerUnit: 'Loss per piece', noLoss: 'none — at this floor a sale still covers its costs',
         maxLoss: 'Maximum total loss', stock: (pieces: number) => `with the current stock of ${pieces} ${pieces === 1 ? 'piece' : 'pieces'}`, stockUnknown: 'stock not known — only the loss per piece is shown',
         ack: (breakEven: string) => `I understand: every sale below ${breakEven} loses money`,
+        // Шаг 107 [Р-233]: пол распродажи ниже Min канала — предупреждение до галочки; цена всё равно уходит (решение владельца)
+        channelMinWarning: (floor: string, min: string) => `The channel's own minimum for this offer is ${min}. With a clearance floor of ${floor}, prices below ${min} are still sent, and the channel will deactivate this offer at them.`,
+        ackWithChannel: (breakEven: string, min: string) => `I understand: every sale below ${breakEven} loses money, and the channel deactivates this offer below ${min}`,
         note: 'Why', noteHint: 'Required — it is kept in the audit log with your name.', notePlaceholder: 'Clearing summer stock',
         endsAt: 'End automatically', endsAtHint: 'Optional — after this date the floor is the computed one again.',
         enable: 'Enable clearance', mfaHint: 'Moves the floor: needs a second factor.', readOnly: 'Only the owner or a manager can enable clearance.',

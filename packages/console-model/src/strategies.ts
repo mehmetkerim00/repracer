@@ -5,6 +5,7 @@ import type { Messages } from './i18n/index.ts';
 import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
 import { channelNotes, strategyLabel } from './products.ts';
 import { catalogFirst, channelOf, gap, scopeById, storefrontName, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
+import { channelPricingBlocks } from './channel-bounds.ts';
 
 /**
  * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
@@ -230,7 +231,10 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
     } else {
       const newest = new Map<string, (typeof world.state.offerChannelPricing)[number]>();
       for (const o of world.state.offerChannelPricing.filter((x) => x.channelAccountId === a.channelAccountId)) newest.set(`${o.marketplace}|${o.externalSku}`, o);
-      flagged = [...newest.values()].filter((o) => o.automatedPricing || o.channelBounds);
+      // Шаг 107 [Р-231]: рамки со значениями в валюте предложения не блокируют — в списке только блокирующие (как база)
+      const currencyOf = (o: (typeof world.state.offerChannelPricing)[number]) => world.state.scopes.find((sc) => sc.channelAccountId === o.channelAccountId
+        && sc.marketplace === o.marketplace && sc.externalUnitId === o.externalSku)?.currency ?? '';
+      flagged = [...newest.values()].filter((o) => channelPricingBlocks(o, currencyOf(o)));
       channelPricingTotal += flagged.length;
     }
     return flagged.map((o) => ({

@@ -15,7 +15,8 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
   const t = m.ui.bounds.clearance;
   const c = view.clearance;
   const [floor, setFloor] = useState('');
-  const [ack, setAck] = useState(false);
+  // Шаг 107 [Р-233]: галочка относится к тексту, который продавец видел, — появился конфликт с Min канала, и прежняя галочка не считается
+  const [ackedLabel, setAckedLabel] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [endsAt, setEndsAt] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,6 +25,11 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
   const floorMinor = parseAmountInput(floor);
   const loss = floorMinor !== null && c.breakEvenMinor !== null && c.breakEvenMinor > floorMinor ? c.breakEvenMinor - floorMinor : null;
   const money = (v: number) => m.money(v, c.currency);
+  // Шаг 107 (G) [Р-233]: пол распродажи ниже Min, заданного продавцом в канале, — предупреждение до галочки; распродажа не блокируется
+  const channelMin = view.channelBounds.channelMinMinor;
+  const belowChannelMin = floorMinor !== null && channelMin !== null && floorMinor < channelMin;
+  const ackLabel = belowChannelMin ? t.ackWithChannel(c.breakEven ?? m.ui.common.noValue, money(channelMin!)) : t.ack(c.breakEven ?? m.ui.common.noValue);
+  const ack = ackedLabel === ackLabel;
   const post = async (path: string[], body: Record<string, unknown>) => {
     setBusy(true); setError(null); setMessage(null);
     try {
@@ -72,7 +78,8 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
               <output className="field-value">{floorMinor === null ? m.ui.common.noValue : loss === null ? t.noLoss : `−${money(loss)}`}</output>
             </Field>
           </FieldGrid>
-          <CheckField label={t.ack(c.breakEven ?? m.ui.common.noValue)} checked={ack} disabled={busy} onChange={setAck} />
+          {belowChannelMin ? <p className="notice warn channel-min-warning" role="alert">{t.channelMinWarning(money(floorMinor!), money(channelMin!))}</p> : null}
+          <CheckField label={ackLabel} checked={ack} disabled={busy} onChange={(v) => setAckedLabel(v ? ackLabel : null)} />
           <FieldGrid cols={2}>
             <Field label={t.note} caption={t.noteHint}>
               <input type="text" value={note} placeholder={t.notePlaceholder} maxLength={500} disabled={busy} onChange={(e) => setNote(e.target.value)} />
@@ -106,6 +113,33 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
           </div>
         </details>
       ) : null}
+    </section>
+  );
+}
+
+/**
+ * Шаг 107 [Р-233, Р-231]: рамки цены, заданные продавцом в самом канале (Amazon Min/Max на SKU), рядом с нашими: значения и «без доставки»,
+ * честное «not provided» без данных канала и предупреждение — ровно при конфликте (наш пол ниже Min канала, наш потолок выше Max канала)
+ */
+function ChannelBoundsSection({ view }: { view: BoundsView }) {
+  const m = useMessages();
+  const b = m.ui.bounds.channelBounds;
+  const c = view.channelBounds;
+  return (
+    <section className="card channel-bounds">
+      <h3>{c.title}</h3>
+      <p className="section-sub">{c.lead}</p>
+      {c.state === 'VALUES' ? (
+        <>
+          <ul className="plain channel-bounds-values">
+            <li>{b.min}{m.colon}<strong className="cur">{c.min}</strong></li>
+            <li>{b.max}{m.colon}<strong className="cur">{c.max}</strong></li>
+          </ul>
+          <p className="small muted">{c.text} {c.seen}</p>
+        </>
+      ) : <p className="muted">{c.text}</p>}
+      {c.conflicts.map((x) => <p key={x.side} className="notice warn channel-bounds-conflict" role="status">{x.text}</p>)}
+      {c.ok ? <p className="small">{c.ok}</p> : null}
     </section>
   );
 }
@@ -159,6 +193,8 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
         </div>
         <div className="card"><h3>{b.maxPrice}</h3><p className="big">{view.maxPrice.amount}</p><p className="small muted">{view.maxPrice.source}</p></div>
       </div>
+
+      <ChannelBoundsSection view={view} />
 
       <ClearanceSection view={view} onChanged={onChanged} />
 

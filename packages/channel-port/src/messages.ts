@@ -216,6 +216,12 @@ export interface CompetitorReadResult {
 // Офферы и заказы (без PII, Р-4)
 // ---------------------------------------------------------------------------
 
+/**
+ * Шаг 107 [Р-233]: значения рамок цены, заданных продавцом в канале (Amazon Min/Max на SKU), — в валюте витрины и без доставки, как наша
+ * цена записи (A-30). null у стороны — рамки этой стороны нет. Поля нет у наблюдения — значения не прочитаны
+ */
+export interface ChannelBoundValues { minMinor: number | null; maxMinor: number | null; currency: string }
+
 export interface DiscoveredOffer {
   identity: OfferIdentity;
   /** EAN/GTIN — для сопоставления с Product */
@@ -229,7 +235,7 @@ export interface DiscoveredOffer {
    * Р-120: собственное ценообразование канала у оффера, прочитанное при обнаружении. automatedPricing — привязка к правилу
    * автоматического ценообразования (Amazon), channelBounds — границы цены на стороне канала. Нет поля — канал этого не сообщает.
    */
-  channelPricing?: { automatedPricing: boolean; channelBounds: boolean };
+  channelPricing?: { automatedPricing: boolean; channelBounds: boolean; boundValues?: ChannelBoundValues | null };
   /**
    * Шаг 47 [Р-164]: доступность листинга для записи там, где канал пишет не во все свои листинги (eBay: только под Inventory
    * API). `writable: false` — листинг есть в каталоге продавца, но писать в него нельзя: не мигрирован (`MIGRATION_REQUIRED`)

@@ -529,6 +529,20 @@ const WINDOW_MOVE_LOG = `
              AND NOT (mv.channel_product_ref = $5 AND mv.condition = $6)
            ORDER BY mv.channel_product_ref, mv.condition, mv.evaluated_at DESC) w`;
 
+/**
+ * Шаг 107 [Р-233]: рамки цены, заданные продавцом в канале, по последнему наблюдению предложения единицы — только со значениями в валюте
+ * единицы (иначе предложение заблокировано целиком, 0205). Только в контексте решения: состояние консоли (весь каталог) их не читает
+ */
+const DECISION_SCOPE_JSON = `((${SCOPE_JSON})::jsonb || jsonb_build_object('channelBounds',
+  (SELECT jsonb_build_object('minMinor', o.channel_min_minor, 'maxMinor', o.channel_max_minor)
+     FROM tenant_data.offer_mapping m
+     JOIN LATERAL (SELECT x.channel_bounds, x.channel_min_minor, x.channel_max_minor, x.bounds_currency FROM channel_data.offer_channel_pricing x
+                    WHERE x.tenant_id = m.tenant_id AND x.channel_account_id = m.channel_account_id AND x.marketplace = m.marketplace AND x.external_sku = m.external_sku
+                    ORDER BY x.observed_at DESC, x.recorded_at DESC LIMIT 1) o ON true
+    WHERE m.tenant_id = $1 AND m.price_write_scope_id = sc.write_scope_id AND m.external_sku IS NOT NULL
+      AND o.channel_bounds AND o.bounds_currency = sc.currency
+    LIMIT 1)))`;
+
 const STATE_JSON = `json_build_object(
   'source', cs.source, 'sourceEventId', cs.source_event_id, 'observedAt', cs.observed_at, 'buyboxMinor', cs.buybox_amount_minor,
   'buyboxIsSelf', cs.buybox_is_self, 'buyboxShippingMinor', cs.buybox_shipping_minor, 'buyboxSellerRef', cs.buybox_seller_ref,
@@ -541,7 +555,7 @@ function contextSql(window: string): string {
 WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM}
                AND m.channel_account_id = $3 AND m.marketplace = $4 AND m.channel_product_ref = $5 AND m.condition = $6)
 SELECT
-  (SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') FROM sc) AS scopes,
+  (SELECT coalesce(json_agg(${DECISION_SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') FROM sc) AS scopes,
   (SELECT json_build_object('currency', mk.currency, 'basis', mk.price_basis)
      FROM tenant_data.channel_account a JOIN platform.marketplace mk ON mk.channel = a.channel AND mk.marketplace = $4
     WHERE a.tenant_id = $1 AND a.channel_account_id = $3) AS storefront,
@@ -573,7 +587,7 @@ SELECT
 
 const SCOPE_BY_ID_SQL = `
 WITH sc AS (SELECT ${SCOPE_COLUMNS} ${SCOPE_FROM} AND s.write_scope_id = $3 LIMIT 1)
-SELECT (SELECT ${SCOPE_JSON} FROM sc) AS scope,
+SELECT (SELECT ${DECISION_SCOPE_JSON} FROM sc) AS scope,
        (SELECT ${STATE_JSON} FROM channel_data.competitor_state cs JOIN sc
            ON cs.channel_account_id = sc.channel_account_id AND cs.marketplace = sc.marketplace
           AND cs.channel_product_ref = sc.channel_product_ref AND cs.condition = sc.condition
@@ -816,7 +830,17 @@ function toScopeContext(j: Row, now: Instant): ScopeEvaluationContext {
     changesInLastHour: Number(j.changes ?? 0),
     ...(j.budgetExhausted ? { budgetExhausted: { resetsAt: (j.budgetExhausted as Row).resetsAt ?? null, budgetDay: (j.budgetExhausted as Row).budgetDay ?? null } } : {}),
     clearance,
+    channelBounds: j.channelBounds
+      ? { minMinor: (j.channelBounds as Row).minMinor === null ? null : Number((j.channelBounds as Row).minMinor),
+          maxMinor: (j.channelBounds as Row).maxMinor === null ? null : Number((j.channelBounds as Row).maxMinor) }
+      : null,
   };
+}
+
+/** Шаг 107 [Р-233]: значения рамок канала из строки наблюдения; без валюты — не прочитаны (поля нет) */
+function boundValuesOf(r: Row): { boundValues?: { minMinor: number | null; maxMinor: number | null; currency: string } } {
+  return r.bounds_currency ? { boundValues: { minMinor: r.channel_min_minor === null ? null : Number(r.channel_min_minor),
+    maxMinor: r.channel_max_minor === null ? null : Number(r.channel_max_minor), currency: String(r.bounds_currency) } } : {};
 }
 
 function toSnapshot(key: ProductKey, s: Row): AcceptedSnapshot {
@@ -2081,14 +2105,22 @@ export class PgPricingStore implements PricingStore {
     if (observations.length === 0) return 0;
     return this.tx(tenantId, async (tx) => {
       const { rowCount } = await tx.query(
-        `INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at)
-         SELECT $1, a.channel_account_id, a.channel, o.marketplace, o.external_sku, o.automated_pricing, o.channel_bounds, o.source, o.observed_at
+        `INSERT INTO channel_data.offer_channel_pricing (tenant_id, channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds,
+                                                         channel_min_minor, channel_max_minor, bounds_currency, source, observed_at)
+         SELECT $1, a.channel_account_id, a.channel, o.marketplace, o.external_sku, o.automated_pricing, o.channel_bounds,
+                o.channel_min_minor, o.channel_max_minor, o.bounds_currency, o.source, o.observed_at
            FROM tenant_data.channel_account a
-           CROSS JOIN jsonb_to_recordset($3::jsonb) AS o(marketplace text, external_sku text, automated_pricing boolean, channel_bounds boolean, source text, observed_at timestamptz)
+           CROSS JOIN jsonb_to_recordset($3::jsonb) AS o(marketplace text, external_sku text, automated_pricing boolean, channel_bounds boolean,
+                                                         channel_min_minor bigint, channel_max_minor bigint, bounds_currency text, source text, observed_at timestamptz)
           WHERE a.tenant_id = $1 AND a.channel_account_id = $2`,
-        [tenantId, channelAccountId, JSON.stringify(observations.map((o) => ({
-          marketplace: o.marketplace, external_sku: o.externalSku, automated_pricing: o.automatedPricing, channel_bounds: o.channelBounds, source: o.source, observed_at: o.observedAt,
-        })))]);
+        [tenantId, channelAccountId, JSON.stringify(observations.map((o) => {
+          // Шаг 107 [Р-233]: значения рамок — только у рамок и только названные; иначе «не прочитаны» (база держит ту же форму)
+          const v = o.channelBounds && o.boundValues && (o.boundValues.minMinor !== null || o.boundValues.maxMinor !== null) ? o.boundValues : null;
+          return {
+            marketplace: o.marketplace, external_sku: o.externalSku, automated_pricing: o.automatedPricing, channel_bounds: o.channelBounds,
+            channel_min_minor: v?.minMinor ?? null, channel_max_minor: v?.maxMinor ?? null, bounds_currency: v?.currency ?? null, source: o.source, observed_at: o.observedAt,
+          };
+        }))]);
       return rowCount ?? 0;
     });
   }
@@ -2603,13 +2635,14 @@ export class PgPricingStore implements PricingStore {
       const onlyKeys = (cols: string, keys: string) => only
         ? ` AND (${cols}) IN (SELECT ${keys} ${SCOPE_FROM}${listedScopes('$2', '$3')})` : '';
       const offerChannelPricing = (await q(`SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
-                                                   channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at
+                                                   channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds,
+                                                   channel_min_minor, channel_max_minor, bounds_currency, source, observed_at
                                               FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
                                                    ${onlyKeys('channel_account_id, marketplace, external_sku', `s.channel_account_id, m.marketplace, coalesce(m.external_unit_id, m.external_sku, '')`)}
                                              ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC`, only ? [tenantId, only, onlyProducts] : [tenantId]))
         .map((r): ConsoleOfferChannelPricingRow => ({
           channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
-          channelBounds: r.channel_bounds, source: r.source, observedAt: iso(r.observed_at),
+          channelBounds: r.channel_bounds, ...boundValuesOf(r), source: r.source, observedAt: iso(r.observed_at),
         }));
       const pricingHealth = (await q(`SELECT DISTINCT ON (h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition)
                                              h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition, h.issue_type, h.event_time,
@@ -2946,20 +2979,23 @@ export class PgPricingStore implements PricingStore {
       let channelPricing: ConsoleCatalogFacts['channelPricing'] = null;
       if (query.channelPricing) {
         // Как экран стратегий: последнее наблюдение каждого предложения, с правилом или границами канала; порядок — витрина, SKU
+        // Шаг 107 [Р-231]: рамки со значениями в валюте витрины предложение не блокируют — в списке только блокирующие (как страж 0205)
         const { rows } = await tx.query(
           `WITH latest AS (SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
-                                  channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds, source, observed_at
+                                  channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds,
+                                  channel_min_minor, channel_max_minor, bounds_currency, source, observed_at
                              FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
                             ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC),
-                flagged AS (SELECT l.*, row_number() OVER (PARTITION BY channel_account_id ORDER BY marketplace, external_sku) AS rn,
-                                   count(*) OVER (PARTITION BY channel_account_id) AS total
-                              FROM latest l WHERE automated_pricing OR channel_bounds)
+                flagged AS (SELECT l.*, row_number() OVER (PARTITION BY l.channel_account_id ORDER BY l.marketplace, l.external_sku) AS rn,
+                                   count(*) OVER (PARTITION BY l.channel_account_id) AS total
+                              FROM latest l LEFT JOIN platform.marketplace pm ON pm.channel = l.channel AND pm.marketplace = l.marketplace
+                             WHERE l.automated_pricing OR (l.channel_bounds AND l.bounds_currency IS DISTINCT FROM pm.currency))
            SELECT * FROM flagged WHERE rn <= $2 ORDER BY channel_account_id, rn`, [tenantId, query.channelPricing.limit]);
         const byAccount = new Map<string, { channelAccountId: string; total: number; rows: ConsoleOfferChannelPricingRow[] }>();
         for (const r of rows) {
           const a = byAccount.get(r.channel_account_id) ?? { channelAccountId: String(r.channel_account_id), total: Number(r.total), rows: [] };
           a.rows.push({ channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
-            channelBounds: r.channel_bounds, source: r.source, observedAt: iso(r.observed_at) });
+            channelBounds: r.channel_bounds, ...boundValuesOf(r), source: r.source, observedAt: iso(r.observed_at) });
           byAccount.set(r.channel_account_id, a);
         }
         channelPricing = [...byAccount.values()];

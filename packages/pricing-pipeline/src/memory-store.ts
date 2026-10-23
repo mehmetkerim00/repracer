@@ -741,6 +741,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       cost,
       unitCostMinor: cost?.unitCostMinor ?? null,
       clearance: this.activeClearance(row.writeScopeId, now),
+      channelBounds: this.channelBoundsOf(row),
       costUnavailableCause: converted && !converted.ok ? converted.cause : null,
       costMissingCause: !row.cost ? 'COST_PROFILE_MISSING' : converted && !converted.ok ? converted.cause : null,
       guardrails: { ...NO_GUARDRAILS, ...row.guardrails },
@@ -1214,17 +1215,40 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return this.apply(w, 'DISPATCHED', planOutcomeTransition(outcome, w.attemptCount, now, policy), now, 'PRE_WRITE_READ');
   }
 
-  /** Как channel_data.offer_channel_pricing_active (0082): последнее наблюдение оффера — правило или границы канала */
-  private channelPricingActive(row: ScopeRow): boolean {
-    if (this.channel === 'KAUFLAND') return false;
-    const latest = this.offerChannelPricing
+  /** Последнее наблюдение ценообразования канала у предложения единицы */
+  private latestChannelPricing(row: ScopeRow): ConsoleOfferChannelPricingRow | undefined {
+    return this.offerChannelPricing
       .filter((o) => o.channelAccountId === row.channelAccountId && o.marketplace === row.marketplace && o.externalSku === row.externalUnitId)
       .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0];
-    return latest !== undefined && (latest.automatedPricing || latest.channelBounds);
+  }
+
+  /**
+   * Как channel_data.offer_channel_pricing_active (0082, 0205): правило канала или рамки канала, чьи значения неизвестны (не прочитаны или
+   * не в валюте единицы) [Р-120, Р-231]; код блока или null
+   */
+  private channelPricingBlock(row: ScopeRow): 'CHANNEL_REPRICER_ACTIVE' | 'CHANNEL_BOUNDS_PRESENT' | null {
+    if (this.channel === 'KAUFLAND') return null;
+    const latest = this.latestChannelPricing(row);
+    if (!latest) return null;
+    if (latest.automatedPricing) return 'CHANNEL_REPRICER_ACTIVE';
+    return latest.channelBounds && latest.boundValues?.currency !== row.currency ? 'CHANNEL_BOUNDS_PRESENT' : null;
+  }
+  private channelPricingActive(row: ScopeRow): boolean { return this.channelPricingBlock(row) !== null; }
+
+  /** Шаг 107 [Р-233]: рамки канала со значениями в валюте единицы — вход движка (как DECISION_SCOPE_JSON у базы) */
+  private channelBoundsOf(row: ScopeRow): { minMinor: number | null; maxMinor: number | null } | null {
+    if (this.channel === 'KAUFLAND') return null;
+    const v = this.latestChannelPricing(row);
+    return v?.channelBounds && v.boundValues && v.boundValues.currency === row.currency ? { minMinor: v.boundValues.minMinor, maxMinor: v.boundValues.maxMinor } : null;
   }
 
   async recordOfferChannelPricing(_tenantId: string, channelAccountId: string, observations: readonly OfferChannelPricingObservation[]): Promise<number> {
-    for (const o of observations) this.offerChannelPricing.push({ ...o, channelAccountId });
+    for (const o of observations) {
+      // Как база (0205): значения — только у рамок и только названные
+      const named = o.channelBounds && o.boundValues && (o.boundValues.minMinor !== null || o.boundValues.maxMinor !== null) ? o.boundValues : null;
+      const { boundValues: _drop, ...rest } = o;
+      this.offerChannelPricing.push({ ...rest, ...(named ? { boundValues: { ...named } } : {}), channelAccountId });
+    }
     return observations.length;
   }
 
@@ -1507,11 +1531,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     // Как CHECK write_scope_engine_has_strategy (0045): движок без стратегии не включается [Р-77]
     if (mode === 'ENGINE' && !row.strategy) throw new Error(`write scope ${writeScopeId} has no strategy; ENGINE cannot be enabled (Р-77)`);
     // Как write_scope_strategy_guard (0082): включение ENGINE при ценообразовании канала — отказ; выключение — всегда [Р-120]
-    if (mode === 'ENGINE' && row.pricingMode !== 'ENGINE' && this.channelPricingActive(row)) {
-      const latest = this.offerChannelPricing.filter((o) => o.channelAccountId === row.channelAccountId && o.marketplace === row.marketplace && o.externalSku === row.externalUnitId)
-        .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0]!;
-      throw new Error(`write_scope ${writeScopeId} has channel-owned pricing (${latest.automatedPricing ? 'CHANNEL_REPRICER_ACTIVE' : 'CHANNEL_BOUNDS_PRESENT'}): a strategy cannot be assigned (Р-120)`);
-    }
+    const block = mode === 'ENGINE' && row.pricingMode !== 'ENGINE' ? this.channelPricingBlock(row) : null;
+    if (block) throw new Error(`write_scope ${writeScopeId} has channel-owned pricing (${block}): a strategy cannot be assigned (Р-120)`);
     row.pricingMode = mode;
   }
 
