@@ -47,7 +47,7 @@ import type {
   ProductKey,
   ScopeEvaluationContext,
   ShiftWindow,
-  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, CompetitionData, CompetitionDataRow, OfferPageFilter,
+  SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxHolderObservation, BuyboxSpanRow, CompetitionData, CompetitionDataRow, OfferPageFilter,
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason } from '@repracer/pricing-pipeline';
@@ -1203,26 +1203,8 @@ export class PgPricingStore implements PricingStore {
        s.accepted?.competitorSnapshotId ?? null, s.accepted ? JSON.stringify(s.accepted.sanity) : null, buyboxShipping, buyboxSeller],
     );
 
-    // Шаг 97 [Р-220]: отрезок держателя Buy Box — продлевается тем же держателем и продавцом без дыры длиннее горизонта, иначе открывается
-    // новый; более старый снимок отрезков не трогает (как проекцию снимка). Горизонт — самый редкий ярус опроса раз в сутки (Р-47)
-    if (s.buyboxHolder && s.accepted) {
-      await tx.query(
-        `WITH last AS (
-           SELECT b.buybox_span_id, b.holder, b.winner_seller_ref, b.last_seen_at FROM channel_data.buybox_span b
-            WHERE b.tenant_id = $1 AND b.channel_account_id = $2 AND b.marketplace = $3 AND b.channel_product_ref = $4 AND b.condition = $5
-            ORDER BY b.started_at DESC LIMIT 1 FOR UPDATE),
-         ext AS (
-           UPDATE channel_data.buybox_span b SET last_seen_at = $6, snapshots = b.snapshots + 1 FROM last
-            WHERE b.tenant_id = $1 AND b.buybox_span_id = last.buybox_span_id AND last.holder = $7 AND last.winner_seller_ref IS NOT DISTINCT FROM $8
-              AND $6::timestamptz >= last.last_seen_at AND $6::timestamptz - last.last_seen_at <= interval '${BUYBOX_SPAN_HORIZON_HOURS} hours'
-            RETURNING 1)
-         INSERT INTO channel_data.buybox_span (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, holder, winner_seller_ref, started_at, last_seen_at)
-         SELECT $1, $2, $3, $4, $5, $7, $8, $6, $6
-          WHERE NOT EXISTS (SELECT 1 FROM ext) AND NOT EXISTS (SELECT 1 FROM last WHERE $6::timestamptz < last.last_seen_at)`,
-        [tenantId, key.channelAccountId, key.marketplace, key.channelProductRef, condition, s.observedAt, s.buyboxHolder.holder,
-         s.buyboxHolder.holder === 'OTHER' ? s.buyboxHolder.sellerRef?.slice(0, 200) ?? null : null],
-      );
-    }
+    // Шаг 97 [Р-220]: отрезок держателя Buy Box — по принятому снимку источника, называющего держателя (правило — writeBuyboxSpan)
+    if (s.buyboxHolder && s.accepted) await PgPricingStore.writeBuyboxSpan(tx, tenantId, key, condition, s.observedAt, s.buyboxHolder);
 
     let rejectedSnapshotId: string | null = null;
     if (s.rejected) {
@@ -2821,6 +2803,7 @@ export class PgPricingStore implements PricingStore {
     }
     const noData = p([...f.buybox.noDataAccounts]);
     const named = p([...f.buybox.namedAccounts]);
+    const shared = p([...f.buybox.shareAccounts]);
     const sinceMs = p(Date.parse(f.buybox.since));
     const untilMs = p(Date.parse(f.buybox.until));
     const since = p(f.buybox.since);
@@ -2881,7 +2864,8 @@ export class PgPricingStore implements PricingStore {
                           WHEN h.holder = 'UNKNOWN' THEN cs.bb + coalesce(cs.bb_ship, 0) END AS price_minor,
                      CASE WHEN h.holder = 'OTHER' AND agg.own_landed IS NOT NULL
                           THEN agg.own_landed - CASE WHEN cs.bb_ship IS NOT NULL THEN cs.bb + cs.bb_ship ELSE agg.winner_landed END END AS gap_minor,
-                     CASE WHEN sc.channel_account_id = ANY (${named}::uuid[]) AND NOT (sc.channel_account_id = ANY (${noData}::uuid[])) THEN share.share_bp END AS share_bp
+                     -- Шаг 109 [Р-235]: доля — у аккаунтов, чей канал называет держателя основным источником или долями просмотров сверки
+                     CASE WHEN sc.channel_account_id = ANY (${shared}::uuid[]) AND NOT (sc.channel_account_id = ANY (${noData}::uuid[])) THEN share.share_bp END AS share_bp
                 FROM sc
                 LEFT JOIN cs ON cs.write_scope_id = sc.write_scope_id
                 LEFT JOIN agg ON agg.write_scope_id = sc.write_scope_id
@@ -3098,6 +3082,23 @@ export class PgPricingStore implements PricingStore {
       if (!r) return null;
       const snapshot = toSnapshot({ channelAccountId: r.channel_account_id, marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: r.condition }, r.state);
       return { snapshot, source: r.state.source, observedAt: iso(r.state.observedAt) };
+    });
+  }
+
+  async competitionSummary(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {
+    if (!UUID_FORM.test(writeScopeId)) return null;
+    return inTenant(this.admin('competitionSummary'), tenantId, async (tx) => {
+      // Индекс журнала (0086) — товар аккаунта по времени получения; снимков сверки среди снимков товара немного — фильтр по вердикту.
+      // Журнал хранит состояние, как его назвал снимок (строчными), привязка — заглавными (dbCondition)
+      const { rows: [r] } = await tx.query(
+        `SELECT l.snapshot, l.source, l.observed_at
+           FROM tenant_data.offer_mapping m JOIN LATERAL (
+             SELECT x.snapshot, x.source, x.observed_at FROM channel_data.competitor_snapshot_log x
+              WHERE x.tenant_id = m.tenant_id AND x.channel_account_id = m.channel_account_id AND x.marketplace = m.marketplace
+                AND x.channel_product_ref = m.channel_product_ref AND x.condition = lower(m.condition) AND x.sanity_verdict = 'RECONCILIATION'
+              ORDER BY x.received_at DESC LIMIT 1) l ON true
+          WHERE m.tenant_id = $1 AND m.price_write_scope_id = $2 AND m.status <> 'ENDED' LIMIT 1`, [tenantId, writeScopeId]);
+      return r ? { snapshot: r.snapshot as CompetitorSnapshot, source: r.source, observedAt: iso(r.observed_at) } : null;
     });
   }
 
@@ -3457,7 +3458,32 @@ export class PgPricingStore implements PricingStore {
         c.pollObservedAt, c.pollMinor, c.currency, c.dueAt]);
   }
 
-  async recordReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; lossCheck?: NotificationLossCheck }): Promise<void> {
+  /**
+   * Шаг 97 [Р-220]: отрезок держателя Buy Box — продлевается тем же держателем и продавцом без дыры длиннее горизонта, иначе открывается
+   * новый; более старый снимок отрезков не трогает (как проекцию снимка). Горизонт — самый редкий ярус опроса раз в сутки (Р-47). Шаг 109
+   * [Р-235]: то же правило у снимка сверки, называющего держателя большинством просмотров
+   */
+  private static async writeBuyboxSpan(tx: Tx, tenantId: string, key: ProductKey, condition: string, observedAt: Instant, h: BuyboxHolderObservation): Promise<void> {
+    await tx.query(
+      `WITH last AS (
+         SELECT b.buybox_span_id, b.holder, b.winner_seller_ref, b.last_seen_at FROM channel_data.buybox_span b
+          WHERE b.tenant_id = $1 AND b.channel_account_id = $2 AND b.marketplace = $3 AND b.channel_product_ref = $4 AND b.condition = $5
+          ORDER BY b.started_at DESC LIMIT 1 FOR UPDATE),
+       ext AS (
+         UPDATE channel_data.buybox_span b SET last_seen_at = $6, snapshots = b.snapshots + 1 FROM last
+          WHERE b.tenant_id = $1 AND b.buybox_span_id = last.buybox_span_id AND last.holder = $7 AND last.winner_seller_ref IS NOT DISTINCT FROM $8
+            AND $6::timestamptz >= last.last_seen_at AND $6::timestamptz - last.last_seen_at <= interval '${BUYBOX_SPAN_HORIZON_HOURS} hours'
+          RETURNING 1)
+       INSERT INTO channel_data.buybox_span (tenant_id, channel_account_id, marketplace, channel_product_ref, condition, holder, winner_seller_ref, started_at, last_seen_at)
+       SELECT $1, $2, $3, $4, $5, $7, $8, $6, $6
+        WHERE NOT EXISTS (SELECT 1 FROM ext) AND NOT EXISTS (SELECT 1 FROM last WHERE $6::timestamptz < last.last_seen_at)`,
+      [tenantId, key.channelAccountId, key.marketplace, key.channelProductRef, condition, observedAt, h.holder,
+       h.holder === 'OTHER' ? h.sellerRef?.slice(0, 200) ?? null : null],
+    );
+  }
+
+  async recordReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant;
+    lossCheck?: NotificationLossCheck; buyboxHolder?: BuyboxHolderObservation }): Promise<void> {
     const { snapshot } = entry;
     await this.tx(tenantId, async (tx) => {
       await tx.query(
@@ -3468,6 +3494,10 @@ export class PgPricingStore implements PricingStore {
         [tenantId, entry.competitorSnapshotId, entry.receivedAt, snapshot.observedAt, entry.channelAccountId, snapshot.marketplace, snapshot.channelProductRef,
           snapshot.condition, snapshot.source, snapshot.sourceEventId ?? null, JSON.stringify(snapshot)]);
       if (entry.lossCheck) await PgPricingStore.insertLossCheck(tx, tenantId, entry.lossCheck);
+      if (entry.buyboxHolder) {
+        await PgPricingStore.writeBuyboxSpan(tx, tenantId, { channelAccountId: entry.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef,
+          condition: snapshot.condition }, dbCondition(snapshot.condition), snapshot.observedAt, entry.buyboxHolder);
+      }
     });
   }
 

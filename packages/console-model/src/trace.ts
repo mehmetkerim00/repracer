@@ -47,6 +47,8 @@ export interface TraceCompetitors {
   rows: Array<{
     seller: string; sellerUrl: string | null; self: boolean; landed: string; fulfilment: string | null; buyBox: boolean | null; rating: string | null;
     move: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was: string | null; landedKnown: boolean;
+    /** Шаг 109 [Р-234]: цена с купоном, если купон был в снимке этого решения (того же вида, что цена строки); null — купона нет */
+    coupon: string | null;
     /** Шаг 101 [Р-226]: строка не участвовала в расчёте — словами («excluded by your filter»); строка остаётся, приглушённой */
     excluded: string | null;
   }>;
@@ -181,6 +183,8 @@ export function traceCompetitors(d: ConsoleDecision, world: StandWorld, m: Messa
       rating: o.ratingPct !== undefined && o.ratingCount !== undefined ? m.ui.competition.rating(m.percentBp(Math.round(o.ratingPct * 100)), o.ratingCount) : null,
       move: o.move ?? null, was: money(o.wasMinor), landedKnown: o.landedMinor !== undefined && o.landedMinor !== null,
       excluded: o.excluded ? c.excluded[o.excluded] : null,
+      coupon: o.couponMinor === undefined || o.couponMinor >= o.priceMinor ? null
+        : money(o.couponMinor + (o.landedMinor !== undefined && o.landedMinor !== null ? o.landedMinor - o.priceMinor : 0)),
     }));
   // Шаг 101 [Р-226]: фильтр — по всему снимку, а не по строкам картины (картина — до 21 строки, снимок — сколько назвал канал)
   const f = view.filter;

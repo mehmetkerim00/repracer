@@ -94,8 +94,14 @@ function attributes(offers: readonly OfferState[]) {
   };
 }
 
+/**
+ * Сводка листинга по модели снимка (definitions.ItemSummaryByMarketplace). Шаг 109 [A]: с обязательными `createdDate` и `lastUpdatedDate`
+ * (настоящий ответ песочницы их несёт, шаг 108) и с `conditionType` и `itemName`, которые читает адаптер (состояние и название, OQ-249)
+ */
 function summaries(skuValue: string, offers: readonly OfferState[]) {
-  return offers.map((o) => ({ marketplaceId: o.marketplace ?? DE, asin: o.asin ?? `B0${skuValue.replace(/\D/g, '').slice(-8).padStart(8, '0')}`, productType: 'SYNTHETIC_PRODUCT_TYPE', status: ['BUYABLE', 'DISCOVERABLE'] }));
+  return offers.map((o) => ({ marketplaceId: o.marketplace ?? DE, asin: o.asin ?? `B0${skuValue.replace(/\D/g, '').slice(-8).padStart(8, '0')}`, productType: 'SYNTHETIC_PRODUCT_TYPE',
+    conditionType: 'new_new', status: ['BUYABLE', 'DISCOVERABLE'], itemName: `Synthetic product ${skuValue}`,
+    createdDate: '2026-01-05T00:00:00Z', lastUpdatedDate: '2026-09-01T00:00:00Z' }));
 }
 
 /**
@@ -345,24 +351,38 @@ export function convertKauflandScenario(file: string, id: string, title: string)
   return { steps: scenario.steps, exchanges, scenario, refs };
 }
 
-/** Р-121: getCompetitiveSummary (productPricing_2022-05-01) — пакет запросов; ответ по каждому товару со статусом */
+/**
+ * Р-121: getCompetitiveSummary (productPricing_2022-05-01) — пакет запросов; ответ по каждому товару со статусом. Шаг 109: запрос просит и
+ * `featuredBuyingOptions` [Р-235]; у предложения — купон (акция COUPON, `discountedPrice`) [Р-234], у товара — предложения в Buy Box по
+ * сегментам покупателей с долей просмотров. Форму ответа держит правило фикстур ответов API (модель снимка 2026-10-29)
+ */
 export function competitiveSummaryExchange(id: string, items: ReadonlyArray<{ asin: string; marketplace?: string; status?: number;
-  offers?: ReadonlyArray<{ seller: string; minor: number; shippingMinor?: number; fba?: boolean; currency?: string }> }>): Exchange {
+  offers?: ReadonlyArray<{ seller: string; minor: number; shippingMinor?: number; fba?: boolean; currency?: string; couponMinor?: number }>;
+  segments?: ReadonlyArray<{ seller: string; membership: 'PRIME' | 'NON_PRIME' | 'DEFAULT'; pct: number }> }>): Exchange {
+  const offerOf = (o: { seller: string; minor: number; shippingMinor?: number; fba?: boolean; currency?: string; couponMinor?: number }) => ({
+    sellerId: o.seller, condition: 'New', subCondition: 'New', fulfillmentType: o.fba ? 'AFN' : 'MFN',
+    listingPrice: { amount: major(o.minor), currencyCode: o.currency ?? 'EUR' },
+    shippingOptions: [{ shippingOptionType: 'DEFAULT', price: { amount: major(o.shippingMinor ?? 0), currencyCode: o.currency ?? 'EUR' } }],
+    ...(o.couponMinor !== undefined ? { promotions: [{ promotionType: 'COUPON', promotionSavings: { discountedPrice: { amount: major(o.couponMinor), currencyCode: o.currency ?? 'EUR' } } }] } : {}),
+  });
+  const featured = (i: (typeof items)[number]) => {
+    const sellers = [...new Set((i.segments ?? []).map((g) => g.seller))];
+    return sellers.length === 0 ? {} : { featuredBuyingOptions: [{ buyingOptionType: 'New', segmentedFeaturedOffers: sellers.map((seller) => ({
+      ...offerOf((i.offers ?? []).find((o) => o.seller === seller) ?? { seller, minor: 0 }),
+      featuredOfferSegments: (i.segments ?? []).filter((g) => g.seller === seller).map((g) => ({ customerMembership: g.membership, segmentDetails: { glanceViewWeightPercentage: g.pct } })),
+    })) }] };
+  };
   return {
-    id, note: 'getCompetitiveSummary: lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11]',
+    id, note: 'getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]',
     request: { method: 'POST', path: '/batches/products/pricing/2022-05-01/items/competitiveSummary', body: { requests: items.map((i) => ({
-      asin: i.asin, marketplaceId: i.marketplace ?? DE, includedData: ['lowestPricedOffers'], lowestPricedOffersInputs: [{ itemCondition: 'New', offerType: 'Consumer' }],
+      asin: i.asin, marketplaceId: i.marketplace ?? DE, includedData: ['featuredBuyingOptions', 'lowestPricedOffers'], lowestPricedOffersInputs: [{ itemCondition: 'New', offerType: 'Consumer' }],
       method: 'GET', uri: '/products/pricing/2022-05-01/items/competitiveSummary',
     })) } },
     response: { status: 200, body: { responses: items.map((i) => (i.status && i.status !== 200
       ? { status: { statusCode: i.status, reasonPhrase: 'Client Error' }, body: { asin: i.asin, marketplaceId: i.marketplace ?? DE, errors: [{ code: 'SYN_NOT_FOUND', message: 'Synthetic item error' }] } }
-      : { status: { statusCode: 200, reasonPhrase: 'Success' }, body: { asin: i.asin, marketplaceId: i.marketplace ?? DE, lowestPricedOffers: [{
+      : { status: { statusCode: 200, reasonPhrase: 'Success' }, body: { asin: i.asin, marketplaceId: i.marketplace ?? DE, ...featured(i), lowestPricedOffers: [{
         lowestPricedOffersInput: { itemCondition: 'New', offerType: 'Consumer' },
-        offers: (i.offers ?? []).map((o) => ({
-          sellerId: o.seller, condition: 'New', subCondition: 'New', fulfillmentType: o.fba ? 'AFN' : 'MFN',
-          listingPrice: { amount: major(o.minor), currencyCode: o.currency ?? 'EUR' },
-          shippingOptions: [{ shippingOptionType: 'DEFAULT', price: { amount: major(o.shippingMinor ?? 0), currencyCode: o.currency ?? 'EUR' } }],
-        })),
+        offers: (i.offers ?? []).map(offerOf),
       }] } })) } },
   };
 }

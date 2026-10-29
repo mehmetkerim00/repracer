@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0206_verify_schema_invariants_v58.sql';
+const VERIFY = 'migrations/0208_verify_schema_invariants_v59.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2914,6 +2914,25 @@ export const STEP107_ROWS = [
         node(R107, GUARD107, 'values in another currency: blocked', '^OK$')),
       m(replaceInFunction('tenant_data.offer_mapping_channel_pricing_guard()', "WHEN x.channel_bounds AND x.bounds_currency IS DISTINCT FROM currency THEN 'CHANNEL_BOUNDS_PRESENT'", "WHEN false THEN 'CHANNEL_BOUNDS_PRESENT'"),
         node(T('channel-pricing-guard.pg.test.ts'), 'step 107 [Р-231]', 'step 107: bounds without values block the mapping', 'resolved')),
+    ],
+  },
+];
+
+/**
+ * Шаг 109 [Р-234]: цена с купоном у строки картины рынка решения (0207) — целое число центов и строго ниже базовой цены строки. Отрезки
+ * держателя из снимков сверки [Р-235] пишет прежнее правило в прежнюю таблицу — её защиты (0188) в каталоге шага 97
+ */
+const R109 = T('summary-step109.pg.test.ts');
+const C109 = 'step 109 [Р-234]: the database refuses a coupon that is not a whole number of cents or not below the price of its row';
+export const STEP109_ROWS = [
+  {
+    row: 'шаг 109 (Р-234)', critical: false,
+    invariant: 'купон в картине рынка решения — целое число центов, не больше триллиона, строго ниже базовой цены своей строки',
+    mutations: [
+      m(replaceInFunction('channel_data.competitor_view_valid(jsonb)', "'rank', 'ratingCount', 'couponMinor']) n", "'rank', 'ratingCount']) n"),
+        node(R109, C109, ['a coupon as text is refused', 'a coupon with a fraction of a cent is refused'], 'resolved')),
+      m(replaceInFunction('channel_data.competitor_view_valid(jsonb)', "THEN (o ->> 'couponMinor')::numeric >= (o ->> 'priceMinor')::numeric ELSE false END)", 'THEN false ELSE false END)'),
+        node(R109, C109, ['a coupon not below the price is refused', 'a coupon above the price is refused'], 'resolved')),
     ],
   },
 ];

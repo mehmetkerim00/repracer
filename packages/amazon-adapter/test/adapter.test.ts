@@ -242,3 +242,55 @@ test('step 70 (Р-205): a response about another SKU is refused with RESPONSE_MI
   assert.equal(failure([{ code: 'InvalidInput', message: 'Invalid Input', details: 'Invalid Input' }]).message, 'InvalidInput: Invalid Input');
   assert.match(failure([{ code: 'X', message: 'm'.repeat(500), details: 'the reason' }]).message, /— the reason$/, 'a long message does not push the reason out');
 });
+
+/**
+ * Шаг 109 [Р-234, Р-235]: сводка конкурентов getCompetitiveSummary — на НАСТОЯЩЕМ ответе статической песочницы SP-API (разведка шага 108,
+ * sandbox-competitive-summary.json). Адаптер просит и `featuredBuyingOptions`: снимок сверки несёт предложения в Buy Box по сегментам
+ * покупателей с долей просмотров, а у предложения — цену с купоном (акция COUPON), когда канал её назвал. Базовая цена остаётся ценой
+ */
+test('step 109 (Р-234, Р-235): the competitive summary carries buy box segments with view shares and the coupon price — on the real sandbox answer', async () => {
+  const { readFileSync } = await import('node:fs');
+  const recorded = JSON.parse(readFileSync(new URL('./sandbox-competitive-summary.json', import.meta.url), 'utf8')) as { response: unknown };
+  const US = 'ATVPDKIKX0DER';
+  const NOW = '2026-10-29T10:00:00.000Z';
+  const run = async (sellerId: string) => {
+    const bodies: Array<{ requests: Array<{ includedData: string[] }> }> = [];
+    const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      if (url.pathname === '/auth/o2/token') return new Response(JSON.stringify({ access_token: 'syn-lwa-access-token', expires_in: 3600 }), { status: 200 });
+      assert.equal(url.pathname, '/batches/products/pricing/2022-05-01/items/competitiveSummary');
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify(recorded.response), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    const adapter = createAmazonAdapter({
+      deps: {
+        accounts: { verify: async (tenantId, channelAccountId) => ({ ok: true, account: { tenantId, channelAccountId, channel: 'AMAZON', externalAccountId: sellerId, region: 'NA', marketplaces: [US], credentialsRef: 'cred:seller' } }) },
+        credentials: { get: async (ref): Promise<Record<string, string>> => (ref === 'cred:seller' ? { refreshToken: 'syn-refresh' } : { clientId: 'syn-client', clientSecret: 'syn-secret' }) },
+        alerts: { raise: async () => {} },
+        logger: { log: () => {} },
+        now: () => NOW,
+      },
+      userAgent: 'repracer-test/1.0', applicationCredentialsRef: 'cred:app', fetch: fetchFn, endpoints: { NA: 'https://sp-api.invalid' }, timeoutMs: 1000,
+    });
+    const ctx = { tenantId: '10000000-0000-4000-8000-000000000001' as TenantId, channelAccountId: '20000000-0000-4000-8000-000000000001' as ChannelAccountId, correlationId: 'unit', deadline: '2026-10-29T10:05:00.000Z' };
+    const read = await adapter.readCompetitors(ctx, [{ marketplace: US, channelProductRef: 'B00ZIAODGE', condition: 'new' }]);
+    return { read, bodies };
+  };
+
+  const { read, bodies } = await run('A1SYNSELLER0001');
+  assert.deepEqual(bodies[0]!.requests[0]!.includedData.slice().sort(), ['featuredBuyingOptions', 'lowestPricedOffers'], 'the same call asks for the featured offers too');
+  assert.deepEqual(read.failures, []);
+  const snap = read.snapshots[0]!;
+  assert.deepEqual(snap.offers.map((o) => [o.sellerRef, o.price.amountMinor, o.couponPrice?.amountMinor ?? null]), [['A2ZWOLFOFDPJL1', 1715, 1629], ['A3DJR8M9Y3OUPG', 1811, null]],
+    'the coupon price is the COUPON promotion discounted price; a basket-building promotion is not a coupon; the base price stays the price');
+  assert.equal(snap.offers[0]!.couponPrice!.currency, 'USD');
+  assert.deepEqual(snap.buyboxSegments, [
+    { sellerRef: 'A3DJR8M9Y3OUPG', isSelf: false, membership: 'NON_PRIME', viewSharePct: 72 },
+    { sellerRef: 'A3DJR8M9Y3OUPG', isSelf: false, membership: 'PRIME', viewSharePct: 10 },
+    { sellerRef: 'A2ZWOLFOFDPJL1', isSelf: false, membership: 'NON_PRIME', viewSharePct: 18 },
+  ]);
+  // Наш продавец — сегменты и предложение помечены нашими, имя продавца у нашей строки не хранится
+  const own = (await run('A2ZWOLFOFDPJL1')).read.snapshots[0]!;
+  assert.deepEqual(own.buyboxSegments!.map((s) => [s.sellerRef ?? null, s.isSelf]), [['A3DJR8M9Y3OUPG', false], ['A3DJR8M9Y3OUPG', false], [null, true]]);
+  assert.equal(own.offers.find((o) => o.isSelf)!.couponPrice!.amountMinor, 1629);
+});

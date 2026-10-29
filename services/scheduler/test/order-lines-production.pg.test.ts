@@ -132,10 +132,17 @@ test('шаг 58: производственный процесс планиро�
   proc = await startScheduler(config, () => undefined);
 
   let reservations: Array<{ channel_order_ref: string; channel_order_line_ref: string; quantity: number; status: string }> = [];
+  /**
+   * Шаг 109 (красный быстрый CI шага 108, прогон 40855305566): работа заказов — две транзакции, резервации (`recordOrderLines`) и пересчёт с
+   * записью количества (`recalculate`); опрос раз в 500 мс видел резервацию между ними, и «новой версии записи нет» краснело гонкой теста.
+   * Барьер — конец ЗАПУСКА работы, прочитавшего строку: строку журнала запусков планировщик пишет после пересчёта и отправки
+   */
+  let finished = false;
   let attempts = 0;
-  for (; attempts < 120 && reservations.length === 0; attempts++) {
+  for (; attempts < 120 && (reservations.length === 0 || !finished); attempts++) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     reservations = await db.rows('SELECT channel_order_ref, channel_order_line_ref, quantity, status FROM channel_data.reservation WHERE tenant_id = $1', [seeded.tenantId]);
+    finished = (await db.rows(`SELECT 1 FROM maintenance.scheduled_job_run WHERE job_name = 'order-lines' AND outcome = 'SUCCEEDED' AND items >= 1`)).length > 0;
   }
   const reservedAfterMs = Date.now() - startedAt;
   const runs = await db.rows<{ outcome: string; error_code: string | null; items: number | null }>(

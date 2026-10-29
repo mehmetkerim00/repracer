@@ -2152,14 +2152,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return h ? this.haltInfo(h) : null;
   }
 
-  async recordReconciliationSnapshot(_tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; lossCheck?: NotificationLossCheck }): Promise<void> {
+  async recordReconciliationSnapshot(_tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant;
+    lossCheck?: NotificationLossCheck; buyboxHolder?: BuyboxHolderObservation }): Promise<void> {
     const { snapshot } = entry;
     // Одна транзакция: проверка отклонена — журнал тоже не пишется
     if (entry.lossCheck) this.recordNotificationLossCheck(entry.lossCheck);
-    this.snapshotLog.push({
-      competitorSnapshotId: entry.competitorSnapshotId, receivedAt: entry.receivedAt, verdict: 'RECONCILIATION', delivery: 'POLL', snapshot,
-      key: { channelAccountId: entry.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition },
-    });
+    const key = { channelAccountId: entry.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition };
+    this.snapshotLog.push({ competitorSnapshotId: entry.competitorSnapshotId, receivedAt: entry.receivedAt, verdict: 'RECONCILIATION', delivery: 'POLL', snapshot, key });
+    // Шаг 109 [Р-235]: держатель большинства просмотров — отрезок тем же правилом, что у снимка решения (0188)
+    if (entry.buyboxHolder) this.recordBuyboxSpan(key, snapshot.observedAt, entry.buyboxHolder);
   }
 
   async heldCompetitorState(_tenantId: string, key: ProductKey): Promise<{ observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null> {
@@ -2597,6 +2598,16 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!s) return null;
     const state = this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }));
     return state?.snapshot ? { snapshot: state.snapshot, source: state.snapshot.source, observedAt: state.observedAt } : null;
+  }
+
+  /** Шаг 109 [Р-234, Р-235]: последний снимок сверки товара единицы — как журнал снимков PostgreSQL (по моменту получения) */
+  async competitionSummary(_tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {
+    const s = this.scopes.get(writeScopeId);
+    if (!s) return null;
+    const last = this.snapshotLog.filter((e) => e.verdict === 'RECONCILIATION' && e.key.channelAccountId === s.channelAccountId && e.key.marketplace === s.marketplace
+      && e.key.channelProductRef === s.channelProductRef && e.key.condition === s.condition)
+      .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)).at(-1);
+    return last ? { snapshot: last.snapshot, source: last.snapshot.source, observedAt: last.snapshot.observedAt } : null;
   }
 
   /** Шаг 105 [Р-230]: снимок и отрезки многих единиц — тем же правилом, что поштучные `competitionSnapshot` и `buyboxSpans` */

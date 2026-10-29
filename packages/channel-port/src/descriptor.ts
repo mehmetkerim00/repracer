@@ -83,6 +83,12 @@ export interface CompetitorSourceDescriptor {
   availability: 'AVAILABLE' | 'EARLY_ACCESS' | 'UNAVAILABLE';
   /** RECONCILIATION — только сверка, не вход стратегии (Р-36) */
   role: 'PRIMARY' | 'RECONCILIATION';
+  /**
+   * Шаг 109 [Р-235]: источник называет предложения в Buy Box по сегментам покупателей с долей просмотров (Amazon getCompetitiveSummary,
+   * `featuredBuyingOptions`). Держатель для доли Buy Box — продавец, у которого сумма долей его сегментов больше половины; иначе неизвестен.
+   * Отдельно от `hasBuyboxWinner`: единого держателя такой источник не называет, и стратегии он держателя не даёт (роль RECONCILIATION)
+   */
+  holderByViewShare?: boolean;
 }
 
 export interface MarketplaceDescriptor {

@@ -44,3 +44,32 @@ test('a competitor snapshot survives the ClickHouse row round trip; a snapshot w
   assert.deepEqual(competitorSnapshotFromRow({ ...row, observed_at: '2026-09-14 10:00:00.000' }), { ...snapshot, offers: snapshot.offers.map((o) => ({ ...o, condition: 'new' })) });
   assert.throws(() => competitorSnapshotRow('t', 'a', 'KAUFLAND', 's', { ...snapshot, buybox: undefined, offers: [] } as unknown as CompetitorSnapshot, NOW), /no currency/);
 });
+
+/**
+ * Шаг 109 [Р-234, Р-235, Р-122]: снимок сверки Amazon с купонами и группами покупателей Buy Box переживает круг через строку ClickHouse — история
+ * (18 месяцев) хранит обе цены и доли просмотров, а не теряет их при выгрузке. Купона нет — NULL, а не цена; групп нет — пусто
+ */
+test('step 109: the coupon price and the Buy Box customer groups survive the ClickHouse row round trip', () => {
+  const usd = (amountMinor: number) => ({ amountMinor, currency: 'USD', basis: 'NET' as const });
+  const snapshot: CompetitorSnapshot = {
+    marketplace: 'ATVPDKIKX0DER', channelProductRef: 'B0SYN00109', condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY',
+    observedAt: '2026-10-29T10:00:00.000Z', completeness: { kind: 'TOP_N', n: 2 },
+    offers: [
+      { sellerRef: 'A2ZWOLFOFDPJL1', isSelf: false, price: usd(1715), shipping: usd(250), totalPrice: usd(1965), couponPrice: usd(1629), condition: 'new', fulfillment: 'MFN', deliveryDays: { min: null, max: null } },
+      { sellerRef: 'A3DJR8M9Y3OUPG', isSelf: false, price: usd(1811), shipping: usd(250), totalPrice: usd(2061), condition: 'new', fulfillment: 'MFN', deliveryDays: { min: null, max: null } },
+    ],
+    buyboxSegments: [
+      { sellerRef: 'A3DJR8M9Y3OUPG', isSelf: false, membership: 'NON_PRIME', viewSharePct: 72 },
+      { sellerRef: 'A3DJR8M9Y3OUPG', isSelf: false, membership: 'PRIME', viewSharePct: 10.5 },
+      { isSelf: true, membership: 'DEFAULT', viewSharePct: 17.5 },
+    ],
+  };
+  const row = competitorSnapshotRow('t', 'a', 'AMAZON', 's', snapshot, NOW, 'RECONCILIATION', 'POLL');
+  assert.deepEqual(row['offers.coupon_minor'], [1629, null], 'no coupon is NULL, not the price');
+  assert.deepEqual([row['buybox_segments.seller_ref'], row['buybox_segments.is_self'], row['buybox_segments.membership'], row['buybox_segments.view_share_bp']],
+    [['A3DJR8M9Y3OUPG', 'A3DJR8M9Y3OUPG', ''], [false, false, true], ['NON_PRIME', 'PRIME', 'DEFAULT'], [7200, 1050, 1750]]);
+  assert.deepEqual(competitorSnapshotFromRow({ ...row, observed_at: '2026-10-29 10:00:00.000' }), snapshot);
+  const plain = competitorSnapshotRow('t', 'a', 'AMAZON', 's', { ...snapshot, buyboxSegments: undefined, offers: snapshot.offers.slice(1) }, NOW);
+  assert.deepEqual([plain['offers.coupon_minor'], plain['buybox_segments.membership']], [[null], []]);
+  assert.equal('buyboxSegments' in competitorSnapshotFromRow({ ...plain, observed_at: '2026-10-29 10:00:00.000' }), false, 'no groups — no field');
+});

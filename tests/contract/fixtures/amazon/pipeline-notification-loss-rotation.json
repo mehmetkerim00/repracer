@@ -442,7 +442,7 @@
     },
     {
       "id": "summary-rotation",
-      "note": "getCompetitiveSummary: lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11]",
+      "note": "getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]",
       "request": {
         "method": "POST",
         "path": "/batches/products/pricing/2022-05-01/items/competitiveSummary",
@@ -452,6 +452,7 @@
               "asin": "B000008301",
               "marketplaceId": "A1PA6795UKMFR9",
               "includedData": [
+                "featuredBuyingOptions",
                 "lowestPricedOffers"
               ],
               "lowestPricedOffersInputs": [
@@ -467,6 +468,7 @@
               "asin": "B000008302",
               "marketplaceId": "A1PA6795UKMFR9",
               "includedData": [
+                "featuredBuyingOptions",
                 "lowestPricedOffers"
               ],
               "lowestPricedOffersInputs": [
@@ -482,6 +484,7 @@
               "asin": "B000008303",
               "marketplaceId": "A1PA6795UKMFR9",
               "includedData": [
+                "featuredBuyingOptions",
                 "lowestPricedOffers"
               ],
               "lowestPricedOffersInputs": [

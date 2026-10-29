@@ -185,6 +185,24 @@ export interface CompetitorOffer {
    * отзывов); у Kaufland и Walmart поля нет — честное отсутствие
    */
   rating?: { positivePct: number; count: number };
+  /**
+   * Шаг 109 [Р-234]: цена с купоном, если канал её назвал (Amazon getCompetitiveSummary — акция `COUPON`, `promotionSavings.discountedPrice`).
+   * Купон условен — его надо «прищёлкнуть», и не всякий покупатель его видит: стратегии считают по `price`, купон только показывается
+   */
+  couponPrice?: Money;
+}
+
+/**
+ * Шаг 109 [Р-235]: сегмент покупателей, которому канал показывает это предложение в Buy Box, с долей просмотров страницы товара
+ * (Amazon `featuredBuyingOptions[].segmentedFeaturedOffers[].featuredOfferSegments[]`: `customerMembership`, `glanceViewWeightPercentage`)
+ */
+export interface BuyboxSegment {
+  sellerRef?: string;
+  isSelf: boolean;
+  /** Членство покупателей сегмента: у Amazon PRIME, NON_PRIME или DEFAULT (статус Prime неизвестен) */
+  membership: string;
+  /** Доля просмотров страницы товара, процентов (0…100) */
+  viewSharePct: number;
 }
 
 export interface CompetitorSnapshot {
@@ -205,6 +223,8 @@ export interface CompetitorSnapshot {
   offers: CompetitorOffer[];
   /** Подсказка канала о цене для выигрыша (Kaufland target_price) — вход стратегии, не решение */
   channelSuggestedPrice?: Money;
+  /** Шаг 109 [Р-235]: предложения в Buy Box по сегментам покупателей — только если канал их назвал (источник с `holderByViewShare`) */
+  buyboxSegments?: BuyboxSegment[];
 }
 
 export interface CompetitorReadResult {

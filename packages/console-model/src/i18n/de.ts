@@ -1326,6 +1326,20 @@ export const de: Messages = {
       position: (rank: number, total: number) => `Ihr Angebot ist Nr. ${rank} von ${total} nach Preis mit Versand`,
       notListed: 'Ihr Angebot ist nicht unter den Angeboten, die der Kanal nennt',
       gapAbove: (amount: string) => `${amount} über dem Buy-Box-Gewinner, mit Versand`, gapNone: 'Auf oder unter dem Preis des Gewinners mit Versand',
+      // Шаг 109 [Р-234]: купон — рядом с базовой ценой; стратегии считают по базовой
+      withCoupon: (price: string) => `(${price} mit Coupon)`,
+      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) — Buy Box по группам покупателей и купоны, со своим моментом
+      summary: {
+        title: (channel: string) => `Wettbewerbsübersicht von ${channel}`, observed: 'Stand',
+        segmentsTitle: 'Buy Box nach Kundenaufrufen', viewsOf: (pct: string) => `${pct} der Aufrufe`,
+        group: { PRIME: 'Prime-Kunden', NON_PRIME: 'Kunden ohne Prime', DEFAULT: 'Prime-Status unbekannt', OTHER: 'übrige Kunden' },
+        majority: (seller: string, pct: string) => `${seller} hat die meisten Aufrufe (${pct}) und zählt in Ihrem Anteil als Inhaber der Buy Box.`,
+        majoritySelf: (pct: string) => `Sie haben die meisten Aufrufe (${pct}); das zählt in Ihrem Anteil als Ihre Zeit.`,
+        noMajority: 'Kein Verkäufer hat mehr als die Hälfte der Aufrufe, deshalb zählt diese Lesung nicht in Ihren Anteil.',
+        couponsTitle: 'Coupons',
+        couponNote: 'Preise werden nach dem Grundpreis entschieden: Ein Coupon wird an der Kasse eingelöst, und nicht jeder Kunde sieht ihn.',
+        note: (channel: string) => `${channel} nennt in dieser Übersicht das Buy-Box-Angebot je Kundengruppe. Sie dient nur der Prüfung und bewegt keine Preise.`,
+      },
       share: {
         title: 'Buy-Box-Anteil', caption: 'Nach Lesungen, nicht nach Verkäufen: jede Lesung zählt bis zur nächsten, höchstens 24 Stunden.',
         of: 'der Zeit mit bekanntem Inhaber der Buy Box: Ihre ÷ (Ihre + anderer Verkäufer + niemand).', coverage: (pct: string) => `Lesungen decken ${pct} des Zeitraums ab.`,

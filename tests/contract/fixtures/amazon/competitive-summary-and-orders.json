@@ -4,7 +4,7 @@
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
   "title": "Р-121: getCompetitiveSummary — снимок только для сверки",
-  "description": "Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).",
+  "description": "Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без единого победителя Buy Box, своё предложение — по SellerId. Шаг 109: тот же вызов — featuredBuyingOptions: предложения в Buy Box по сегментам с долей просмотров [Р-235]; купон предложения — отдельной ценой [Р-234]. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).",
   "tags": [
     "port",
     "r-121"
@@ -92,7 +92,12 @@
                 "shipping": {
                   "amountMinor": 0
                 },
-                "fulfillment": "AFN"
+                "fulfillment": "AFN",
+                "couponPrice": {
+                  "amountMinor": 1699,
+                  "currency": "EUR",
+                  "basis": "GROSS"
+                }
               },
               {
                 "isSelf": true,
@@ -108,6 +113,25 @@
                   "amountMinor": 2249
                 },
                 "fulfillment": "MFN"
+              }
+            ],
+            "buyboxSegments": [
+              {
+                "sellerRef": "A1SYNCOMPETITOR",
+                "isSelf": false,
+                "membership": "NON_PRIME",
+                "viewSharePct": 64
+              },
+              {
+                "sellerRef": "A1SYNCOMPETITOR",
+                "isSelf": false,
+                "membership": "PRIME",
+                "viewSharePct": 12
+              },
+              {
+                "isSelf": true,
+                "membership": "DEFAULT",
+                "viewSharePct": 24
               }
             ]
           }
@@ -184,7 +208,7 @@
     },
     {
       "id": "summary-batch",
-      "note": "getCompetitiveSummary: lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11]",
+      "note": "getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]",
       "request": {
         "method": "POST",
         "path": "/batches/products/pricing/2022-05-01/items/competitiveSummary",
@@ -194,6 +218,7 @@
               "asin": "B000007001",
               "marketplaceId": "A1PA6795UKMFR9",
               "includedData": [
+                "featuredBuyingOptions",
                 "lowestPricedOffers"
               ],
               "lowestPricedOffersInputs": [
@@ -209,6 +234,7 @@
               "asin": "B000007003",
               "marketplaceId": "A1PA6795UKMFR9",
               "includedData": [
+                "featuredBuyingOptions",
                 "lowestPricedOffers"
               ],
               "lowestPricedOffersInputs": [
@@ -235,6 +261,84 @@
               "body": {
                 "asin": "B000007001",
                 "marketplaceId": "A1PA6795UKMFR9",
+                "featuredBuyingOptions": [
+                  {
+                    "buyingOptionType": "New",
+                    "segmentedFeaturedOffers": [
+                      {
+                        "sellerId": "A1SYNCOMPETITOR",
+                        "condition": "New",
+                        "subCondition": "New",
+                        "fulfillmentType": "AFN",
+                        "listingPrice": {
+                          "amount": 17.79,
+                          "currencyCode": "EUR"
+                        },
+                        "shippingOptions": [
+                          {
+                            "shippingOptionType": "DEFAULT",
+                            "price": {
+                              "amount": 0,
+                              "currencyCode": "EUR"
+                            }
+                          }
+                        ],
+                        "promotions": [
+                          {
+                            "promotionType": "COUPON",
+                            "promotionSavings": {
+                              "discountedPrice": {
+                                "amount": 16.99,
+                                "currencyCode": "EUR"
+                              }
+                            }
+                          }
+                        ],
+                        "featuredOfferSegments": [
+                          {
+                            "customerMembership": "NON_PRIME",
+                            "segmentDetails": {
+                              "glanceViewWeightPercentage": 64
+                            }
+                          },
+                          {
+                            "customerMembership": "PRIME",
+                            "segmentDetails": {
+                              "glanceViewWeightPercentage": 12
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "sellerId": "A1SYNSELLER0001",
+                        "condition": "New",
+                        "subCondition": "New",
+                        "fulfillmentType": "MFN",
+                        "listingPrice": {
+                          "amount": 18.5,
+                          "currencyCode": "EUR"
+                        },
+                        "shippingOptions": [
+                          {
+                            "shippingOptionType": "DEFAULT",
+                            "price": {
+                              "amount": 3.99,
+                              "currencyCode": "EUR"
+                            }
+                          }
+                        ],
+                        "featuredOfferSegments": [
+                          {
+                            "customerMembership": "DEFAULT",
+                            "segmentDetails": {
+                              "glanceViewWeightPercentage": 24
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "lowestPricedOffers": [
                   {
                     "lowestPricedOffersInput": {
@@ -257,6 +361,17 @@
                             "price": {
                               "amount": 0,
                               "currencyCode": "EUR"
+                            }
+                          }
+                        ],
+                        "promotions": [
+                          {
+                            "promotionType": "COUPON",
+                            "promotionSavings": {
+                              "discountedPrice": {
+                                "amount": 16.99,
+                                "currencyCode": "EUR"
+                              }
                             }
                           }
                         ]

@@ -622,3 +622,46 @@ test('step 107 [Р-233, Р-231, Р-232]: demo on PostgreSQL — channel bounds n
   }
   assert.ok(!/amazon\.com\/sp\?seller=/.test(clTrace + heldTrace), 'no seller link in the receipts of the demo');
 });
+
+type Summary109 = { title: string; observed: { at: string }; segments: Array<{ share: string; seller: string; self: boolean; group: string }>; holder: string | null;
+  coupons: Array<{ seller: string; price: string; coupon: string }>; couponNote: string | null };
+
+/**
+ * Шаг 109 [Р-234, Р-235]: демо на PostgreSQL — сверка amazon.com по кругу (сводка конкурентов модели) пишет снимки с группами покупателей и
+ * купонами. Страница Competition показывает последнюю сводку со своим моментом; держатель в снимке уведомления по-прежнему неизвестен
+ * (A-29), а доля Buy Box amazon.com считается по отрезкам держателя большинства просмотров — и колонка Offers говорит то же, что страница
+ */
+test('step 109 [Р-234, Р-235]: demo on PostgreSQL — amazon.com offers show the competitive summary (customer groups, majority, coupons); the Buy Box share counts', async () => {
+  const { token, w } = await guest105();
+  const m = messagesFor('en');
+  const c = m.ui.competition;
+  const amazon = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind === 'UNKNOWN');
+  assert.ok(amazon.length >= 10, `amazon.com offers with a snapshot: ${amazon.length}`);
+  const seen = { summaries: 0, majority: 0, none: 0, coupons: 0, shares: 0 };
+  for (const first of amazon) {
+    let row = first;
+    let view = (await call<Competition105 & { summary: Summary109 | null }>('GET', `/api/worlds/${w}/competition/${first.unit.writeScopeId}?period=7d`, token)).body;
+    // Демо живёт настоящим временем: строка и страница сравниваются на одном окне доли (как у шага 105)
+    for (let attempt = 0; attempt < 5 && row.buybox!.share !== (view.share.available ? view.share.value : null); attempt++) {
+      row = (await offers105(token, w, `&bb=1&q=${encodeURIComponent(first.unit.externalUnitId)}`)).find((r) => r.unit.writeScopeId === first.unit.writeScopeId) ?? first;
+      view = (await call<Competition105 & { summary: Summary109 | null }>('GET', `/api/worlds/${w}/competition/${first.unit.writeScopeId}?period=7d`, token)).body;
+    }
+    assert.equal(view.holder!.kind, 'UNKNOWN', `${row.unit.label}: the notification still does not name the holder (A-29)`);
+    assert.equal(row.buybox!.share, view.share.available ? view.share.value : null, `${row.unit.label}: the Offers column is the page`);
+    if (view.share.available) seen.shares += 1;
+    const s = view.summary;
+    if (!s) continue;
+    seen.summaries += 1;
+    assert.equal(s.title, c.summary.title('Amazon'));
+    assert.ok(s.segments.length > 0 && s.segments.every((x) => /^\d+% of views$/.test(x.share)), `${row.unit.label}: «72% of views: …» per customer group`);
+    if (s.holder === c.summary.noMajority) seen.none += 1; else seen.majority += 1;
+    for (const x of s.coupons) {
+      seen.coupons += 1;
+      assert.ok(Number(x.coupon.replace(/[$,]/g, '')) < Number(x.price.replace(/[$,]/g, '')), `${row.unit.label}: the coupon price is below the price`);
+    }
+  }
+  assert.ok(seen.summaries >= 10, `the competitive summary is on the page of the reconciled offers: ${JSON.stringify(seen)}`);
+  assert.ok(seen.majority > 0 && seen.none > 0, `a majority holder and «no majority» are both shown: ${JSON.stringify(seen)}`);
+  assert.ok(seen.coupons > 0, `competitor coupons are shown: ${JSON.stringify(seen)}`);
+  assert.ok(seen.shares >= 10, `the amazon.com Buy Box share counts the spans of the summaries: ${JSON.stringify(seen)}`);
+});

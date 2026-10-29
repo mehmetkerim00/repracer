@@ -1,5 +1,5 @@
-import type { AdapterCallContext, CompetitorOffer, CompetitorQuery, CompetitorReadResult, DiscoveredOffer, Instant, Money, OrderLine, Page, PageRequest, PriceBasis } from '@repracer/channel-port';
-import type { CompetitiveSummaryBatchRequest, CompetitiveSummaryBatchResponse, InventorySummariesResponse, ItemSearchResults, MoneyType, OrderItemRecord, OrderRecord, SearchOrdersResponse } from '@repracer/amazon-client';
+import type { AdapterCallContext, BuyboxSegment, CompetitorOffer, CompetitorQuery, CompetitorReadResult, DiscoveredOffer, Instant, Money, OrderLine, Page, PageRequest, PriceBasis } from '@repracer/channel-port';
+import type { CompetitiveSummaryBatchRequest, CompetitiveSummaryBatchResponse, CompetitiveSummaryResponseBody, InventorySummariesResponse, ItemSearchResults, MoneyType, OrderItemRecord, OrderRecord, PricingOffer, SearchOrdersResponse } from '@repracer/amazon-client';
 import { logConservative } from './conservative.ts';
 import { AMAZON_MARKETPLACES, COMPETITIVE_SUMMARY_BATCH_MAX, COMPETITIVE_SUMMARY_PATH, FBA_SUMMARIES_PATH, FBA_SUMMARIES_SKUS_MAX, marketplaceInfo, ORDERS_PAGE_MAX, ORDERS_PATH, SEARCH_PAGE_MAX, SOURCE_COMPETITIVE_SUMMARY } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyFailure } from './errors.ts';
@@ -222,8 +222,10 @@ function orderLine(item: OrderItemRecord, head: OrderHead): { line: OrderLine } 
 
 /**
  * Р-121 (шаг 24): getCompetitiveSummary — только сверка потерь ANY_OFFER_CHANGED [AMZ_C11]. Снимок источника AMAZON_COMPETITIVE_SUMMARY
- * (роль RECONCILIATION): предложения — lowestPricedOffers New/Consumer, без победителя Buy Box; момент наблюдения — время ответа.
- * Пакет — до 20 товаров одного региона сессии; ограничитель — операция getCompetitiveSummary (0.033 rps, burst 1)
+ * (роль RECONCILIATION): предложения — lowestPricedOffers New/Consumer, без единого победителя Buy Box; момент наблюдения — время ответа.
+ * Пакет — до 20 товаров одного региона сессии; ограничитель — операция getCompetitiveSummary (0.033 rps, burst 1).
+ * Шаг 109: тот же вызов просит и `featuredBuyingOptions` — предложения в Buy Box по сегментам покупателей с долей просмотров [Р-235];
+ * у предложения — цена с купоном, если канал её назвал [Р-234]. Набор шире — запросов не больше: лимит считается на вызов
  */
 export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: AdapterCallContext, queries: readonly CompetitorQuery[]): Promise<CompetitorReadResult> {
   const failures: CompetitorReadResult['failures'] = [];
@@ -256,7 +258,7 @@ export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: 
     }
     const body: CompetitiveSummaryBatchRequest = {
       requests: batch.map((q) => ({
-        asin: q.channelProductRef, marketplaceId: q.marketplace, includedData: ['lowestPricedOffers'], lowestPricedOffersInputs: [{ itemCondition: 'New', offerType: 'Consumer' }],
+        asin: q.channelProductRef, marketplaceId: q.marketplace, includedData: ['featuredBuyingOptions', 'lowestPricedOffers'], lowestPricedOffersInputs: [{ itemCondition: 'New', offerType: 'Consumer' }],
         method: 'GET', uri: '/products/pricing/2022-05-01/items/competitiveSummary',
       })),
     };
@@ -286,20 +288,58 @@ export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: 
         const shippingOption = (o.shippingOptions ?? []).find((x) => x.shippingOptionType === 'DEFAULT');
         const shipping = shippingOption ? summaryMoney(shippingOption.price, basis) : null;
         const isSelf = o.sellerId === session.sellerId;
+        const coupon = couponPrice(o, price, basis);
         offers.push({
           isSelf, ...(typeof o.sellerId === 'string' && !isSelf ? { sellerRef: o.sellerId } : {}), price,
           ...(shipping ? { shipping, totalPrice: { ...price, amountMinor: price.amountMinor + shipping.amountMinor } } : {}),
           ...(typeof o.subCondition === 'string' ? { condition: o.subCondition.toLowerCase() } : {}),
           fulfillment: o.fulfillmentType === 'AFN' ? 'AFN' : 'MFN',
+          ...(coupon ? { couponPrice: coupon } : {}),
         });
       }
+      const segments = buyboxSegmentsOf(r.body, session.sellerId);
       snapshots.push({
         marketplace: query.marketplace, channelProductRef: query.channelProductRef, condition: 'new', source: SOURCE_COMPETITIVE_SUMMARY, observedAt,
-        completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers,
+        completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers, ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
       });
     }
   }
   return { snapshots, failures };
+}
+
+/**
+ * Шаг 109 [Р-234]: цена с купоном — акция `COUPON` (definitions.PromotionType: «a live coupon that customers can clip and apply at checkout»),
+ * её `promotionSavings.discountedPrice`. DEAL (скидка применяется сама) и BASKET_BUILDING (скидка за несколько штук) — не купон. Цена в чужой
+ * валюте или не ниже базовой — не купон; купонов несколько — самая низкая цена
+ */
+function couponPrice(o: PricingOffer, price: Money, basis: PriceBasis): Money | null {
+  let best: Money | null = null;
+  for (const p of o.promotions ?? []) {
+    if (p?.promotionType !== 'COUPON') continue;
+    const m = summaryMoney(p.promotionSavings?.discountedPrice, basis);
+    if (m && m.currency === price.currency && m.amountMinor > 0 && m.amountMinor < price.amountMinor && (!best || m.amountMinor < best.amountMinor)) best = m;
+  }
+  return best;
+}
+
+/**
+ * Шаг 109 [Р-235]: предложения в Buy Box по сегментам — `featuredBuyingOptions` с `buyingOptionType` New (сверка читает новое состояние).
+ * Доля просмотров сегмента — `segmentDetails.glanceViewWeightPercentage` (число, в модели необязательное: сегмента без доли нет в снимке)
+ */
+function buyboxSegmentsOf(body: CompetitiveSummaryResponseBody, sellerId: string): BuyboxSegment[] {
+  const out: BuyboxSegment[] = [];
+  for (const option of body.featuredBuyingOptions ?? []) {
+    if (option?.buyingOptionType !== 'New') continue;
+    for (const offer of option.segmentedFeaturedOffers ?? []) {
+      const isSelf = offer?.sellerId === sellerId;
+      for (const segment of offer?.featuredOfferSegments ?? []) {
+        const pct = segment?.segmentDetails?.glanceViewWeightPercentage;
+        if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100 || typeof segment.customerMembership !== 'string') continue;
+        out.push({ ...(typeof offer.sellerId === 'string' && !isSelf ? { sellerRef: offer.sellerId } : {}), isSelf, membership: segment.customerMembership.slice(0, 20), viewSharePct: pct });
+      }
+    }
+  }
+  return out;
 }
 
 function summaryMoney(p: MoneyType | undefined, basis: PriceBasis): Money | null {

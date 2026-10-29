@@ -9,7 +9,7 @@ import {
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
-  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, filterActive, OFFER_HOLDER_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
 } from '@repracer/console-model';
 import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
@@ -778,7 +778,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      */
     const accountCompetitors = (): Record<string, AccountCompetitorInfo> => Object.fromEntries(live.accounts.map((a) => {
       const primary = (descriptorOf(a.channel).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE' && x.role === 'PRIMARY');
-      return [a.channelAccountId, { channel: a.channel, data: primary.length > 0, named: primary.some((x) => x.hasBuyboxWinner) }];
+      const all = (descriptorOf(a.channel).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE');
+      // Шаг 109 [Р-235]: доля Buy Box считается и там, где держателя называет сверка долями просмотров (Amazon)
+      return [a.channelAccountId, { channel: a.channel, data: primary.length > 0, named: primary.some((x) => x.hasBuyboxWinner), shares: shareNamedBy(all) }];
     }));
     /** Окно доли Buy Box в колонке — те же 7 дней, что у страницы Competition по умолчанию */
     const shareRange = () => periodRange(OFFER_SHARE_PERIOD, live.clock.iso(), display?.timeZone ?? null, BUYBOX_SHARE_KEEP_DAYS);
@@ -1043,13 +1045,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const scope = scopeById(world, param);
           if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
           const range = periodRange(period, live.clock.iso(), display?.timeZone ?? null, BUYBOX_SHARE_KEEP_DAYS);
-          const [snapshot, spans] = await Promise.all([
+          const [snapshot, spans, summary] = await Promise.all([
             live.store.competitionSnapshot(world.tenantId, param),
             live.store.buyboxSpans(world.tenantId, param, range.since as never, range.until as never),
+            // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов (снимок сверки) — группы покупателей и купоны со своим моментом
+            live.store.competitionSummary(world.tenantId, param),
           ]);
           const sources = (descriptorOf(channelOf(world, scope.channelAccountId)).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE');
           const view = competitionView(world, param, {
-            snapshot, spans, range, sources, floorMinor: effectiveFloor(scope, world).minor, period,
+            snapshot, spans, range, sources, floorMinor: effectiveFloor(scope, world).minor, period, summary,
             sourceText: (source) => (m.ui.sources as Record<string, string | undefined>)[source] ?? m.ui.trace.sourceUnnamed,
           }, m);
           return view ? ok(view) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);

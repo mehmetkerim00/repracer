@@ -1,6 +1,6 @@
 import { sellerLink } from './seller-link.ts';
 import type { CompetitorOffer, CompetitorSnapshot } from '@repracer/channel-port';
-import { fulfilmentKind } from '@repracer/pricing-model';
+import { fulfilmentKind, sellerViewShares, holderByViewShare } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
 import type { Period } from './period.ts';
 import { scopeById, unitOf, type StandWorld, type UnitRef } from './world.ts';
@@ -162,8 +162,13 @@ export type BuyboxHolderKind = 'SELF' | 'OTHER' | 'NONE' | 'UNKNOWN';
 export interface BuyboxFacts {
   /** NO_COMPETITOR_DATA — канал конкурентов не даёт (eBay); NO_SNAPSHOT — снимков ещё нет */
   state: 'OK' | 'NO_COMPETITOR_DATA' | 'NO_SNAPSHOT';
-  /** Канал называет держателя (основной источник с победителем Buy Box); нет — держатель «неизвестен», доли нет (A-29) */
+  /** Канал называет держателя (основной источник с победителем Buy Box); нет — держатель «неизвестен» (A-29) */
   holderNamed: boolean;
+  /**
+   * Шаг 109 [Р-235]: доля Buy Box считается — держателя называет основной источник или источник сверки называет его долями просмотров
+   * (Amazon getCompetitiveSummary: держатель большинства просмотров). Нынешний держатель на странице при этом может быть «неизвестен»
+   */
+  shareNamed: boolean;
   holder: BuyboxHolderKind | null;
   /** Держатель — другой продавец: его имя; канал имени не назвал — null */
   seller: string | null;
@@ -180,7 +185,12 @@ export interface BuyboxFactsInput {
   snapshot: { snapshot: CompetitorSnapshot; source: string; observedAt: string } | null;
   spans: readonly ShareSpan[];
   range: { since: string; until: string };
-  sources: ReadonlyArray<{ hasBuyboxWinner: boolean; role: string }>;
+  sources: ReadonlyArray<{ hasBuyboxWinner: boolean; role: string; holderByViewShare?: boolean }>;
+}
+
+/** Шаг 109 [Р-235]: доля Buy Box считается, если держателя называет основной источник или источник долей просмотров */
+export function shareNamedBy(sources: ReadonlyArray<{ hasBuyboxWinner: boolean; role: string; holderByViewShare?: boolean }>): boolean {
+  return sources.some((s) => (s.role === 'PRIMARY' && s.hasBuyboxWinner) || s.holderByViewShare === true);
 }
 
 /**
@@ -191,10 +201,11 @@ export interface BuyboxFactsInput {
 export function buyboxFacts(input: BuyboxFactsInput): BuyboxFacts {
   const primary = input.sources.filter((s) => s.role === 'PRIMARY');
   const holderNamed = primary.some((s) => s.hasBuyboxWinner);
-  const share = holderNamed ? buyboxShare(input.spans, Date.parse(input.range.since), Date.parse(input.range.until)) : null;
+  const shareNamed = shareNamedBy(input.sources);
+  const share = shareNamed ? buyboxShare(input.spans, Date.parse(input.range.since), Date.parse(input.range.until)) : null;
   const none = { holder: null, seller: null, price: null, gapMinor: null, observedAt: null };
-  if (primary.length === 0) return { state: 'NO_COMPETITOR_DATA', holderNamed: false, share: null, ...none };
-  if (!input.snapshot) return { state: 'NO_SNAPSHOT', holderNamed, share, ...none };
+  if (primary.length === 0) return { state: 'NO_COMPETITOR_DATA', holderNamed: false, shareNamed: false, share: null, ...none };
+  if (!input.snapshot) return { state: 'NO_SNAPSHOT', holderNamed, shareNamed, share, ...none };
   const snap = input.snapshot.snapshot;
   const bb = snap.buybox;
   const holder: BuyboxHolderKind = !holderNamed || (bb && bb.isSelf === null) ? 'UNKNOWN' : !bb ? 'NONE' : bb.isSelf ? 'SELF' : 'OTHER';
@@ -212,7 +223,7 @@ export function buyboxFacts(input: BuyboxFactsInput): BuyboxFacts {
       : bb ? { minor: bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0), landed: bb.shipping !== undefined } : null
     : holder === 'UNKNOWN' && bb ? { minor: bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0), landed: bb.shipping !== undefined } : null;
   const gapMinor = holder === 'OTHER' && winnerLanded !== null && ownLanded !== null ? ownLanded - winnerLanded : null;
-  return { state: 'OK', holderNamed, holder, seller, price, gapMinor, share, observedAt: input.snapshot.observedAt };
+  return { state: 'OK', holderNamed, shareNamed, holder, seller, price, gapMinor, share, observedAt: input.snapshot.observedAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +244,24 @@ export interface CompetitionRow {
   /** Канал назвал держателем; null — канал не говорит */
   buyBox: boolean | null;
   landedKnown: boolean;
+  /** Шаг 109 [Р-234]: цена с купоном (с доставкой, если цена строки с доставкой), если канал её назвал; null — купона нет */
+  coupon: string | null;
+}
+
+/**
+ * Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (снимок сверки) на странице Competition — со своим моментом: предложения в
+ * Buy Box по группам покупателей с долей просмотров, держатель большинства и купоны конкурентов. Цены она не двигает
+ */
+export interface CompetitionSummaryView {
+  title: string;
+  observed: { at: string; when: string };
+  /** Группы покупателей по убыванию доли: «72% of views» · продавец · группа */
+  segments: Array<{ share: string; seller: string; sellerUrl: string | null; self: boolean; group: string }>;
+  /** Держатель большинства просмотров или «большинства нет»; null — канал групп не назвал */
+  holder: string | null;
+  coupons: Array<{ seller: string; sellerUrl: string | null; self: boolean; price: string; coupon: string }>;
+  couponNote: string | null;
+  note: string;
 }
 
 export interface CompetitionView {
@@ -253,6 +282,7 @@ export interface CompetitionView {
   gap: string | null;
   share: { available: boolean; value: string | null; coverage: string | null; note: string; caption: string; clipped: boolean };
   diagnosis: { reasons: string[]; footnote: string } | null;
+  summary: CompetitionSummaryView | null;
 }
 
 export interface CompetitionInput {
@@ -260,7 +290,9 @@ export interface CompetitionInput {
   spans: readonly ShareSpan[];
   range: { since: string; until: string; clipped: boolean };
   /** Источники канала: называет ли какой-нибудь держателя; пусто — конкурентов канал не даёт */
-  sources: ReadonlyArray<{ source: string; hasBuyboxWinner: boolean; role: string }>;
+  sources: ReadonlyArray<{ source: string; hasBuyboxWinner: boolean; role: string; holderByViewShare?: boolean }>;
+  /** Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов (снимок сверки) товара; нет — блока нет */
+  summary?: { snapshot: CompetitorSnapshot; source: string; observedAt: string } | null;
   floorMinor: number | null;
   period: Period;
   sourceText: (source: string) => string;
@@ -277,7 +309,7 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
   // Шаг 105 [Р-230]: держатель, цена, разрыв и доля — одним правилом с колонками Offers
   const facts = buyboxFacts(input);
   const share = (): CompetitionView['share'] => {
-    if (!facts.holderNamed) return { available: false, value: null, coverage: null, note: c.share.unknown(channelName), caption: c.share.caption, clipped: input.range.clipped };
+    if (!facts.shareNamed) return { available: false, value: null, coverage: null, note: c.share.unknown(channelName), caption: c.share.caption, clipped: input.range.clipped };
     const s = facts.share!;
     return {
       available: s.shareBp !== null, value: s.shareBp === null ? null : m.percentBp(s.shareBp), coverage: c.share.coverage(m.percentBp(s.coverageBp)),
@@ -286,10 +318,11 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
   };
   if (facts.state === 'NO_COMPETITOR_DATA') {
     return { worldId: world.id, unit, state: 'NO_COMPETITOR_DATA', stateText: c.noCompetitorData(channelName), holder: null, observed: null, rows: [], columns: NO_COLUMNS, buyBoxPrice: null, position: null, gap: null,
-      share: { available: false, value: null, coverage: null, note: c.noCompetitorData(channelName), caption: c.share.caption, clipped: false }, diagnosis: null };
+      share: { available: false, value: null, coverage: null, note: c.noCompetitorData(channelName), caption: c.share.caption, clipped: false }, diagnosis: null, summary: null };
   }
+  const summary = competitionSummaryView(input.summary ?? null, { channel: unit.channel, channelName, marketplace: unit.marketplace, demo: world.state.demo, currency: scope.currency }, m);
   if (facts.state === 'NO_SNAPSHOT' || !input.snapshot) {
-    return { worldId: world.id, unit, state: 'NO_SNAPSHOT', stateText: c.noSnapshot, holder: null, observed: null, rows: [], columns: NO_COLUMNS, buyBoxPrice: null, position: null, gap: null, share: share(), diagnosis: null };
+    return { worldId: world.id, unit, state: 'NO_SNAPSHOT', stateText: c.noSnapshot, holder: null, observed: null, rows: [], columns: NO_COLUMNS, buyBoxPrice: null, position: null, gap: null, share: share(), diagnosis: null, summary };
   }
   const snap = input.snapshot.snapshot;
   const currency = scope.currency;
@@ -310,6 +343,7 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
     rating: o.rating ? c.rating(m.percentBp(Math.round(o.rating.positivePct * 100)), o.rating.count) : null,
     buyBox: o.holdsBuyBox === true ? true : facts.holderNamed ? false : null,
     landedKnown: landed(o) !== null,
+    coupon: couponText(o, money),
   }));
   const columns = { ...competitorColumns(rows, m), shipping: rows.some((r) => r.shipping !== null) };
   const bb = snap.buybox;
@@ -342,5 +376,60 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
               : c.why.floor(money(r.floorMinor))),
       footnote: c.why.footnote,
     } : null,
+    summary,
+  };
+}
+
+/**
+ * Шаг 109 [Р-234]: цена с купоном рядом с ценой строки — того же вида: у цены с доставкой — купон плюс та же доставка. Купон в чужой валюте
+ * или не дешевле цены — не купон
+ */
+export function couponLanded(o: Pick<CompetitorOffer, 'price' | 'shipping' | 'totalPrice' | 'couponPrice'>): number | null {
+  const c = o.couponPrice;
+  if (!c || c.currency !== o.price.currency || c.amountMinor >= o.price.amountMinor) return null;
+  const shipping = o.totalPrice ? o.totalPrice.amountMinor - o.price.amountMinor : o.shipping ? o.shipping.amountMinor : null;
+  return landed(o as CompetitorOffer) !== null && shipping !== null ? c.amountMinor + shipping : c.amountMinor;
+}
+
+const couponText = (o: CompetitorOffer, money: (v: number) => string): string | null => {
+  const v = couponLanded(o);
+  return v === null ? null : money(v);
+};
+
+/** Шаг 109 [Р-234, Р-235]: блок последней сводки конкурентов — только когда в ней есть группы покупателей или купоны */
+export function competitionSummaryView(summary: { snapshot: CompetitorSnapshot; source: string; observedAt: string } | null,
+  ctx: { channel: string; channelName: string; marketplace: string; demo: boolean; currency: string }, m: Messages): CompetitionSummaryView | null {
+  if (!summary) return null;
+  const c = m.ui.competition;
+  const t = c.summary;
+  const snap = summary.snapshot;
+  const segments = snap.buyboxSegments ?? [];
+  const money = (v: number) => m.money(v, ctx.currency);
+  const groupOf = (membership: string) => (t.group as Record<string, string | undefined>)[membership] ?? t.group.OTHER;
+  const link = (sellerRef: string | null | undefined, self: boolean) => sellerLink({ channel: ctx.channel, marketplace: ctx.marketplace, sellerRef, self, demo: ctx.demo });
+  const pct = (v: number) => m.percentBp(Math.round(v * 100));
+  const rows = segments.filter((s) => Number.isFinite(s.viewSharePct) && s.viewSharePct >= 0 && s.viewSharePct <= 100)
+    .map((s) => ({ s, seller: s.isSelf ? c.you : s.sellerRef ?? c.unnamedSeller }))
+    .sort((a, b) => b.s.viewSharePct - a.s.viewSharePct || a.seller.localeCompare(b.seller));
+  const majority = holderByViewShare(segments);
+  const top = sellerViewShares(segments)[0];
+  const holder = segments.length === 0 ? null
+    : majority?.holder === 'SELF' ? t.majoritySelf(pct(majority.viewSharePct))
+      : majority ? t.majority(majority.sellerRef ?? c.unnamedSeller, pct(majority.viewSharePct))
+        : top ? t.noMajority : null;
+  const coupons = orderedOffers(snap).flatMap((o) => {
+    const v = couponLanded(o);
+    return v === null ? [] : [{ seller: o.isSelf ? c.you : o.sellerRef ?? c.unnamedSeller, sellerUrl: link(o.sellerRef, o.isSelf), self: o.isSelf,
+      price: money(landed(o) ?? o.price.amountMinor), coupon: money(v) }];
+  });
+  if (rows.length === 0 && coupons.length === 0) return null;
+  return {
+    title: t.title(ctx.channelName),
+    observed: { at: summary.observedAt, when: m.when(summary.observedAt) },
+    segments: rows.map(({ s, seller }) => ({ share: t.viewsOf(pct(s.viewSharePct)), seller, sellerUrl: link(s.sellerRef, s.isSelf), self: s.isSelf, group: groupOf(s.membership) })),
+    holder,
+    coupons,
+    couponNote: coupons.length > 0 ? t.couponNote : null,
+    note: t.note(ctx.channelName),
   };
 }

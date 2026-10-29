@@ -71,9 +71,18 @@ export interface CompetitiveSummaryBatchRequest { requests: CompetitiveSummaryRe
 export interface PricingOffer {
   sellerId: string; condition?: string; subCondition?: string; fulfillmentType: 'AFN' | 'MFN'; listingPrice: MoneyType;
   shippingOptions?: Array<{ shippingOptionType: 'DEFAULT'; price: MoneyType }>; primeDetails?: { eligibility: 'NATIONAL' | 'REGIONAL' | 'NONE' };
+  /** Шаг 109 [Р-234]: definitions.Promotion — тип акции (COUPON, DEAL, BASKET_BUILDING) и цена после неё */
+  promotions?: Array<{ promotionType?: string; promotionSavings?: { discountedPrice?: MoneyType } }>;
 }
 export interface LowestPricedOffer { lowestPricedOffersInput: { itemCondition: string; offerType: string }; offers: PricingOffer[] }
-export interface CompetitiveSummaryResponseBody { asin: string; marketplaceId: string; lowestPricedOffers?: LowestPricedOffer[]; errors?: SpApiError[] }
+/** Шаг 109 [Р-235]: definitions.FeaturedBuyingOption, SegmentedFeaturedOffer, FeaturedOfferSegment — предложение в Buy Box по сегментам */
+export interface FeaturedBuyingOption {
+  buyingOptionType: string;
+  segmentedFeaturedOffers: Array<PricingOffer & { featuredOfferSegments: Array<{ customerMembership: string; segmentDetails?: { glanceViewWeightPercentage?: number } }> }>;
+}
+export interface CompetitiveSummaryResponseBody {
+  asin: string; marketplaceId: string; lowestPricedOffers?: LowestPricedOffer[]; featuredBuyingOptions?: FeaturedBuyingOption[]; errors?: SpApiError[];
+}
 export interface CompetitiveSummaryResponse { status: { statusCode?: number; reasonPhrase?: string }; body: CompetitiveSummaryResponseBody }
 export interface CompetitiveSummaryBatchResponse { responses: CompetitiveSummaryResponse[] }
 

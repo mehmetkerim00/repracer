@@ -3,7 +3,7 @@ import {
   importExportRows, LIST_PAGE_MAX, offerExportRows, productList, protectionExportRows, rejectedView, stockExportRows, unitOf, type ExportFormat, type ExportScreen, type Messages,
   type StandWorld,
 } from '@repracer/console-model';
-import { buyboxCellsOf, competitionDataById, selectOffers, type AccountCompetitorInfo, type OfferQuery } from './offer-selection.ts';
+import { buyboxCellsOf, competitionDataById, competitorSourcesOf, selectOffers, type AccountCompetitorInfo, type OfferQuery } from './offer-selection.ts';
 import type { Instant } from '@repracer/channel-port';
 import type { DecisionPageQuery, FeedPageQuery, ImportKind, PricingStore } from '@repracer/pricing-pipeline';
 import type { StockStore } from '@repracer/stock-sync';
@@ -180,7 +180,7 @@ export async function screenExportRows(p: ScreenExportParams, deps: ScreenExport
           if (!scope) return [];
           const info = o.accounts[scope.channelAccountId];
           const d = data.get(id) ?? { snapshot: null, spans: [] };
-          const facts = buyboxFacts({ snapshot: d.snapshot, spans: d.spans, range: o.shareRange, sources: info?.data ? [{ role: 'PRIMARY', hasBuyboxWinner: info.named }] : [] });
+          const facts = buyboxFacts({ snapshot: d.snapshot, spans: d.spans, range: o.shareRange, sources: competitorSourcesOf(info) });
           return [{ unit: unitOf(world, scope, m), snapshot: d.snapshot, holderNamed: facts.holderNamed, state: facts.state }];
         }), world.state.demo));
       }

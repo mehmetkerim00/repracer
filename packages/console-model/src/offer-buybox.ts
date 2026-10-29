@@ -63,7 +63,7 @@ export function buyboxCells(f: BuyboxFacts, ctx: { currency: string; channel: st
   const age = f.observedAt ? Math.max(0, Math.floor((Date.parse(ctx.now) - Date.parse(f.observedAt)) / 60_000)) : null;
   const title = kind === 'NO_DATA' ? b.noData(channelName)
     : kind === 'NO_SNAPSHOT' || !f.observedAt ? b.noSnapshot
-      : `${b.asOf(m.when(f.observedAt), b.age(age!))}${f.holderNamed ? '' : `. ${b.shareUnknown(channelName)}`}`;
+      : `${b.asOf(m.when(f.observedAt), b.age(age!))}${f.shareNamed ? '' : `. ${b.shareUnknown(channelName)}`}`;
   return {
     holder: { kind, text },
     seller: kind === 'OTHER' ? f.seller : null,

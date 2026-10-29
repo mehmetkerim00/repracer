@@ -1381,6 +1381,20 @@ export const en = {
       position: (rank: number, total: number) => `Your offer is #${rank} of ${total} by price with shipping`,
       notListed: 'Your offer is not among the offers the channel listed',
       gapAbove: (amount: string) => `${amount} above the Buy Box winner, with shipping`, gapNone: 'At or below the winner’s price with shipping',
+      // Шаг 109 [Р-234]: купон — рядом с базовой ценой; стратегии считают по базовой
+      withCoupon: (price: string) => `(${price} with coupon)`,
+      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) — Buy Box по группам покупателей и купоны, со своим моментом
+      summary: {
+        title: (channel: string) => `${channel} competitive summary`, observed: 'As of',
+        segmentsTitle: 'Buy Box by customer views', viewsOf: (pct: string) => `${pct} of views`,
+        group: { PRIME: 'Prime customers', NON_PRIME: 'non-Prime customers', DEFAULT: 'Prime status unknown', OTHER: 'other customers' },
+        majority: (seller: string, pct: string) => `${seller} has most of the views (${pct}) and counts as the Buy Box holder in your share.`,
+        majoritySelf: (pct: string) => `You have most of the views (${pct}), which counts as yours in your share.`,
+        noMajority: 'No seller has more than half of the views, so this reading is not counted in your share.',
+        couponsTitle: 'Coupons',
+        couponNote: 'Prices are decided on the base price: a coupon is clipped at checkout and not every customer sees it.',
+        note: (channel: string) => `${channel} names the Buy Box offer for each group of customers in this summary. It is read for checking only and does not move prices.`,
+      },
       share: {
         title: 'Buy Box share', caption: 'By snapshots, not by sales: each reading counts until the next one, at most 24 hours.',
         of: 'of the time the Buy Box holder was known: yours ÷ (yours + another seller + nobody).', coverage: (pct: string) => `Readings cover ${pct} of the period.`,

@@ -152,7 +152,7 @@ test('step 105.1 [Р-230]: the Offers gap counts from the landed Buy Box price w
   const until = now() as never;
   const since = new Date(Date.now() - 7 * 86_400_000).toISOString() as never;
   const page = async (dir: 'asc' | 'desc') => (await store.consoleCatalogPage(kaufland.tenantId, until, { offset: 0, limit: 10, offers: {
-    sort: { key: 'gap', dir }, buybox: { since, until, noDataAccounts: [], namedAccounts: [kaufland.ids.dbId(KAUFLAND)] } } })).scopeIds;
+    sort: { key: 'gap', dir }, buybox: { since, until, noDataAccounts: [], namedAccounts: [kaufland.ids.dbId(KAUFLAND)], shareAccounts: [kaufland.ids.dbId(KAUFLAND)] } } })).scopeIds;
   const [ws1, ws2, ws4] = [kaufland.ids.dbId('ws-1'), kaufland.ids.dbId('ws-2'), kaufland.ids.dbId('ws-4')];
   assert.deepEqual(await page('asc'), [ws2, ws4, ws1], 'gap ascending: +0.50 (Buy Box shipping), +0.80 (holder by the Buy Box seller), +1.10');
   assert.deepEqual(await page('desc'), [ws1, ws4, ws2], 'gap descending');

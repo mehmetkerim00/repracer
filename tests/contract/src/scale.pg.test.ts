@@ -284,7 +284,7 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
     await observer.query('ANALYZE channel_data.competitor_state; ANALYZE channel_data.buybox_span');
   });
   const since = new Date(Date.parse(k.clock.iso()) - 7 * 86_400_000).toISOString() as never;
-  const bbFilter = { buybox: { since, until: now(), noDataAccounts: [], namedAccounts: [account] } };
+  const bbFilter = { buybox: { since, until: now(), noDataAccounts: [], namedAccounts: [account], shareAccounts: [account] } };
   for (const [label, filter] of [['sorted by Buy Box share', { sort: { key: 'share', dir: 'desc' } }], ['holder «another seller», sorted by gap', { holder: 'OTHER', sort: { key: 'gap', dir: 'asc' } }]] as const) {
     await timed(`screen: products ${label} (database selection over every snapshot and span + Buy Box cells of the page)`, SCREEN_SECONDS, async () => {
       const page = await store.consoleCatalogPage(tenant, now(), { offset: 0, limit: 50, offers: { ...filter, ...bbFilter } as never });

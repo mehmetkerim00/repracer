@@ -71,6 +71,13 @@ export interface CompetitorSnapshotRow {
   'offers.delivery_max_days': Array<number | null>;
   'offers.feedback_count': Array<number | null>;
   'offers.feedback_pct': Array<number | null>;
+  /** Шаг 109 (098) [Р-234]: цена с купоном, если канал её назвал; нет купона — null */
+  'offers.coupon_minor': Array<number | null>;
+  /** Шаг 109 (098) [Р-235]: Buy Box по группам покупателей — продавец (у нашего — пусто), наш ли, группа, доля просмотров в б. п. */
+  'buybox_segments.seller_ref': string[];
+  'buybox_segments.is_self': boolean[];
+  'buybox_segments.membership': string[];
+  'buybox_segments.view_share_bp': number[];
   offer_counts: Record<string, number>;
   data_class: string;
 }
@@ -93,6 +100,7 @@ export function competitorSnapshotRow(
   // Находка 2 ревью шага 21: доставка Buy Box — у предложения-победителя. Шаг 97: канал называет её у Buy Box или держателя у предложения;
   // держатель не назван (Amazon, A-29) — доставки Buy Box в строке нет, а не «доставка первого ранга»
   const winner = snapshot.buybox ? o.find((x) => x.holdsBuyBox === true) : undefined;
+  const segments = snapshot.buyboxSegments ?? [];
   return {
     tenant_id: tenantId, competitor_snapshot_id: snapshotId, received_at: receivedAt, observed_at: snapshot.observedAt,
     channel_account_id: channelAccountId, channel, marketplace: snapshot.marketplace, channel_product_ref: snapshot.channelProductRef,
@@ -109,6 +117,9 @@ export function competitorSnapshotRow(
     'offers.delivery_min_days': o.map((x) => x.deliveryDays?.min ?? null), 'offers.delivery_max_days': o.map((x) => x.deliveryDays?.max ?? null),
     // Шаг 97: рейтинг — только если канал его дал (Amazon); доля положительных отзывов — целые проценты столбца UInt8
     'offers.feedback_count': o.map((x) => x.rating?.count ?? null), 'offers.feedback_pct': o.map((x) => (x.rating ? Math.round(x.rating.positivePct) : null)),
+    'offers.coupon_minor': o.map((x) => x.couponPrice?.amountMinor ?? null),
+    'buybox_segments.seller_ref': segments.map((x) => x.sellerRef ?? ''), 'buybox_segments.is_self': segments.map((x) => x.isSelf),
+    'buybox_segments.membership': segments.map((x) => x.membership), 'buybox_segments.view_share_bp': segments.map((x) => Math.round(x.viewSharePct * 100)),
     offer_counts: {}, data_class: channel === 'AMAZON' ? 'AMAZON_INFO' : 'CHANNEL_INFO',
   };
 }
@@ -129,6 +140,12 @@ export function competitorSnapshotFromRow(row: CompetitorSnapshotRow): Competito
     ...(row['offers.condition'][i] ? { condition: row['offers.condition'][i]! } : {}),
     ...(row['offers.fulfillment'][i] ? { fulfillment: row['offers.fulfillment'][i]! } : {}),
     deliveryDays: { min: row['offers.delivery_min_days'][i] ?? null, max: row['offers.delivery_max_days'][i] ?? null },
+    ...(row['offers.coupon_minor']?.[i] != null ? { couponPrice: money(row['offers.coupon_minor'][i]!) } : {}),
+  }));
+  // Строки до 098 столбцов групп не несут
+  const segments = (row['buybox_segments.membership'] ?? []).map((membership, i) => ({
+    ...(row['buybox_segments.seller_ref'][i] ? { sellerRef: row['buybox_segments.seller_ref'][i]! } : {}),
+    isSelf: row['buybox_segments.is_self'][i] ?? false, membership, viewSharePct: (row['buybox_segments.view_share_bp'][i] ?? 0) / 100,
   }));
   const completeness = row.completeness === 'TOP_N' ? { kind: 'TOP_N' as const, n: row.completeness_n ?? offers.length }
     : row.completeness === 'FULL' ? { kind: 'FULL' as const } : { kind: 'CHEAPEST_ONLY' as const };
@@ -142,6 +159,7 @@ export function competitorSnapshotFromRow(row: CompetitorSnapshotRow): Competito
       ...(row.buybox_shipping_minor != null ? { shipping: money(row.buybox_shipping_minor) } : {}), ...(row.buybox_seller_ref ? { sellerRef: row.buybox_seller_ref } : {}) } } : {}),
     offers,
     ...(row.channel_suggested_amount_minor != null ? { channelSuggestedPrice: money(row.channel_suggested_amount_minor) } : {}),
+    ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
   };
 }
 

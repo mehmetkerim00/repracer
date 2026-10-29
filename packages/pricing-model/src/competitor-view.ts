@@ -26,6 +26,11 @@ export interface CompetitorViewRow {
   /** Прежняя цена (UP, DOWN) или последняя известная (GONE) */
   wasMinor?: number;
   /**
+   * Шаг 109 [Р-234]: цена с купоном, если канал её назвал в снимке этого решения. Только показ: стратегия считала по `priceMinor` (купон
+   * условен и не всякому покупателю виден)
+   */
+  couponMinor?: number;
+  /**
    * Шаг 101 [Р-226]: предложение не участвовало в расчёте — исключено фильтром «Compete with» (FILTER) или его исполнение неизвестно
    * (UNKNOWN). Строка остаётся в картине рынка: квитанция показывает её приглушённой, а не прячет
    */
@@ -144,6 +149,7 @@ function rowOf(o: CompetitorOffer): CompetitorViewRow {
     ...(kind ? { fulfilment: kind } : {}),
     ...(o.holdsBuyBox !== undefined ? { holdsBuyBox: o.holdsBuyBox } : {}),
     ...(o.rating ? { ratingPct: o.rating.positivePct, ratingCount: o.rating.count } : {}),
+    ...(o.couponPrice && o.couponPrice.currency === o.price.currency && o.couponPrice.amountMinor < o.price.amountMinor ? { couponMinor: o.couponPrice.amountMinor } : {}),
   };
 }
 
@@ -175,8 +181,8 @@ export function buildCompetitorView(current: CompetitorSnapshot, previous: Previ
   const present = new Set(current.offers.map(keyOf).filter((k): k is string => k !== null));
   const gone: CompetitorViewRow[] = previous
     ? [...before.entries()].filter(([k, o]) => !present.has(k) && !o.isSelf).sort(([a], [b]) => a.localeCompare(b))
-      // У ушедшего — последняя известная цена; ранг и держатель прежнего снимка к нынешнему рынку не относятся
-      .map(([, o]) => { const { rank: _rank, holdsBuyBox: _holds, ...r } = rowOf(o); return { ...r, move: 'GONE' as const, wasMinor: o.price.amountMinor }; })
+      // У ушедшего — последняя известная цена; ранг, держатель и купон прежнего снимка к нынешнему рынку не относятся
+      .map(([, o]) => { const { rank: _rank, holdsBuyBox: _holds, couponMinor: _coupon, ...r } = rowOf(o); return { ...r, move: 'GONE' as const, wasMinor: o.price.amountMinor }; })
     : [];
 
   // Хранится: топ по рангу, наше предложение, все подвинувшиеся и ушедшие — не больше предела; первыми — подвинувшиеся и наше

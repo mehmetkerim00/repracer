@@ -44,7 +44,7 @@ export const AMAZON_CONSERVATIVE_RULES = {
   },
   AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION: {
     question: 'A-15',
-    behaviour: 'getCompetitiveSummary — только сверка потерь ANY_OFFER_CHANGED по кругу [Р-121]: пакет до 20 товаров, lowestPricedOffers New/Consumer; сверяется наименьшая цена конкурента; победитель Buy Box из featuredBuyingOptions не берётся (сегменты по Prime и месту покупателя); момент наблюдения — время ответа (в ответе его нет); только состояние new; лимит уровня приложения не документирован — равен лимиту пары',
+    behaviour: 'getCompetitiveSummary — только сверка потерь ANY_OFFER_CHANGED по кругу [Р-121]: пакет до 20 товаров, featuredBuyingOptions и lowestPricedOffers New/Consumer; сверяется наименьшая цена конкурента; единого победителя Buy Box в ответе нет — предложения в Buy Box по группам покупателей с долей просмотров; держатель для доли Buy Box — продавец большинства просмотров (> 50 %), стратегии он держателя не даёт (шаг 109, Р-235); цена с купоном (акция COUPON) — отдельной ценой, стратегии считают по базовой (Р-234); момент наблюдения — время ответа (в ответе его нет); только состояние new; лимит уровня приложения не документирован — равен лимиту пары',
     whenAnswered: 'Если набор lowestPricedOffers совпадает с Offers уведомления, известны задержка уведомления и лимит приложения — сравнение, срок и темп сверки уточняются',
   },
   AMZ_C08_NOTIFICATION_NOT_SIGNED: {

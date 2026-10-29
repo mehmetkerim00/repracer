@@ -867,9 +867,11 @@ export interface PricingStore {
   /** Р-123 (шаг 24): наименьшая цена за 30 суток витрины до начала скидки — предупреждение до объявления */
   /**
    * Р-121, Р-122: снимок источника только для сверки (роль RECONCILIATION) — в журнал снимков без проверки входов и решения; проверка
-   * потери (только при расхождении, совпадение отклоняет база) — в той же транзакции
+   * потери (только при расхождении, совпадение отклоняет база) — в той же транзакции. Шаг 109 [Р-235]: держатель большинства просмотров
+   * (источник называет Buy Box по сегментам) — отрезок доли Buy Box в той же транзакции, тем же правилом, что у снимка решения
    */
-  recordReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant; lossCheck?: NotificationLossCheck }): Promise<void>;
+  recordReconciliationSnapshot(tenantId: string, entry: { channelAccountId: string; competitorSnapshotId: string; snapshot: CompetitorSnapshot; receivedAt: Instant;
+    lossCheck?: NotificationLossCheck; buyboxHolder?: BuyboxHolderObservation }): Promise<void>;
   /** Р-121: последнее принятое состояние товара (competitor_state) — прежнее состояние сверки без чтения контекста решения */
   heldCompetitorState(tenantId: string, key: ProductKey): Promise<{ observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null } | null>;
   /** Р-121: вердикты проверок аккаунта, срок которых наступил к at; вычисляет база */
@@ -1002,6 +1004,11 @@ export interface PricingStore {
   buyboxSpans(tenantId: string, writeScopeId: string, from: Instant, to: Instant): Promise<BuyboxSpanRow[]>;
   /** Шаг 97 [Р-218]: последний принятый снимок товара единицы — нынешняя картина рынка страницы Competition; нет снимка — null */
   competitionSnapshot(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null>;
+  /**
+   * Шаг 109 [Р-234, Р-235]: последний снимок СВЕРКИ товара единицы (журнал снимков, 3 суток) — Buy Box по сегментам и купоны конкурентов на
+   * странице Competition, со своим моментом. Сверки не было — null
+   */
+  competitionSummary(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null>;
   /**
    * Шаг 105 [Р-230]: снимок и отрезки держателя за [from, to) у многих единиц одним обращением — колонки Buy Box показанной страницы Offers и
    * выгрузки; по смыслу — `competitionSnapshot` и `buyboxSpans` каждой единицы
@@ -1426,7 +1433,8 @@ export interface OfferPageFilter {
   search?: { q: string; labelTemplate: string; marketplaceWords: Readonly<Record<string, string>>; channelNames: Readonly<Record<string, string>>; unknownChannel: string };
   sort?: { key: OfferSortKey; dir: 'asc' | 'desc' };
   /** Окно доли Buy Box (те же 7 дней, что у страницы Competition) и что канал аккаунта называет */
-  buybox: { since: Instant; until: Instant; noDataAccounts: readonly string[]; namedAccounts: readonly string[] };
+  /** Шаг 109 [Р-235]: `shareAccounts` — у кого считается доля Buy Box (держатель назван основным источником или долями просмотров сверки) */
+  buybox: { since: Instant; until: Instant; noDataAccounts: readonly string[]; namedAccounts: readonly string[]; shareAccounts: readonly string[] };
   /** Посчитать строки выгрузки конкурентов (потолок 50 000 — до создания задания) */
   countCompetitorRows?: boolean;
 }

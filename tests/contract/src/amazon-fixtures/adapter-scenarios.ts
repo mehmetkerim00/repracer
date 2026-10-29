@@ -243,7 +243,7 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
 
   add('competitive-summary-and-orders.json', scenario('amazon/port/competitive-summary',
     'Р-121: getCompetitiveSummary — снимок только для сверки',
-    'Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без победителя Buy Box, своё предложение — по SellerId. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).',
+    'Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без единого победителя Buy Box, своё предложение — по SellerId. Шаг 109: тот же вызов — featuredBuyingOptions: предложения в Buy Box по сегментам с долей просмотров [Р-235]; купон предложения — отдельной ценой [Р-234]. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).',
     ['port', 'r-121'],
     [
       call('competitors', 'readCompetitors', [[
@@ -253,8 +253,15 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
         snapshots: [{ marketplace: DE, channelProductRef: 'B000007001', condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: { $clockIso: 0 },
           completeness: { kind: 'TOP_N', n: 2 },
           offers: [
-            { isSelf: false, sellerRef: 'A1SYNCOMPETITOR', price: { amountMinor: 1779, currency: 'EUR', basis: 'GROSS' }, shipping: { amountMinor: 0 }, fulfillment: 'AFN' },
+            { isSelf: false, sellerRef: 'A1SYNCOMPETITOR', price: { amountMinor: 1779, currency: 'EUR', basis: 'GROSS' }, shipping: { amountMinor: 0 }, fulfillment: 'AFN',
+              couponPrice: { amountMinor: 1699, currency: 'EUR', basis: 'GROSS' } },
             { isSelf: true, price: { amountMinor: 1850, currency: 'EUR', basis: 'GROSS' }, shipping: { amountMinor: 399 }, totalPrice: { amountMinor: 2249 }, fulfillment: 'MFN' },
+          ],
+          // Шаг 109 [Р-235]: предложения в Buy Box по сегментам — наш сегмент помечен нашим, без имени продавца
+          buyboxSegments: [
+            { sellerRef: 'A1SYNCOMPETITOR', isSelf: false, membership: 'NON_PRIME', viewSharePct: 64 },
+            { sellerRef: 'A1SYNCOMPETITOR', isSelf: false, membership: 'PRIME', viewSharePct: 12 },
+            { isSelf: true, membership: 'DEFAULT', viewSharePct: 24 },
           ] }],
         failures: [
           { query: { channelProductRef: 'B000007002' }, error: { code: 'UNSUPPORTED' } },
@@ -267,7 +274,8 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
     [
       tokenExchange(),
       competitiveSummaryExchange('summary-batch', [
-        { asin: 'B000007001', offers: [{ seller: 'A1SYNCOMPETITOR', minor: 1779, fba: true }, { seller: SELLER, minor: 1850, shippingMinor: 399 }] },
+        { asin: 'B000007001', offers: [{ seller: 'A1SYNCOMPETITOR', minor: 1779, fba: true, couponMinor: 1699 }, { seller: SELLER, minor: 1850, shippingMinor: 399 }],
+          segments: [{ seller: 'A1SYNCOMPETITOR', membership: 'NON_PRIME', pct: 64 }, { seller: 'A1SYNCOMPETITOR', membership: 'PRIME', pct: 12 }, { seller: SELLER, membership: 'DEFAULT', pct: 24 }] },
         { asin: 'B000007003', status: 404 },
       ]),
     ],

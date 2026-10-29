@@ -122,7 +122,8 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       kind: 'PULL',
       completeness: { kind: 'TOP_N', n: 20 },
       conditions: ['new'],
-      // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет [AMZ_C11]
+      // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет [AMZ_C11]; держатель для доли Buy Box —
+      // продавец большинства просмотров (шаг 109, Р-235), стратегии он держателя не даёт
       hasBuyboxWinner: false,
       hasBuyboxPrice: false,
       hasFulfilment: false,
@@ -131,6 +132,7 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       typicalStalenessSeconds: null,
       availability: 'AVAILABLE',
       role: 'RECONCILIATION',
+      holderByViewShare: true,
     },
   ],
 };

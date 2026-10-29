@@ -16,6 +16,8 @@ export interface CompetitorTableRow {
   move?: 'UP' | 'DOWN' | 'APPEARED' | 'GONE' | null; was?: string | null;
   /** Шаг 101 [Р-226]: строка вне расчёта — приглушена, с пометкой словами */
   excluded?: string | null;
+  /** Шаг 109 [Р-234]: цена с купоном того же вида, что цена строки — «$17.15 ($16.29 with coupon)» */
+  coupon?: string | null;
 }
 
 export function CompetitorTable({ rows, columns, shipping = false, foot }: {
@@ -48,6 +50,7 @@ export function CompetitorTable({ rows, columns, shipping = false, foot }: {
                   : r.move === 'GONE' ? <><s>{r.landed}</s> <span className="move move-gone">{t.moved.GONE}</span></>
                     : r.move === 'APPEARED' ? <>{r.landed} <span className="move move-new">{t.moved.APPEARED}</span></>
                       : r.landed}
+                {r.coupon && r.move !== 'GONE' ? <span className="coupon"> {c.withCoupon(r.coupon)}</span> : null}
               </td>
               {shipping ? <td className="num cur">{r.shipping ?? '–'}</td> : null}
               {columns.fulfilment ? <td>{r.fulfilment ?? '–'}</td> : null}
@@ -88,6 +91,39 @@ export function CompetitionScreenView({ view, period, onPeriod }: { view: Compet
             <CompetitorTable rows={view.rows} columns={view.columns} shipping={view.columns.shipping} />
           </>}
         </section>
+        {/*
+          Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) со своим моментом — Buy Box по группам покупателей с долей
+          просмотров, держатель большинства (он и считается в доле) и купоны конкурентов. Цены она не двигает
+        */}
+        {view.summary ? (
+          <section className="card competition-summary">
+            <h3>{view.summary.title}</h3>
+            <p className="muted small">{c.summary.observed} <span className="when" title={view.summary.observed.at}>{view.summary.observed.when}</span></p>
+            {view.summary.segments.length > 0 ? <>
+              <h4>{c.summary.segmentsTitle}</h4>
+              <ul className="plain facts segments">
+                {view.summary.segments.map((s, i) => (
+                  <li key={`${s.seller}-${s.group}-${i}`}>
+                    <strong className="num">{s.share}</strong>{m.colon}{s.self ? <strong>{s.seller}</strong> : <SellerName name={s.seller} url={s.sellerUrl} />} <span className="muted">· {s.group}</span>
+                  </li>
+                ))}
+              </ul>
+              {view.summary.holder ? <p className="summary-holder">{view.summary.holder}</p> : null}
+            </> : null}
+            {view.summary.coupons.length > 0 ? <>
+              <h4>{c.summary.couponsTitle}</h4>
+              <ul className="plain facts coupons">
+                {view.summary.coupons.map((x, i) => (
+                  <li key={`${x.seller}-${i}`}>
+                    {x.self ? <strong>{x.seller}</strong> : <SellerName name={x.seller} url={x.sellerUrl} />}{m.colon}<span className="cur">{x.price}</span> <span className="coupon">{c.withCoupon(x.coupon)}</span>
+                  </li>
+                ))}
+              </ul>
+              {view.summary.couponNote ? <p className="note">{view.summary.couponNote}</p> : null}
+            </> : null}
+            <p className="note">{view.summary.note}</p>
+          </section>
+        ) : null}
         {/* Доля Buy Box за период — по снимкам, а не по продажам [Р-220]; глубже 45 суток отрезков нет — календарь это говорит */}
         <section className="card competition-share">
           <h3>{c.share.title}</h3>

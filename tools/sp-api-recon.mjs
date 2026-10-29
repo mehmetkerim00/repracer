@@ -6,7 +6,7 @@
  *  1. Обмен LWA (`api.amazon.com`, боевой сервер токенов): refresh_token приложения песочницы → токен доступа. Для сравнения — один обмен
  *     client_credentials (токен без продавца) и попытка прочитать им листинг.
  *  2. Вызовы `sandbox.sellingpartnerapi-na.amazon.com` по операциям наших ролей — Listings Items, Product Pricing, FBA Inventory —
- *     РОВНО с параметрами образцов `x-amzn-api-sandbox.static` из моделей снимка vendor/amazon/sp-api-models/2026-09-29 (статическая
+ *     РОВНО с параметрами образцов `x-amzn-api-sandbox.static` из моделей снимка vendor/amazon/sp-api-models/2026-10-29 (статическая
  *     песочница отвечает только на них). FBA Inventory — динамическая: запрос формы адаптера по SKU, созданному шагом 70.
  *  3. Сверка каждого настоящего ответа: (а) с образцом модели байт в байт, (б) со схемой ответа модели — строже модели в одном, как
  *     проверка уведомлений шага 97: поле, которого модель не описывает, — находка; (в) разбором НАСТОЯЩЕГО адаптера (ответ подаётся
@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 
 const ROOT = new URL('../', import.meta.url);
-const MODELS = new URL('vendor/amazon/sp-api-models/2026-09-29/models/', ROOT);
+const MODELS = new URL('vendor/amazon/sp-api-models/2026-10-29/models/', ROOT);
 const FIXTURES = new URL('tests/contract/fixtures/amazon/', ROOT);
 const SANDBOX = 'https://sandbox.sellingpartnerapi-na.amazon.com';
 const LWA = 'https://api.amazon.com/auth/o2/token';
@@ -213,7 +213,7 @@ async function runLive(secretsFile) {
       process.stderr.write(`${c.id}: ${response.status}\n`);
     }
   }
-  const log = { recordedAt: new Date().toISOString(), sandbox: SANDBOX, modelsSnapshot: 'vendor/amazon/sp-api-models/2026-09-29', lwa: lwaLog, exchanges };
+  const log = { recordedAt: new Date().toISOString(), sandbox: SANDBOX, modelsSnapshot: 'vendor/amazon/sp-api-models/2026-10-29', lwa: lwaLog, exchanges };
   // Р-177, Р-148: ни одно значение секрета и ни один токен формы Amazon не уходят в журнал
   const text = JSON.stringify(log, null, 2);
   for (const v of secretValues) if (v && text.includes(v)) throw new Error('refusing to write the log: a secret value is in it');
@@ -227,45 +227,12 @@ async function runLive(secretsFile) {
 const isPlaceholder = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 1 && Object.keys(v)[0].startsWith('$');
 const kindOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v === 'number' ? (Number.isInteger(v) ? 'integer' : 'number') : typeof v);
 
-/** Строгая сверка со схемой Swagger 2.0: $ref, allOf, типы, перечисления, обязательные; поле, которого модель не описывает, — находка */
-export function modelErrors(model, schema, value) {
-  const flatten = (raw, depth = 0) => {
-    let s = raw ?? {};
-    while (typeof s.$ref === 'string') s = walkRef(model, s.$ref) ?? {};
-    if (!Array.isArray(s.allOf) || depth > 20) return s;
-    const parts = s.allOf.map((p) => flatten(p, depth + 1));
-    const properties = {}; const required = [];
-    for (const p of [...parts, s]) { Object.assign(properties, p.properties ?? {}); required.push(...(p.required ?? [])); }
-    return { ...s, allOf: undefined, type: s.type ?? parts.find((p) => p.type)?.type ?? 'object', properties, required,
-      additionalProperties: s.additionalProperties ?? parts.find((p) => p.additionalProperties !== undefined)?.additionalProperties };
-  };
-  const out = new Set();
-  const check = (raw, v, path) => {
-    const s = flatten(raw);
-    if (isPlaceholder(v)) return;
-    if (Array.isArray(s.enum) && !s.enum.includes(v)) out.add(`${path}: value ${JSON.stringify(v).slice(0, 40)} is not in the model enum`);
-    const type = s.type ?? (s.properties || s.additionalProperties ? 'object' : s.items ? 'array' : undefined);
-    const k = kindOf(v);
-    if (type === 'string') { if (k !== 'string') out.add(`${path}: ${k}, the model says string`); return; }
-    if (type === 'integer') { if (k !== 'integer') out.add(`${path}: ${k}, the model says integer`); return; }
-    if (type === 'number') { if (k !== 'integer' && k !== 'number') out.add(`${path}: ${k}, the model says number`); return; }
-    if (type === 'boolean') { if (k !== 'boolean') out.add(`${path}: ${k}, the model says boolean`); return; }
-    if (type === 'array') { if (k !== 'array') out.add(`${path}: ${k}, the model says array`); else if (s.items) for (const x of v) check(s.items, x, `${path}[]`); return; }
-    if (type === 'object') {
-      if (k !== 'object') { out.add(`${path}: ${k}, the model says object`); return; }
-      const props = s.properties ?? {};
-      for (const r of s.required ?? []) if (!(r in v)) out.add(`${path}.${r}: required by the model, absent`);
-      for (const [key, x] of Object.entries(v)) {
-        if (key in props) check(props[key], x, `${path}.${key}`);
-        else if (s.additionalProperties && typeof s.additionalProperties === 'object') check(s.additionalProperties, x, `${path}.${key}`);
-        else if (!s.properties) continue; // свободный объект модели (например, ItemAttributes)
-        else out.add(`${path}.${key}: not in the model`);
-      }
-    }
-  };
-  check(schema, value, '$');
-  return [...out].sort();
-}
+/**
+ * Строгая сверка со схемой Swagger 2.0 — та же функция, что у правила фикстур ответов API (шаг 109, A): поле, которого модель не описывает, —
+ * находка. Загружается в main(): исходник — TypeScript
+ */
+let apiModelErrors;
+const modelErrors = (model, schema, value) => apiModelErrors(model, schema, value);
 
 /** Пути и виды значений: индексы массивов свёрнуты в [] */
 function shapes(v, path = '$', out = new Map()) {
@@ -480,6 +447,7 @@ async function main() {
   if (!process.features?.typescript) {
     throw new Error('run with --experimental-strip-types: the adapter parse needs the TypeScript sources of packages/amazon-adapter');
   }
+  ({ apiModelErrors } = await import(new URL('tests/contract/src/amazon-fixtures/schema-check.ts', ROOT)));
   const log = values.offline ? loadJson(new URL(values.offline, `file://${process.cwd()}/`))
     : await runLive(values.secrets ?? process.env.REPRACER_AMAZON_SANDBOX_ENV ?? join(homedir(), '.config', 'repracer', 'secrets', 'amazon-sandbox.env'));
   const findings = await analyse(log);

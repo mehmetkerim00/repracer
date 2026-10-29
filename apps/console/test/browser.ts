@@ -36,6 +36,8 @@ export interface Browser {
   setColorScheme(scheme: 'light' | 'dark' | null): Promise<void>;
   /** Шаг 100 (B): настоящее движение мыши в точку окна — состояние :hover, которого синтетическое событие страницы не даёт */
   mouseMove(x: number, y: number): Promise<void>;
+  /** Шаг 109: снимок видимой части окна в JPEG — для доказательств шага (смоук пишет их, только когда задан каталог снимков) */
+  screenshot(): Promise<Buffer>;
   /** Исключения страницы и вызовы console.error с начала работы */
   errors(): string[];
   close(): Promise<void>;
@@ -106,6 +108,10 @@ export async function launchBrowser(): Promise<Browser> {
     async setViewport(width, height) { await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); },
     async mouseMove(x, y) { await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); },
     async setColorScheme(scheme) { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme ?? '' }] }); },
+    async screenshot() {
+      const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 80 });
+      return Buffer.from(String((r.result as { data?: string } | undefined)?.data ?? ''), 'base64');
+    },
     text,
     async waitText(needle, timeoutMs = 60_000) {
       const started = Date.now();

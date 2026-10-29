@@ -574,7 +574,9 @@ const SAME_AS_ENGLISH: Readonly<Record<'es' | 'fr', readonly string[]>> = {
   fr: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Deutsch', 'English', 'Español', 'Français',
     'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com', 'SKU', 'CSV', 'XLSX',
     // Французские слова, которые пишутся так же
-    'position', 'active', 'Stock', 'stock', 'Protections', 'Menu', 'Note', 'Sources', 'Source', 'Mode', 'urgent', 'attention', 'Attention', 'Type', 'Versions'],
+    'position', 'active', 'Stock', 'stock', 'Protections', 'Menu', 'Note', 'Sources', 'Source', 'Mode', 'urgent', 'attention', 'Attention', 'Type', 'Versions',
+    // Шаг 109 [Р-234]: заголовок купонов конкурентов на Competition
+    'Coupons'],
 };
 test('step 98 (Р-223): a Spanish or French dictionary string equal to the English one is a name or a word spelled the same — from an explicit list', async () => {
   const { messagesFor } = await import('./i18n/index.ts');

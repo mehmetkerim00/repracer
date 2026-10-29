@@ -1381,6 +1381,20 @@ export const fr: Messages = {
       position: (rank: number, total: number) => `Votre offre est n° ${rank} sur ${total} par prix livraison comprise`,
       notListed: 'Votre offre ne figure pas parmi les offres listées par le canal',
       gapAbove: (amount: string) => `${amount} au-dessus du gagnant de la Buy Box, livraison comprise`, gapNone: 'Au prix du gagnant ou en dessous, livraison comprise',
+      // Шаг 109 [Р-234]: купон — рядом с базовой ценой; стратегии считают по базовой
+      withCoupon: (price: string) => `(${price} avec coupon)`,
+      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) — Buy Box по группам покупателей и купоны, со своим моментом
+      summary: {
+        title: (channel: string) => `Synthèse de la concurrence ${channel}`, observed: 'Au',
+        segmentsTitle: 'Buy Box selon les vues des clients', viewsOf: (pct: string) => `${pct} des vues`,
+        group: { PRIME: 'clients Prime', NON_PRIME: 'clients sans Prime', DEFAULT: 'statut Prime inconnu', OTHER: 'autres clients' },
+        majority: (seller: string, pct: string) => `${seller} a la plupart des vues (${pct}) et compte comme détenteur de la Buy Box dans votre part.`,
+        majoritySelf: (pct: string) => `Vous avez la plupart des vues (${pct}), ce qui compte comme vôtre dans votre part.`,
+        noMajority: 'Aucun vendeur n’a plus de la moitié des vues, cette lecture ne compte donc pas dans votre part.',
+        couponsTitle: 'Coupons',
+        couponNote: 'Les prix sont décidés sur le prix de base\u00a0: un coupon s’active au paiement et tous les clients ne le voient pas.',
+        note: (channel: string) => `${channel} indique dans cette synthèse l’offre de la Buy Box pour chaque groupe de clients. Elle sert uniquement au contrôle et ne fait pas bouger les prix.`,
+      },
       share: {
         title: 'Part de Buy Box', caption: 'D’après les lectures des données de la concurrence, pas d’après les ventes : chaque lecture compte jusqu’à la suivante, 24 heures au plus.',
         of: 'du temps où le détenteur de la Buy Box était connu : vous ÷ (vous + un autre vendeur + personne).', coverage: (pct: string) => `Les lectures couvrent ${pct} de la période.`,

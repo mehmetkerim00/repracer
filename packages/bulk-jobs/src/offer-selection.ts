@@ -12,8 +12,11 @@ import type { CompetitionData, CompetitionDataRow, ConsoleCatalogPage, PricingSt
  * держит тест на всех мирах стенда.
  */
 
-/** Что канал аккаунта говорит о конкурентах — из описания канала (консоль знает его, база — нет) */
-export interface AccountCompetitorInfo { channel: string; data: boolean; named: boolean }
+/**
+ * Что канал аккаунта говорит о конкурентах — из описания канала (консоль знает его, база — нет). Шаг 109 [Р-235]: `shares` — доля Buy Box
+ * считается: держателя называет основной источник или сверка называет его долями просмотров (Amazon); нет поля — как `named`
+ */
+export interface AccountCompetitorInfo { channel: string; data: boolean; named: boolean; shares?: boolean }
 
 export interface OfferQuery {
   storefront: { channelAccountId: string; marketplace: string } | null;
@@ -37,8 +40,10 @@ export interface OfferSelectionDeps {
   shareRange: { since: string; until: string };
 }
 
-const sourcesOf = (info: AccountCompetitorInfo | undefined) =>
-  (info?.data ? [{ role: 'PRIMARY', hasBuyboxWinner: info.named }] : []);
+/** Источники аккаунта для правила страницы: основной (называет ли держателя) и, если доля считается иначе, — источник долей просмотров */
+export const competitorSourcesOf = (info: AccountCompetitorInfo | undefined) =>
+  (info?.data ? [{ role: 'PRIMARY', hasBuyboxWinner: info.named }, ...(info.shares && !info.named ? [{ role: 'RECONCILIATION', hasBuyboxWinner: false, holderByViewShare: true }] : [])] : []);
+const sourcesOf = competitorSourcesOf;
 
 /** Колонки Buy Box единиц — правило страницы Competition по их снимку и отрезкам */
 /** Пакет хранилища — по единице */
@@ -82,7 +87,8 @@ export async function selectOffers(deps: OfferSelectionDeps, query: OfferQuery, 
           unknownChannel: (m.values as Record<string, string | undefined>).UNKNOWN_CHANNEL ?? 'UNKNOWN_CHANNEL' } } : {}),
         ...(query.sort ? { sort: query.sort } : {}),
         buybox: { since: deps.shareRange.since as Instant, until: deps.shareRange.until as Instant,
-          noDataAccounts: accounts.filter(([, a]) => !a.data).map(([id]) => id), namedAccounts: accounts.filter(([, a]) => a.data && a.named).map(([id]) => id) },
+          noDataAccounts: accounts.filter(([, a]) => !a.data).map(([id]) => id), namedAccounts: accounts.filter(([, a]) => a.data && a.named).map(([id]) => id),
+          shareAccounts: accounts.filter(([, a]) => a.data && (a.shares ?? a.named)).map(([id]) => id) },
         ...(options.countCompetitorRows ? { countCompetitorRows: true } : {}),
       },
     });

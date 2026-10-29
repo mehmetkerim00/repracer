@@ -102,6 +102,12 @@ const WALMART_ELSEWHERE_MINOR = (k: number) => (k === 2 || k === 6 ? 1999 : k ==
 const WALMART_PRESS_POLL_MS = 2 * HOUR_MS;
 const WALMART_LIVE_POLL_MS = 15 * MINUTE_MS;
 const WALMART_STATUS_EVERY_MS = 10 * MINUTE_MS;
+/**
+ * Шаг 109 [Р-234, Р-235]: сводка конкурентов amazon.com (getCompetitiveSummary) — сверка по кругу, как у планировщика: в прожатой неделе — раз
+ * в два часа, дальше — раз в полчаса. Её снимки пишут отрезки держателя большинства просмотров (доля Buy Box amazon.com) и купоны конкурентов
+ */
+const AMAZON_SUMMARY_PRESS_MS = 2 * HOUR_MS;
+const AMAZON_SUMMARY_LIVE_MS = 30 * MINUTE_MS;
 
 
 /** Строки заказов, изменившиеся с `sinceMs`: открытые — по времени заказа, отгруженные и отменённые — по времени смены статуса */
@@ -309,7 +315,7 @@ export async function startDemoUsMarket(input: {
   const ctx = (channelAccountId: string): AdapterCallContext => ({
     tenantId: a.tenantId as never, channelAccountId: channelAccountId as never, correlationId: 'console-demo-us', deadline: new Date(Date.parse(nowIso()) + MINUTE_MS).toISOString() as never,
   });
-  const counts = { amazon: 0, ebay: 0, walmart: 0 };
+  const counts = { amazon: 0, ebay: 0, walmart: 0, summaries: 0 };
   const deliver = async () => {
     for (const snapshot of port.drainSnapshots()) {
       await amazon.processSnapshot(ctx(a.amazonAccountId), snapshot);
@@ -317,6 +323,15 @@ export async function startDemoUsMarket(input: {
     }
   };
   const recomputeEbay = async () => { counts.ebay += (await ebay.recomputeScheduled(ctx(a.ebayAccountId), { limit: 100 })).scopes; };
+  // Шаг 109: сводка — пакет до 20 товаров одним вызовом (лимит модели — 0.033 в секунду на вызов, как у адаптера)
+  const summarizeAmazon = async () => {
+    const queries = amazonScopes.map((s) => ({ marketplace: AMAZON_US, channelProductRef: s.channelProductRef!, condition: 'new' }));
+    for (let i = 0; i < queries.length; i += 20) {
+      const batch = queries.slice(i, i + 20);
+      const r = await amazon.pollCompetitors(ctx(a.amazonAccountId), batch);
+      counts.summaries += batch.length - r.failures.length - r.processingFailed.length;
+    }
+  };
   // Шаг 97 [Р-219]: плановый пересчёт walmart.com — таймер ступени подъёма «Win the Buy Box» (в тени предложения удерживаются)
   const recomputeWalmart = async () => { if (walmartSim) await walmartSim.pipeline.recomputeScheduled(ctx(walmartSim.account), { limit: 100 }); };
 
@@ -459,6 +474,7 @@ export async function startDemoUsMarket(input: {
         // Шаг 97: таймер подъёма walmart.com в прожатой неделе не зовётся — аккаунт в тени, а таймер тень не берёт (ревью шага 97, в1); ступени
         // подъёма в тени видны по снимкам Buy Box
         if ((t - begin) % HOUR_MS === 0) await recomputeEbay();
+        if ((t - begin) % AMAZON_SUMMARY_PRESS_MS === 0) await summarizeAmazon();
         if (t === begin) await syncWalmartStatuses();
         // Шаг 89: Buy Box Walmart — товар раз в два часа, товары со сдвигом в 10 минут
         await pollWalmart(walmartScopes.filter((_sc, i) => (t - begin - i * 10 * MINUTE_MS) >= 0 && (t - begin - i * 10 * MINUTE_MS) % WALMART_PRESS_POLL_MS === 0).map((sc) => sc.sku));
@@ -470,7 +486,7 @@ export async function startDemoUsMarket(input: {
     if (failures > 0) log(`demo US press: ${failures} failed steps`);
     virtualMs = null;
     pressed = { amazon: counts.amazon, ebay: counts.ebay, walmart: counts.walmart, seconds: Math.round((systemClock.nowMs() - realStart) / 100) / 10 };
-    log(`demo US week pressed: ${input.pressDays} days, amazon.com snapshots ${pressed.amazon}, eBay US recomputed ${pressed.ebay}, walmart.com snapshots ${pressed.walmart}, alerts kept in memory ${alertCount}, ${pressed.seconds} s`);
+    log(`demo US week pressed: ${input.pressDays} days, amazon.com snapshots ${pressed.amazon} and competitive summaries ${counts.summaries}, eBay US recomputed ${pressed.ebay}, walmart.com snapshots ${pressed.walmart}, alerts kept in memory ${alertCount}, ${pressed.seconds} s`);
   }
 
   if (input.newOffers) {
@@ -482,6 +498,7 @@ export async function startDemoUsMarket(input: {
   if (input.pressDays === 0) await syncWalmartStatuses().catch((error: unknown) => log(`demo walmart.com statuses failed: ${error instanceof Error ? error.message : String(error)}`));
   let stopped = false;
   let lastEbay = 0;
+  let lastSummary = 0;
   let lastWalmartPoll = 0;
   let lastWalmartStatus = systemClock.nowMs();
   let wake: (() => void) | null = null;
@@ -491,6 +508,7 @@ export async function startDemoUsMarket(input: {
       try {
         await deliver();
         if (systemClock.nowMs() - lastEbay >= EBAY_RECOMPUTE_EVERY_MS) { lastEbay = systemClock.nowMs(); await recomputeEbay(); }
+        if (systemClock.nowMs() - lastSummary >= AMAZON_SUMMARY_LIVE_MS) { lastSummary = systemClock.nowMs(); await summarizeAmazon(); }
         if (systemClock.nowMs() - lastWalmartPoll >= WALMART_LIVE_POLL_MS) { lastWalmartPoll = systemClock.nowMs(); await pollWalmart(walmartScopes.map((sc) => sc.sku)); await recomputeWalmart(); }
         if (systemClock.nowMs() - lastWalmartStatus >= WALMART_STATUS_EVERY_MS) { lastWalmartStatus = systemClock.nowMs(); await syncWalmartStatuses(); }
         await syncOrders();

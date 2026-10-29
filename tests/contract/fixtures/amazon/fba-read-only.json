@@ -245,10 +245,14 @@
                   "marketplaceId": "A1PA6795UKMFR9",
                   "asin": "B000007101",
                   "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "conditionType": "new_new",
                   "status": [
                     "BUYABLE",
                     "DISCOVERABLE"
-                  ]
+                  ],
+                  "itemName": "Synthetic product SYN-SKU-FBM-7101",
+                  "createdDate": "2026-01-05T00:00:00Z",
+                  "lastUpdatedDate": "2026-09-01T00:00:00Z"
                 }
               ],
               "attributes": {
@@ -300,10 +304,14 @@
                   "marketplaceId": "A1PA6795UKMFR9",
                   "asin": "B000007102",
                   "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "conditionType": "new_new",
                   "status": [
                     "BUYABLE",
                     "DISCOVERABLE"
-                  ]
+                  ],
+                  "itemName": "Synthetic product SYN-SKU-FBA-7102",
+                  "createdDate": "2026-01-05T00:00:00Z",
+                  "lastUpdatedDate": "2026-09-01T00:00:00Z"
                 }
               ],
               "attributes": {
@@ -349,10 +357,14 @@
                   "marketplaceId": "A1PA6795UKMFR9",
                   "asin": "B000007103",
                   "productType": "SYNTHETIC_PRODUCT_TYPE",
+                  "conditionType": "new_new",
                   "status": [
                     "BUYABLE",
                     "DISCOVERABLE"
-                  ]
+                  ],
+                  "itemName": "Synthetic product SYN-SKU-NON-7103",
+                  "createdDate": "2026-01-05T00:00:00Z",
+                  "lastUpdatedDate": "2026-09-01T00:00:00Z"
                 }
               ],
               "attributes": {
@@ -450,10 +462,14 @@
               "marketplaceId": "A1PA6795UKMFR9",
               "asin": "B000007102",
               "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "conditionType": "new_new",
               "status": [
                 "BUYABLE",
                 "DISCOVERABLE"
-              ]
+              ],
+              "itemName": "Synthetic product SYN-SKU-FBA-7102",
+              "createdDate": "2026-01-05T00:00:00Z",
+              "lastUpdatedDate": "2026-09-01T00:00:00Z"
             }
           ],
           "attributes": {
@@ -502,10 +518,14 @@
               "marketplaceId": "A1PA6795UKMFR9",
               "asin": "B000007102",
               "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "conditionType": "new_new",
               "status": [
                 "BUYABLE",
                 "DISCOVERABLE"
-              ]
+              ],
+              "itemName": "Synthetic product SYN-SKU-FBA-7102",
+              "createdDate": "2026-01-05T00:00:00Z",
+              "lastUpdatedDate": "2026-09-01T00:00:00Z"
             }
           ],
           "attributes": {
@@ -565,10 +585,14 @@
               "marketplaceId": "A1PA6795UKMFR9",
               "asin": "B000007103",
               "productType": "SYNTHETIC_PRODUCT_TYPE",
+              "conditionType": "new_new",
               "status": [
                 "BUYABLE",
                 "DISCOVERABLE"
-              ]
+              ],
+              "itemName": "Synthetic product SYN-SKU-NON-7103",
+              "createdDate": "2026-01-05T00:00:00Z",
+              "lastUpdatedDate": "2026-09-01T00:00:00Z"
             }
           ],
           "attributes": {

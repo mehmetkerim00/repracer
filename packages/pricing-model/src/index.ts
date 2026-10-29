@@ -75,3 +75,4 @@ export function reason<C extends string>(code: C, params: Readonly<Record<string
 export { BASIS_MISMATCH_TOLERANCE_MINOR, priceBasisMismatch, type BasisMismatchDirection } from './price-basis.ts';
 export { addDays, localDate, OMNIBUS_WINDOW_DAYS, omnibusLowestPriorPrice, omnibusVerdict, zonedDayStart, type OmnibusPriorPrice, type OmnibusStatus, type OmnibusVerdict } from './omnibus.ts';
 export * from './competitor-view.ts';
+export * from './buybox-segments.ts';

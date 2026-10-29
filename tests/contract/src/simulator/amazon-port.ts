@@ -308,21 +308,27 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     return out;
   }
 
-  private snapshotOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
+  /** Предложения товара на рынке модели (по цене) и победитель Buy Box по правилу мира — общие у уведомления и у сводки */
+  private marketOf(marketplace: string, asin: string) {
     const offers = [
       ...[...this.listings.values()].filter((l) => l.marketplace === marketplace && l.asin === asin)
         .map((l) => ({ isSelf: true, sellerRef: 'self', minor: l.priceMinor, shippingMinor: 0, channelFulfilled: this.spec.selfChannelFulfilled === true, rating: undefined as AmazonCompetitorSpec['rating'] })),
       ...this.competitors.filter((c) => c.marketplace === marketplace && c.asin === asin)
         .map((c) => ({ isSelf: false, sellerRef: c.sellerRef, minor: c.priceMinor, shippingMinor: c.shippingMinor ?? 0, channelFulfilled: c.channelFulfilled === true, rating: c.rating })),
     ].sort((a, b) => a.minor - b.minor);
-    const { currency, basis } = this.money();
-    const money = (minor: number) => ({ amountMinor: minor, currency, basis });
     // Шаг 97 [H]: победитель — по формуле мира (landed минус бонус FBA) или прежнему правилу (минимальная цена товара)
     const order = new Map(this.competitors.map((c, i) => [c.sellerRef, i]));
     const winner = this.spec.buyBox
       ? rankForBuyBox(offers.map((o) => ({ ...o, key: o.isSelf ? '$self' : o.sellerRef, self: o.isSelf, landedMinor: o.minor + o.shippingMinor,
         order: o.isSelf ? Number.MAX_SAFE_INTEGER : order.get(o.sellerRef) ?? Number.MAX_SAFE_INTEGER })), null, this.spec.buyBox)[0]
       : offers[0];
+    return { offers, winner };
+  }
+
+  private snapshotOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
+    const { offers, winner } = this.marketOf(marketplace, asin);
+    const { currency, basis } = this.money();
+    const money = (minor: number) => ({ amountMinor: minor, currency, basis });
     return {
       marketplace, channelProductRef: asin, condition: 'new', source: AMAZON_SIM_SOURCE, sourceEventId: `sim-aoc-${asin}-${observedAt}`,
       observedAt: new Date(observedAt).toISOString(),
@@ -345,10 +351,33 @@ export class SimulatedAmazonPort implements ChannelAdapter {
    */
   private summaryOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
     const pushed = this.snapshotOf(marketplace, asin, observedAt);
-    const offers = pushed.offers.map((o) => ({ isSelf: o.isSelf, ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice })) as CompetitorSnapshot['offers'];
+    /**
+     * Шаг 109 [Р-234]: купон — у части продавцов (по продавцу и товару) 5 % от цены, как акция COUPON сводки (`discountedPrice`). Шаг 109
+     * [Р-235]: Buy Box по группам покупателей с долей просмотров (`featuredBuyingOptions`). Как канал делит группы, он не публикует — это
+     * допущение модели: группы без Prime и с неизвестным статусом видят победителя по правилу мира, группа Prime — самое дешёвое предложение
+     * с исполнением каналом (FBA); у каждого четвёртого товара просмотры делятся без большинства (45 / 40 / 15)
+     */
+    const offers = pushed.offers.map((o) => {
+      const coupon = !o.isSelf && o.sellerRef && hashOf(`${o.sellerRef}|${asin}`) % 3 === 0 ? Math.round(o.price.amountMinor * 0.95) : null;
+      return { isSelf: o.isSelf, ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice,
+        ...(coupon !== null && coupon > 0 && coupon < o.price.amountMinor ? { couponPrice: { ...o.price, amountMinor: coupon } } : {}) };
+    }) as CompetitorSnapshot['offers'];
+    const { offers: market, winner } = this.marketOf(marketplace, asin);
+    const seg = (o: (typeof market)[number], membership: string, viewSharePct: number) => ({ ...(o.isSelf ? {} : { sellerRef: o.sellerRef }), isSelf: o.isSelf, membership, viewSharePct });
+    const h = hashOf(asin);
+    const landed = (o: (typeof market)[number]) => o.minor + o.shippingMinor;
+    // Победитель правила мира — копия строки рынка: сравнение по продавцу, а не по ссылке
+    const same = (a: { isSelf: boolean; sellerRef: string } | undefined, b: { isSelf: boolean; sellerRef: string } | undefined) => !!a && !!b && a.isSelf === b.isSelf && a.sellerRef === b.sellerRef;
+    const fba = market.filter((o) => o.channelFulfilled).sort((a, b) => landed(a) - landed(b))[0];
+    const others = market.filter((o) => !same(o, winner));
+    const second = fba && !same(fba, winner) ? fba : others[0];
+    const segments = !winner ? []
+      : h % 4 === 3 && second
+        ? [seg(winner, 'NON_PRIME', 45), seg(second, 'PRIME', 40), seg(others.find((o) => !same(o, second)) ?? second, 'DEFAULT', 15)]
+        : [seg(winner, 'NON_PRIME', 50 + (h % 21)), seg(fba ?? winner, 'PRIME', 40 - (h % 21)), seg(winner, 'DEFAULT', 10)];
     return {
       marketplace, channelProductRef: asin, condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: new Date(observedAt).toISOString(),
-      completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers,
+      completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers, ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
     };
   }
 
@@ -427,4 +456,11 @@ export class SimulatedAmazonPort implements ChannelAdapter {
     const l = this.listings.get(`${marketplace}|${sku}`);
     return l ? { priceMinor: l.priceMinor, quantity: l.quantity, pendingPriceMinor: l.pendingPrice?.minor ?? null } : null;
   }
+}
+
+/** Шаг 109: детерминированный хеш строки модели — какие продавцы дают купон и как делятся просмотры у товара */
+function hashOf(text: string): number {
+  let h = 7;
+  for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h;
 }

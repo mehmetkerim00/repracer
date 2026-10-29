@@ -99,7 +99,7 @@ test('step 67 (Р-146): with no catalog statistics, every console read over the 
   const offers = await timed(() => store.consoleCatalogPage(tenant, now, { offset: 0, limit: 50, offers: {
     search: { q: '670', labelTemplate: '{p} · {s}', marketplaceWords: {}, channelNames: { KAUFLAND: 'Kaufland' }, unknownChannel: 'UNKNOWN_CHANNEL' },
     holder: 'NO_DATA', sort: { key: 'share', dir: 'desc' }, countCompetitorRows: true,
-    buybox: { since, until: now, noDataAccounts: [], namedAccounts: [world.ids.dbId(ACCOUNT)] } } }));
+    buybox: { since, until: now, noDataAccounts: [], namedAccounts: [world.ids.dbId(ACCOUNT)], shareAccounts: [world.ids.dbId(ACCOUNT)] } } }));
   assert.equal(JSON.stringify([offers.result.matched, offers.result.scopeIds.length, offers.result.competitorRows]), JSON.stringify([UNITS, 50, 0]),
     'every offer has no snapshot yet — «no competitor data», no competitor rows');
   const seconds = { page: page.seconds, listed: listed.seconds, facts: facts.seconds, whole: whole.seconds, offers: offers.seconds };

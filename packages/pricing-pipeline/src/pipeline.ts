@@ -19,6 +19,7 @@ import { assessShift, DEFAULT_SANITY_CONFIG, evaluateSnapshot, SANITY_RULESET, t
 import { decide, GATE_PROFILE, repricingWarnings, resolveMarginFloor, validateRepricingEnablement } from '@repracer/price-gate';
 import {
   buildCompetitorView,
+  holderByViewShare,
   withCompetitorFilter,
   buildExplanation,
   isCompetitorDerived,
@@ -693,7 +694,14 @@ export function createPricingPipeline(deps: PipelineDeps) {
           const competitorSnapshotId = randomUUID();
           const key: ProductKey = { channelAccountId: ctx.channelAccountId, marketplace: snapshot.marketplace, channelProductRef: snapshot.channelProductRef, condition: snapshot.condition };
           const r = options.reconcile ? lossCheckFor(ctx, snapshot, await store.heldCompetitorState(ctx.tenantId, key), competitorSnapshotId, now, graceSeconds) : null;
-          await store.recordReconciliationSnapshot(ctx.tenantId, { channelAccountId: ctx.channelAccountId, competitorSnapshotId, snapshot, receivedAt: now, ...(r?.check ? { lossCheck: r.check } : {}) });
+          /**
+           * Шаг 109 [Р-235]: источник называет предложения в Buy Box по сегментам с долей просмотров — держатель большинства просмотров (сумма
+           * долей продавца > 50 %) пишет отрезок доли Buy Box в той же транзакции, как снимок источника, называющего держателя. Большинства
+           * нет — держатель неизвестен, отрезка нет. Стратегии это не меняет: снимок сверки в решение не идёт
+           */
+          const majority = source.holderByViewShare ? holderByViewShare(snapshot.buyboxSegments ?? []) : null;
+          await store.recordReconciliationSnapshot(ctx.tenantId, { channelAccountId: ctx.channelAccountId, competitorSnapshotId, snapshot, receivedAt: now, ...(r?.check ? { lossCheck: r.check } : {}),
+            ...(majority ? { buyboxHolder: { holder: majority.holder, sellerRef: majority.sellerRef } } : {}) });
           count(r?.kind);
           reconciliation.logged += 1;
           if (r?.check) await emit(ctx, [lossCheckOpened(r.check)]);
