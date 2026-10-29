@@ -1393,6 +1393,8 @@ export const fr: Messages = {
         noMajority: 'Aucun vendeur n’a plus de la moitié des vues, cette lecture ne compte donc pas dans votre part.',
         couponsTitle: 'Coupons',
         couponNote: 'Les prix sont décidés sur le prix de base\u00a0: un coupon s’active au paiement et tous les clients ne le voient pas.',
+        // Шаг 109.1 [Р-71]: суммы предложений не в валюте витрины не печатаются — строка называет валюту, если она одна
+        hiddenOffers: (n: number, currency: string | null) => `${n} ${n === 1 ? 'offre' : 'offres'} ${currency ? `en ${currency}` : 'dans d’autres devises'} ${n === 1 ? 'n’est pas affichée' : 'ne sont pas affichées'}`,
         note: (channel: string) => `${channel} indique dans cette synthèse l’offre de la Buy Box pour chaque groupe de clients. Elle sert uniquement au contrôle et ne fait pas bouger les prix.`,
       },
       share: {

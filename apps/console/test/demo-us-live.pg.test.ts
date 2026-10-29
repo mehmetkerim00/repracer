@@ -624,7 +624,19 @@ test('step 107 [Р-233, Р-231, Р-232]: demo on PostgreSQL — channel bounds n
 });
 
 type Summary109 = { title: string; observed: { at: string }; segments: Array<{ share: string; seller: string; self: boolean; group: string }>; holder: string | null;
-  coupons: Array<{ seller: string; price: string; coupon: string }>; couponNote: string | null };
+  coupons: Array<{ seller: string; price: string; coupon: string }>; couponNote: string | null; hidden: string | null };
+
+/**
+ * Шаг 109.1 [Р-71]: правило денег профиля us — каждая сумма сводки на странице Competition предложения amazon.com — «$», и ни одного «€» на всей
+ * странице; строки «offers in EUR are not shown» в демо нет (все предложения сводки — в долларах). Возвращает нарушения — пусто, если правило держится
+ */
+function usMoneyViolations(view: unknown, summary: { coupons: ReadonlyArray<{ price: string; coupon: string }>; hidden?: string | null } | null): string[] {
+  return [
+    ...(JSON.stringify(view).includes('€') ? ['€ on the page'] : []),
+    ...(summary?.coupons ?? []).flatMap((x) => [x.price, x.coupon].filter((v) => !/^\$\d[\d,]*\.\d{2}$/.test(v)).map((v) => `not a dollar amount: ${v}`)),
+    ...(summary?.hidden ? [`offers outside the storefront currency: ${summary.hidden}`] : []),
+  ];
+}
 
 /**
  * Шаг 109 [Р-234, Р-235]: демо на PostgreSQL — сверка amazon.com по кругу (сводка конкурентов модели) пишет снимки с группами покупателей и
@@ -647,6 +659,7 @@ test('step 109 [Р-234, Р-235]: demo on PostgreSQL — amazon.com offers show t
       view = (await call<Competition105 & { summary: Summary109 | null }>('GET', `/api/worlds/${w}/competition/${first.unit.writeScopeId}?period=7d`, token)).body;
     }
     assert.equal(view.holder!.kind, 'UNKNOWN', `${row.unit.label}: the notification still does not name the holder (A-29)`);
+    assert.deepEqual(usMoneyViolations(view, view.summary), [], `${row.unit.label}: us profile — every amount is in dollars, no euro anywhere on the page`);
     assert.equal(row.buybox!.share, view.share.available ? view.share.value : null, `${row.unit.label}: the Offers column is the page`);
     if (view.share.available) seen.shares += 1;
     const s = view.summary;
@@ -664,4 +677,7 @@ test('step 109 [Р-234, Р-235]: demo on PostgreSQL — amazon.com offers show t
   assert.ok(seen.majority > 0 && seen.none > 0, `a majority holder and «no majority» are both shown: ${JSON.stringify(seen)}`);
   assert.ok(seen.coupons > 0, `competitor coupons are shown: ${JSON.stringify(seen)}`);
   assert.ok(seen.shares >= 10, `the amazon.com Buy Box share counts the spans of the summaries: ${JSON.stringify(seen)}`);
+  // Положительный контроль правила денег [Р-94]: страница с евро, сумма не в долларах и скрытое предложение — три нарушения, каждое своё
+  assert.deepEqual(usMoneyViolations({ note: '€19.65' }, { coupons: [{ price: '$19.65', coupon: '€18.79' }], hidden: '1 offer in EUR is not shown' }),
+    ['€ on the page', 'not a dollar amount: €18.79', 'offers outside the storefront currency: 1 offer in EUR is not shown'], 'the money rule finds a euro amount');
 });

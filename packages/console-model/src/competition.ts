@@ -261,6 +261,8 @@ export interface CompetitionSummaryView {
   holder: string | null;
   coupons: Array<{ seller: string; sellerUrl: string | null; self: boolean; price: string; coupon: string }>;
   couponNote: string | null;
+  /** Шаг 109.1 [Р-71]: предложения с купоном не в валюте витрины — не печатаются, строкой с валютой, если она одна */
+  hidden: string | null;
   note: string;
 }
 
@@ -417,12 +419,20 @@ export function competitionSummaryView(summary: { snapshot: CompetitorSnapshot; 
     : majority?.holder === 'SELF' ? t.majoritySelf(pct(majority.viewSharePct))
       : majority ? t.majority(majority.sellerRef ?? c.unnamedSeller, pct(majority.viewSharePct))
         : top ? t.noMajority : null;
-  const coupons = orderedOffers(snap).flatMap((o) => {
+  /**
+   * Шаг 109.1 [Р-71]: снимок сверки идёт мимо проверки входов (`CURRENCY_MISMATCH` — только у снимка решения), и предложение может прийти не в
+   * валюте витрины. Значок витрины на чужой сумме — выдуманная валюта: такие суммы не печатаются, а строка говорит, сколько их и в чём
+   */
+  const withCoupon = orderedOffers(snap).filter((o) => couponLanded(o) !== null);
+  const foreign = withCoupon.filter((o) => o.price.currency !== ctx.currency);
+  const foreignCurrencies = [...new Set(foreign.map((o) => o.price.currency))];
+  const hidden = foreign.length > 0 ? t.hiddenOffers(foreign.length, foreignCurrencies.length === 1 ? foreignCurrencies[0]! : null) : null;
+  const coupons = withCoupon.filter((o) => o.price.currency === ctx.currency).flatMap((o) => {
     const v = couponLanded(o);
     return v === null ? [] : [{ seller: o.isSelf ? c.you : o.sellerRef ?? c.unnamedSeller, sellerUrl: link(o.sellerRef, o.isSelf), self: o.isSelf,
       price: money(landed(o) ?? o.price.amountMinor), coupon: money(v) }];
   });
-  if (rows.length === 0 && coupons.length === 0) return null;
+  if (rows.length === 0 && coupons.length === 0 && !hidden) return null;
   return {
     title: t.title(ctx.channelName),
     observed: { at: summary.observedAt, when: m.when(summary.observedAt) },
@@ -430,6 +440,7 @@ export function competitionSummaryView(summary: { snapshot: CompetitorSnapshot; 
     holder,
     coupons,
     couponNote: coupons.length > 0 ? t.couponNote : null,
+    hidden,
     note: t.note(ctx.channelName),
   };
 }

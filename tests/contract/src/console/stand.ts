@@ -155,15 +155,20 @@ export interface StandOptions {
   filter?: (s: Scenario) => boolean;
   /** По умолчанию — хранилище в памяти; PostgreSQL — pgStoreFactory (доказательство шага 12, A) */
   storeFactory?: PricingStoreFactory;
+  /**
+   * Шаг 109.1: сценарии Amazon без метки `console-stand`, взятые поимённо, — мир amazon.com в долларах для проверок и снимков профиля us
+   * (метка добавила бы мир во все стенды, а в профиле us европейских витрин нет — шаг 87)
+   */
+  amazonIds?: readonly string[];
 }
 
 
 export async function buildStandWorlds(options: StandOptions = {}): Promise<LiveWorld[]> {
-  const { filter = () => true, storeFactory = memoryStoreFactory } = options;
+  const { filter = () => true, storeFactory = memoryStoreFactory, amazonIds = [] } = options;
   const worlds: LiveWorld[] = [];
   const sources = [
     ...loadScenarios(FIXTURES).map(({ scenario }) => ({ scenario, adapter: kauflandUnderTest })),
-    ...loadScenarios(AMAZON_FIXTURES).filter(({ scenario }) => scenario.tags.includes('console-stand')).map(({ scenario }) => ({ scenario, adapter: amazonUnderTest })),
+    ...loadScenarios(AMAZON_FIXTURES).filter(({ scenario }) => scenario.tags.includes('console-stand') || amazonIds.includes(scenario.id)).map(({ scenario }) => ({ scenario, adapter: amazonUnderTest })),
   ];
   for (const { scenario, adapter } of sources) {
     if (!scenario.world.pricing || !filter(scenario)) continue;

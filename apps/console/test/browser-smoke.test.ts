@@ -16,7 +16,7 @@ import { handlersFor, runPendingJobs } from './run-jobs.ts';
 import type { LiveWorld } from '@repracer/contract-tests/stand';
 import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts';
 import { prepareStep107, SELLER107, type Step107World } from './step107-world.ts';
-import { prepareStep109 } from './step109-world.ts';
+import { prepareStep109, SCOPE109_US, SELLER109_US } from './step109-world.ts';
 
 /**
  * Шаг 76 (предполётный прогон демо, ревью — находка 7): страница консоли исполняется настоящим браузером. Страница была ПУСТОЙ с шага 29
@@ -82,6 +82,9 @@ let soloApi: ReturnType<typeof createStandApi>;
 /** Шаг 107 [Р-232, Р-233]: своё пространство Amazon — продавцы с SellerId в снимке и рамки цены канала у двух предложений */
 let step107Api: ReturnType<typeof createStandApi>;
 let step109: { writeScopeId: string };
+// Шаг 109.1: мир Amazon стенда с единицей amazon.com в долларах — профиль us
+let step109UsApi: ReturnType<typeof createStandApi>;
+let step109Us: { writeScopeId: string };
 let step107: Step107World;
 /** Шаг 99: мир смоука — по нему исполняются задания импорта (исполнителя у смоука нет, задания зовутся из теста) */
 let smokeLive: LiveWorld;
@@ -245,6 +248,13 @@ before(async () => {
   step107 = await prepareStep107(amazon107[0]!, step107Api, { authorization: `Bearer ${(token107.body as { accessToken: string }).accessToken}`, cookie: 'repracer_locale=en' });
   // Шаг 109: последняя сводка конкурентов — у предложения «рамки шире наших» (его страницу Competition шаг 107 не смотрит)
   step109 = await prepareStep109(amazon107[0]!, step107.insideScopeId);
+  // Шаг 109.1: профиль us — единица amazon.com в долларах; в сводке ещё предложение в евро, которое блок не печатает
+  const amazonUs = await buildStandWorlds({ filter: (sc) => sc.id === SELLER109_US, amazonIds: [SELLER109_US] });
+  step109UsApi = createStandApi(amazonUs, {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory(amazonUs) }),
+    simulator: identity.simulator,
+  }, { defaultLocale: 'en', market: 'us', people: STAND_PEOPLE });
+  step109Us = await prepareStep109(amazonUs[0]!, SCOPE109_US, { foreign: 'EUR' });
   currentApi = euApi;
   // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
   stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous })
@@ -2276,9 +2286,11 @@ test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab;
 /**
  * Шаг 109 [Р-234, Р-235]: страница Competition показывает последнюю сводку конкурентов (снимок сверки Amazon) со своим моментом — группы
  * покупателей с долей просмотров («72% of views: Cedar Lane»), держателя большинства и купоны конкурентов; доля Buy Box Amazon считается
- * (а не «not counted»). Четыре языка, обе темы, 1440 и 375 без прокрутки вбок. Снимки — только при REPRACER_SMOKE_SHOTS (каталог)
+ * (а не «not counted»). Обе темы, 1440 и 375 без прокрутки вбок. Снимки — только при REPRACER_SMOKE_SHOTS (каталог).
+ * Шаг 109.1 [Р-71]: блок с деньгами проверяется и снимается в ОБОИХ профилях — eu (amazon.de, евро; EN, DE, ES, FR) и us (amazon.com,
+ * доллары; EN, ES, FR): в профиле us все суммы блока — «$» и ни одного «€», а предложение в евро не печатается — строка его называет
  */
-test('step 109 [Р-234, Р-235]: Competition shows the latest competitive summary — customer groups with view shares, the majority holder and coupons', async () => {
+test('step 109 [Р-234, Р-235], step 109.1: Competition shows the latest competitive summary in both market profiles — customer groups with view shares, the majority holder, coupons in the storefront currency only', async () => {
   const b = browser!;
   const before = b.errors().length;
   const shots = process.env.REPRACER_SMOKE_SHOTS ?? null;
@@ -2288,62 +2300,84 @@ test('step 109 [Р-234, Р-235]: Competition shows the latest competitive summar
     mkdirSync(shots, { recursive: true });
     writeFileSync(`${shots}/${name}.jpg`, await b.screenshot());
   };
-  currentApi = step107Api;
+  // Снимок — с верха страницы окном в рост блока: в кадре подзаголовок с витриной и вся сводка
+  const shotWhole = async (name: string, width: number) => {
+    if (!shots) return;
+    await b.setViewport(width, width < 768 ? 1250 : 1000);
+    await b.evaluate('(window.scrollTo(0, 0), true)');
+    await shot(name);
+    await b.setViewport(width, 900);
+  };
+  const profiles = [
+    { profile: 'eu', api: step107Api, world: step109, storefront: 'amazon.de', currency: 'EUR', sign: '€', other: '$', locales: [en, de, es, fr], foreign: null },
+    { profile: 'us', api: step109UsApi, world: step109Us, storefront: 'amazon.com', currency: 'USD', sign: '$', other: '€', locales: [en, es, fr], foreign: 'EUR' },
+  ] as const;
   try {
-    await b.setViewport(1440, 900);
-    await b.open(pageUrl);
-    await b.waitText(en.ui.app.login.roleCan.OWNER);
-    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
-    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
-    await settled(b, 'first screen');
-    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
-    const go = async (route: string) => {
-      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
-      await settled(b, route);
-    };
-    const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
-    const read = `(() => { const s = document.querySelector('section.competition-summary'); if (!s) return null;
-      const flat = (t) => t.replace(/\\s+/g, ' ').trim();
-      return { title: flat(s.querySelector('h3').textContent), segments: [...s.querySelectorAll('ul.segments li')].map((li) => flat(li.textContent)),
-        holder: s.querySelector('.summary-holder') ? flat(s.querySelector('.summary-holder').textContent) : null,
-        coupons: [...s.querySelectorAll('ul.coupons li')].map((li) => flat(li.textContent)),
-        share: flat(document.querySelector('section.competition-share').textContent) }; })()`;
-    for (const m of [en, de, es, fr]) {
-      if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
-      await go(`competition/${encodeURIComponent(step109.writeScopeId)}`);
-      const block = await b.evaluate<{ title: string; segments: string[]; holder: string | null; coupons: string[]; share: string } | null>(read);
-      assert.ok(block, `${m.locale}: the summary block is on the page`);
-      const t = m.ui.competition.summary;
-      const amazon = (m.values as Record<string, string>).AMAZON ?? 'Amazon';
-      assert.equal(block.title, flat(t.title(amazon)), `${m.locale}: title`);
-      assert.deepEqual(block.segments, [
-        flat(`${t.viewsOf(m.percentBp(7200))}${m.colon}Cedar Lane · ${t.group.NON_PRIME}`),
-        flat(`${t.viewsOf(m.percentBp(1800))}${m.colon}A2SYN1090000AA · ${t.group.NON_PRIME}`),
-        flat(`${t.viewsOf(m.percentBp(1000))}${m.colon}Cedar Lane · ${t.group.PRIME}`),
-      ], `${m.locale}: «72% of views: Cedar Lane» per customer group, largest first`);
-      assert.equal(block.holder, flat(t.majority('Cedar Lane', m.percentBp(8200))), `${m.locale}: the shares of one seller add up to the majority`);
-      assert.deepEqual(block.coupons, [flat(`A2SYN1090000AA${m.colon}${m.money(1965, 'EUR')} ${m.ui.competition.withCoupon(m.money(1879, 'EUR'))}`)],
-        `${m.locale}: the coupon next to the price with shipping`);
-      assert.ok(!block.share.includes(flat(m.ui.competition.share.unknown(amazon))), `${m.locale}: the Amazon Buy Box share is counted, not «not counted»`);
-      assert.ok(!block.share.includes(flat(m.ui.competition.share.noData)), `${m.locale}: the majority holder of the summary is a reading with a known holder`);
-      if (m === en) await shot('after-en-light-1440-competition-summary');
-      else await shot(`after-${m.locale}-light-1440-competition-summary`);
-      if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
-    }
-    for (const scheme of ['light', 'dark'] as const) {
-      await b.setColorScheme(scheme);
-      for (const width of [1440, 375]) {
-        await b.setViewport(width, 900);
-        await go(`competition/${encodeURIComponent(step109.writeScopeId)}`);
-        const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
-        assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: Competition with the summary does not scroll sideways — ${fit.out.join('; ')}`);
-        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out of its frame`);
-        await b.evaluate(`(document.querySelector('section.competition-summary').scrollIntoView(), true)`);
-        await shot(`after-en-${scheme}-${width}-competition-summary`);
+    for (const p of profiles) {
+      currentApi = p.api;
+      await b.setViewport(1440, 900);
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.OWNER);
+      await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+      await waitFor(b, `location.hash.startsWith('#/w/')`, `${p.profile}: straight into the only workspace`);
+      await settled(b, 'first screen');
+      const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+      const go = async (route: string) => {
+        await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+        await settled(b, route);
+      };
+      const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
+      const read = `(() => { const s = document.querySelector('section.competition-summary'); if (!s) return null;
+        const flat = (t) => t.replace(/\\s+/g, ' ').trim();
+        return { title: flat(s.querySelector('h3').textContent), segments: [...s.querySelectorAll('ul.segments li')].map((li) => flat(li.textContent)),
+          holder: s.querySelector('.summary-holder') ? flat(s.querySelector('.summary-holder').textContent) : null,
+          coupons: [...s.querySelectorAll('ul.coupons li')].map((li) => flat(li.textContent)),
+          amounts: [...s.querySelectorAll('ul.coupons .cur, ul.coupons .coupon')].map((x) => flat(x.textContent)),
+          hidden: s.querySelector('.summary-hidden') ? flat(s.querySelector('.summary-hidden').textContent) : null,
+          text: flat(s.textContent), subtitle: flat(document.querySelector('p.subtitle').textContent),
+          share: flat(document.querySelector('section.competition-share').textContent) }; })()`;
+      for (const m of p.locales) {
+        if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
+        await go(`competition/${encodeURIComponent(p.world.writeScopeId)}`);
+        const block = await b.evaluate<{ title: string; segments: string[]; holder: string | null; coupons: string[]; amounts: string[]; hidden: string | null; text: string; subtitle: string; share: string } | null>(read);
+        const at = `${p.profile} ${m.locale}`;
+        assert.ok(block, `${at}: the summary block is on the page`);
+        // Шаг 109.1: витрина названа на странице — доказательство с деньгами читается вместе с витриной и её валютой
+        assert.ok(block.subtitle.includes(` · ${p.storefront} · `), `${at}: the page names the storefront ${p.storefront}: ${block.subtitle}`);
+        const t = m.ui.competition.summary;
+        const amazon = (m.values as Record<string, string>).AMAZON ?? 'Amazon';
+        assert.equal(block.title, flat(t.title(amazon)), `${at}: title`);
+        assert.deepEqual(block.segments, [
+          flat(`${t.viewsOf(m.percentBp(7200))}${m.colon}Cedar Lane · ${t.group.NON_PRIME}`),
+          flat(`${t.viewsOf(m.percentBp(1800))}${m.colon}A2SYN1090000AA · ${t.group.NON_PRIME}`),
+          flat(`${t.viewsOf(m.percentBp(1000))}${m.colon}Cedar Lane · ${t.group.PRIME}`),
+        ], `${at}: «72% of views: Cedar Lane» per customer group, largest first`);
+        assert.equal(block.holder, flat(t.majority('Cedar Lane', m.percentBp(8200))), `${at}: the shares of one seller add up to the majority`);
+        assert.deepEqual(block.coupons, [flat(`A2SYN1090000AA${m.colon}${m.money(1965, p.currency)} ${m.ui.competition.withCoupon(m.money(1879, p.currency))}`)],
+          `${at}: the coupon next to the price with shipping, in the storefront currency only`);
+        // Шаг 109.1 [Р-71]: каждая сумма блока — в валюте витрины, знака другой валюты в блоке нет; чужая — строкой с её кодом
+        assert.ok(block.amounts.length > 0 && block.amounts.every((x) => x.includes(p.sign) && !x.includes(p.other)), `${at}: every amount is in ${p.currency}: ${block.amounts.join(' | ')}`);
+        assert.ok(!block.text.includes(p.other), `${at}: no ${p.other} anywhere in the block`);
+        assert.equal(block.hidden, p.foreign ? flat(t.hiddenOffers(1, p.foreign)) : null, `${at}: an offer in another currency is not printed — the line names its currency`);
+        assert.ok(!block.share.includes(flat(m.ui.competition.share.unknown(amazon))), `${at}: the Amazon Buy Box share is counted, not «not counted»`);
+        assert.ok(!block.share.includes(flat(m.ui.competition.share.noData)), `${at}: the majority holder of the summary is a reading with a known holder`);
+        if (m !== en) await shotWhole(`after-${m.locale}-light-1440-competition-summary-${p.profile}`, 1440);
+        if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
       }
+      for (const scheme of ['light', 'dark'] as const) {
+        await b.setColorScheme(scheme);
+        for (const width of [1440, 375]) {
+          await b.setViewport(width, 900);
+          await go(`competition/${encodeURIComponent(p.world.writeScopeId)}`);
+          const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+          assert.ok(fit.scrollWidth <= fit.width, `${p.profile} ${scheme} ${width}: Competition with the summary does not scroll sideways — ${fit.out.join('; ')}`);
+          assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${p.profile} ${scheme} ${width}: nothing sticks out of its frame`);
+          await shotWhole(`after-en-${scheme}-${width}-competition-summary-${p.profile}`, width);
+        }
+      }
+      await b.setColorScheme('light');
+      await b.setViewport(1440, 900);
     }
-    await b.setColorScheme('light');
-    await b.setViewport(1440, 900);
   } finally {
     currentApi = euApi;
   }

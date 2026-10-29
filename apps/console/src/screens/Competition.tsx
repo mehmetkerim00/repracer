@@ -110,15 +110,17 @@ export function CompetitionScreenView({ view, period, onPeriod }: { view: Compet
               </ul>
               {view.summary.holder ? <p className="summary-holder">{view.summary.holder}</p> : null}
             </> : null}
-            {view.summary.coupons.length > 0 ? <>
+            {view.summary.coupons.length > 0 || view.summary.hidden ? <>
               <h4>{c.summary.couponsTitle}</h4>
-              <ul className="plain facts coupons">
+              {view.summary.coupons.length > 0 ? <ul className="plain facts coupons">
                 {view.summary.coupons.map((x, i) => (
                   <li key={`${x.seller}-${i}`}>
                     {x.self ? <strong>{x.seller}</strong> : <SellerName name={x.seller} url={x.sellerUrl} />}{m.colon}<span className="cur">{x.price}</span> <span className="coupon">{c.withCoupon(x.coupon)}</span>
                   </li>
                 ))}
-              </ul>
+              </ul> : null}
+              {/* Шаг 109.1 [Р-71]: суммы не в валюте витрины не печатаются — строка говорит, сколько их и в какой валюте */}
+              {view.summary.hidden ? <p className="summary-hidden">{view.summary.hidden}</p> : null}
               {view.summary.couponNote ? <p className="note">{view.summary.couponNote}</p> : null}
             </> : null}
             <p className="note">{view.summary.note}</p>

@@ -1393,6 +1393,8 @@ export const en = {
         noMajority: 'No seller has more than half of the views, so this reading is not counted in your share.',
         couponsTitle: 'Coupons',
         couponNote: 'Prices are decided on the base price: a coupon is clipped at checkout and not every customer sees it.',
+        // Шаг 109.1 [Р-71]: суммы предложений не в валюте витрины не печатаются — строка называет валюту, если она одна
+        hiddenOffers: (n: number, currency: string | null) => `${n} ${n === 1 ? 'offer' : 'offers'} in ${currency ?? 'other currencies'} ${n === 1 ? 'is' : 'are'} not shown`,
         note: (channel: string) => `${channel} names the Buy Box offer for each group of customers in this summary. It is read for checking only and does not move prices.`,
       },
       share: {

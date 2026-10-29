@@ -98,3 +98,34 @@ test('step 109 [Р-234]: the receipt shows the coupon of the decision snapshot n
   const rows = traceCompetitors(decision, world, m).rows;
   assert.deepEqual(rows.map((r) => [r.seller, r.landed, r.coupon]), [['Harbor Goods', '$18.00', '$16.50'], ['You', '$21.50', null]]);
 });
+
+/**
+ * Шаг 109.1 [Р-234, Р-71]: снимок сверки идёт мимо проверки входов (`CURRENCY_MISMATCH` — только у снимка решения), а журнал хранит валюту
+ * каждого предложения. Блок печатал сумму предложения в чужой валюте значком витрины («€21.50» как «$21.50»); теперь суммы — только в валюте
+ * витрины, остальные — честной строкой: одна валюта — названа («1 offer in EUR is not shown»), несколько — общая форма
+ */
+test('step 109.1 [Р-234]: the summary shows amounts only in the storefront currency; offers in another currency — an honest line naming it', () => {
+  const m = messagesFor('en');
+  const eur = (v: number) => ({ amountMinor: v, currency: 'EUR', basis: 'GROSS' as const });
+  const gbp = (v: number) => ({ amountMinor: v, currency: 'GBP', basis: 'GROSS' as const });
+  const pine = { isSelf: false, sellerRef: 'Pine & Co', price: usd(1715), shipping: usd(250), totalPrice: usd(1965), couponPrice: usd(1629) };
+  const rhine = { isSelf: false, sellerRef: 'Rhine GmbH', price: eur(2000), shipping: eur(150), totalPrice: eur(2150), couponPrice: eur(1840) };
+  const view = competitionSummaryView(summary([['Cedar Lane', 'NON_PRIME', 72]], [pine, rhine]), ctx, m)!;
+  assert.deepEqual(view.coupons.map((c) => `${c.seller}${m.colon}${c.price} ${m.ui.competition.withCoupon(c.coupon)}`), ['Pine & Co: $19.65 ($18.79 with coupon)'],
+    'the euro offer is not printed with the dollar sign of the storefront');
+  assert.equal(view.hidden, '1 offer in EUR is not shown', 'one currency — the line names it');
+  assert.ok(!/€|\$21\.50|\$19\.90/.test(JSON.stringify(view)), 'no amount of the euro offer anywhere in the block');
+  const two = competitionSummaryView(summary([], [rhine, { ...rhine, sellerRef: 'Moselle SA' }]), ctx, m)!;
+  assert.ok(two, 'a summary whose only amounts are in another currency still says so');
+  assert.deepEqual(two.coupons, []);
+  assert.equal(two.hidden, '2 offers in EUR are not shown');
+  assert.equal(two.couponNote, null, 'no coupon shown — no note about coupons');
+  const mixed = competitionSummaryView(summary([], [rhine, { ...rhine, sellerRef: 'Thames Ltd', price: gbp(2000), shipping: gbp(150), totalPrice: gbp(2150), couponPrice: gbp(1840) }]), ctx, m)!;
+  assert.equal(mixed.hidden, '2 offers in other currencies are not shown', 'several currencies — the general form');
+  assert.equal(competitionSummaryView(summary([['Cedar Lane', 'NON_PRIME', 72]], [pine]), ctx, m)!.hidden, null, 'all in the storefront currency — no line');
+  for (const lang of ['de', 'es', 'fr'] as const) {
+    const l = messagesFor(lang);
+    const one = competitionSummaryView(summary([], [rhine]), ctx, l)!;
+    assert.ok(one.hidden && one.hidden.includes('EUR') && one.hidden !== '1 offer in EUR is not shown', `${lang}: the line is translated and names the currency`);
+  }
+});

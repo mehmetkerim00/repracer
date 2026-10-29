@@ -7,14 +7,25 @@ import type { LiveWorld } from '@repracer/contract-tests/stand';
  * записывается тем же методом хранилища, которым его пишет путь сверки; держатель большинства — Cedar Lane (82 %, правило
  * `holderByViewShare` проверяют тесты pricing-model и PostgreSQL шага)
  */
+/**
+ * Шаг 109.1: мир Amazon стенда с единицей amazon.com в долларах (сценарий курса: себестоимость в евро, витрина США) — для снимков и проверок
+ * профиля us; блок с деньгами снимается в обоих профилях
+ */
+export const SELLER109_US = 'amazon/pipeline/fx-usd-floor-eur-cost';
+export const SCOPE109_US = 'ws-price-us-4501';
+
 /** Снимок часом раньше часов мира: отрезок держателя до «сейчас» — час, и доля Buy Box на странице считается (не «0 % периода») */
 const HOUR_MS = 3_600_000;
 
-export async function prepareStep109(live: LiveWorld, writeScopeId: string): Promise<{ writeScopeId: string }> {
-  type Scope = { writeScopeId: string; channelAccountId: string; marketplace: string; channelProductRef: string; condition: string; currency: string };
+/**
+ * Шаг 109.1 [Р-71]: `foreign` — ещё одно предложение с купоном не в валюте витрины (снимок сверки идёт мимо проверки входов): блок его суммы
+ * не печатает, а говорит строкой «1 offer in EUR is not shown»
+ */
+export async function prepareStep109(live: LiveWorld, writeScopeId: string, options: { foreign?: string } = {}): Promise<{ writeScopeId: string }> {
+  type Scope = { writeScopeId: string; channelAccountId: string; marketplace: string; channelProductRef: string; condition: string; currency: string; basis?: 'GROSS' | 'NET' };
   const scopes = (await live.view({ membershipId: 'probe', role: 'OWNER', userId: 'probe' } as never)).state.scopes as unknown as Scope[];
   const sc = scopes.find((s) => s.writeScopeId === writeScopeId)!;
-  const money = (amountMinor: number) => ({ amountMinor, currency: sc.currency, basis: 'GROSS' as const });
+  const money = (amountMinor: number) => ({ amountMinor, currency: sc.currency, basis: sc.basis ?? 'GROSS' });
   const snapshot: CompetitorSnapshot = {
     marketplace: sc.marketplace, channelProductRef: sc.channelProductRef, condition: sc.condition, source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: live.clock.iso(-HOUR_MS) as never,
     completeness: { kind: 'TOP_N', n: 3 },
@@ -22,6 +33,9 @@ export async function prepareStep109(live: LiveWorld, writeScopeId: string): Pro
       { isSelf: false, sellerRef: 'A2SYN1090000AA', price: money(1715), shipping: money(250), totalPrice: money(1965), couponPrice: money(1629) },
       { isSelf: false, sellerRef: 'Cedar Lane', price: money(1811), shipping: money(250), totalPrice: money(2061) },
       { isSelf: true, price: money(1900), shipping: money(0), totalPrice: money(1900) },
+      ...(options.foreign ? [{ isSelf: false, sellerRef: 'A2SYN109000FX1', price: { amountMinor: 2000, currency: options.foreign, basis: 'GROSS' as const },
+        shipping: { amountMinor: 150, currency: options.foreign, basis: 'GROSS' as const }, totalPrice: { amountMinor: 2150, currency: options.foreign, basis: 'GROSS' as const },
+        couponPrice: { amountMinor: 1840, currency: options.foreign, basis: 'GROSS' as const } }] : []),
     ],
     buyboxSegments: [
       { sellerRef: 'Cedar Lane', isSelf: false, membership: 'NON_PRIME', viewSharePct: 72 },

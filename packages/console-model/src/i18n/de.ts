@@ -1338,6 +1338,8 @@ export const de: Messages = {
         noMajority: 'Kein Verkäufer hat mehr als die Hälfte der Aufrufe, deshalb zählt diese Lesung nicht in Ihren Anteil.',
         couponsTitle: 'Coupons',
         couponNote: 'Preise werden nach dem Grundpreis entschieden: Ein Coupon wird an der Kasse eingelöst, und nicht jeder Kunde sieht ihn.',
+        // Шаг 109.1 [Р-71]: суммы предложений не в валюте витрины не печатаются — строка называет валюту, если она одна
+        hiddenOffers: (n: number, currency: string | null) => `${n} ${n === 1 ? 'Angebot' : 'Angebote'} in ${currency ?? 'anderen Währungen'} ${n === 1 ? 'wird' : 'werden'} nicht angezeigt`,
         note: (channel: string) => `${channel} nennt in dieser Übersicht das Buy-Box-Angebot je Kundengruppe. Sie dient nur der Prüfung und bewegt keine Preise.`,
       },
       share: {
