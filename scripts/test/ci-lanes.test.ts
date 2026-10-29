@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { ACTIONS_APP_ID, protectionBody, protectionFindings, REQUIRED_CHECKS } from '../branch-protection.mjs';
 import { catalogTestRefs, laneOf, LIGHT_PLACES } from '../ci-lane.mjs';
 import { gate, isFastForward, mergeDecision } from '../merge-when-green.mjs';
 import { failedJobs, NIGHT_LABEL, nightIssueCommands, nightIssuePlan } from '../night-watch.mjs';
@@ -79,6 +80,50 @@ test('Р-236: слияние — лёгкая по зелёному быстро
   // последний прогон main зелёный, но Issue не закрыт (закрывает его только зелёная ночь или человек)
   assert.deepEqual(decide('LIGHT', green, null, green, true, { number: 7 }), { action: 'STOP', why: 'NIGHT_ISSUE_OPEN' });
   assert.deepEqual(decide('HEAVY', green, green, null, true, { number: 7 }), { action: 'STOP', why: 'NIGHT_ISSUE_OPEN' });
+  // Шаг 110.1: защита main на стороне GitHub считает ПОСЛЕДНЮЮ проверку с тем же именем на SHA (проба: зелёные проверки c949c3a
+  // перекрыл снятый позже прогон — «4 of 4 required status checks are cancelled»). Полный прогон, запущенный на лёгкой ветке, несёт те
+  // же fast и guards — ворота его не игнорируют: красный — стоп, идущий — ожидание
+  assert.deepEqual(decide('LIGHT', green, red, null), { action: 'STOP', why: 'FULL_RED' });
+  assert.deepEqual(decide('LIGHT', green, running, null), { action: 'WAIT', why: 'FULL_RUNNING' });
+  assert.deepEqual(decide('LIGHT', green, green, null), { action: 'MERGE', why: 'LIGHT_FAST_GREEN' });
+});
+
+test('Р-236, шаг 110.1: защита main — обязательные проверки ровно задания каждого push; владелец не обходит; force-push и удаление запрещены', () => {
+  const ci = read('.github/workflows/ci.yml');
+  // Задания каждого push — без условия на уровне задания; у матрицы — имена «имя (значение/N)», как их показывает GitHub
+  const pushChecks = (text: string) => [...text.slice(text.indexOf('\njobs:\n')).matchAll(/^ {2}([a-z-]+):\n((?: {4}.*\n|\n)*)/gm)]
+    .filter((m) => !/^ {4}if:/m.test(m[2]!))
+    .flatMap((m) => {
+      const name = /^ {4}name: (.+)$/m.exec(m[2]!)?.[1];
+      const values = /^ {8}shard: \[([^\]]+)\]/m.exec(m[2]!)?.[1]?.split(',').map((s) => s.trim());
+      return name && values ? values.map((v) => name.replace('${{ matrix.shard }}', v)) : [m[1]!];
+    })
+    .sort();
+  assert.deepEqual([...REQUIRED_CHECKS].sort(), pushChecks(ci), 'обязательные проверки защиты = задания каждого push в ci.yml');
+  // Зубы [Р-94]: третий шард или новое задание каждого push без строки в защите — расхождение (push в main ждал бы проверку, которой
+  // нет, или новое задание не держало бы main)
+  assert.notDeepEqual([...REQUIRED_CHECKS].sort(), pushChecks(ci.replace('shard: [1, 2]', 'shard: [1, 2, 3]').replace('/2)', '/3)')));
+  assert.notDeepEqual([...REQUIRED_CHECKS].sort(), pushChecks(ci.replace(/^ {2}full:\n((?: {4}.*\n|\n)*)/m, (job) => job.replace(/^ {4}if:.*\n/m, ''))));
+
+  // Живая защита в форме ответа GET …/protection
+  const body = protectionBody();
+  const live = {
+    required_status_checks: { strict: false, checks: body.required_status_checks.checks },
+    enforce_admins: { enabled: true }, allow_force_pushes: { enabled: false }, allow_deletions: { enabled: false },
+  };
+  assert.deepEqual(protectionFindings(live), []);
+  assert.deepEqual(protectionFindings(null), ['ветка не защищена']);
+  const without = (patch: object) => protectionFindings({ ...live, ...patch });
+  assert.deepEqual(without({ required_status_checks: { checks: body.required_status_checks.checks.slice(1) } }), ['нет обязательных проверок: guards']);
+  assert.deepEqual(without({ required_status_checks: { checks: [...body.required_status_checks.checks, { context: 'full', app_id: ACTIONS_APP_ID }] } }),
+    ['лишние обязательные проверки: full'], 'ночное задание на push пропущено и засчитано успехом — требовать его бессмысленно');
+  assert.deepEqual(without({ required_status_checks: { checks: body.required_status_checks.checks.map((c) => ({ ...c, app_id: null })) } }),
+    [`проверку засчитает не только GitHub Actions: ${REQUIRED_CHECKS.join(', ')}`]);
+  assert.deepEqual(without({ enforce_admins: { enabled: false } }), ['владелец обходит защиту (enforce_admins выключен)'],
+    'по умолчанию защита не действует на админов, а в main пушит владелец');
+  assert.deepEqual(without({ allow_force_pushes: { enabled: true } }), ['force-push разрешён']);
+  assert.deepEqual(without({ allow_deletions: { enabled: true } }), ['удаление ветки разрешено']);
+  assert.deepEqual(without({ required_pull_request_reviews: { required_approving_review_count: 0 } }), ['требуется pull request — ворота пушат напрямую и упрутся в защиту']);
 });
 
 test('Р-236, шаг 110.3: режим исправления — при красной ночи сливается только исправление открытого Issue и только по обоим зелёным прогонам', () => {

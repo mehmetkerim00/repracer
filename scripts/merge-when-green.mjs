@@ -33,8 +33,9 @@ export function mergeDecision({ lane, push, dispatch, night, fastForward, nightI
   if (!repairing && nightRed) return { action: 'STOP', why: 'NIGHT_RED' };
   if (!repairing && nightIssue !== null) return { action: 'STOP', why: 'NIGHT_ISSUE_OPEN' };
   if (fastForward !== true) return { action: 'STOP', why: 'NOT_FAST_FORWARD' };
-  // Полный прогон обязателен тяжёлой полосе и любому исправлению красной ночи
-  const full = lane !== 'LIGHT' || repairing;
+  // Полный прогон обязателен тяжёлой полосе и любому исправлению красной ночи; у лёгкой, если его запустили, тоже не игнорируется:
+  // защита main (шаг 110.1) считает последнюю проверку с тем же именем на SHA, а он несёт те же fast и guards
+  const full = lane !== 'LIGHT' || repairing || dispatch !== null;
   if (done(push) && push.conclusion !== 'success') return { action: 'STOP', why: 'FAST_RED' };
   if (full && done(dispatch) && dispatch.conclusion !== 'success') return { action: 'STOP', why: 'FULL_RED' };
   if (!done(push)) return { action: 'WAIT', why: push === null ? 'FAST_NOT_STARTED' : 'FAST_RUNNING' };
@@ -71,8 +72,7 @@ export async function gate({ sha, lane, read, push, sleep, log, repair = null, a
       night = await read.night();
       const nightIssue = await read.nightIssue();
       const fastForward = await read.fastForward();
-      const dispatch = lane === 'LIGHT' && repair === null ? null : await read.run('workflow_dispatch');
-      decision = mergeDecision({ lane, push: await read.run('push'), dispatch, night, fastForward, nightIssue, repair });
+      decision = mergeDecision({ lane, push: await read.run('push'), dispatch: await read.run('workflow_dispatch'), night, fastForward, nightIssue, repair });
     } catch (failure) {
       decision = { action: 'WAIT', why: 'READ_FAILED' };
       error = String(failure?.stderr || failure?.message || failure).split('\n').find(Boolean)?.slice(0, 200);
