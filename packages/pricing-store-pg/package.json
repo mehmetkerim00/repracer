@@ -14,7 +14,7 @@
     "@repracer/pricing-model": "0.1.0",
     "@repracer/pricing-pipeline": "0.1.0",
     "@repracer/write-dispatcher": "0.1.0",
-    "pg": "8.23.0",
+    "pg": "8.23.1",
     "@repracer/stock-sync": "0.1.0"
   },
   "devDependencies": {
