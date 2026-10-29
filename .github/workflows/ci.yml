@@ -15,7 +15,8 @@
 # прогона ветки до слияния: push и workflow_dispatch. Лёгкая (только консоль, тексты и документы) — слияние по зелёному быстрому прогону и
 # затронутым тестам. Полосу решает scripts/ci-lane.mjs по диффу, сливает scripts/merge-when-green.mjs. Полный прогон main — ночью
 # (on.schedule): задания полного прогона на push больше не идут — тяжёлая полоса запускает их на ветке до слияния, а лёгкую ловит ночь.
-# Красная ночь — разбор первым делом, шаги не сливаются до зелёной.
+# Красная ночь — разбор первым делом, шаги не сливаются до зелёной. Задание night-watch ведёт Issue «Красная ночь YYYY-MM-DD»
+# (scripts/night-watch.mjs); ворота слияния держат и красная ночь, и открытый Issue.
 name: ci
 
 on:
@@ -394,3 +395,26 @@ jobs:
         with:
           name: compression
           path: compression.json
+
+  # Р-236, довесок владельца: сторож ночи. После всех заданий ночного прогона main при любом их исходе (always(), а не failure():
+  # зелёная ночь должна закрыть Issue): красная ночь — Issue «Красная ночь YYYY-MM-DD» со ссылкой и упавшими заданиями, повторная —
+  # комментарий в открытый, зелёная — комментарий и закрытие. Ворота слияния не сливают, пока такой Issue открыт. Только этому заданию —
+  # право на Issues; npm ci не нужен — скрипт на встроенных модулях Node
+  night-watch:
+    needs: [fast, guards, clickhouse-compression, full, demo-day, shadow-day, chaos, scale]
+    if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      NEEDS: ${{ toJSON(needs) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.22.3'
+      - run: node scripts/night-watch.mjs
