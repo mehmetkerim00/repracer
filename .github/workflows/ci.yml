@@ -7,15 +7,26 @@
 #   guards — на каждый коммит: мутационная проверка КРИТИЧНЫХ защит [Р-95, OQ-203] — обе границы и пол маржи (Price Gate),
 #            проверка входов, диспетчер записей, роли подключения и второй фактор массового изменения. Отдельным заданием, а не
 #            внутри быстрого: она идёт около десяти минут, и быстрый прогон перестал бы быть быстрым.
-#   full   — при слиянии в main и по запросу (workflow_dispatch): сверх быстрого ещё ВСЯ мутационная проверка схемы, брокер,
+#   full   — ночью по расписанию и по запросу (workflow_dispatch): сверх быстрого ещё ВСЯ мутационная проверка схемы, брокер,
 #            ClickHouse и запуск развёртываний. Именно он отменялся по лимиту на шаге 28, когда всё было одним заданием.
 # Что откладывается до полного прогона — названо поимённо в scripts/test-scopes.mjs, а не решается по имени файла.
+#
+# Р-236 (шаг 110): две полосы. Тяжёлая (миграции, движок, хранилище, Gate, симулятор, ClickHouse и всё вне списка лёгких мест) — оба
+# прогона ветки до слияния: push и workflow_dispatch. Лёгкая (только консоль, тексты и документы) — слияние по зелёному быстрому прогону и
+# затронутым тестам. Полосу решает scripts/ci-lane.mjs по диффу, сливает scripts/merge-when-green.mjs. Полный прогон main — ночью
+# (on.schedule): задания полного прогона на push больше не идут — тяжёлая полоса запускает их на ветке до слияния, а лёгкую ловит ночь.
+# Красная ночь — разбор первым делом, шаги не сливаются до зелёной.
 name: ci
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+  # Р-236: ночной полный прогон main. Расписание работает только на ветке по умолчанию и по UTC; начало часа — пик нагрузки GitHub Actions,
+  # запуск в это время сдвигают или снимают — поэтому 02:17. В публичном репозитории расписание отключается после 60 дней без активности
+  # (docs.github.com, «Events that trigger workflows», schedule)
+  schedule:
+    - cron: '17 2 * * *'
 
 # Шаг 52 (OWASP A08): токен заданий только читает репозиторий — прогонам больше не нужно
 permissions:
@@ -116,8 +127,8 @@ jobs:
         run: node scripts/db/mutation-check.mjs --critical --jobs 3
 
   full:
-    # Р-137: полный прогон — при слиянии в main и по запросу; на ветке шага его запускает владелец перед слиянием
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    # Р-137, Р-236: полный прогон — ночью по расписанию и по запросу; у шага тяжёлой полосы его запускают на ветке перед слиянием
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     # Шаг 37: предел поднят с 75 до 110 минут. Полный прогон вырос дважды: прогоны-замеры идут ПО ОДНОМУ (шаг 36), а
     # развёртывания теперь поднимают ещё и профиль production с консолью, у которой при старте заводится демо-тенант.
@@ -208,7 +219,7 @@ jobs:
   # Шаг 36 [Р-155]: сюда же попал замер пакетной записи (10 000 предложений отправляются дважды) — область `long` целиком.
   # Предел поднят с 70 до 110 минут: локально сутки идут 35 минут, замер — 13, а раннер CI медленнее машины разработчика
   demo-day:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     services:
@@ -241,7 +252,7 @@ jobs:
 
 
   shadow-day:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     services:
@@ -274,7 +285,7 @@ jobs:
 
   # Шаг 65, часть 1: хаос. Семя печатается первой строкой вывода; повтор плана — REPRACER_CHAOS_SEED=<семя>
   chaos:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     services:
@@ -308,7 +319,7 @@ jobs:
 
   # Шаг 65, часть 3: масштаб — каталог 50 000 предложений против пределов экрана и работы
   scale:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     services:
