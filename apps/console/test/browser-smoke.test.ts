@@ -1581,7 +1581,6 @@ test('step 100 (B): the period calendar — presets as a segment row above the m
     const edge = document.querySelector('.drp-day.edge') ?? document.body; const edgeStyle = getComputedStyle(edge);
     const inside = [...document.querySelectorAll('.drp-month td.in-range')];
     const gaps = inside.slice(1).map((td, k) => { const a = r(inside[k]); const z = r(td); return Math.abs(a.top - z.top) < 1 ? Math.round(z.left - a.right) : 0; });
-    const disabled = document.querySelector('.drp-day.disabled');
     const foot = document.querySelector('.drp-foot'); const status = document.querySelector('.drp-status'); const actions = foot.querySelector('.form-actions');
     const limit = document.querySelector('.drp-limit');
     const cancel = [...foot.querySelectorAll('button')].find((x) => !x.classList.contains('primary'));
@@ -1592,7 +1591,6 @@ test('step 100 (B): the period calendar — presets as a segment row above the m
       todayDecoration: today.textDecorationLine, todayRing: today.boxShadow !== 'none' || today.borderStyle !== 'none' && today.borderWidth !== '0px',
       edgeRound: parseFloat(edgeStyle.borderTopLeftRadius) * 2 >= edge.getBoundingClientRect().width - 1,
       inRange: inside.length, gaps: [...new Set(gaps)], fill: inside.length ? getComputedStyle(inside[Math.floor(inside.length / 2)]).backgroundColor : null,
-      disabledColor: disabled ? getComputedStyle(disabled).color : null,
       statusLeft: !!status && !!actions && r(status).right <= r(actions).left, limit: limit?.textContent.trim() ?? null, limitColor: limit ? getComputedStyle(limit).color : null,
       cancelGhost: !!cancel && cancel.classList.contains('ghost') && getComputedStyle(cancel).backgroundColor === 'rgba(0, 0, 0, 0)', applyPrimary: !!apply,
       navIcons: [...document.querySelectorAll('.drp-nav button')].every((x) => x.querySelector('svg') && x.getAttribute('aria-label')),
@@ -1614,8 +1612,7 @@ test('step 100 (B): the period calendar — presets as a segment row above the m
     assert.equal(v.edgeRound, true, `${scheme}: the ends of the range are round`);
     assert.ok((v.inRange as number) >= 5, `${scheme}: the days of the range carry the fill — ${String(v.inRange)}`);
     assert.deepEqual([v.gaps, v.fill], [[0], want.soft], `${scheme}: the fill joins the days without gaps or steps`);
-    assert.equal(v.disabledColor, want.text3, `${scheme}: days beyond the kept window are lighter`);
-    // у журнала цен окно — 90 суток (шаг 96)
+    // у журнала цен окно — 90 суток (шаг 96); дни за окном — ниже, на календаре Protections
     assert.deepEqual([v.statusLeft, v.limit, v.limitColor], [true, t.limit(90), want.text2], `${scheme}: the footer — the choice on the left, the limit short and grey`);
     assert.ok(!/[()]/.test(String(v.limit)), 'the limit has no brackets');
     assert.deepEqual([v.cancelGhost, v.applyPrimary, v.navIcons], [true, true, true], `${scheme}: Cancel is a ghost, Apply the primary, the month arrows icon buttons`);
@@ -1648,6 +1645,20 @@ test('step 100 (B): the period calendar — presets as a segment row above the m
   assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), 'no sideways scroll');
   await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
   await b.setViewport(1440, 900);
+  // Дни за окном хранения светлее — на календаре с окном 30 суток (Protections). У журнала цен (90 суток) в стартовом виде (прошлый и
+  // текущий месяц) неактивны только будущие дни, а в последний день месяца их нет: утверждение краснело ночью 2026-10-31 (скрытый вход
+  // «дата»). У окна 30 суток неактивный день в стартовом виде есть при любой дате — перебор 2026–2033 той же арифметикой: 0 дат против 96
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/protections`)}, true)`);
+  await settled(b, 'protections');
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    await b.evaluate(`(document.querySelector('.drp-trigger').click(), true)`);
+    await waitFor(b, `document.querySelector('.drp-pop') !== null`, 'the protections calendar opens');
+    const quiet = await b.evaluate<{ limit: string | null; color: string | null }>(`(() => { const d = document.querySelector('.drp-day.disabled'); const l = document.querySelector('.drp-limit');
+      return { limit: l?.textContent.trim() ?? null, color: d ? getComputedStyle(d).color : null }; })()`);
+    assert.deepEqual(quiet, { limit: t.limit(30), color: await b.evaluate<string>(token('--text-3')) }, `${scheme}: days beyond the kept window are lighter`);
+    await b.evaluate(`(document.querySelector('.drp-foot button:not(.primary)').click(), true)`);
+  }
   await b.setColorScheme(null);
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
