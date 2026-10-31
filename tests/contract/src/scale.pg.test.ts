@@ -9,7 +9,7 @@ import {
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
-import { MEDIAN_RUNS, medianOf } from './scale-median.ts';
+import { FULL_STATE_SECONDS, MEDIAN_RUNS, medianOf } from './scale-median.ts';
 
 /**
  * Шаг 65, часть 3: МАСШТАБ. Каталог продавца в N предложений (`REPRACER_SCALE_OFFERS`, по умолчанию 50 000; таблица 10 000 → 50 000 —
@@ -178,8 +178,10 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
    * ещё читают (стратегии, поиск предложения, комплаенс, остановка, карточка границ) — своей строкой: это память сервера на их запрос
    */
   // Шаг 67: каталог целиком собирают только маршруты записи массовых операций («весь каталог», стратегии, границы, импорт) — остаток OQ-248
-  // Шаг 107 (решение владельца): ходит у предела 10 с на медленном раннере — медиана трёх прогонов подряд, предел прежний (строка в отложенном)
-  await timedMedian('server: full catalog state — bulk write routes still loading it (all: true, strategy assign, bounds, import)', SCREEN_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
+  // Шаг 107 (решение владельца): ходит у предела 10 с на медленном раннере — медиана трёх прогонов подряд (строка в отложенном).
+  // Шаг 110.3 (решение владельца): предел временно 15 с — разброс раннеров на одном коммите 6,95…10,23 с, ночь блокирует слияния всех;
+  // вернуть к 10 с после оптимизации чтения — `FULL_STATE_SECONDS` в scale-median.ts, обратный билет держит тест
+  await timedMedian('server: full catalog state — bulk write routes still loading it (all: true, strategy assign, bounds, import)', FULL_STATE_SECONDS, () => store.readConsoleState(tenant, now()), bytesOf);
   const world = { id: 'scale', title: 'scale', description: '', tenantId: tenant, now: k.clock.iso(), accounts: [{ channelAccountId: account, channel: 'KAUFLAND', marketplaces: ['de'] }],
     viewer: { membershipId: k.seeded.ownerMembershipId, role: 'OWNER' } };
   const m = messagesFor('en');

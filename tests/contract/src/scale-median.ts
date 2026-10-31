@@ -6,6 +6,15 @@
  */
 export const MEDIAN_RUNS = 3;
 
+/**
+ * Шаг 110.3 (решение владельца после красной ночи 2026-10-31): ночь — ворота слияний [Р-236], а один и тот же коммит `dfc98e8` дал 6,95 /
+ * 9,97 / 10,23 с на разных раннерах — разброс почти 50 %. Предел замера временно 15 с (квадратичный рост он ловит: вдвое больше каталога —
+ * вчетверо дольше); цель — 10 с, ВЕРНУТЬ после оптимизации «массовые маршруты записи не читают каталог целиком» — обратный билет в
+ * docs/deferred.md держит тест этого файла
+ */
+export const FULL_STATE_TARGET_SECONDS = 10;
+export const FULL_STATE_SECONDS = 15;
+
 /** Медиана нечётного числа замеров (секунды) */
 export function medianOf(values: readonly number[]): number {
   if (values.length === 0 || values.length % 2 === 0) throw new Error(`median of an odd number of runs, got ${values.length}`);

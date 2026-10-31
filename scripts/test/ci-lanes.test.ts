@@ -81,6 +81,39 @@ test('Р-236: слияние — лёгкая по зелёному быстро
   assert.deepEqual(decide('HEAVY', green, green, null, true, { number: 7 }), { action: 'STOP', why: 'NIGHT_ISSUE_OPEN' });
 });
 
+test('Р-236, шаг 110.3: режим исправления — при красной ночи сливается только исправление открытого Issue и только по обоим зелёным прогонам', () => {
+  const decide = (lane: 'LIGHT' | 'HEAVY', push: object | null, dispatch: object | null, night: object | null, nightIssue: object | null, repair: number | null) =>
+    mergeDecision({ lane, push, dispatch, night, fastForward: true, nightIssue, repair });
+  const issue = { number: 19 };
+  // Красная ночь 2026-10-31: исправление открытого Issue сливается по обоим зелёным прогонам своего SHA — и у лёгкой полосы
+  assert.deepEqual(decide('HEAVY', green, green, red, issue, 19), { action: 'MERGE', why: 'REPAIR_BOTH_GREEN' });
+  assert.deepEqual(decide('LIGHT', green, green, red, issue, 19), { action: 'MERGE', why: 'REPAIR_BOTH_GREEN' });
+  assert.deepEqual(decide('LIGHT', green, null, red, issue, 19), { action: 'WAIT', why: 'FULL_NOT_STARTED' }, 'полный прогон обязателен и лёгкой полосе');
+  assert.deepEqual(decide('LIGHT', green, red, red, issue, 19), { action: 'STOP', why: 'FULL_RED' });
+  assert.deepEqual(decide('HEAVY', green, running, red, issue, 19), { action: 'WAIT', why: 'FULL_RUNNING' });
+  // Ночь уже не красная, но Issue ещё открыт (его закрывает зелёный прогон main) — тоже исправление
+  assert.deepEqual(decide('LIGHT', green, green, green, issue, 19), { action: 'MERGE', why: 'REPAIR_BOTH_GREEN' });
+  // Исправление не того Issue или без открытого Issue — стоп: Issue — ручка исправления
+  assert.deepEqual(decide('HEAVY', green, green, red, { number: 20 }, 19), { action: 'STOP', why: 'REPAIR_ISSUE_NOT_OPEN' });
+  assert.deepEqual(decide('HEAVY', green, green, red, null, 19), { action: 'STOP', why: 'REPAIR_ISSUE_NOT_OPEN' });
+  // Без режима исправления — как прежде
+  assert.deepEqual(decide('HEAVY', green, green, red, issue, null), { action: 'STOP', why: 'NIGHT_RED' });
+  assert.deepEqual(decide('HEAVY', green, green, green, issue, null), { action: 'STOP', why: 'NIGHT_ISSUE_OPEN' });
+  // Чинить нечего (ночь зелёная, Issue закрыт) — обычные правила полосы
+  assert.deepEqual(decide('LIGHT', green, null, green, null, 19), { action: 'MERGE', why: 'LIGHT_FAST_GREEN' });
+});
+
+test('Р-236, шаг 110.3: после слияния исправления — полный прогон main (зелёный закроет Issue сторожем); у обычного слияния — нет', async () => {
+  const sha = 'e'.repeat(40);
+  const repairs: unknown[][] = [];
+  const read = (night: object, nightIssue: object | null) => ({ run: () => green, night: () => night, nightIssue: () => nightIssue, fastForward: () => true });
+  const common = { sha, push: async () => true, sleep: async () => {}, log: () => {}, afterRepair: async (...args: unknown[]) => { repairs.push(args); } };
+  assert.equal(await gate({ ...common, lane: 'LIGHT', repair: 19, read: read(red, { number: 19 }) }), `MERGED REPAIR LIGHT ${sha}`);
+  assert.deepEqual(repairs, [[19, sha]]);
+  assert.equal(await gate({ ...common, lane: 'HEAVY', repair: null, read: read(green, null) }), `MERGED HEAVY ${sha}`);
+  assert.equal(repairs.length, 1, 'обычное слияние полный прогон main не запускает');
+});
+
 test('Р-236: ворота сливают только fast-forward — проверка на настоящих репозиториях git', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-lanes-ff-'));
   try {
