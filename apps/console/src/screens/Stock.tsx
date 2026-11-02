@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, MarketContext, Pager, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, MarketContext, Pager, useMessages, StorefrontTag } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
@@ -166,7 +166,8 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
                         <li key={c.writeScopeId} title={c.detailText}>
                           {/* Шаг 96.1: в строке — канал · витрина, пилюля и «N to publish»; что значит состояние — один раз над таблицей,
                               полное предложение — подсказкой строки */}
-                          <span className="channel-name">{c.label}</span> <Badge tone={c.tone}>{c.statusText}</Badge>
+                          {/* Шаг 111 [Р-237]: витрины — чипами, «канал · витрина» словами — подсказкой */}
+                          <span className="channel-name" title={c.label}>{c.chips.map((chip) => <StorefrontTag key={chip.full} chip={chip} />)}</span> <Badge tone={c.tone}>{c.statusText}</Badge>
                           {c.toPublishText ? <span className="nowrap"> {c.toPublishText}</span> : null}
                           {c.differsText ? <span className="muted nowrap"> · {c.differsText}</span> : null}
                           {c.divergedText ? <p className="error">{c.divergedText}</p> : null}

@@ -11,8 +11,8 @@
 
 | Понятие | EN | DE | Запрещено (EN / DE) | Что это |
 |---|---|---|---|---|
-| Продукт | **PriceTrail** | **PriceTrail** | repracer (прежнее имя), Pricetrail, Price Trail / то же | Шаг 92 [Р-216]: в прозе — PriceTrail с заглавными P и T; строчное **pricetrail** — только знак в шапке и на входе. Технические имена (`@repracer/*`, `REPRACER_*`, база) не меняются |
-| Тенант | **workspace** | **Arbeitsbereich** | tenant, seller account, account group / Mandant, Verkäuferkonto, Händlerkonto | Бизнес продавца в PriceTrail: его участники, каналы, каталог, границы. У агентства их несколько, у каждого свои язык и пояс (K1, K4) |
+| Продукт | **TMPrice** | **TMPrice** | repracer и PriceTrail (прежние имена), Tmprice, TMprice, TM Price / то же | Шаг 111 [Р-237] (прежде шаг 92 [Р-216] — PriceTrail): в прозе — TMPrice с заглавными T, M и P; строчное **tmprice** — знак в шапке и на входе. Технические имена (`@repracer/*`, `REPRACER_*`, база) не меняются |
+| Тенант | **workspace** | **Arbeitsbereich** | tenant, seller account, account group / Mandant, Verkäuferkonto, Händlerkonto | Бизнес продавца в TMPrice: его участники, каналы, каталог, границы. У агентства их несколько, у каждого свои язык и пояс (K1, K4) |
 | Канал | **channel** | **Kanal** | marketplace (о канале) / Marktplatz | Amazon, eBay, Kaufland |
 | Витрина | **storefront** | **Storefront** | marketplace / Marktplatz | amazon.de, amazon.com, ebay.com, kaufland.de — страна или сайт канала. На экране — словами, не кодом (`ATVPDKIKX0DER`, `EBAY_US`) |
 | Аккаунт канала | **channel account** (рядом с названием канала — «Amazon account») | **Kanalkonto** («Amazon-Konto») | seller account, channel connection / Kanalverbindung, Kanal-Konto | Аккаунт продавца в канале, подключённый к workspace. Раздел «Channel accounts» / «Kanalkonten» экрана «Channels» / «Kanäle» (шаг 95) |
@@ -52,7 +52,7 @@
 ## Испанский и французский (шаг 98, Р-223)
 
 Испанский — нейтральный латиноамериканский, как у продавцов США (обращение «usted», «costo», а не «coste»); французский — французский
-Франции (обращение «vous»). Валюта, числа и даты — американские, как в профиле `us` (решение владельца). Не переводятся: **PriceTrail**,
+Франции (обращение «vous»). Валюта, числа и даты — американские, как в профиле `us` (решение владельца). Не переводятся: **TMPrice**,
 **Buy Box** (имя собственное, род — «la Buy Box» в обоих языках), **Price Gate**, названия каналов и витрин, коды (SKU, EAN, FBA, FBM, CSV,
 XLSX). Одно понятие — одно слово по всему продукту, на экранах и в письмах.
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { periodPhrase, periodSearch, type Messages, type Period, type RejectedItem, type RejectedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, collapseRepeats, commonZone, Gaps, href, Load, LocalPager, REPORT_PAGE_SIZE, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, collapseRepeats, commonZone, Gaps, href, Load, LocalPager, REPORT_PAGE_SIZE, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { rangeText } from '../date-range.tsx';
 
 /** Шаг 96.2: короткая подпись периода — в чипе повторов «×11 · 7d» */
@@ -145,7 +145,7 @@ export function RejectedScreenView({ view, only = null, period = { preset: '7d' 
                 return (
                   <tr key={i} className={item.intervention === 'DANGEROUS' ? 'dangerous' : ''}>
                     <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={item.at} zone={!zone} /></td>
-                    <td className="offer card-title">{item.unit?.label ?? item.productRef ?? m.ui.common.noValue}</td>
+                    <td className="offer card-title">{item.unit ? <UnitName unit={item.unit} /> : item.productRef ?? m.ui.common.noValue}</td>
                     {stateOf ? null : <td className="state card-status"><Badge tone={tone}>{text}</Badge></td>}
                     <td className="num money cur history" data-label={`${r.historyColumn} · ${r.historyLegend}`}><PriceHistory item={item} /></td>
                     {beyond ? <td className="num" data-label={c.deviation}>{item.deviation ?? '–'}</td> : null}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { periodSearch, type DangerousReportView, type Period } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, collapseRepeats, commonZone, Gaps, href, Load, LocalPager, REPORT_PAGE_SIZE, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, collapseRepeats, commonZone, Gaps, href, Load, LocalPager, REPORT_PAGE_SIZE, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { reasonPlan, ShortReason } from './Rejected.tsx';
 
 /** Отчёт о работе границ за период: удержания полом [Р-117] и отклонения Gate больше 10 % [Р-73] */
@@ -50,7 +50,7 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
               {shownHolds.map(({ item: i, count }, n) => (
                 <tr key={`${i.decisionId ?? 'hold'}-${n}`}>
                   <td className="nowrap" data-label={`${d.floorColumns.when}${holdZone ? ` · ${holdZone}` : ''}`}><When value={i.at} zone={!holdZone} /></td>
-                  <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}{i.clearance ? <> <Badge tone="warn">{i.clearance}</Badge></> : null}</td>
+                  <td className="offer card-title">{i.unit ? <UnitName unit={i.unit} /> : m.ui.common.noValue}{i.clearance ? <> <Badge tone="warn">{i.clearance}</Badge></> : null}</td>
                   <td className="num cur" data-label={d.floorColumns.target}>{i.target ?? m.ui.common.noValue}</td>
                   <td className="num money cur" data-label={d.floorColumns.floor}>{i.floor}</td>
                   <td className="num cur" data-label={d.floorColumns.below}>{i.below ?? m.ui.common.noValue}</td>
@@ -82,7 +82,7 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
                 {view.items.map((i) => (
                   <tr key={i.decisionId} className="dangerous">
                     <td className="nowrap" data-label={`${c.when}${gateZone ? ` · ${gateZone}` : ''}`}><When value={i.at} zone={!gateZone} /></td>
-                    <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
+                    <td className="offer card-title">{i.unit ? <UnitName unit={i.unit} /> : m.ui.common.noValue}</td>
                     <td className="num cur" data-label={c.proposed}>{i.proposed}</td>
                     <td className="num cur" data-label={c.bound}>{i.bound}</td>
                     <td className="num" data-label={c.deviation}>{i.deviation}</td>

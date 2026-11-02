@@ -1,4 +1,4 @@
-export { catalogFirst, catalogTotal, channelOf, gap, GAP_CODES, scopeById, storefrontName, uniqueGaps, unitOf, type ConsoleDecision, type ConsoleHalt, type ConsoleIntent, type ConsoleScope, type ConsoleStop, type ConsoleWrite, type Gap, type GapCode, type StandAccount, type StandWorld, type StatusCell, type Tone, type UnitRef, type Viewer } from './world.ts';
+export { catalogFirst, catalogTotal, channelOf, gap, GAP_CODES, scopeById, storefrontChip, storefrontName, uniqueGaps, unitOf, type StorefrontChip, type ConsoleDecision, type ConsoleHalt, type ConsoleIntent, type ConsoleScope, type ConsoleStop, type ConsoleWrite, type Gap, type GapCode, type StandAccount, type StandWorld, type StatusCell, type Tone, type UnitRef, type Viewer } from './world.ts';
 export { describe, explainabilityCatalogue, LIMIT_CODES, REASON_LIMITS, type ExplainabilityRow, type HumanReason, type LimitCode } from './explain.ts';
 export { LOCALES, messagesFor, type Messages } from './i18n/index.ts';
 export { humanDate, monthDay, nameTag, tableWhenParts, zoneName } from './i18n/shape.ts';

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { periodSearch, type ListQuery, type Period, type ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { Field, FormActions } from '../forms.tsx';
 import { NextStepCard } from './Onboarding.tsx';
@@ -182,7 +182,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                 <tbody>
                   {v.rows.map((r) => (
                     <tr key={r.channelWriteId}>
-                      <td className="card-title">{r.label} <Badge tone="off">{m.ui.shadow.kinds[r.field === 'QUANTITY' ? 'QUANTITY' : 'PRICE']}</Badge></td>
+                      <td className="card-title"><UnitName unit={r} /> <Badge tone="off">{m.ui.shadow.kinds[r.field === 'QUANTITY' ? 'QUANTITY' : 'PRICE']}</Badge></td>
                       <td className={r.field === 'QUANTITY' ? 'money' : 'money cur'} data-label={c.value}>{r.valueText}{r.budgetText === null ? null : <div className="note">{r.budgetText}</div>}</td>
                       <td data-label={`${c.when}${commonZone(v.rows.map((x) => x.whenText)) ? ` · ${commonZone(v.rows.map((x) => x.whenText))}` : ''}`}><When value={r.whenText} zone={!commonZone(v.rows.map((x) => x.whenText))} /></td>
                       <td className="num card-action">{r.priceDecisionId === null ? null : <a className="row-link" href={href(worldId, 'decisions', r.priceDecisionId)}>{c.why}</a>}</td>

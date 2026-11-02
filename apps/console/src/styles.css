@@ -547,6 +547,19 @@ h2 .badge, h3 .badge { margin-left: var(--space-2); }
 .tone-stop { color: var(--danger); border-color: var(--danger-line); }
 .tone-off { color: var(--text-2); border-color: var(--border); }
 .tone-unknown { color: var(--text-2); border-color: var(--border); border-style: dashed; }
+/* Шаг 111 [Р-237]: чип площадки — кружок её цвета (палитра display Primer) с буквой из data-letter, короткое имя витрины — приглушённо рядом */
+.storefront-tag { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; vertical-align: middle; }
+.channel-chip {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--space-4); height: var(--space-4); border-radius: 50%;
+  background: var(--chip-other); color: var(--on-emphasis); font-size: var(--font-size-xs); line-height: 1; font-weight: var(--weight-heading);
+}
+.channel-chip::before { content: attr(data-letter); }
+.channel-chip[data-channel="AMAZON"] { background: var(--chip-amazon); }
+.channel-chip[data-channel="WALMART"] { background: var(--chip-walmart); }
+.channel-chip[data-channel="EBAY"] { background: var(--chip-ebay); }
+.channel-chip[data-channel="KAUFLAND"] { background: var(--chip-kaufland); }
+.chip-short { font-size: var(--font-size-xs); font-weight: var(--weight-medium); color: var(--text-2); }
+.channel-name .storefront-tag + .storefront-tag { margin-left: var(--space-1); }
 /* ход задания — Primer ProgressBar: дорожка и полоса цвета успеха */
 progress { appearance: none; width: 280px; height: var(--space-2); border: 0; border-radius: var(--radius); background: var(--track-bg); overflow: hidden; }
 progress::-webkit-progress-bar { background: var(--track-bg); border-radius: var(--radius); }

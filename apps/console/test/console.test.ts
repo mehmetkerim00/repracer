@@ -222,8 +222,10 @@ test('screens render from the dictionary: sign-in, products with the effective f
   const products = await html('/src/screens/Products.tsx', 'ProductsView', { view: await get<ProductListView>(auth, api(id, 'products')) });
   // Шаг 79: «Next check» — колонка по выбору (у всех предложений «нет данных», по умолчанию скрыта); её название — в выборе колонок
   for (const text of ['Effective floor', 'Next check', 'Status', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
-  // Шаг 68 (K10): предложение — SKU продавца и витрина словами, а не «Kaufland de · unit 4101»
-  assert.match(products, /syn-[^ <]+ · kaufland\.de/);
+  // Шаг 68 (K10): предложение — SKU продавца и витрина словами, а не «Kaufland de · unit 4101»; шаг 111 [Р-237]: витрина — чипом площадки,
+  // полное имя — подсказкой и доступным именем, длинного «· kaufland.de» в строке нет
+  assert.match(products, /syn-[^ <]+(?:<!-- -->)? <span class="storefront-tag" title="kaufland\.de"><span class="channel-chip" data-channel="KAUFLAND" data-letter="k" role="img" aria-label="kaufland\.de">/);
+  assert.ok(!products.includes(' · kaufland.de'), 'длинного имени витрины в строке нет');
   assert.ok(!products.includes('unit 4101'), 'номер единицы канала не подпись предложения');
 
   const decisions = (await get<DecisionListView>(auth, api(id, 'decisions'))).items;

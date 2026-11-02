@@ -328,9 +328,10 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\bstand\b(?! still)/i, use: 'server (the stand is a test bench)' },
     // Шаг 79: себестоимость — одно слово «unit cost» на всех экранах (визуальное ревью нашло «cost price» на импорте)
     { pattern: /\bcost prices?\b|\bproduct costs?\b/i, use: 'unit cost' },
-    // Шаг 92 [Р-216]: продукт — PriceTrail; прежнее имя и неверные написания краснеют, строчное «pricetrail» — только знак
-    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
-    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail (the wordmark pricetrail is lowercase)' },
+    // Шаг 92 [Р-216], шаг 111 [Р-237]: продукт — TMPrice; прежние имена (repracer, PriceTrail) и неверные написания краснеют, строчное «tmprice» — знак
+    { pattern: /\brepracer\b/i, use: 'TMPrice' },
+    { pattern: /\bprice ?trail\b/i, use: 'TMPrice (PriceTrail is the former name)' },
+    { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice (the wordmark tmprice is lowercase)' },
   ],
   de: [
     { pattern: /\bMandant(en|in)?\b|Mandanten-?[Ss]topp/, use: 'Arbeitsbereich' },
@@ -346,8 +347,9 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /Selbstkosten|Einstandskosten|Einstandspreis/, use: 'Stückkosten' },
     // Шаг 86 (отложенное 79, ревью 21): данные конкурентов на момент — «Wettbewerbsdaten», а не английское «Snapshot» (было 43 текста)
     { pattern: /Snapshot|Momentaufnahme/, use: 'Wettbewerbsdaten (Plural; Zeitpunkt — „Wettbewerbsdaten vom …“)' },
-    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
-    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail (das Wortzeichen pricetrail ist klein geschrieben)' },
+    { pattern: /\brepracer\b/i, use: 'TMPrice' },
+    { pattern: /\bprice ?trail\b/i, use: 'TMPrice (PriceTrail ist der frühere Name)' },
+    { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice (das Wortzeichen tmprice ist klein geschrieben)' },
   ],
   // Шаг 98 [Р-223]: испанский и французский — тот же глоссарий (docs/console-glossary.md, раздел «Испанский и французский»)
   es: [
@@ -357,8 +359,9 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\blistados?\b|\blistings?\b/i, use: 'oferta; anuncio de eBay' },
     { pattern: /snapshots?|instant[áa]neas?/i, use: 'datos de la competencia' },
     { pattern: /\bcostes?\b/i, use: 'costo (español de los vendedores de EE. UU.)' },
-    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
-    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail' },
+    { pattern: /\brepracer\b/i, use: 'TMPrice' },
+    { pattern: /\bprice ?trail\b/i, use: 'TMPrice' },
+    { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice' },
   ],
   fr: [
     { pattern: /\blocataires?\b/i, use: 'espace de travail' },
@@ -366,8 +369,9 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\barticles?\b/i, use: 'produit' },
     { pattern: /\blistings?\b|\bfiches? produits?\b/i, use: 'offre ; annonce eBay' },
     { pattern: /snapshots?|instantan[ée]s?/i, use: 'données de la concurrence' },
-    { pattern: /\brepracer\b/i, use: 'PriceTrail' },
-    { pattern: /\bPricetrail\b|\bPrice ?[Tt]rail\b(?<!\bPriceTrail)|\bPRICE ?TRAIL\b/, use: 'PriceTrail' },
+    { pattern: /\brepracer\b/i, use: 'TMPrice' },
+    { pattern: /\bprice ?trail\b/i, use: 'TMPrice' },
+    { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice' },
   ],
 };
 const EBAY_LISTING = /\blistings?\b/i;
@@ -442,11 +446,13 @@ test('шаг 69 (K9), шаг 98 (Р-223): словари EN, DE, ES и FR гов
   for (const bad of ['the whole tenant', 'Your seller account is ready', 'the account group stop', 'read from the marketplace', 'channel units in sync', 'the item may break',
     'one article', 'Open the channel connections', 'The stand is unavailable', 'Check the listing in the channel', 'Import cost prices', 'enter the product cost']) assert.equal(en(bad), 1, bad);
   for (const ok of ['the unit cost of this offer', 'prices stand still', 'older eBay listings', 'edits this listing through the Trading API', 'Workspace: Demo']) assert.equal(en(ok), 0, ok);
-  // Шаг 92 [Р-216]: имя продукта — PriceTrail; прежнее имя и неверные написания — нет, строчный знак «pricetrail» — да
-  for (const bad of ['Prices set outside repracer', 'Pricetrail does not change it', 'set in Price Trail', 'PRICETRAIL alert']) assert.equal(en(bad), 1, bad);
-  for (const ok of ['Prices set outside PriceTrail', 'pricetrail · seller console']) assert.equal(en(ok), 0, ok);
+  // Шаг 111 [Р-237]: имя продукта — TMPrice; прежние имена (repracer, PriceTrail) и неверные написания — нет, строчный знак «tmprice» — да
+  for (const bad of ['Prices set outside repracer', 'Prices set outside PriceTrail', 'pricetrail · seller console', 'set in Price Trail', 'Tmprice does not change it',
+    'TMprice alert', 'set in TM Price', 'T.M. Price']) assert.equal(en(bad), 1, bad);
+  for (const ok of ['Prices set outside TMPrice', 'tmprice · seller console']) assert.equal(en(ok), 0, ok);
   assert.equal(de('außerhalb von repracer'), 1);
-  assert.equal(de('PriceTrail ändert den Preis nicht'), 0);
+  assert.equal(de('außerhalb von PriceTrail'), 1);
+  assert.equal(de('TMPrice ändert den Preis nicht'), 0);
   for (const bad of ['den gesamten Mandanten', 'ein Mandanten-Stopp', 'Rechner des Marktplatzes', 'neue Einheiten', 'Kanaleinheiten im Abgleich', 'ein Artikel hier',
     'Ihr Verkäuferkonto ist da', 'dieses Händlerkonto ist verbunden', 'Öffnen Sie die Kanalverbindungen', 'im Kanal-Konto prüfen', 'Fehler des Stands.',
     'Standdaten werden geladen', 'Selbstkosten importieren', 'ohne Einstandskosten']) assert.equal(de(bad), 1, bad);
@@ -568,11 +574,11 @@ test('step 84: the shadow summary as «metric — value» says what the sentence
  */
 const SAME_AS_ENGLISH: Readonly<Record<'es' | 'fr', readonly string[]>> = {
   es: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Demo', 'Deutsch', 'English', 'Español', 'Français',
-    'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com',
+    'tmprice', 'TMPrice', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com',
     // Шаг 99: код SKU — как в глоссарии, во всех языках; шаг 104: форматы файла
     'SKU', 'CSV', 'XLSX'],
   fr: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Deutsch', 'English', 'Español', 'Français',
-    'pricetrail', 'PriceTrail', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com', 'SKU', 'CSV', 'XLSX',
+    'tmprice', 'TMPrice', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com', 'SKU', 'CSV', 'XLSX',
     // Французские слова, которые пишутся так же
     'position', 'active', 'Stock', 'stock', 'Protections', 'Menu', 'Note', 'Sources', 'Source', 'Mode', 'urgent', 'attention', 'Attention', 'Type', 'Versions',
     // Шаг 109 [Р-234]: заголовок купонов конкурентов на Competition

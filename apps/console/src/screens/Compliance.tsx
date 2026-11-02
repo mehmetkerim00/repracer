@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, type ComplianceView, type DiscountCheckView, type HistoryDepthView, type ListQuery } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import type { DiscountAnnounceResponse, JobCreatedResponse } from '../api-types.ts';
-import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages, Intro, DateTimeField } from '../components.tsx';
+import { Badge, errorText, Gaps, Load, OfferPicker, Pager, useMessages, Intro, DateTimeField, UnitName } from '../components.tsx';
 import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { JobProgress } from './Jobs.tsx';
 
@@ -124,7 +124,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
             <tbody>
               {view.depth.map((d) => (
                 <tr key={d.unit.writeScopeId}>
-                  <td className="offer">{d.unit.label}</td>
+                  <td className="offer"><UnitName unit={d.unit} /></td>
                   <td className="nowrap">{d.depth.seen}</td>
                   <td><Badge tone={d.depth.tone}>{d.depth.short}</Badge><div className="note">{d.depth.reliability}</div>{d.depth.externalChanges ? <div className="note">{d.depth.externalChanges}</div> : null}</td>
                 </tr>
@@ -143,7 +143,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
             <tbody>
               {view.rows.map((r) => (
                 <tr key={r.announcementId} className={r.now.verdict === 'VIOLATION' ? 'dangerous' : ''}>
-                  <td>{r.unit?.label ?? m.ui.common.noValue}</td>
+                  <td>{r.unit ? <UnitName unit={r.unit} /> : m.ui.common.noValue}</td>
                   <td className="num cur">{r.reference}</td>
                   <td className="num cur">{r.sale}</td>
                   <td className="nowrap">{r.period}</td>

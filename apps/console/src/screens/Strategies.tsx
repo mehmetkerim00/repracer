@@ -5,7 +5,7 @@ import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
 /**
@@ -99,7 +99,7 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
           <tbody>
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
-                <td className="offer card-title">{r.unit.label}</td>
+                <td className="offer card-title"><UnitName unit={r.unit} /></td>
                 <td className="small as-of" data-label={`${c.asOf}${asOfZone ? ` · ${asOfZone}` : ''}`}><When value={r.asOf} zone={!asOfZone} /></td>
                 <td className="num cur" data-label={c.current}>{r.current}</td>
                 <td className="num cur" data-label={c.proposed}>{r.proposed ?? '–'}</td>
@@ -245,7 +245,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
             {s.defaultFor ? <div className="small muted strategy-default">{s.defaultFor}</div> : null}
             {openOffers === s.strategyId ? (
               <ul className="offer-list small">
-                {s.scopes.map((u) => <li key={u.unit.writeScopeId}>{u.unit.label}{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
+                {s.scopes.map((u) => <li key={u.unit.writeScopeId}><UnitName unit={u.unit} />{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
                 {s.scopeCount > s.scopes.length ? <li className="muted">{t.moreOffers(s.scopeCount - s.scopes.length)} — <a href={href(worldId, 'products')}>{m.ui.app.screens.products}</a></li> : null}
               </ul>
             ) : null}

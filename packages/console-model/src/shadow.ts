@@ -4,7 +4,7 @@ import { accountState, channelLimitText } from './connections.ts';
 import type { Messages } from './i18n/index.ts';
 import { monthDay, nameTag, zoneName } from './i18n/shape.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
-import { gap, storefrontName, type Gap, type StandWorld } from './world.ts';
+import { gap, storefrontChip, storefrontName, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
 import { periodDays, periodPhrase, type Period, type PeriodRange } from './period.ts';
 
 /**
@@ -35,6 +35,9 @@ export interface ShadowAccountView extends ShadowAccountRow {
 
 export interface ShadowWriteView extends ShadowWriteRow {
   label: string;
+  /** Шаг 111 [Р-237]: имя продукта и чип витрины — для таблицы; `label` целиком — для подсказок и файлов */
+  name: string;
+  storefront: StorefrontChip;
   valueText: string;
   budgetText: string | null;
   whenText: string;
@@ -375,15 +378,21 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
     // Превью недельного письма — у недели: письмо считает семь суток
     digestPreview: world.demo === true && 'preset' in period && period.preset === '7d' ? digestPreview(world, page, accounts, m) : null,
     accounts,
-    rows: page.rows.map((r): ShadowWriteView => ({
+    rows: page.rows.map((r): ShadowWriteView => {
+      const name = r.title ?? r.sku ?? m.ui.common.unitRef(r.writeScopeId.slice(0, 8));
+      // Запись аккаунта без витрины (количество региона) — чип площадки с её именем
+      const storefront = r.marketplace === null
+        ? { ...storefrontChip(null, r.channel, '', m), full: (m.values as Record<string, string | undefined>)[r.channel] ?? r.channel }
+        : storefrontChip(world, r.channel, r.marketplace, m);
+      return {
       ...r,
       // Ревью шага 68, находка 3: подпись — как у остальных экранов (название или SKU и витрина словами), не идентификатор единицы
-      label: m.ui.common.unitLabel(r.title ?? r.sku ?? m.ui.common.unitRef(r.writeScopeId.slice(0, 8)),
-        r.marketplace === null ? (m.values as Record<string, string | undefined>)[r.channel] ?? r.channel : storefrontName(r.channel, r.marketplace, m)),
+      label: m.ui.common.unitLabel(name, storefront.full), name, storefront,
       valueText: r.field === 'QUANTITY' ? t.quantity(r.quantity ?? 0) : money(m, r.amountMinor, r.currency),
       budgetText: r.wouldSpendBudget ? t.wouldSpend : null,
       whenText: m.when(r.finishedAt),
-    })),
+      };
+    }),
     page: pageInfo(query, page.total, m),
     none: t.none, liveButton: t.liveButton, shadowButton: t.shadowButton, mfaHint: t.mfaHint, cannot: t.cannot,
     gaps: [],

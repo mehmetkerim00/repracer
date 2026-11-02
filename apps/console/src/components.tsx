@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type UnitRef } from '@repracer/console-model';
+import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type StorefrontChip, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
 import { Octicon } from './icons.tsx';
@@ -14,6 +14,26 @@ export const MarketContext = createContext<{ locales: readonly Locale[]; omnibus
 export const useMessages = (): Messages => useContext(MessagesContext);
 
 export const href = (worldId: string, ...parts: string[]) => `#/w/${[worldId, ...parts].map(encodeURIComponent).join('/')}`;
+/** Шаг 111 [Р-237]: адрес списка рабочих пространств — показывается всегда, в отличие от корня `#/` (вход с одним пространством — сразу в него) */
+export const WORKSPACES_HREF = '#/workspaces';
+
+/**
+ * Шаг 111 [Р-237]: витрина в таблице и списке — чип площадки: кружок её цвета (палитра Primer) с буквой; короткое имя витрины рядом —
+ * только когда без него неоднозначно. Полное имя — подсказкой и доступным именем; буква — из стиля, в тексте ячейки её нет
+ */
+export function StorefrontTag({ chip }: { chip: StorefrontChip }) {
+  return (
+    <span className="storefront-tag" title={chip.full}>
+      <span className="channel-chip" data-channel={chip.channel} data-letter={chip.letter} role="img" aria-label={chip.full} />
+      {chip.short ? <span className="chip-short" aria-hidden="true">{chip.short}</span> : null}
+    </span>
+  );
+}
+
+/** Шаг 111 [Р-237]: предложение в таблице и списке — имя продукта и чип витрины вместо «… · amazon.com» */
+export function UnitName({ unit }: { unit: Pick<UnitRef, 'name' | 'storefront'> }) {
+  return <span className="unit-name">{unit.name} <StorefrontTag chip={unit.storefront} /></span>;
+}
 
 export function errorText(error: unknown, m: Messages): string {
   if (!(error instanceof ApiError)) return m.ui.app.unavailable(error instanceof Error ? error.message : String(error));
@@ -266,7 +286,7 @@ export function FileDrop({ label, fileName, disabled = false, onChoose, id, 'ari
 }
 
 /** Шаг 79: «не найдено» — карточкой с заголовком, пояснением и путём назад (мир, экран, решение) */
-export function NotFound({ title, text, back, href: to = '#/' }: { title: string; text: string; back: string; href?: string }) {
+export function NotFound({ title, text, back, href: to = WORKSPACES_HREF }: { title: string; text: string; back: string; href?: string }) {
   return (
     <section className="card not-found">
       <h2>{title}</h2>

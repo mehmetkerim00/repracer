@@ -441,7 +441,7 @@ export function renderReport(d: ReportData, options: { client?: (s: string) => s
     </section>` : '';
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PriceTrail · Repricing decisions for your catalog</title>
+<title>TMPrice · Repricing decisions for your catalog</title>
 <style>
 :root{--ink:#1d2733;--muted:#5d6b7a;--line:#dde3ea;--bg:#f6f8fa;--accent:#1f6feb;--floor:#8a5a00;--floorbg:#fff4d6}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
@@ -460,10 +460,10 @@ section.highlight{border-color:#e3b341;background:#fffbea}td.loss{color:#b42318;
 @media (max-width:600px){.checks{columns:1}.prices{gap:10px}}
 </style></head>
 <body><main>
-<div class="brand">${BRAND_MARK}<span>pricetrail</span></div>
+<div class="brand">${BRAND_MARK}<span>tmprice</span></div>
 <h1>Repricing decisions for your catalog</h1>
 <div class="muted">Shadow run on ${STOREFRONT} · ${e(d.generatedAt)} · ${d.hours} simulated hours · file: ${cl(d.fileName)} (${e(d.format)})</div>
-<p class="lead">We ran your catalog through the PriceTrail repricing engine in <strong>shadow mode</strong>: each decision went through the same checks as in live mode, and ${c.sentToAmazon} changes were sent to Amazon. Each decision below comes with the reason for its price.</p>
+<p class="lead">We ran your catalog through the TMPrice repricing engine in <strong>shadow mode</strong>: each decision went through the same checks as in live mode, and ${c.sentToAmazon} changes were sent to Amazon. Each decision below comes with the reason for its price.</p>
 <div class="notice"><strong>What is real and what is simulated.</strong> Your ${fromFile.slice(0, -1).join(', ')} and ${fromFile.at(-1)} come from your file. Simulated or assumed: your competitors (we cannot see them until you connect your Amazon account), your minimum and maximum prices, the Amazon referral fee and the minimum margin — see “How this run was set up”. The numbers about the floor describe this simulation, not your market.</div>
 <div class="cards">
 ${card(c.rows, 'rows in your file')}${card(c.inEngine, 'priced by the engine')}${d.belowFloor.length > 0 ? card(d.belowFloor.length, 'priced below your margin floor') : ''}${card(c.decisions, 'decisions')}${card(c.changes, 'would change the price')}${card(c.floorHeld, 'landed on the floor (simulation)')}${card(c.sentToAmazon, 'changes sent to Amazon')}

@@ -2,7 +2,7 @@ import { can, type StopScope } from '@repracer/pricing-model';
 import type { PageInfo } from './page.ts';
 import type { Messages } from './i18n/index.ts';
 import type { ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
-import { channelOf, gap, storefrontName, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld } from './world.ts';
+import { channelOf, gap, storefrontChip, storefrontName, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
 
 /**
  * Экран E: три вида остановки, у каждого своя таблица, своя причина и свой путь снятия.
@@ -94,6 +94,8 @@ export interface AuditCard {
   detail?: string | null;
   /** Шаг 93: адрес человека, названного в ячейке по имени, — подсказкой при наведении */
   scopeHint?: string | null;
+  /** Шаг 111 [Р-237]: предмет — предложение: имя продукта и чип витрины на экране; `scope` целиком — в файле выгрузки журнала */
+  scopeUnit?: { name: string; storefront: StorefrontChip } | null;
 }
 
 export interface StopView {
@@ -269,6 +271,7 @@ export function auditCards(world: StandWorld, audit: readonly ConsoleAuditRow[],
       at: m.when(a.at), action: m.ui.stop.auditActions[a.action],
       actor: (m.values as Record<string, string | undefined>)[a.channel ?? ''] ?? a.channel ?? m.ui.stop.system,
       scope: m.ui.common.unitLabel(a.offerName ?? '', storefrontName(a.channel ?? '', a.marketplace ?? '', m)),
+      scopeUnit: { name: a.offerName ?? '', storefront: storefrontChip(world, a.channel ?? '', a.marketplace ?? '', m) },
       note: null, detail: m.ui.stop.offerUnpublishedDetail(a.elsewhere ? m.money(a.elsewhere.amountMinor, a.elsewhere.currency) : null),
     } : {
       at: m.when(a.at),

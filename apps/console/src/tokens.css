@@ -31,6 +31,12 @@
   --text-3: #818b98; /* primer: --fgColor-disabled */
   --text-money: #1f2328; /* primer: --fgColor-default */
   --on-emphasis: #ffffff; /* primer: --fgColor-onEmphasis */
+  /* Шаг 111 [Р-237]: чипы площадок — мнемоника, а не бренд: ближайшие цвета палитры display Primer, буква — --on-emphasis */
+  --chip-amazon: #b8500f; /* primer: --display-orange-bgColor-emphasis */
+  --chip-walmart: #006edb; /* primer: --display-blue-bgColor-emphasis */
+  --chip-ebay: #df0c24; /* primer: --display-red-bgColor-emphasis */
+  --chip-kaufland: #9d615c; /* primer: --display-auburn-bgColor-emphasis */
+  --chip-other: #647182; /* primer: --display-gray-bgColor-emphasis */
 
   /* Ссылки, фокус, выбранное — акцент Primer (синий) */
   --accent: #0969da; /* primer: --fgColor-accent */
@@ -165,6 +171,11 @@
     --text-3: #656c76; /* primer-dark: --fgColor-disabled */
     --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
     --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
+    --chip-amazon: #984b10; /* primer-dark: --display-orange-bgColor-emphasis */
+    --chip-walmart: #005bd1; /* primer-dark: --display-blue-bgColor-emphasis */
+    --chip-ebay: #c31328; /* primer-dark: --display-red-bgColor-emphasis */
+    --chip-kaufland: #87534f; /* primer-dark: --display-auburn-bgColor-emphasis */
+    --chip-other: #576270; /* primer-dark: --display-gray-bgColor-emphasis */
     --accent: #4493f8; /* primer-dark: --fgColor-accent */
     --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
     --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */
@@ -237,6 +248,11 @@
   --text-3: #656c76; /* primer-dark: --fgColor-disabled */
   --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
   --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
+  --chip-amazon: #984b10; /* primer-dark: --display-orange-bgColor-emphasis */
+  --chip-walmart: #005bd1; /* primer-dark: --display-blue-bgColor-emphasis */
+  --chip-ebay: #c31328; /* primer-dark: --display-red-bgColor-emphasis */
+  --chip-kaufland: #87534f; /* primer-dark: --display-auburn-bgColor-emphasis */
+  --chip-other: #576270; /* primer-dark: --display-gray-bgColor-emphasis */
   --accent: #4493f8; /* primer-dark: --fgColor-accent */
   --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
   --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */

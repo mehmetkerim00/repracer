@@ -62,7 +62,7 @@ $24.99, а тот же товар «в другом месте» — $19.99, и 
 публикации walmart.com — раз в 10 минут, заказ amazon.com — раз в 10 минут. Замер шага 87:
 первая резервация — на 2-й минуте после «Демо готово». Перезапуск команды — новый мир с нуля.
 
-В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 92: по центру знак PriceTrail — линия цены, удержанная в конце, — и строчное имя **pricetrail**, под ними строка
+В браузере: `http://127.0.0.1:5173` (не `localhost`) → экран входа уже по-английски (шаг 92, шаг 111: по центру знак продукта — линия цены, удержанная в конце, — и строчное имя **tmprice**, под ними строка
 «Repricing you can audit», под ними карточка входа; шаг 84 — роли строками: цветной кружок, имя роли и что роль может; шаг 88 —
 шаг 98 — ровно две роли: **Owner** «everything: prices, stock, people, channel accounts and sending prices to your store; only an owner grants
 the owner role», **Manager** «everything the owner does, except granting or removing the owner role») → строка **Owner** (в шапке —
@@ -195,7 +195,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 
 Пункта меню «Why this price» нет (шаг 95): квитанция решения — своя страница, пункт меню над ней — Price changes. Короче всего —
 **Price changes** → **Kind: All decisions** → **Outcome: price changed** (шаг 96: у решений есть период и фильтр исхода) → поле **Offer**:
-начните набирать «plant pot» — таблица фильтруется по мере ввода (шаг 96, Б11) → нажмите на строку amazon.com: строка кликабельна
+начните набирать «plant pot» — таблица фильтруется по мере ввода (шаг 96, Б11) → нажмите на строку amazon.com (шаг 111: витрина в таблице — оранжевый чип «a», полное имя — подсказкой): строка кликабельна
 целиком (Б17) и ведёт на квитанцию. Второй путь — на экране тени раскрыть «Every held change, one by one» и нажать «Why this price».
 
 Над таблицей Price changes в тени — фраза «Trial week: prices were computed but nothing was sent to your stores.» (шаг 96, А5): нули в
@@ -396,13 +396,13 @@ it.» Полное прежнее предложение строки — под
 массовые правки — «Set minimum & maximum price for many offers», «Assign a strategy to many offers», «Import unit costs» — и история
 операций): «Total 36: on 36, …» — предложения трёх витрин одной таблицей. У двух предложений walmart.com в колонке **«Issues from the
 channel»** (шаг 96, А6) — красная пилюля **«Unpublished (uncompetitive price)»**, под ней коротко: «Cheaper elsewhere: $19.99. Since Oct
-7, 2026, 15:31 UTC−4; PriceTrail does not change the price here.» и раскрывающаяся ссылка **«What to do»**: «Walmart hides this offer
+7, 2026, 15:31 UTC−4; TMPrice does not change the price here.» и раскрывающаяся ссылка **«What to do»**: «Walmart hides this offer
 because the same product is cheaper elsewhere ($19.99). To show it again, bring the walmart.com price close to that price — only if your
-floor allows. PriceTrail never changes the price for this on its own.» Наведите курсор на ячейку — подсказка с полным объяснением:
+floor allows. TMPrice never changes the price for this on its own.» Наведите курсор на ячейку — подсказка с полным объяснением:
 
 > «Walmart took this offer off walmart.com on Oct 7, 2026, 15:31 UTC−4: the same product is cheaper elsewhere ($19.99) — on another channel
 > or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart
-> publishes the offer again; PriceTrail does not change the price for you here.»
+> publishes the offer again; TMPrice does not change the price for you here.»
 
 Время — момент подготовки демо минус неделя: Walmart снял их в первом же опросе прожатой недели. На телефоне таблица Offers листается
 в своей рамке — колонка «Issues from the channel» правее.
@@ -410,14 +410,14 @@ floor allows. PriceTrail never changes the price for this on its own.» Наве
 Это **Wall clock, small · walmart.com** и **Yoga mat, small · walmart.com**: «Current price» у них $24.99.
 
 **Экран «Stop pricing»**, журнал **«Audit log: stops, roles and channel events»**: две строки «Offer unpublished: uncompetitive price» ·
-«Walmart» · подпись предложения · «The same product is cheaper elsewhere ($19.99) — on another channel or sold by Walmart itself. PriceTrail
+«Walmart» · подпись предложения · «The same product is cheaper elsewhere ($19.99) — on another channel or sold by Walmart itself. TMPrice
 does not change the price for you here.» — событие канала рядом с остановками и сменами ролей, со временем.
 
-Что сказать — паритет как причина пользоваться PriceTrail, а не страшилка:
+Что сказать — паритет как причина пользоваться TMPrice, а не страшилка:
 
 - у Walmart есть правило: если тот же товар заметно дешевле на другой площадке или у самого Walmart, листинг снимается с публикации.
   Продавец, который ведёт цены каждой площадки отдельно, узнаёт об этом, когда продажи walmart.com уже встали;
-- PriceTrail видит все каналы сразу — одна таблица, одно состояние у предложения, одно событие в журнале со временем и причиной;
+- TMPrice видит все каналы сразу — одна таблица, одно состояние у предложения, одно событие в журнале со временем и причиной;
 - что делать с ценой — решает продавец: движок снятие с публикации сам не чинит (шаг 89), автоматический ответ — отдельное решение;
 - честно: Walmart в демо — модель по правилам настоящего Walmart; ключей Walmart у нас пока нет, порог 10 % и цена «в другом месте» —
   параметры модели (W-10, W-11 в [docs/channels/walmart.md](channels/walmart.md)).

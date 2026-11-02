@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, DateTimeField, errorText, Gaps, href, Load, NotFound, Pager, SectionAnchor, useMessages } from '../components.tsx';
+import { Badge, DateTimeField, errorText, Gaps, href, Load, NotFound, Pager, SectionAnchor, useMessages, UnitName } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 
@@ -246,7 +246,7 @@ export function BoundsIndexView({ worldId, items, embedded = false }: { worldId:
             <tbody>
               {items.map((i) => (
                 <tr key={i.writeScopeId}>
-                  <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}>{i.label}</a></td>
+                  <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}><UnitName unit={i} /></a></td>
                   <td className="num money cur" data-label={c.min}>{i.minPrice}</td>
                   <td className="num money cur" data-label={c.max}>{i.maxPrice}</td>
                   <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>

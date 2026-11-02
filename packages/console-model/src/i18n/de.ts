@@ -399,7 +399,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE: { what: 'Bezeichnung von Angeboten mit eigener Preisautomatik des Kanals', why: 'Ein Angebot, dessen Preis wir nicht führen, wird unter Umständen nur mit Ihrer SKU gezeigt.' },
   PRICING_HEALTH_ISSUES: { what: 'Von Amazon gemeldeter Problemtyp', why: 'Amazon benennt den Problemtyp mit eigenen Worten; er wird so gezeigt, wie Amazon ihn gesendet hat.' },
   POSITION_STRATEGY: { what: 'Strategie „Platz im Ranking“', why: 'Noch nicht verfügbar: Sie lässt sich weder entwerfen noch in der Vorschau prüfen.' },
-  OMNIBUS_OUTSIDE_PRICES: { what: 'Preise außerhalb von PriceTrail', why: 'Der 30-Tage-Zeitraum wird aus unserer Preishistorie gebildet. Ein Preis aus dem Kanal-Backoffice oder vor der Anbindung des Angebots fehlt darin — ein Zeitraum vor unserem ersten Preis ist „nicht prüfbar“, nicht „korrekt“.' },
+  OMNIBUS_OUTSIDE_PRICES: { what: 'Preise außerhalb von TMPrice', why: 'Der 30-Tage-Zeitraum wird aus unserer Preishistorie gebildet. Ein Preis aus dem Kanal-Backoffice oder vor der Anbindung des Angebots fehlt darin — ein Zeitraum vor unserem ersten Preis ist „nicht prüfbar“, nicht „korrekt“.' },
   OMNIBUS_TIME_ZONE_TO_VERIFY: { what: 'Tagesgrenze der Storefront', why: 'Tage zählen in der Zeitzone der Storefront. Für Kaufland de und at wird sie noch mit Kaufland bestätigt.' },
   DANGEROUS_THRESHOLD: { what: 'Warum „gefährlich“', why: 'Eine vom Price Gate gestoppte Änderung, die mehr als 10 % jenseits der verletzten Grenze liegt. Kleinere gelten als „korrigiert“.' },
 };
@@ -431,9 +431,9 @@ export const de: Messages = {
       unknownReason: (code: string) => `Unbekannter Grund ${code}`,
     },
     app: {
-      /** Шаг 92 [Р-216]: знак и строчное имя «pricetrail» в шапке; вкладка — имя в прозе (documentTitle) */
-      title: 'pricetrail · Verkäuferkonsole',
-      documentTitle: 'PriceTrail · Verkäuferkonsole',
+      /** Шаг 92 [Р-216], шаг 111 [Р-237]: знак и строчное имя «tmprice» в шапке; вкладка — имя в прозе (documentTitle) */
+      title: 'tmprice · Verkäuferkonsole',
+      documentTitle: 'TMPrice · Verkäuferkonsole',
       // Шаг 96.1: кнопка темы — солнце или луна; подсказка называет, куда переключит
       theme: { label: 'Darstellung', light: 'Hell', dark: 'Dunkel', toLight: 'Zur hellen Darstellung wechseln', toDark: 'Zur dunklen Darstellung wechseln' },
       stand: 'Testumgebung, synthetische Daten',
@@ -477,7 +477,7 @@ export const de: Messages = {
         protections: 'Was eine Preisänderung gestoppt oder verhindert hat: Menschen, die Preise gestoppt haben, und die Regeln — Ihre Untergrenze, Ihre Grenzen und die Eingangsprüfung.',
         channels: 'Ihre Kanalkonten — Verbindung, Bestandsaktualisierungen, Sprache und Zeitzone — und die Einrichtungsliste, bis sie erledigt ist.',
       },
-      brand: 'pricetrail',
+      brand: 'tmprice',
       screens: { connections: 'Kanalkonten', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Angebote', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Stückkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge',
         costs: 'Kosten & Untergrenzen', protections: 'Schutz', channels: 'Kanäle',
         inventory: 'Lagerbestand' },
@@ -610,8 +610,8 @@ export const de: Messages = {
       pricingHealth: (issue: string) => `Kanal: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `Das Angebot hat das Featured Offer wegen seines Preises verloren (${when})${threshold ? `; Wettbewerbspreisschwelle des Kanals ${threshold}` : ''}`,
       unpublished: 'Nicht veröffentlicht (Preis nicht wettbewerbsfähig)',
-      unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Anderswo günstiger: ${elsewhere}.` : 'Anderswo günstiger.'} Seit ${when}; PriceTrail ändert den Preis hier nicht.`,
-      unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart hat dieses Angebot am ${when} von walmart.com genommen: dasselbe Produkt ist anderswo günstiger${elsewhere ? ` (${elsewhere})` : ''} — auf einem anderen Kanal oder bei Walmart selbst —, Käufer auf walmart.com sehen es nicht mehr. Bringen Sie den Preis auf walmart.com in die Nähe dieses Preises, dann veröffentlicht Walmart das Angebot wieder; PriceTrail ändert den Preis hier nicht für Sie.`,
+      unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Anderswo günstiger: ${elsewhere}.` : 'Anderswo günstiger.'} Seit ${when}; TMPrice ändert den Preis hier nicht.`,
+      unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart hat dieses Angebot am ${when} von walmart.com genommen: dasselbe Produkt ist anderswo günstiger${elsewhere ? ` (${elsewhere})` : ''} — auf einem anderen Kanal oder bei Walmart selbst —, Käufer auf walmart.com sehen es nicht mehr. Bringen Sie den Preis auf walmart.com in die Nähe dieses Preises, dann veröffentlicht Walmart das Angebot wieder; TMPrice ändert den Preis hier nicht für Sie.`,
     },
     applying: {
       idle: 'Nichts in Arbeit', idleDetail: 'Jeder entschiedene Preis hat den Kanal erreicht oder endete mit Grund',
@@ -847,13 +847,13 @@ export const de: Messages = {
      * приглашение читает продавец.
      */
     invitation: {
-      subject: (tenant: string) => `PriceTrail: Einladung als Inhaber von ${tenant}`,
-      intro: (tenant: string) => `Ihr Arbeitsbereich „${tenant}“ wurde in PriceTrail angelegt.`,
+      subject: (tenant: string) => `TMPrice: Einladung als Inhaber von ${tenant}`,
+      intro: (tenant: string) => `Ihr Arbeitsbereich „${tenant}“ wurde in TMPrice angelegt.`,
       roleLine: 'Sie werden als INHABER eingeladen: Sie entscheiden, wer sonst Zugang bekommt und was die Preisautomatik darf.',
       acceptLine: (url: string) => `Einladung annehmen: ${url}`,
       expiresLine: (when: string) => `Die Einladung gilt bis ${when}. Danach bitten Sie uns um eine neue.`,
       nextLine: 'Nach der Annahme führen wir Sie Schritt für Schritt: Kanal, Stückkosten, Grenzen, Strategie, Motor einschalten. Bis Sie ihn selbst einschalten, ändert sich kein Preis.',
-      signature: 'PriceTrail',
+      signature: 'TMPrice',
     },
     /**
      * Шаг 41 [Р-169…Р-171]: тот же экран по-немецки. Язык — свойство тенанта [Р-161].
@@ -986,12 +986,12 @@ export const de: Messages = {
         denied: 'Sie haben auf der Seite des Kanals abgelehnt. Es wurde nichts verbunden.',
         exchange: 'Der Kanal hat die Zustimmung nicht bestätigt. Es wurde nichts verbunden; beginnen Sie neu.',
         identityUnknown: 'eBay nennt uns nicht, welcher Händler sich angemeldet hat; eine zweite eBay-Verbindung könnte derselbe Händler doppelt sein. Erneutes Verbinden von eBay wird möglich, sobald wir den Händler erkennen können.',
-        sellerTaken: 'Dieses Kanalkonto ist bereits verbunden — in einem anderen PriceTrail-Arbeitsbereich oder als anderes Kanalkonto. Es wurde nichts verbunden; wenden Sie sich an den Support, falls das unerwartet ist.',
+        sellerTaken: 'Dieses Kanalkonto ist bereits verbunden — in einem anderen TMPrice-Arbeitsbereich oder als anderes Kanalkonto. Es wurde nichts verbunden; wenden Sie sich an den Support, falls das unerwartet ist.',
         mfa: 'Das Erneuern des Zugriffs einer bestehenden Verbindung braucht Ihren zweiten Faktor. Melden Sie sich damit neu an und wiederholen Sie es.',
         connected: (reconnected: boolean): string => reconnected ? 'Zugriff erneuert. Das Konto arbeitet wie zuvor.' : 'Verbunden. Das Konto beginnt im Schattenmodus; Ihre Angebote erscheinen innerhalb von Minuten.',
         // Шаг 60 [Р-202]: ответ о других инструментах и подтверждение записи количества — каждый исход своим текстом
         badAnswer: 'Wählen Sie eine der Antworten.',
-        accountNotFound: 'Dieses Kanalkonto ist in diesem PriceTrail-Arbeitsbereich nicht verbunden.',
+        accountNotFound: 'Dieses Kanalkonto ist in diesem TMPrice-Arbeitsbereich nicht verbunden.',
         answerConflictConfirmed: 'Bestandsaktualisierungen an diesen Kanal sind bereits bestätigt: Pflegt hier ein anderes Tool die Bestände, überschreiben sich beide gegenseitig. Diese Antwort wird nicht angenommen.',
         notOwner: 'Nur Inhaber oder Manager bestätigen oder widerrufen Bestandsaktualisierungen an einen Kanal.',
         alreadyConfirmed: 'Bestandsaktualisierungen an diesen Kanal sind bereits bestätigt.',
@@ -1100,7 +1100,7 @@ export const de: Messages = {
         blocksLive: (list: string) => `Das Senden der Preise lässt sich noch nicht einschalten: wir kennen ${list} nicht. Der Schattenmodus läuft weiter, und Sie sehen weiterhin, was die Automatik täte.`,
       },
       digest: {
-        subject: (tenant: string) => `PriceTrail: was die Preisautomatik diese Woche getan hätte (${tenant})`,
+        subject: (tenant: string) => `TMPrice: was die Preisautomatik diese Woche getan hätte (${tenant})`,
         intro: (tenant: string, accounts: number, zone: string) => `Ihr Arbeitsbereich „${tenant}“ betreibt ${accounts} Kanalkonto/-konten im Schattenmodus: die Preisautomatik arbeitet vollständig und sendet nichts an Ihren Shop. Das hätte sie in der letzten Woche (Montag bis Sonntag, ${zone}) getan. Die Seite Schattenmodus zählt die letzten sieben Tage bis jetzt, ihre Zahlen weichen daher von diesem Brief ab.`,
         cta: 'Wenn diese Zahlen stimmen, schalten Sie in der Konsole das Senden der Preise an Ihren Shop ein — Bildschirm „Schattenmodus“. Das können Inhaber oder Manager, mit zweitem Faktor.',
         previewIntro: (tenant: string, accounts: number) => `Ihr Arbeitsbereich „${tenant}“ betreibt ${accounts} Kanalkonto/-konten im Schattenmodus: die Engine arbeitet vollständig und sendet nichts an Ihren Shop. Das hätte sie in den letzten sieben Tagen getan.`,
@@ -1126,14 +1126,14 @@ export const de: Messages = {
       },
     },
     alerts: {
-      subject: (severity: string, what: string, tenant: string) => `PriceTrail ${severity}: ${what} (${tenant})`,
+      subject: (severity: string, what: string, tenant: string) => `TMPrice ${severity}: ${what} (${tenant})`,
       severity: { CRITICAL: 'dringend', WARNING: 'zur Kenntnis' },
       tenantLine: (tenant: string) => `Arbeitsbereich: ${tenant}`,
       channelLine: (channel: string, marketplaces: string) => `Kanal: ${channel} (${marketplaces})`,
       whenLine: (when: string) => `Passiert: ${when}`,
       codeLine: (code: string) => `Ereigniscode: ${code} (bitte bei Rückfragen nennen)`,
       firstStepLine: (step: string) => `Erster Schritt: ${step}`,
-      digestSubject: (count: number, tenant: string) => `PriceTrail: ${count} Ereignisse der letzten Stunde (${tenant})`,
+      digestSubject: (count: number, tenant: string) => `TMPrice: ${count} Ereignisse der letzten Stunde (${tenant})`,
       digestIntro: (count: number) => `In der letzten Stunde gab es ${count} Ereignisse, die keine sofortige Reaktion brauchen:`,
       digestRow: (code: string, what: string, count: number, when: string) => `- ${what} (${code}) — ${count}-mal, zuletzt um ${when}`,
       digestFirstStep: 'Erster Schritt: Öffnen Sie die Konsole und prüfen Sie die Angebote der genannten Kanäle.',
@@ -1252,7 +1252,7 @@ export const de: Messages = {
       clock: (now: string) => `Simulierte Zeit: ${now}.`,
       columns: { unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil 7 T' },
       whatToDo: 'Was tun',
-      unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. PriceTrail ändert den Preis dafür nie von sich aus.`,
+      unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. TMPrice ändert den Preis dafür nie von sich aus.`,
       conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten', compact: 'Kompakte Zeilen' },
       productRef: (ref: string, condition: string, gtin: string | null) => `Produkt ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
       productId: (ref: string, gtin: string | null) => `Produkt ${ref}${gtin ? ` · EAN ${gtin}` : ''}`,
@@ -1764,8 +1764,8 @@ export const de: Messages = {
       mfa: 'Für das Anwenden ist eine Anmeldung mit zweitem Faktor nötig.',
       applied: (n: number, seconds: number) => `${n} ${n === 1 ? 'Zeile' : 'Zeilen'} in ${seconds} s angewendet`,
       noRight: 'Ihre Rolle darf diese Werte sehen, aber nicht importieren.',
-      stockSource: 'Bestandsquelle', stockSourceCaption: 'Die Mengen gehen in diese Quelle. Eine Datei nimmt nur eine in PriceTrail geführte Quelle an.',
-      noStockSource: 'Legen Sie zuerst eine in PriceTrail geführte Bestandsquelle an — die Datei geht in sie.',
+      stockSource: 'Bestandsquelle', stockSourceCaption: 'Die Mengen gehen in diese Quelle. Eine Datei nimmt nur eine in TMPrice geführte Quelle an.',
+      noStockSource: 'Legen Sie zuerst eine in TMPrice geführte Bestandsquelle an — die Datei geht in sie.',
       fields: {
         sku: 'SKU', storefront: 'Storefront', title: 'Titel', unit_cost: 'Stückkosten', currency: 'Währung', fee_percent: 'Kanalprovision, %', fixed_fee: 'Fixe Gebühr',
         quantity: 'Menge', min_price: 'Mindestpreis', max_price: 'Höchstpreis', min_margin_percent: 'Mindestmarge, %', strategy: 'Strategie',
@@ -1795,7 +1795,7 @@ export const de: Messages = {
         STRATEGY_AMBIGUOUS: 'mehr als eine Strategie trägt diesen Namen — benennen Sie eine auf der Seite Strategien um',
         STRATEGY_NOT_ACTIVE: 'die Strategie hat keine aktive Version',
         STRATEGY_UNAVAILABLE: (why: string) => `der Kanal liefert nicht die Daten, die diese Strategie braucht: ${why}`,
-        CHANNEL_PRICING: 'der Kanal bepreist dieses Angebot selbst — PriceTrail ordnet keine Strategie zu',
+        CHANNEL_PRICING: 'der Kanal bepreist dieses Angebot selbst — TMPrice ordnet keine Strategie zu',
       },
       notes: {
         COSTS: [
@@ -1812,7 +1812,7 @@ export const de: Messages = {
         BOUNDS: [
           'So füllen Sie aus: eine Zeile pro Angebot. Ändern Sie die gewünschten Zellen; eine leere Zelle behält den aktuellen Wert.',
           'min_price und max_price — Ihr Mindest- und Höchstpreis in der Währung des Angebots (z. B. 14.00). min_margin_percent — die niedrigste Marge, die Sie akzeptieren (z. B. 12%).',
-          'PriceTrail sendet nie einen Preis unter dem Mindestpreis oder der Margenuntergrenze und nie über dem Höchstpreis.',
+          'TMPrice sendet nie einen Preis unter dem Mindestpreis oder der Margenuntergrenze und nie über dem Höchstpreis.',
           'Zeilen, die mit # beginnen, werden ignoriert. Laden Sie die Datei hoch, prüfen Sie sie und wenden Sie sie dann an: Eine einzige Zeile mit Fehler stoppt den ganzen Import.',
         ],
         STRATEGY: [
@@ -1925,7 +1925,7 @@ export const de: Messages = {
         NO_PRICE_HISTORY: (_since: string) => 'Vor Rabattbeginn gibt es keinen eigenen Preis für dieses Angebot.',
         TIME_ZONE_UNKNOWN: (_since: string) => 'Die Zeitzone der Storefront ist nicht festgelegt: Storefront-Tage können nicht gezählt werden.',
         WINDOW_OPEN: (_since: string) => 'Der Rabatt beginnt später: Die Preise bis zum Beginn sind noch nicht bekannt — bei Beginn erneut prüfen.',
-        EXTERNAL_CHANGES: (_since: string) => 'Im Zeitraum wurden Preise außerhalb von PriceTrail bemerkt: Sie sind berücksichtigt, die Prüfung ist nicht verlässlich.',
+        EXTERNAL_CHANGES: (_since: string) => 'Im Zeitraum wurden Preise außerhalb von TMPrice bemerkt: Sie sind berücksichtigt, die Prüfung ist nicht verlässlich.',
       },
       window: (from: string, to: string, tz: string) => `Zeitraum ${from} – ${to} (${tz})`,
       windowUnknown: 'Zeitraum unbekannt',
@@ -1948,17 +1948,17 @@ export const de: Messages = {
         incomplete: {
           INCOMPLETE_HISTORY: (days: number, needed: number) => `Die Prüfung ist unvollständig: Der Zeitraum braucht ${needed} Tage, wir sehen ${days}.`,
           NO_PRICE_HISTORY: (_days: number, _needed: number) => 'Die Prüfung ist unvollständig: Wir kennen keinen Preis dieses Angebots.',
-          EXTERNAL_CHANGES: (_days: number, _needed: number) => 'Die Prüfung ist unvollständig: Im Zeitraum wurden Preise außerhalb von PriceTrail gesetzt.',
+          EXTERNAL_CHANGES: (_days: number, _needed: number) => 'Die Prüfung ist unvollständig: Im Zeitraum wurden Preise außerhalb von TMPrice gesetzt.',
           WINDOW_OPEN: (_days: number, _needed: number) => 'Die Prüfung ist unvollständig: Der Rabatt beginnt später, die Preise bis dahin sind noch nicht bekannt.',
           TIME_ZONE_UNKNOWN: (_days: number, _needed: number) => 'Die Prüfung ist unvollständig: Die Tagesgrenze der Storefront ist nicht festgelegt.',
         },
-        external: (n: number) => `${n} ${n === 1 ? 'Preisänderung' : 'Preisänderungen'} außerhalb von PriceTrail im Zeitraum bemerkt — im niedrigsten Preis berücksichtigt.`,
+        external: (n: number) => `${n} ${n === 1 ? 'Preisänderung' : 'Preisänderungen'} außerhalb von TMPrice im Zeitraum bemerkt — im niedrigsten Preis berücksichtigt.`,
         limit: 'Preise, die im Kanal-Backoffice oder mit einem anderen Tool gesetzt und von unserem Abgleich nicht bemerkt wurden, sind nicht sichtbar.',
         columns: { offer: 'Angebot', seen: 'Sichtbare Historie', reliability: 'Prüfung' },
       },
       cannotCheckTitle: 'Was dieses Modul nicht prüfen kann',
       cannotCheck: [
-        'Preise, die außerhalb von PriceTrail (im Kanal-Backoffice, mit einem anderen Tool) vor der Anbindung des Angebots gesetzt wurden: Die Historie beginnt mit unserem ersten Preis.',
+        'Preise, die außerhalb von TMPrice (im Kanal-Backoffice, mit einem anderen Tool) vor der Anbindung des Angebots gesetzt wurden: Die Historie beginnt mit unserem ersten Preis.',
         'Rabatte, die der Kanal selbst anzeigt (Streichpreise, Coupons, Blitzangebote) und die hier nicht angekündigt wurden.',
         'Storefronts ohne bestätigte Zeitzone (amazon.com, eBay US): Storefront-Tage können nicht gezählt werden.',
         'Ob der Kanal den angegebenen vorherigen Preis tatsächlich angezeigt hat: Der Kanal liefert den angezeigten Referenzpreis nicht zurück.',
@@ -2000,7 +2000,7 @@ export const de: Messages = {
       auditColumns: { when: 'Wann', action: 'Aktion', who: 'Wer', subject: 'Betrifft', note: 'Notiz' },
       auditEmpty: 'Noch keine Stopps, Rollenwechsel oder Kanalereignisse. Jeder Stopp, jede Fortsetzung und jeder Rollenwechsel erscheint hier mit Person, jedes vom Kanal aus dem Verkauf genommene Angebot mit dem Grund.',
       auditActions: { 'pricing.stop_created': 'Preise gestoppt', 'pricing.stop_released': 'Preise fortgesetzt', 'pricing.halt_created': 'Storefront vom System angehalten', 'pricing.halt_released': 'Anhalten der Storefront aufgehoben', 'pricing.distrust_created': 'Kanal vom System als nicht vertrauenswürdig markiert — alle Preise angehalten', 'pricing.distrust_released': 'Misstrauen gegenüber dem Kanal aufgehoben', 'membership.role_changed': 'Rolle geändert', 'channel.offer_unpublished': 'Angebot nicht veröffentlicht: Preis nicht wettbewerbsfähig' },
-      offerUnpublishedDetail: (elsewhere: string | null) => `Dasselbe Produkt ist anderswo günstiger${elsewhere ? ` (${elsewhere})` : ''} — auf einem anderen Kanal oder bei Walmart selbst. PriceTrail ändert den Preis hier nicht für Sie.`,
+      offerUnpublishedDetail: (elsewhere: string | null) => `Dasselbe Produkt ist anderswo günstiger${elsewhere ? ` (${elsewhere})` : ''} — auf einem anderen Kanal oder bei Walmart selbst. TMPrice ändert den Preis hier nicht für Sie.`,
       roleChanged: (member: string | null, from: string, to: string) => (member ? `${member}: ${from} → ${to}` : `${from} → ${to}`),
       system: 'System',
       confirmTitle: (label: string) => `Alle Preisänderungen stoppen: ${label}?`,

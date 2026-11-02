@@ -1,4 +1,4 @@
-import type { BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, StopTarget, StrategyListView } from '@repracer/console-model';
+import type { BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, StopTarget, StorefrontChip, StrategyListView } from '@repracer/console-model';
 
 /** Контракт сервера стенда и интерфейса: экраны получают готовые модели @repracer/console-model на языке сессии [Р-72] */
 
@@ -59,6 +59,9 @@ export interface StandToken {
 export interface BoundsIndexItem {
   writeScopeId: string;
   label: string;
+  /** Шаг 111 [Р-237]: имя продукта и чип витрины — для таблицы */
+  name: string;
+  storefront: StorefrontChip;
   minPrice: string;
   maxPrice: string;
 }

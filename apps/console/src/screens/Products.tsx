@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages } from '../components.tsx';
+import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName } from '../components.tsx';
 import { CheckField, Field, FormActions } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
@@ -166,7 +166,7 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
-                  <strong>{r.unit.label}</strong>
+                  <strong><UnitName unit={r.unit} /></strong>
                   {/* Шаг 102 [Р-227]: режим распродажи — пилюлей attention у названия */}
                   {r.clearance ? <> <Badge tone="warn">{r.clearance}</Badge></> : null}
                   {/* Шаг 102: пол выше потолка — цены заморожены законно, но не молча */}

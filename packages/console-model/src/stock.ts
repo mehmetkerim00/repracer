@@ -2,7 +2,7 @@ import { can } from '@repracer/pricing-model';
 import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSourceRow } from '@repracer/stock-sync';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
-import { gap, storefrontName, type Gap, type StandWorld } from './world.ts';
+import { gap, storefrontChip, storefrontName, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
 
 /**
  * Р-153 (шаг 35): экран остатков. По товару — физический остаток, резервации, доступно; по каждому каналу — что мы
@@ -14,6 +14,8 @@ export interface StockChannelCell {
   writeScopeId: string;
   channel: string;
   label: string;
+  /** Шаг 111 [Р-237]: витрины строки — чипами в таблице; `label` словами — в подсказке и файлах */
+  chips: StorefrontChip[];
   /** Одно значение на все эти витрины (Kaufland: id_offer; Amazon: регион) */
   sharedText: string | null;
   syncEnabled: boolean;
@@ -118,7 +120,7 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
 const storefronts = (channel: string, marketplaces: readonly string[], m: Messages): string =>
   marketplaces.map((mp) => storefrontName(channel, mp, m)).join(', ');
 
-export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
+export function channelCell(c: StockChannelRow, m: Messages, world: Pick<StandWorld, 'accounts'> | null = null): StockChannelCell {
   const s = m.ui.stock.channel;
   const channelName = (m.values as Record<string, string | undefined>)[c.channel] ?? c.channel;
   const awaitingAck = c.sideEffects.requiresAck && !c.sideEffects.acknowledged;
@@ -132,6 +134,7 @@ export function channelCell(c: StockChannelRow, m: Messages): StockChannelCell {
   return {
     // Шаг 69 (K10, K9): витрины — словами, как в подписи предложения, а не кодами (ATVPDKIKX0DER, EBAY_US)
     writeScopeId: c.writeScopeId, channel: c.channel, label: `${channelName} · ${storefronts(c.channel, c.marketplaces, m)}`,
+    chips: c.marketplaces.map((mp) => storefrontChip(world, c.channel, mp, m)),
     sharedText,
     syncEnabled: c.syncEnabled, published: c.published,
     // Шаг 64: удержанное тенью не «отправлено» — в канал ничего не ушло [Р-169]
@@ -158,7 +161,7 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
   const search = filter.search?.trim() ?? '';
   const filtered = search !== '' || filter.withReservations === true;
   const channelName = (channel: string) => (m.values as Record<string, string | undefined>)[channel] ?? channel;
-  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m)),
+  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m, world)),
     channelManaged: (r.channelManaged ?? []).map((c) => ({
       text: t.channel.managedShort(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity),
       detail: t.channel.managedByChannel(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity, m.when(c.observedAt)),

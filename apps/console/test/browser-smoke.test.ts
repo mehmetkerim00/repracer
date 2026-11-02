@@ -38,7 +38,7 @@ function dictionaryStrings(value: unknown, out = new Set<string>()): Set<string>
   return out;
 }
 /** Имена, которые не переводятся (глоссарий): бренд, каналы, Buy Box, Omnibus, Price Gate; коды — заглавными буквами и цифрами */
-const KEPT_NAMES = /^(PriceTrail|pricetrail|Kaufland|Amazon|eBay|Otto|Walmart|Buy Box|Omnibus|Price Gate)$/;
+const KEPT_NAMES = /^(TMPrice|tmprice|Kaufland|Amazon|eBay|Otto|Walmart|Buy Box|Omnibus|Price Gate)$/;
 /** Английские тексты словаря, которых нет в словаре языка: на его экране такой текст — непереведённая строка */
 function englishOnly(target: typeof en): string[] {
   const own = dictionaryStrings(target);
@@ -94,7 +94,7 @@ let syntheticDangerous: unknown = null;
 /** Синтетический отчёт о поле: 24 одинаковых удержания одного предложения и 106 разных — 107 строк после схлопывания, три страницы */
 function syntheticFloorReport(worldId: string) {
   const reason = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'Target capped at your minimum price.', problems: [], limit: null, withheld: [] };
-  const unit = (i: number) => ({ writeScopeId: `smoke-hold-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `u-${i}`, channelProductRef: `p-${i}`, condition: 'NEW', gtin: null, label: `Synthetic lamp ${i} · kaufland.de` });
+  const unit = (i: number) => ({ writeScopeId: `smoke-hold-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `u-${i}`, channelProductRef: `p-${i}`, condition: 'NEW', gtin: null, label: `Synthetic lamp ${i} · kaufland.de`, name: `Synthetic lamp ${i}`, storefront: { channel: 'KAUFLAND', letter: 'k', full: 'kaufland.de', short: null } });
   const at = (i: number) => new Date(Date.UTC(2026, 9, 15, 12) - i * 600_000).toISOString();
   const items = [
     ...Array.from({ length: 24 }, (_, i) => ({ at: at(i), unit: unit(0), kind: 'CAPPED', target: '€9.99', floor: '€14.00', below: '€4.01', reason, decisionId: null })),
@@ -114,7 +114,7 @@ function syntheticFloorReport(worldId: string) {
  */
 function demoLikeFloorReport(worldId: string) {
   const reason = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'Target capped at your minimum price.', problems: [], limit: null, withheld: [] };
-  const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de` });
+  const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de`, name: `Synthetic clock ${i}`, storefront: { channel: 'KAUFLAND', letter: 'k', full: 'kaufland.de', short: null } });
   const at = (i: number) => new Date(Date.UTC(2026, 9, 15, 12) - i * 300_000).toISOString();
   const items = Array.from({ length: 132 }, (_, n) => ({ at: at(n), unit: unit(n % 12), kind: 'CAPPED', target: `€${(8.99 + (n % 12) * 0.5).toFixed(2)}`, floor: `€${(14 + (n % 3)).toFixed(2)}`, below: `€${(5.01 - (n % 12) * 0.5 + (n % 3)).toFixed(2)}`, reason, decisionId: null }));
   return {
@@ -126,7 +126,7 @@ function demoLikeFloorReport(worldId: string) {
 function demoLikeRejected(worldId: string, dangerous = false) {
   const capped = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'The target from competitor prices was below your minimum price — capped at €14.00.', problems: [], limit: null, withheld: [] };
   const below = { code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', text: 'The price €12.20 is below your minimum price €14.00 — the Price Gate refused it.', problems: [], limit: null, withheld: [] };
-  const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de` });
+  const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de`, name: `Synthetic clock ${i}`, storefront: { channel: 'KAUFLAND', letter: 'k', full: 'kaufland.de', short: null } });
   const at = (i: number) => `Oct 15, ${String(12 - Math.floor(i / 12)).padStart(2, '0')}:${String(59 - (i % 12) * 4).padStart(2, '0')}`;
   const items = [
     ...Array.from({ length: 132 }, (_, n) => ({ kind: 'STRATEGY_CAP', tone: 'progress', at: at(n), unit: unit(n % 12), productRef: null, proposed: '€12.49', current: '€18.50', change: '−32.5%',
@@ -312,10 +312,10 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   // Шаг 84: роли — строками «имя роли — что может»; «Sign in as Owner» — доступное имя кнопки
   await b.waitText(en.ui.app.login.roleCan.OWNER);
   assert.equal(await b.evaluate<string>('document.documentElement.lang'), 'en', 'the document language follows the screen');
-  // Шаг 92 [Р-216]: вкладка называет продукт в прозе — «PriceTrail · seller console»
+  // Шаг 92 [Р-216], шаг 111 [Р-237]: вкладка называет продукт в прозе — «TMPrice · seller console»
   assert.equal(await b.evaluate<string>('document.title'), en.ui.app.documentTitle, 'the tab title names the product, not a Russian placeholder');
   /**
-   * Шаг 92 [Р-216]: знак PriceTrail — SVG «held trail», а не кружок с буквой «r»; имя знака — строчное «pricetrail». Линия — цвет контекста,
+   * Шаг 92 [Р-216]: знак продукта — SVG «held trail», а не кружок с буквой «r»; имя знака — строчное (шаг 111 [Р-237]: «tmprice»). Линия — цвет контекста,
    * конечная точка — зелёный Primer своего контекста: на светлом входе — `--fgColor-success`, в тёмной шапке — зелёный тёмной темы
    */
   const mark = (where: string) => b.evaluate<{ svg: boolean; text: string; line: string; end: string } | null>(`(() => {
@@ -324,7 +324,10 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
     return { svg: true, text: host.textContent.trim(), line: getComputedStyle(svg).color, end: getComputedStyle(svg.querySelector('.brand-mark-end')).fill };
   })()`);
   assert.deepEqual(await mark('.login-brand'), { svg: true, text: en.ui.app.brand, line: 'rgb(31, 35, 40)', end: 'rgb(26, 127, 55)' }, 'sign-in: the mark on light, the lowercase name');
-  assert.equal(en.ui.app.brand, 'pricetrail');
+  // Шаг 111 [Р-237]: витринное имя — TMPrice (домен tmprice.com), знак и шапка — строчное «tmprice», знак-гребёнка прежний
+  assert.equal(en.ui.app.brand, 'tmprice');
+  assert.equal(en.ui.app.title, 'tmprice · seller console');
+  assert.equal(en.ui.app.documentTitle, 'TMPrice · seller console');
   assert.deepEqual(await mark('.topbar .brand'), { svg: true, text: en.ui.app.title, line: 'rgb(255, 255, 255)', end: 'rgb(63, 185, 80)' }, 'header: the mark on dark');
   assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('.brand-mark')].filter((e) => e.textContent.trim() === 'r').length`), 0, 'the old «r» mark is gone');
   await b.click(owner);
@@ -1520,10 +1523,11 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
-test('step 100 (A): one workspace — straight into it after sign-in, no workspace list and no «All workspaces»; two or more — the list as before', async () => {
+test('step 100 (A), step 111 [Р-237]: one workspace — straight into it after sign-in, «All workspaces» always there and opens the list with one card; two or more — the list as before', async () => {
   const b = browser!;
   const before = b.errors().length;
-  const rootLinks = `[...document.querySelectorAll('.sidebar a')].filter((a) => a.getAttribute('href') === '#/').length`;
+  // Шаг 111 [Р-237]: ссылка «All workspaces» — всегда, своим адресом списка; корень `#/` — вход
+  const listLinks = `[...document.querySelectorAll('.sidebar a')].filter((a) => a.getAttribute('href') === '#/workspaces' && a.textContent.trim() === ${JSON.stringify(en.ui.app.backToWorlds)}).length`;
   currentApi = soloApi;
   try {
     for (const width of [1440, 375]) {
@@ -1533,16 +1537,22 @@ test('step 100 (A): one workspace — straight into it after sign-in, no workspa
       await b.click(en.ui.app.login.asAccount(en.values.OWNER));
       await waitFor(b, `location.hash.startsWith('#/w/')`, `${width}: straight into the only workspace`);
       await settled(b, `${width}: the only workspace`);
-      assert.equal(await b.evaluate<boolean>(`document.querySelector('.worlds-page') === null`), true, `${width}: no workspace list`);
-      assert.equal(await b.evaluate<number>(rootLinks), 0, `${width}: no «All workspaces» — nothing to choose from`);
-      // «#/» вручную — снова внутрь
+      assert.equal(await b.evaluate<boolean>(`document.querySelector('.worlds-page') === null`), true, `${width}: no workspace list after sign-in`);
+      assert.equal(await b.evaluate<number>(listLinks), 1, `${width}: «All workspaces» is there with one workspace too`);
+      // Ссылка ведёт на список — и там он показан с одной карточкой, а не возвращает внутрь
+      await b.evaluate(`(document.querySelector('.sidebar a[href="#/workspaces"]').click(), true)`);
+      await waitFor(b, `!!document.querySelector('.worlds-page')`, `${width}: the list behind «All workspaces»`);
+      await settled(b, `${width}: the list of one`);
+      assert.equal(await b.evaluate<string>('location.hash'), '#/workspaces', `${width}: the list stays on its address`);
+      assert.equal(await b.evaluate<number>(`document.querySelectorAll('.worlds-page h3 a').length`), 1, `${width}: one card`);
+      // «#/» вручную — снова внутрь: автозаход — только у входа
       await b.evaluate(`(location.hash = '#/', true)`);
       await waitFor(b, `location.hash.startsWith('#/w/')`, `${width}: the root leads into the only workspace`);
     }
   } finally {
     currentApi = euApi;
   }
-  // Контроль: два пространства — список и ссылка «All workspaces», как прежде
+  // Контроль: два пространства — список после входа и ссылка «All workspaces», как прежде
   await b.setViewport(1440, 900);
   await b.open(pageUrl);
   await b.waitText(en.ui.app.login.roleCan.OWNER);
@@ -1551,7 +1561,7 @@ test('step 100 (A): one workspace — straight into it after sign-in, no workspa
   assert.equal(await b.evaluate<number>(`document.querySelectorAll('.worlds-page h3 a').length`), 2);
   await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
   await settled(b, 'a workspace of two');
-  assert.equal(await b.evaluate<number>(rootLinks), 1, 'with two workspaces the way back is there');
+  assert.equal(await b.evaluate<number>(listLinks), 1, 'with two workspaces the way back is there');
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
@@ -2391,6 +2401,77 @@ test('step 109 [Р-234, Р-235], step 109.1: Competition shows the latest compet
     }
   } finally {
     currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 111 [Р-237]: витрина в таблицах — чип площадки: кружок её цвета (палитра display Primer, а не бренд) с буквой; полное имя — подсказкой
+ * и доступным именем, длинного «· kaufland.de» в тексте ячейки нет; короткое имя рядом — только когда в таблице две витрины одной площадки
+ */
+test('step 111 [Р-237]: storefronts in tables are platform chips — a letter on the platform colour, the full name as hint and accessible name, no long name in the cell; light and dark', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  await b.setViewport(1440, 900);
+  let world = '';
+  const go = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+  };
+  type Chip = { channel: string; letter: string; label: string | null; title: string | null; bg: string; fg: string; short: string | null; cell: string; width: number };
+  const chips = () => b.evaluate<Chip[]>(`[...document.querySelectorAll('main table tbody .unit-name')].map((u) => {
+    const c = u.querySelector('.channel-chip'); const st = getComputedStyle(c);
+    return { channel: c.dataset.channel, letter: getComputedStyle(c, '::before').content, label: c.getAttribute('aria-label'), title: u.querySelector('.storefront-tag').getAttribute('title'),
+      bg: st.backgroundColor, fg: st.color, short: u.querySelector('.chip-short')?.textContent ?? null, cell: u.closest('td').textContent, width: Math.round(c.getBoundingClientRect().width) };
+  })`);
+  const LETTER: Record<string, string> = { AMAZON: '"a"', WALMART: '"w"', EBAY: '"e"', KAUFLAND: '"k"' };
+  // Пары тем Primer: display-orange, -blue, -red, -auburn (bgColor-emphasis)
+  const COLOUR: Record<'light' | 'dark', Record<string, string>> = {
+    light: { AMAZON: 'rgb(184, 80, 15)', WALMART: 'rgb(0, 110, 219)', EBAY: 'rgb(223, 12, 36)', KAUFLAND: 'rgb(157, 97, 92)' },
+    dark: { AMAZON: 'rgb(152, 75, 16)', WALMART: 'rgb(0, 91, 209)', EBAY: 'rgb(195, 19, 40)', KAUFLAND: 'rgb(135, 83, 79)' },
+  };
+  const judge = (where: string, list: Chip[], theme: 'light' | 'dark') => {
+    const byChannel = new Map<string, Set<string>>();
+    for (const c of list) byChannel.set(c.channel, (byChannel.get(c.channel) ?? new Set()).add(c.label ?? ''));
+    for (const c of list) {
+      assert.equal(c.letter, LETTER[c.channel], `${where}: the letter of ${c.channel}`);
+      assert.match(c.label ?? '', /^[a-z]+\.[a-z.]+$/, `${where}: the full storefront name is the accessible name`);
+      assert.equal(c.title, c.label, `${where}: the full name is the hint`);
+      assert.equal(c.bg, COLOUR[theme][c.channel], `${where} ${theme}: ${c.channel} on its Primer colour`);
+      assert.equal(c.fg, 'rgb(255, 255, 255)', `${where} ${theme}: the letter on emphasis`);
+      assert.equal(c.width, 16, `${where}: a 16 px circle`);
+      assert.ok(!c.cell.includes(c.label!), `${where}: no long storefront name in the cell — «${c.cell}»`);
+      if (byChannel.get(c.channel)!.size > 1) assert.equal(c.short, c.label!.slice(c.label!.indexOf('.')), `${where}: two storefronts of ${c.channel} — the short name beside the chip`);
+    }
+  };
+  // Kaufland — мир смоука (профиль eu), Amazon — мир amazon.com шага 109.1 (профиль us, одно пространство — вход сразу в него)
+  try {
+    for (const [api, channel] of [[euApi, 'KAUFLAND'], [step109UsApi, 'AMAZON']] as const) {
+      currentApi = api;
+      await b.setColorScheme('light');
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.OWNER);
+      await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+      await waitFor(b, `location.hash.startsWith('#/w/') || !!document.querySelector('.worlds-page h3 a')`, `${channel}: signed in`);
+      if (!(await b.evaluate<string>('location.hash')).startsWith('#/w/')) await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+      await settled(b, `${channel}: first screen`);
+      world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+      for (const theme of ['light', 'dark'] as const) {
+        await b.setColorScheme(theme);
+        await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+        await go('products');
+        const offers = await chips();
+        const rows = await b.evaluate<number>(`document.querySelectorAll('table.products tbody tr').length`);
+        assert.ok(rows > 0 && offers.length === rows, `${channel} Offers: every row names its storefront by a chip — ${offers.length} of ${rows}`);
+        assert.ok(offers.every((c) => c.channel === channel), `${channel} Offers: the chip of the world's platform`);
+        judge(`${channel} Offers`, offers, theme);
+        await go('feed/decisions');
+        judge(`${channel} Price changes`, await chips(), theme);
+      }
+    }
+  } finally {
+    currentApi = euApi;
+    await b.setColorScheme(null);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

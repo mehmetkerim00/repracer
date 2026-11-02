@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
-import { ErrorBox, errorText, Gaps, useMessages } from '../components.tsx';
+import { ErrorBox, errorText, Gaps, useMessages, UnitName } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
@@ -41,7 +41,7 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
                 {/* Шаг 79 (ревью): предложение — текстом; внимание к строке — в колонке пометок, а не цветом названия */}
-                <td className={`offer${r.tone === 'warn' ? ' attention' : ''}`}>{r.unit.label}</td>
+                <td className={`offer${r.tone === 'warn' ? ' attention' : ''}`}><UnitName unit={r.unit} /></td>
                 <td className="num cur">{r.minBefore}</td>
                 <td className="num cur">{r.minAfter}{r.minChange ? <div className="small muted">{r.minChange}</div> : null}</td>
                 <td className="num cur">{r.maxBefore}</td>

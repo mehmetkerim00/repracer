@@ -1,6 +1,6 @@
 import type { DecisionListItem, DecisionTrace, StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { CompetitorTable } from './Competition.tsx';
 
@@ -24,7 +24,7 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
                 // Шаг 96 (Б17): строка журнала ведёт на квитанцию решения целиком
                 <tr key={d.decisionId} className="row-clickable" onClick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) window.location.hash = href(worldId, 'decisions', d.decisionId); }}>
                   <td data-label={`${t.columns.when}${zone ? ` · ${zone}` : ''}`}><When value={d.decidedAt} zone={!zone} /></td>
-                  <td className="card-title">{d.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="card-title">{d.unit ? <UnitName unit={d.unit} /> : m.ui.common.noValue}</td>
                   <td className="card-status"><Badge tone={d.tone}>{d.outcome}</Badge>{d.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}</td>
                   <td className="money cur" data-label={t.columns.price}>{d.price}</td>
                   {/* Шаг 100 (E): решение, вызванное движением конкурента, называет его тем же чипом, что строка записи; полная фраза — подсказкой */}

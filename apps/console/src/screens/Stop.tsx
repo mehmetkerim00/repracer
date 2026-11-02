@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AUDIT_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type DistrustCard, type HaltCard, type ListQuery, type Period, type StopCard, type StopPlan, type StopTarget, type StopView, type TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, NoteConfirm, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, NoteConfirm, Pager, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 
@@ -178,7 +178,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
                     <td className="nowrap" data-label={`${s.auditColumns.when}${auditZone ? ` · ${auditZone}` : ''}`}><When value={a.at} zone={!auditZone} /></td>
                     <td className="card-title">{a.action}</td>
                     <td data-label={s.auditColumns.who}>{a.actor}</td>
-                    <td data-label={s.auditColumns.subject} title={a.scopeHint ?? undefined}>{a.scope}</td>
+                    <td data-label={s.auditColumns.subject} title={a.scopeHint ?? undefined}>{a.scopeUnit ? <UnitName unit={a.scopeUnit} /> : a.scope}</td>
                     <td data-label={s.auditColumns.note}>{a.note ? s.noteLabel(a.note) : a.detail ?? ''}</td>
                   </tr>
                 ))}

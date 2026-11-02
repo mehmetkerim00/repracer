@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
-import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages } from './components.tsx';
+import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages, WORKSPACES_HREF } from './components.tsx';
 import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
 import { ZoneContext } from './date-range.tsx';
@@ -39,6 +39,8 @@ export interface Route {
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  // Шаг 111 [Р-237]: у списка пространств свой адрес — по нему список показывается всегда, даже с одной карточкой; корень — вход
+  if (parts[0] === 'workspaces') return { worldId: null, screen: 'workspaces', param: null };
   if (parts[0] !== 'w' || !parts[1]) return { worldId: null, screen: 'worlds', param: null };
   return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null, param2: parts[4] ?? null };
 }
@@ -252,8 +254,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         <button type="button" className="nav-close ghost" aria-label={m.ui.app.closeMenu} onClick={() => setOpen(false)}><Icon name="x" size={20} /></button>
         <div className="workspace">
           <div className="name">{world.title}</div>
-          {/* Шаг 100 (A): «All workspaces» — только когда есть из чего выбирать */}
-          {worlds.length > 1 ? <a href="#/">{m.ui.app.backToWorlds}</a> : null}
+          {/* Шаг 111 [Р-237]: «All workspaces» — всегда, своим адресом списка (шаг 100 (A) показывал её только при двух и больше) */}
+          <a href={WORKSPACES_HREF}>{m.ui.app.backToWorlds}</a>
         </div>
         <nav className="tabs-nav" aria-label={world.title}>
           {NAV_GROUPS.map(([group, keys]) => {
@@ -315,7 +317,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
 
 /**
  * Шаг 100 (A): одно рабочее пространство — выбирать не из чего: после входа сразу в него, заменой адреса (кнопка «назад» не возвращает
- * на пустой выбор). Список — только при двух и больше
+ * на пустой выбор). Шаг 111 [Р-237]: только на входе (корень `#/`); ссылка «All workspaces» ведёт на свой адрес, и там список
+ * показывается и с одной карточкой
  */
 function OnlyWorld({ world }: { world: WorldSummary }) {
   const m = useMessages();
@@ -330,7 +333,7 @@ function SignedIn({ route }: { route: Route }) {
   if (callback) return <ConnectCallback onDone={() => setCallback(false)} />;
   return (
     <Load resource={worlds} retry={retry}>
-      {(list) => (route.worldId === null ? (list.length === 1 ? <OnlyWorld world={list[0]!} /> : <WorldList worlds={list} />)
+      {(list) => (route.worldId === null ? (list.length === 1 && route.screen !== 'workspaces' ? <OnlyWorld world={list[0]!} /> : <WorldList worlds={list} />)
         : <WorldScreen route={{ ...route, worldId: route.worldId }} worlds={list} />)}
     </Load>
   );

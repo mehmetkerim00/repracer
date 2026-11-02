@@ -112,7 +112,33 @@ export interface UnitRef {
   channelProductRef: string;
   condition: string;
   gtin: string | null;
+  /** Подпись целиком — «Plant pot, green · amazon.com»: поиск, подсказки, заголовки страниц, выгрузки и письма */
   label: string;
+  /** Шаг 111 [Р-237]: имя продукта без витрины — в таблицах и списках рядом с чипом витрины */
+  name: string;
+  storefront: StorefrontChip;
+}
+
+/**
+ * Шаг 111 [Р-237]: витрина в таблицах и списках — чип площадки: кружок её цвета (палитра Primer) с буквой — a amazon, w walmart, e ebay,
+ * k kaufland. Короткое имя витрины рядом — только когда у пространства больше одной витрины этой площадки (amazon.de и amazon.com); полное
+ * имя — подсказкой и доступным именем. Выгрузки, журналы в файлах и письма называют витрину полностью, как прежде
+ */
+export interface StorefrontChip {
+  channel: string;
+  letter: string;
+  /** Полное имя витрины — «amazon.com» */
+  full: string;
+  /** Короткое имя — «.de»; null, когда без него однозначно */
+  short: string | null;
+}
+
+const CHIP_LETTERS: Readonly<Record<string, string>> = { AMAZON: 'a', WALMART: 'w', EBAY: 'e', KAUFLAND: 'k' };
+
+export function storefrontChip(world: Pick<StandWorld, 'accounts'> | null, channel: string, marketplace: string, m: Messages): StorefrontChip {
+  const full = storefrontName(channel, marketplace, m);
+  const names = new Set([full, ...(world?.accounts ?? []).filter((a) => a.channel === channel).flatMap((a) => a.marketplaces.map((mk) => storefrontName(channel, mk, m)))]);
+  return { channel, letter: CHIP_LETTERS[channel] ?? channel.slice(0, 1).toLowerCase(), full, short: names.size > 1 ? /^[a-z]+(\.[a-z.]+)$/.exec(full)?.[1] ?? full : null };
 }
 
 export function channelOf(world: StandWorld, channelAccountId: string): string {
@@ -121,10 +147,12 @@ export function channelOf(world: StandWorld, channelAccountId: string): string {
 
 export function unitOf(world: StandWorld, scope: ConsoleScope, m: Messages): UnitRef {
   const channel = channelOf(world, scope.channelAccountId);
+  const name = scope.title ?? scope.sku ?? m.ui.common.unitRef(scope.externalUnitId);
+  const storefront = storefrontChip(world, channel, scope.marketplace, m);
   return {
     writeScopeId: scope.writeScopeId, channel, marketplace: scope.marketplace, externalUnitId: scope.externalUnitId,
     channelProductRef: scope.channelProductRef, condition: scope.condition, gtin: scope.gtin,
-    label: m.ui.common.unitLabel(scope.title ?? scope.sku ?? m.ui.common.unitRef(scope.externalUnitId), storefrontName(channel, scope.marketplace, m)),
+    label: m.ui.common.unitLabel(name, storefront.full), name, storefront,
   };
 }
 

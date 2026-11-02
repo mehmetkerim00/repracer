@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodSearch, type DecisionListView, type FeedQuery, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
-import { Badge, commonZone, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { Field } from '../forms.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
@@ -78,7 +78,7 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
               {view.items.map((i, n) => (
                 <tr key={n} className={i.decisionId ? 'row-clickable' : undefined} onClick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) open(i.decisionId); }}>
                   <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={i.at} zone={!zone} /></td>
-                  <td className="offer card-title">{i.unit?.label ?? m.ui.common.noValue}</td>
+                  <td className="offer card-title">{i.unit ? <UnitName unit={i.unit} /> : m.ui.common.noValue}</td>
                   <td className="num cur" data-label={c.from}>{i.from ?? '–'}</td>
                   <td className="num money cur" data-label={c.to}>{i.to}</td>
                   <td className="num" data-label={c.change}>{i.change ?? '–'}</td>
