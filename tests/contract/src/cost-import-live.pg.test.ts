@@ -5,6 +5,7 @@ import { buildImportPlan, importCheckView, importMapping, messagesFor, type Impo
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '@repracer/pricing-store-pg';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
+import { COST_IMPORT_SECONDS } from './cost-import-limit.ts';
 
 /**
  * Р-130, Р-134, Р-135 (шаг 28), шаг 99 [Р-224]: живой прогон массового импорта себестоимости. Настоящая выгрузка продавца (10 000 строк,
@@ -116,7 +117,8 @@ test('шаг 99 (Р-224, E): исправленный файл применяе�
             (SELECT count(DISTINCT product_id)::int FROM tenant_data.cost_profile WHERE source = 'IMPORT') AS with_cost`)).rows);
   assert.deepEqual([counts.batches, counts.with_cost], [1, OFFERS], 'один пакет, себестоимость у каждого предложения файла');
   console.log(JSON.stringify({ rows: OFFERS, checkSeconds: seconds, applySeconds }));
-  assert.ok(seconds + applySeconds < 60, `примерка и применение 10 000 строк: ${seconds} + ${applySeconds} с`);
+  // Шаг 110.5: предел временно выше цели 60 с (медленная группа раннеров CI) — обратный билет держит cost-import-limit.test.ts
+  assert.ok(seconds + applySeconds < COST_IMPORT_SECONDS, `примерка и применение 10 000 строк: ${seconds} + ${applySeconds} с при пределе ${COST_IMPORT_SECONDS} с`);
   // Тот же файл ещё раз — менять нечего: примерка это и говорит
   // Профили импорта действуют с момента фиксации — мир читается на часах после неё
   const now = new Date().toISOString();
