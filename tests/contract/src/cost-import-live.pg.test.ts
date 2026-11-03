@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { cpus } from 'node:os';
 import { after, before, test } from 'node:test';
 import { readTable } from '@repracer/cost-import';
 import { buildImportPlan, importCheckView, importMapping, messagesFor, type ImportCheckView, type ImportPlan, type StandWorld } from '@repracer/console-model';
@@ -26,6 +27,8 @@ let admin: PgPool;
 let world: SeededPricingWorld;
 let store: PgPricingStore;
 let standWorld: StandWorld;
+/** Шаг 113: посев 10 000 предложений — путь, которого шаг не трогал: по нему видно, на какой группе раннеров идёт замер */
+let seedSeconds = 0;
 const m = messagesFor('de');
 
 function scope(n: number): MemorySeedScope {
@@ -71,11 +74,13 @@ before(async () => {
   db = await createIsolatedDatabase('costlive');
   pool = db.pool('svc_app', 4);
   admin = db.pool('svc_admin', 4);
+  const seedStarted = Date.now();
   world = await seedPricingWorld(pool, {
     provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin, fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT,
     marketplaces: ['de'], clock: new Date().toISOString(),
     seed: { scopes: Array.from({ length: OFFERS }, (_, i) => scope(i + 1)) },
   });
+  seedSeconds = Math.round((Date.now() - seedStarted) / 100) / 10;
   store = new PgPricingStore(pool, { adminPool: admin });
   const now = new Date().toISOString();
   const state = await store.readConsoleState(world.tenantId, now as never);
@@ -116,8 +121,9 @@ test('шаг 99 (Р-224, E): исправленный файл применяе�
     `SELECT (SELECT count(*)::int FROM tenant_data.cost_import) AS batches,
             (SELECT count(DISTINCT product_id)::int FROM tenant_data.cost_profile WHERE source = 'IMPORT') AS with_cost`)).rows);
   assert.deepEqual([counts.batches, counts.with_cost], [1, OFFERS], 'один пакет, себестоимость у каждого предложения файла');
-  console.log(JSON.stringify({ rows: OFFERS, checkSeconds: seconds, applySeconds }));
-  // Шаг 110.5: предел временно выше цели 60 с (медленная группа раннеров CI) — обратный билет держит cost-import-limit.test.ts
+  // Шаг 113: рядом с замером — процессор раннера и посев (путь, которого шаг не трогал): по ним замер относится к группе раннеров
+  console.log(JSON.stringify({ rows: OFFERS, checkSeconds: seconds, applySeconds, seedSeconds, cpu: cpus()[0]?.model ?? null, cores: cpus().length }));
+  // Шаг 110.5: предел был временно 90 с; шаг 113 вернул его к цели 60 с (индексы под построчные запросы триггеров, 0211)
   assert.ok(seconds + applySeconds < COST_IMPORT_SECONDS, `примерка и применение 10 000 строк: ${seconds} + ${applySeconds} с при пределе ${COST_IMPORT_SECONDS} с`);
   // Тот же файл ещё раз — менять нечего: примерка это и говорит
   // Профили импорта действуют с момента фиксации — мир читается на часах после неё
