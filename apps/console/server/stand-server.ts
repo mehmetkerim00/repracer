@@ -1019,7 +1019,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             const catalog = await catalogPageFor(query);
             const list = productList(await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog }), m, query, undefined, catalog ?? undefined);
             return ok({
-              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, name: r.unit.name, storefront: r.unit.storefront, minPrice: r.minPrice, maxPrice: r.maxPrice })),
+              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, name: r.unit.name, storefront: r.unit.storefront, color: r.unit.color, swatch: r.unit.swatch, minPrice: r.minPrice, maxPrice: r.maxPrice })),
               page: list.page,
               canEdit: can(viewer.role, 'MANAGE_PRICING'),
             } satisfies BoundsIndexView);
@@ -1830,7 +1830,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     if (screen === 'imports') {
       const kind = IMPORT_KIND_LIST.find((k) => k === body.kind);
       if (!kind) return fail(400, 'BAD_REQUEST', s.badRequest);
-      const right = kind === 'STOCK' ? 'MANAGE_CATALOG' : 'MANAGE_PRICING';
+      // Шаг 112 [Р-238]: описание товара (цвет) ведёт тот, кто ведёт каталог, — как остатки
+      const right = kind === 'STOCK' || kind === 'PRODUCTS' ? 'MANAGE_CATALOG' : 'MANAGE_PRICING';
       const stockSourceId = typeof body.stockSourceId === 'string' ? body.stockSourceId : null;
       const ownSource = async () => {
         if (kind !== 'STOCK') return true;

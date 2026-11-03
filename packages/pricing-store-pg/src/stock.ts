@@ -933,7 +933,7 @@ export class PgStockStore implements StockStore {
        */
       const { rows: products } = await tx.query(
         `SELECT q.* FROM (
-           SELECT p.product_id, p.sku, p.title, p.gtin,
+           SELECT p.product_id, p.sku, p.title, p.color, p.gtin,
                   coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
                   coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
              FROM tenant_data.product p WHERE ${matches}) q
@@ -958,7 +958,7 @@ export class PgStockStore implements StockStore {
       const managedOf = new Map<string, NonNullable<StockRow['channelManaged']>>();
       for (const m of managed) managedOf.set(m.product_id, [...(managedOf.get(m.product_id) ?? []), { channel: m.channel, marketplace: m.marketplace, quantity: Number(m.quantity), observedAt: iso(m.observed_at) }]);
       const items: StockRow[] = products.map((p) => ({
-        productId: p.product_id, sku: p.sku, title: p.title ?? null, gtin: p.gtin ?? null, onHand: Number(p.on_hand), reserved: Number(p.reserved), available: availableOf(Number(p.on_hand), Number(p.reserved)),
+        productId: p.product_id, sku: p.sku, title: p.title ?? null, color: p.color ?? null, gtin: p.gtin ?? null, onHand: Number(p.on_hand), reserved: Number(p.reserved), available: availableOf(Number(p.on_hand), Number(p.reserved)),
         channels: byProduct.get(p.product_id) ?? [],
         ...(managedOf.has(p.product_id) ? { channelManaged: managedOf.get(p.product_id)! } : {}),
       }));

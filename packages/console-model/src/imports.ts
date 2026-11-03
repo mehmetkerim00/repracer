@@ -6,6 +6,7 @@ import { channelPricingBlocks } from './channel-bounds.ts';
 import type { PageInfo } from './page.ts';
 import type { Messages } from './i18n/index.ts';
 import { fingerprint } from './strategies.ts';
+import { PRODUCT_COLOR_FORM } from '@repracer/pricing-pipeline/store';
 import { channelOf, storefrontName, unitOf, type ConsoleScope, type StandWorld, type Tone } from './world.ts';
 
 /**
@@ -23,11 +24,11 @@ import { channelOf, storefrontName, unitOf, type ConsoleScope, type StandWorld, 
  */
 
 export type { ImportKind } from '@repracer/pricing-pipeline/store';
-export const IMPORT_KIND_LIST: readonly ImportKind[] = ['COSTS', 'STOCK', 'BOUNDS', 'STRATEGY'];
+export const IMPORT_KIND_LIST: readonly ImportKind[] = ['COSTS', 'STOCK', 'BOUNDS', 'STRATEGY', 'PRODUCTS'];
 
 export type ImportFieldName =
   | 'sku' | 'storefront' | 'title' | 'unit_cost' | 'currency' | 'fee_percent' | 'fixed_fee' | 'quantity' | 'min_price' | 'max_price'
-  | 'min_margin_percent' | 'strategy';
+  | 'min_margin_percent' | 'strategy' | 'color';
 
 interface FieldSpec {
   field: ImportFieldName;
@@ -68,10 +69,18 @@ export const IMPORT_SCHEMAS: Readonly<Record<ImportKind, readonly FieldSpec[]>> 
     SKU, STOREFRONT, TITLE,
     { field: 'strategy', role: 'value', synonyms: ['strategy', 'strategy name', 'стратегия', 'strategie', 'estrategia', 'stratégie'] },
   ],
+  // Шаг 112 [Р-238]: описание товара — цвет словом продавца; ключ — товар (SKU), как у остатков
+  PRODUCTS: [
+    SKU, TITLE,
+    { field: 'color', role: 'value', synonyms: ['color', 'colour', 'product color', 'variant color', 'цвет', 'farbe', 'colores', 'couleur'] },
+  ],
 };
 
-/** Ключ на предложение — у себестоимости, границ и стратегий; у остатков — товар (пул общий для всех каналов, Р-6) */
-export const importTargetsOffers = (kind: ImportKind) => kind !== 'STOCK';
+/**
+ * Ключ на предложение — у себестоимости, границ и стратегий; у остатков — товар (пул общий для всех каналов, Р-6); у описания товара
+ * (шаг 112) — тоже товар: цвет одного SKU один на всех витринах
+ */
+export const importTargetsOffers = (kind: ImportKind) => kind !== 'STOCK' && kind !== 'PRODUCTS';
 
 export type ImportMapping = Partial<Record<ImportFieldName, number>>;
 
@@ -142,7 +151,9 @@ export type ImportProblem =
   | 'NOT_A_NUMBER' | 'AMBIGUOUS_SEPARATOR' | 'NEGATIVE' | 'TOO_LARGE' | 'NOT_POSITIVE'
   | 'CURRENCY_UNSUPPORTED' | 'CURRENCY_NOT_OF_OFFER' | 'PERCENT_OUT_OF_RANGE' | 'PERCENT_AMBIGUOUS' | 'QUANTITY_INVALID' | 'COST_MISSING'
   | 'MIN_ABOVE_MAX' | 'MARGIN_HELD_WIDER' | 'MARGIN_FLOOR_ABOVE_MAX' | 'BOUND_HELD_ELSEWHERE'
-  | 'STRATEGY_NOT_FOUND' | 'STRATEGY_AMBIGUOUS' | 'STRATEGY_NOT_ACTIVE' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING';
+  | 'STRATEGY_NOT_FOUND' | 'STRATEGY_AMBIGUOUS' | 'STRATEGY_NOT_ACTIVE' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING'
+  /** Шаг 112: цвет длиннее 40 знаков или с управляющими знаками */
+  | 'COLOR_INVALID';
 
 export interface ImportRowError {
   line: number;
@@ -310,6 +321,8 @@ export function buildImportPlan(kind: ImportKind, sheet: Pick<Sheet, 'rows' | 'l
     }
   }
   const strategies = kind === 'STRATEGY' ? strategiesByName(world) : new Map();
+  // Шаг 112 [Р-238]: товары мира по ключам их предложений — SKU товара, SKU и номер товара канала, EAN
+  const products = kind === 'PRODUCTS' ? productTargets(world) : null;
 
   for (const { line, cells } of rows) {
     const key = cell(cells, 'sku');
@@ -329,6 +342,26 @@ export function buildImportPlan(kind: ImportKind, sheet: Pick<Sheet, 'rows' | 'l
       candidates.push({
         line, key, target: t.productId,
         row: q.n === now ? null : { line, key, target: t.productId, set: { quantity: q.n }, expected: { onHand: t.onHand }, changes: [{ field: 'quantity', from: t.onHand, to: q.n }] },
+      });
+      continue;
+    }
+
+    if (products) {
+      const found = products.byKey.get(keyOf(key)) ?? [];
+      if (found.length === 0) { fail('NOT_FOUND', { field: 'sku', raw: key }); continue; }
+      if (found.length > 1) { fail('AMBIGUOUS', { field: 'sku', raw: key }); continue; }
+      const product = found[0]!;
+      const raw = cell(cells, 'color');
+      if (raw === '') { candidates.push({ line, key, target: product.productId, row: null }); continue; }
+      // «-» — снять цвет; иначе слово продавца как есть, пробелы внутри сведены к одному
+      const next = raw === '-' ? null : raw.replace(/\s+/g, ' ');
+      if (next !== null && !PRODUCT_COLOR_FORM.test(next)) { fail('COLOR_INVALID', { field: 'color', raw }); continue; }
+      candidates.push({
+        line, key, target: product.productId,
+        row: next === product.color ? null : {
+          line, key, target: product.productId, set: { color: next ?? '' }, expected: { color: product.color },
+          changes: [{ field: 'color', from: product.color, to: next ?? '' }],
+        },
       });
       continue;
     }
@@ -503,6 +536,26 @@ export function buildImportPlan(kind: ImportKind, sheet: Pick<Sheet, 'rows' | 'l
 }
 
 /**
+ * Шаг 112 [Р-238]: товары мира — для импорта «Product details». Товар узнаётся по SKU товара и по ключам его предложений (SKU канала,
+ * номер товара канала, EAN); ключ, общий у разных товаров, — неоднозначность строки, а не выбор наугад
+ */
+export function productTargets(world: StandWorld): { list: Array<{ productId: string; sku: string | null; title: string | null; color: string | null }>; byKey: Map<string, Array<{ productId: string; sku: string | null; title: string | null; color: string | null }>> } {
+  const byId = new Map<string, { productId: string; sku: string | null; title: string | null; color: string | null }>();
+  const byKey = new Map<string, Array<{ productId: string; sku: string | null; title: string | null; color: string | null }>>();
+  for (const s of world.state.scopes) {
+    let p = byId.get(s.productId);
+    if (!p) { p = { productId: s.productId, sku: s.sku ?? null, title: s.title ?? null, color: s.color ?? null }; byId.set(s.productId, p); }
+    for (const k of [s.sku, s.externalUnitId, s.channelProductRef, s.gtin]) {
+      if (typeof k !== 'string' || k.trim() === '') continue;
+      const list = byKey.get(keyOf(k)) ?? [];
+      if (!list.includes(p)) list.push(p);
+      byKey.set(keyOf(k), list);
+    }
+  }
+  return { list: [...byId.values()], byKey };
+}
+
+/**
  * Импорт границ: граница уровня предложения может ничего не изменить — у товара своя граница, и действует наибольший пол и наименьший
  * потолок. Что получится на деле, считает база без записи (`editBounds` в режиме PREVIEW); строка, у которой действующая граница не
  * станет той, что в файле, — ошибка с причиной, а не тихое «применено». Отпечаток пересчитывается: уточнённая примерка — это и есть
@@ -537,7 +590,7 @@ export interface ImportTemplate {
 }
 
 /** Имя файла шаблона — латиницей во всех языках: исполнитель приводит имя к безопасному виду, и не латиница стала бы подчёркиваниями */
-export const IMPORT_FILE_NAMES: Readonly<Record<ImportKind, string>> = { COSTS: 'unit-costs', STOCK: 'stock', BOUNDS: 'min-max-prices', STRATEGY: 'strategies' };
+export const IMPORT_FILE_NAMES: Readonly<Record<ImportKind, string>> = { COSTS: 'unit-costs', STOCK: 'stock', BOUNDS: 'min-max-prices', STRATEGY: 'strategies', PRODUCTS: 'product-details' };
 
 /** Шаблон каждого импорта, заполненный текущими значениями каталога: продавец правит то, что есть */
 export function importTemplate(kind: ImportKind, world: StandWorld, m: Messages, context: ImportPlanContext = {}): ImportTemplate {
@@ -571,6 +624,14 @@ export function importTemplate(kind: ImportKind, world: StandWorld, m: Messages,
     case 'STRATEGY':
       rows = world.state.scopes.map((s) => [keyOfScope(s), storefrontOf(s), s.title ?? '', strategyNameOf(world, s)]);
       example = [`# ${t.exampleKey}`, 'amazon.com', t.exampleTitle, t.exampleStrategy];
+      break;
+    case 'PRODUCTS':
+      // Строка на товар: SKU товара (без него — SKU первого предложения), название для ориентира, цвет
+      rows = productTargets(world).list.map((p) => {
+        const first = world.state.scopes.find((s) => s.productId === p.productId)!;
+        return [p.sku ?? first.externalUnitId, p.title ?? '', p.color ?? ''];
+      });
+      example = [`# ${t.exampleKey}`, t.exampleTitle, t.exampleColor];
       break;
   }
   return { fileName: `${IMPORT_FILE_NAMES[kind]}-template`, header, example, notes: t.notes[kind], rows };
@@ -659,7 +720,10 @@ export function importCheckView(world: StandWorld, plan: ImportPlan, source: { n
     const scope = byScope.get(target);
     if (scope) return { label: unitOf(world, scope, m).label, currency: scope.currency };
     const product = byProduct.get(target);
-    return { label: product ? product.title ?? product.sku ?? target : target, currency: '' };
+    if (product) return { label: product.title ?? product.sku ?? target, currency: '' };
+    // Шаг 112: описание товара — цель товар; подпись — название товара (или SKU) без витрины: цвет один на всех его витринах
+    const ofProduct = world.state.scopes.find((s) => s.productId === target);
+    return { label: ofProduct ? ofProduct.title ?? ofProduct.sku ?? target : target, currency: '' };
   };
   const changes = plan.changed.slice(0, IMPORT_CHANGES_SHOWN).flatMap((r) => {
     const offer = offerOf(r.target);

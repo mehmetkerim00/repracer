@@ -197,6 +197,8 @@ export interface StockRow {
   sku: string;
   /** Шаг 69 (K8, OQ-249): название товара, если известно (из канала при обнаружении или от продавца) — подпись строки вместо голого SKU */
   title?: string | null;
+  /** Шаг 112 [Р-238]: цвет товара словом продавца — колонкой выгрузки Inventory */
+  color?: string | null;
   gtin: string | null;
   onHand: number;
   reserved: number;

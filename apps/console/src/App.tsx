@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import { LOCALES, messagesFor, type Locale } from '@repracer/console-model';
+import { can, LOCALES, messagesFor, type Locale, type MemberRole } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
-import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, useMessages, WORKSPACES_HREF } from './components.tsx';
+import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, SectionAnchor, useMessages, WORKSPACES_HREF } from './components.tsx';
 import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
 import { ZoneContext } from './date-range.tsx';
@@ -12,6 +12,7 @@ import { CompetitionScreen } from './screens/Competition.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { CostsScreen } from './screens/Costs.tsx';
+import { ImportPanel } from './screens/Imports.tsx';
 import { JobHistory } from './screens/Jobs.tsx';
 import { ProtectionsScreen } from './screens/Protections.tsx';
 import { ShadowScreen } from './screens/Shadow.tsx';
@@ -298,8 +299,12 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                 <li><a className="row-link" href={href(world.id, 'costs', 'edit')}>{m.ui.jobs.links.bounds}</a></li>
                 <li><a className="row-link" href={href(world.id, 'strategies')}>{m.ui.jobs.links.strategies}</a></li>
                 <li><a className="row-link" href={href(world.id, 'costs', 'import')}>{m.ui.jobs.links.costs}</a></li>
+                {/* Шаг 112 [Р-238]: описание товара (цвет) — импортом здесь же, ниже */}
+                <li><a className="row-link" href={href(world.id, 'products', 'bulk', 'details')}>{m.ui.jobs.links.products}</a></li>
               </ul>
             </section>
+            <SectionAnchor id="product-details" focus={route.param2 === 'details'} />
+            <ImportPanel worldId={world.id} kind="PRODUCTS" canEdit={world.role !== null && can(world.role as MemberRole, 'MANAGE_CATALOG')} />
             <JobHistory worldId={world.id} /></>
         : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
         : route.screen === 'inventory' ? <StockScreen worldId={world.id} />

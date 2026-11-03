@@ -68,13 +68,26 @@ export function demoTitle(i: number): string {
   return `${DEMO_KINDS[i % DEMO_KINDS.length]}, ${DEMO_VARIANTS[Math.floor(i / DEMO_KINDS.length) % DEMO_VARIANTS.length]}${DEMO_SERIES[Math.floor(i / 100) % DEMO_SERIES.length]}`;
 }
 
+/**
+ * Шаг 112 [Р-238]: товар демо так, как его описал бы продавец, — цвет атрибутом товара (импорт «Product details»), а не словом в названии:
+ * «Travel mug» и цвет grey, а не «Travel mug, grey». Размер и материал (small, large, oak, steel) остаются в названии — атрибута для них нет.
+ * Название с цветом (`demoTitle`) — у файла каталога клиента kill-test: там цвет пишет в название сам клиент
+ */
+const DEMO_COLORS: ReadonlySet<string> = new Set(['black', 'white', 'grey', 'blue', 'green', 'red']);
+export function demoProduct(i: number): { title: string; color: string | null } {
+  const kind = DEMO_KINDS[i % DEMO_KINDS.length]!;
+  const variant = DEMO_VARIANTS[Math.floor(i / DEMO_KINDS.length) % DEMO_VARIANTS.length]!;
+  const series = DEMO_SERIES[Math.floor(i / 100) % DEMO_SERIES.length]!;
+  return DEMO_COLORS.has(variant) ? { title: `${kind}${series}`, color: variant } : { title: `${kind}, ${variant}${series}`, color: null };
+}
+
 export function demoProducts(options: { bare: boolean }): LiveProduct[] {
   return Array.from({ length: DEMO_OFFERS }, (_, i) => {
     // Единица Kaufland — число БЕЗ ведущих нулей: адаптер берёт её из последних шести цифр товара и отклоняет «000001» как
     // неверную (первый прогон демо: 2710 записей цены отброшены VALIDATION, до канала не дошла ни одна)
     const idProduct = 340_100_001 + i;
     return {
-      cls: i % 5 === 0 ? 'HOT' : 'WARM', idProduct, marketplace: 'de', title: demoTitle(i),
+      cls: i % 5 === 0 ? 'HOT' : 'WARM', idProduct, marketplace: 'de', ...demoProduct(i),
       behaviour: DEMO_DRIFT, competitorStartMinor: 1850 + (i % 7) * 10 + 30, competitorName: sellersFor(idProduct)[0]!.name,
       pastMovesEveryMinutes: i % 5 === 0 ? 30 : 180,
       ...(options.bare ? { bare: true } : { pricingMode: 'ENGINE' as const, costMinor: 1000 + (i % 9) * 25 }),

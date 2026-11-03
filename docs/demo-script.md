@@ -214,7 +214,8 @@ are always in English.» Нажатие — фоновое задание, по�
 **Buy Box → Another seller** — где Buy Box не наш. Наведите на ячейку — момент и возраст снимка. «Export competitors» — первые 10 конкурентов
 последнего снимка по каждому показанному предложению. Сказать честно: значения — те же, что на странице Competition предложения, она — источник.
 
-**Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot, green · amazon.com».
+**Экран решения amazon.com** (шаг 68, записано прогоном `demo-us-live`): предложение подписано словами — «Plant pot · amazon.com». С шага 112
+[Р-238] цвет товара демо — атрибутом, а не словом в названии: в таблицах он второй строкой под названием (кружок и «green»).
 
 - **Итог** (шаг 83 — плашка янтарного фона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; sending to your store:
   held by shadow mode (not sent)». У отказа — плашка красного фона, без цены, причина крупно одной фразой. Шаги расчёта — номера в цветных кружках
@@ -369,7 +370,7 @@ with reservations»** — список фильтруется сразу, над
 
 | Product | On hand | Reserved | Available | Channels |
 |---|---|---|---|---|
-| Water bottle, green · SYN-DEMO-US-AMZ-01 | 60 | 1 | 59 | Amazon · amazon.com, пилюля «held by shadow mode», «57 to publish» |
+| Water bottle · SYN-DEMO-US-AMZ-01 | 60 | 1 | 59 | Amazon · amazon.com, пилюля «held by shadow mode», «57 to publish» |
 
 Что значит состояние и на какой момент — одной строкой при сводке, а не в каждой строке (шаг 96.1): «Channel figures as of Oct 16, 2026,
 03:30 UTC−4. Held by shadow mode — the number to publish is computed, but nothing is sent to the store, so the channel has not confirmed

@@ -48,7 +48,7 @@ import type {
   ScopeEvaluationContext,
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxHolderObservation, BuyboxSpanRow, CompetitionData, CompetitionDataRow, OfferPageFilter,
-  BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult,
+  BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason } from '@repracer/pricing-pipeline';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
@@ -1652,6 +1652,36 @@ export class PgPricingStore implements PricingStore {
     }
   }
 
+  /**
+   * Шаг 112 [Р-238]: цвет товаров из импорта «Product details» — одной транзакцией вместе со строкой журнала. Цвет каждого товара
+   * сверяется с примеркой (CONFLICT); форму значения держит база (`product_color_form`, 0209), право — страж административной записи
+   * (каталог)
+   */
+  async importProductDetails(tenantId: string, input: ProductDetailsImportInput, actor: AdminActor): Promise<ProductDetailsImportResult> {
+    try {
+      return await inTenant(this.admin('importProductDetails'), tenantId, async (tx) => {
+        const ids = [...new Set([...input.expected.map((e) => e.productId), ...input.rows.map((r) => r.productId)])];
+        const { rows } = await tx.query(`SELECT product_id, color FROM tenant_data.product WHERE tenant_id = $1 AND product_id = ANY ($2::uuid[]) FOR UPDATE`, [tenantId, ids]);
+        const now = new Map(rows.map((r) => [String(r.product_id), (r.color ?? null) as string | null]));
+        const missing = ids.find((id) => !now.has(id));
+        if (missing) throw new RollbackWith<ProductDetailsImportResult>({ status: 'INVALID', cause: 'PRODUCT_NOT_FOUND', productId: missing });
+        const changed = input.expected.find((e) => now.get(e.productId) !== e.color);
+        if (changed) throw new RollbackWith<ProductDetailsImportResult>({ status: 'CONFLICT', productId: changed.productId });
+        await tx.query(
+          `UPDATE tenant_data.product p SET color = r.color, updated_at = now()
+             FROM unnest($2::uuid[], $3::text[]) AS r(product_id, color)
+            WHERE p.tenant_id = $1 AND p.product_id = r.product_id`, [tenantId, input.rows.map((r) => r.productId), input.rows.map((r) => r.color)]);
+        const run = input.run && actor.bulkJobId ? await insertImportRun(tx, tenantId, input.run, actor.bulkJobId, actor) : undefined;
+        return { status: 'APPLIED', products: input.rows.length, ...(run ? { run } : {}) } satisfies ProductDetailsImportResult;
+      }, actor.userId, { mfa: actor.mfa, ...(actor.bulkJobId ? { bulkJobId: actor.bulkJobId } : {}) });
+    } catch (error) {
+      const e = error as { code?: string; constraint?: string };
+      if (e.code === '42501') return { status: 'FORBIDDEN' };
+      if (e.code === '23514' && e.constraint === 'product_color_form') return { status: 'INVALID', cause: 'COLOR_INVALID' };
+      throw error;
+    }
+  }
+
   /** Шаг 99 [Р-224]: строка журнала вне применения — примерка или отказ; пишет задание, которое сейчас идёт */
   async recordImportRun(tenantId: string, run: ImportRunInput, actor: AdminActor & { bulkJobId: string }): Promise<ImportRunRow> {
     return inTenant(this.admin('recordImportRun'), tenantId, (tx) => insertImportRun(tx, tenantId, run, actor.bulkJobId, actor),
@@ -2574,7 +2604,7 @@ export class PgPricingStore implements PricingStore {
         .map((r) => String(r.product_id)) : null;
       if (!only) await q(`SET LOCAL enable_nestloop = off`, []);
       // Шаг 68 (K10): SKU и название товара — подпись предложения на экране
-      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS}, p.sku AS product_sku, p.title AS product_title ${SCOPE_FROM}${only ? listedScopes('$3', '$4') : ''})
+      const [scopeJson] = await q(`WITH sc AS (SELECT ${SCOPE_COLUMNS}, p.sku AS product_sku, p.title AS product_title, p.color AS product_color ${SCOPE_FROM}${only ? listedScopes('$3', '$4') : ''})
         SELECT coalesce(json_agg(${SCOPE_JSON} ORDER BY sc.created_at, sc.write_scope_id), '[]') AS scopes FROM sc`, only ? [tenantId, now, only, onlyProducts] : [tenantId, now]);
       if (!only) await q(`SET LOCAL enable_nestloop = on`, []);
       const scopes = ((scopeJson?.scopes ?? []) as Row[]).map((j): ConsoleScopeRow => {
@@ -2584,6 +2614,8 @@ export class PgPricingStore implements PricingStore {
         const row = j.row as Row;
         return {
           ...ctx.scope, bounds: ctx.bounds, sku: row.product_sku ?? null, title: row.product_title ?? null,
+          // Шаг 112 [Р-238]: цвет товара — слово продавца из импорта «Product details»
+          color: row.product_color ?? null,
           // Себестоимость в валюте возникновения; без действующей оценки комиссии пол по марже не считается (как в решении)
           cost: c && fee && Number.isSafeInteger(fee.feeRateBp) && Number.isSafeInteger(fee.fixedFeeMinor)
             ? {

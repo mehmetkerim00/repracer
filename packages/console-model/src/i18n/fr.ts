@@ -1309,7 +1309,9 @@ export const fr: Messages = {
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart masque cette offre parce que le même produit est moins cher ailleurs${elsewhere ? ` (${elsewhere})` : ''}. Pour qu’elle réapparaisse, rapprochez le prix walmart.com de ce prix — seulement si votre plancher le permet. TMPrice ne modifie jamais le prix de lui-même pour cette raison.`,
       conditions: { used: 'occasion', refurbished: 'reconditionné', collectible: 'de collection' }, viewOptions: { columns: 'Colonnes', compact: 'Lignes compactes' },
       productRef: (ref: string, condition: string, gtin: string | null) => `produit ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
-      productId: (ref: string, gtin: string | null) => `produit ${ref}${gtin ? ` · EAN ${gtin}` : ''}`,
+      // Шаг 112 [Р-238]: идентификатор товара в канале — именем канала (у Amazon — ASIN), а не словом «product»; пустой — не показывается.
+      // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
+      productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'ID Walmart', EBAY: 'ID eBay', KAUFLAND: 'ID Kaufland' } as Record<string, string>)[channel] ?? 'ID produit'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'données de la concurrence',
       why: 'Pourquoi ce prix', bounds: 'Limites et plancher', noDecisions: 'pas encore de décision', enable: 'Activer',
       floorNoMin: 'Le prix minimum n’est pas défini',
@@ -1690,14 +1692,14 @@ export const fr: Messages = {
     },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
-      links: { title: 'Lancer une modification groupée', bounds: 'Définir les prix minimum et maximum de nombreuses offres', strategies: 'Attribuer une stratégie à de nombreuses offres', costs: 'Importer les coûts unitaires' },
+      links: { title: 'Lancer une modification groupée', bounds: 'Définir les prix minimum et maximum de nombreuses offres', strategies: 'Attribuer une stratégie à de nombreuses offres', costs: 'Importer les coûts unitaires', products: 'Importer les détails des produits (couleur)' },
       pageTitle: 'Opérations groupées', back: '← Offres', historyTitle: 'Opérations passées', none: 'Pas encore d’opérations groupées. Elles apparaissent ici quand vous importez des coûts unitaires, modifiez les limites de nombreuses offres ou attribuez une stratégie à de nombreuses offres.',
       kinds: {
         COST_IMPORT: 'Importer les coûts unitaires', REPRICING_ENABLE: 'Activer la tarification automatique', STOCK_IMPORT: 'Importer le stock', STOCK_SYNC_ENABLE: 'Activer la synchronisation du stock', BOUNDS_EDIT: 'Modifier les limites', BOUNDS_PLAN: 'Calculer les différences de limites',
         STRATEGY_ASSIGN: 'Attribuer une stratégie', STRATEGY_PREVIEW: 'Prévisualiser une stratégie', PRICE_EVIDENCE: 'Exporter les preuves de prix',
         PRICE_FEED_EXPORT: 'Exporter le journal des prix',
         SCREEN_EXPORT: 'Exporter un écran',
-        IMPORT_TEMPLATE: 'Préparer un modèle d’import', IMPORT_CHECK: 'Vérifier un fichier d’import',
+        IMPORT_TEMPLATE: 'Préparer un modèle d’import', IMPORT_CHECK: 'Vérifier un fichier d’import', PRODUCT_IMPORT: 'Importer les détails des produits',
       },
       queued: 'En file d’attente — l’opération démarre sous peu.',
       preparing: (done: number, total: number | null) => (total === null ? 'Préparation…' : `Préparation : ${done} sur ${total}`),
@@ -1788,12 +1790,13 @@ export const fr: Messages = {
     },
     /** Шаг 99 [Р-224, Р-225]: импорты продавца — заголовки колонок файла английские во всех языках; пояснение — на языке пространства */
     imports: {
-      titles: { COSTS: 'Importer les coûts unitaires', STOCK: 'Importer les stocks', BOUNDS: 'Importer les prix minimum et maximum', STRATEGY: 'Importer les attributions de stratégie' },
+      titles: { COSTS: 'Importer les coûts unitaires', STOCK: 'Importer les stocks', BOUNDS: 'Importer les prix minimum et maximum', STRATEGY: 'Importer les attributions de stratégie', PRODUCTS: 'Importer les détails des produits' },
       intros: {
         COSTS: 'Téléchargez le modèle avec vos coûts unitaires actuels, modifiez ce qu’il faut et chargez-le. Vous voyez chaque modification avant que rien ne soit appliqué.',
         STOCK: 'Téléchargez le modèle avec les quantités de cette source de stock, modifiez ce qu’il faut et chargez-le. Vous voyez chaque modification avant que rien ne soit appliqué.',
         BOUNDS: 'Téléchargez le modèle avec vos prix minimum et maximum et vos marges minimales actuels, modifiez ce qu’il faut et chargez-le.',
         STRATEGY: 'Téléchargez le modèle avec la stratégie de chaque offre, indiquez la stratégie voulue et chargez-le. Vous voyez chaque modification avant que rien ne soit appliqué.',
+        PRODUCTS: 'Téléchargez le modèle avec la couleur de chaque produit, indiquez la couleur voulue et chargez-le. Vous voyez chaque modification avant que rien ne soit appliqué.',
       },
       templateCsv: 'Télécharger le modèle (CSV)', templateXlsx: 'Télécharger le modèle (XLSX)',
       templateCaption: 'Le modèle contient déjà vos valeurs actuelles : modifiez seulement les cellules à changer.',
@@ -1827,7 +1830,7 @@ export const fr: Messages = {
       noStockSource: 'Ajoutez d’abord une source de stock tenue dans TMPrice — le fichier va dans celle-ci.',
       fields: {
         sku: 'SKU', storefront: 'Site', title: 'Titre', unit_cost: 'Coût unitaire', currency: 'Devise', fee_percent: 'Commission du canal, %', fixed_fee: 'Frais fixes',
-        quantity: 'Quantité', min_price: 'Prix minimum', max_price: 'Prix maximum', min_margin_percent: 'Marge minimale, %', strategy: 'Stratégie',
+        quantity: 'Quantité', min_price: 'Prix minimum', max_price: 'Prix maximum', min_margin_percent: 'Marge minimale, %', strategy: 'Stratégie', color: 'Couleur',
       },
       problems: {
         KEY_EMPTY: 'pas de SKU dans la ligne',
@@ -1855,6 +1858,7 @@ export const fr: Messages = {
         STRATEGY_NOT_ACTIVE: 'la stratégie n’a pas de version active',
         STRATEGY_UNAVAILABLE: (why: string) => `le canal ne fournit pas les données dont cette stratégie a besoin : ${why}`,
         CHANNEL_PRICING: 'le canal fixe lui-même le prix de cette offre — TMPrice n’attribue pas de stratégie',
+        COLOR_INVALID: 'la couleur doit être un mot de 40 caractères au plus, sans saut de ligne',
       },
       notes: {
         COSTS: [
@@ -1879,8 +1883,13 @@ export const fr: Messages = {
           'Si la tarification automatique est active pour une offre, sa prochaine décision de prix utilise la nouvelle stratégie.',
           'Les lignes qui commencent par # sont ignorées. Chargez le fichier, vérifiez-le, puis appliquez-le : une seule ligne en erreur arrête tout l’import.',
         ],
+        PRODUCTS: [
+          'Comment le remplir : une ligne par produit. Écrivez la couleur du produit en un mot (par ex. gris) ; vide garde la couleur actuelle, - la retire.',
+          'La couleur apparaît sous le nom du produit. Les mots de couleur courants (noir, blanc, gris, rouge, vert, bleu…) ont en plus un cercle d’échantillon ; tout autre mot s’affiche en texte.',
+          'Les lignes qui commencent par # sont ignorées. Chargez le fichier, vérifiez-le, puis appliquez-le : une seule ligne en erreur arrête tout l’import.',
+        ],
       },
-      exampleKey: 'exemple : ABC-123', exampleTitle: 'Tuyau d’arrosage, 15 m', exampleStrategy: 'Battre le prix le plus bas',
+      exampleKey: 'exemple : ABC-123', exampleTitle: 'Tuyau d’arrosage, 15 m', exampleStrategy: 'Battre le prix le plus bas', exampleColor: 'gris',
       sheets: { data: 'Données', help: 'Aide' },
       historyTitle: 'Historique des imports', historyEmpty: 'Aucun import pour l’instant.',
       historyColumns: { when: 'Quand', who: 'Qui', outcome: 'Résultat', file: 'Fichier', rows: 'Lignes', time: 'Durée' },

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import type { EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName } from '../components.tsx';
+import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName, ColorVariant } from '../components.tsx';
 import { CheckField, Field, FormActions } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
@@ -166,7 +166,7 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
             {view.rows.map((r) => (
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
-                  <strong><UnitName unit={r.unit} /></strong>
+                  <strong><UnitName unit={r.unit} variant={false} /></strong>
                   {/* Шаг 102 [Р-227]: режим распродажи — пилюлей attention у названия */}
                   {r.clearance ? <> <Badge tone="warn">{r.clearance}</Badge></> : null}
                   {/* Шаг 102: пол выше потолка — цены заморожены законно, но не молча */}
@@ -175,8 +175,9 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
                   {r.channelBounds ? <> <Badge tone="warn">{r.channelBounds}</Badge></> : null}
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
                   {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
-                  <div className="product-ref">{p.productId(r.unit.channelProductRef, r.unit.gtin)} {r.unit.condition && r.unit.condition.toLowerCase() !== 'new'
-                    ? <Badge tone="off">{(p.conditions as Record<string, string | undefined>)[r.unit.condition.toLowerCase()] ?? r.unit.condition}</Badge> : null}</div>
+                  {/* Шаг 112 [Р-238]: вторая строка — цвет товара (кружок и слово), затем идентификатор товара в канале его именем (ASIN,
+                      Item ID); пустой идентификатор не показывается — прежде у eBay висело голое «product». В компактных строках — только цвет */}
+                  <ProductRef unit={r.unit} />
                 </td>
                 {/* Шаг 79: «On» и «In progress» — одна колонка: включённость всегда, ход — только когда что-то идёт */}
                 <td className="status-cell"><Cell cell={r.enabled} />{r.applying.tone !== 'ok' ? <Cell cell={r.applying} /> : null}</td>
@@ -258,6 +259,22 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
           ? <button type="button" className="danger" disabled={props.busy} onClick={props.onAcknowledge}>{d.enableAnyway}</button>
           : null}
       </FormActions>
+    </div>
+  );
+}
+
+/** Шаг 112 [Р-238]: вторая строка предложения на Offers — цвет товара, идентификатор товара в канале и состояние, если оно не «новое» */
+function ProductRef({ unit }: { unit: ProductRow['unit'] }) {
+  const p = useMessages().ui.products;
+  const ids = p.productId(unit.channel, unit.channelProductRef, unit.gtin);
+  const condition = unit.condition && unit.condition.toLowerCase() !== 'new'
+    ? (p.conditions as Record<string, string | undefined>)[unit.condition.toLowerCase()] ?? unit.condition : null;
+  if (!unit.color && !ids && !condition) return null;
+  return (
+    <div className="product-ref">
+      {unit.color ? <ColorVariant color={unit.color} swatch={unit.swatch} /> : null}
+      {ids ? <span className="channel-ids">{unit.color ? ' · ' : ''}{ids}</span> : null}
+      {condition ? <Badge tone="off">{condition}</Badge> : null}
     </div>
   );
 }

@@ -571,8 +571,9 @@ export type CostImportResult =
  * Шаг 99 [Р-224]: импорт продавца — один из четырёх видов, и у каждого запуска (примерка, применение, отказ) строка журнала. Журнал
  * только на добавление; автора, момент и длительность ставит база из задания, которое строку пишет
  */
-export type ImportKind = 'COSTS' | 'STOCK' | 'BOUNDS' | 'STRATEGY';
-export const IMPORT_KINDS: readonly ImportKind[] = ['COSTS', 'STOCK', 'BOUNDS', 'STRATEGY'];
+/** Шаг 112 [Р-238]: PRODUCTS — описание товара (цвет) импортом «Product details» */
+export type ImportKind = 'COSTS' | 'STOCK' | 'BOUNDS' | 'STRATEGY' | 'PRODUCTS';
+export const IMPORT_KINDS: readonly ImportKind[] = ['COSTS', 'STOCK', 'BOUNDS', 'STRATEGY', 'PRODUCTS'];
 export type ImportRunOutcome = 'CHECKED' | 'APPLIED' | 'REFUSED';
 
 export interface ImportRunInput {
@@ -631,6 +632,26 @@ export type StrategiesImportResult =
   | { status: 'FORBIDDEN' }
   | { status: 'CONFLICT'; writeScopeId: string }
   | { status: 'INVALID'; cause: 'STRATEGY_NOT_FOUND' | 'SCOPE_NOT_FOUND' | 'STRATEGY_UNAVAILABLE' | 'CHANNEL_PRICING_ACTIVE' | 'VERSION_NOT_ACTIVE'; writeScopeId?: string };
+
+/** Шаг 112 [Р-238]: форма цвета товара — как `product_color_form` (0209): без пробелов по краям и двойных, без управляющих знаков, 1–40 знаков */
+// eslint-disable-next-line no-control-regex
+export const PRODUCT_COLOR_FORM = /^(?=.{1,40}$)(?!\s)(?!.*\s$)(?!.*\s\s)[^\u0000-\u001f\u007f-\u009f]+$/u;
+
+/**
+ * Шаг 112 [Р-238]: описание товара из файла — цвет у товаров (не у предложений), одной транзакцией. Цвет каждого товара сверяется с
+ * примеркой (`expected`, CONFLICT); `color: null` — снять цвет
+ */
+export interface ProductDetailsImportInput {
+  rows: ReadonlyArray<{ productId: string; color: string | null }>;
+  expected: ReadonlyArray<{ productId: string; color: string | null }>;
+  run?: ImportRunInput;
+}
+
+export type ProductDetailsImportResult =
+  | { status: 'APPLIED'; products: number; run?: ImportRunRow }
+  | { status: 'FORBIDDEN' }
+  | { status: 'CONFLICT'; productId: string }
+  | { status: 'INVALID'; cause: 'PRODUCT_NOT_FOUND' | 'COLOR_INVALID'; productId?: string };
 
 /** Шаг 21: новая версия стратегии и её назначение единицам записи — после превью */
 export interface StrategySaveInput {
@@ -810,6 +831,8 @@ export interface PricingStore {
   importBounds(tenantId: string, input: { rows: readonly BoundsImportRowInput[]; run?: ImportRunInput }, actor: AdminActor): Promise<BoundsImportResult>;
   /** Шаг 99 [Р-225]: назначение стратегий из файла — целиком, одной транзакцией вместе со строкой журнала */
   importStrategies(tenantId: string, input: StrategiesImportInput, actor: AdminActor): Promise<StrategiesImportResult>;
+  /** Шаг 112 [Р-238]: цвет товаров из импорта «Product details» — одной транзакцией вместе со строкой журнала */
+  importProductDetails(tenantId: string, input: ProductDetailsImportInput, actor: AdminActor): Promise<ProductDetailsImportResult>;
   /**
    * Шаг 99 [Р-224]: строка журнала импортов вне применения (примерка, отказ). Пишет её задание, которое сейчас идёт (`actor.bulkJobId`);
    * повтор того же задания строку не дублирует — возвращается записанная
@@ -1056,7 +1079,9 @@ export type BulkJobKind = 'COST_IMPORT' | 'BOUNDS_EDIT' | 'BOUNDS_PLAN' | 'STRAT
   /** Шаг 35 [Р-139]: буфер аккаунта, единицы записи остатка и первые записи — на каталог целевого клиента это десятки секунд */
   | 'STOCK_SYNC_ENABLE'
   /** Шаг 104 [Р-229]: выгрузка экрана в файл (CSV / XLSX) — ничего не меняет, отдаёт файл; не больше 50 000 строк */
-  | 'SCREEN_EXPORT';
+  | 'SCREEN_EXPORT'
+  /** Шаг 112 [Р-238]: применение импорта «Product details» — цвет товаров; право — на каталог, второй фактор не нужен (забор не двигается) */
+  | 'PRODUCT_IMPORT';
 
 /**
  * Р-143 (шаг 31): виды заданий, которые НИЧЕГО НЕ МЕНЯЮТ. Им второй фактор не нужен, и создать их может любой участник; но
@@ -1148,6 +1173,8 @@ export interface ConsoleScopeRow {
   /** Шаг 68 (K10): SKU продавца и название товара — подпись предложения словами, а не номером единицы канала */
   sku?: string | null;
   title?: string | null;
+  /** Шаг 112 [Р-238]: цвет товара словом продавца (импорт «Product details»); null — не задан */
+  color?: string | null;
   channelAccountId: string;
   marketplace: string;
   externalUnitId: string;

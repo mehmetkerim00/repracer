@@ -17,6 +17,8 @@ import type { LiveWorld } from '@repracer/contract-tests/stand';
 import { EMPTY_WORLD_ID, emptyWorld, emptyWorldConnect } from './empty-world.ts';
 import { prepareStep107, SELLER107, type Step107World } from './step107-world.ts';
 import { prepareStep109, SCOPE109_US, SELLER109_US } from './step109-world.ts';
+import { chipProblems } from './chip-quiet.ts';
+import { colorsWorld } from './colors-world.ts';
 
 /**
  * Шаг 76 (предполётный прогон демо, ревью — находка 7): страница консоли исполняется настоящим браузером. Страница была ПУСТОЙ с шага 29
@@ -84,6 +86,8 @@ let step107Api: ReturnType<typeof createStandApi>;
 let step109: { writeScopeId: string };
 // Шаг 109.1: мир Amazon стенда с единицей amazon.com в долларах — профиль us
 let step109UsApi: ReturnType<typeof createStandApi>;
+/** Шаг 112 [Р-238]: 16 синтетических предложений трёх площадок с цветами товаров (профиль us) */
+let colorsApi: ReturnType<typeof createStandApi>;
 let step109Us: { writeScopeId: string };
 let step107: Step107World;
 /** Шаг 99: мир смоука — по нему исполняются задания импорта (исполнителя у смоука нет, задания зовутся из теста) */
@@ -255,6 +259,11 @@ before(async () => {
     simulator: identity.simulator,
   }, { defaultLocale: 'en', market: 'us', people: STAND_PEOPLE });
   step109Us = await prepareStep109(amazonUs[0]!, SCOPE109_US, { foreign: 'EUR' });
+  const colors = colorsWorld(w0.clock);
+  colorsApi = createStandApi([colors], {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory([colors]) }),
+    simulator: identity.simulator,
+  }, { defaultLocale: 'en', market: 'us', people: STAND_PEOPLE });
   currentApi = euApi;
   // Шаг 96 (Б12): страницы и «×N» вкладки «Prevented by rules» проверяются на синтетическом отчёте о поле — в мире смоука удержаний нет
   stand = createStandServer((req) => (syntheticDangerous && /\/dangerous(\?|$)/.test(req.url) ? Promise.resolve({ status: 200, body: syntheticDangerous })
@@ -2409,7 +2418,7 @@ test('step 109 [Р-234, Р-235], step 109.1: Competition shows the latest compet
  * Шаг 111 [Р-237]: витрина в таблицах — чип площадки: кружок её цвета (палитра display Primer, а не бренд) с буквой; полное имя — подсказкой
  * и доступным именем, длинного «· kaufland.de» в тексте ячейки нет; короткое имя рядом — только когда в таблице две витрины одной площадки
  */
-test('step 111 [Р-237]: storefronts in tables are platform chips — a letter on the platform colour, the full name as hint and accessible name, no long name in the cell; light and dark', async () => {
+test('step 111 [Р-237], step 112 [Р-238]: storefronts in tables are quiet platform chips — a tinted circle with the letter in the platform colour, the full name as hint and accessible name, no long name in the cell; light and dark', async () => {
   const b = browser!;
   const before = b.errors().length;
   await b.setViewport(1440, 900);
@@ -2425,10 +2434,10 @@ test('step 111 [Р-237]: storefronts in tables are platform chips — a letter o
       bg: st.backgroundColor, fg: st.color, short: u.querySelector('.chip-short')?.textContent ?? null, cell: u.closest('td').textContent, width: Math.round(c.getBoundingClientRect().width) };
   })`);
   const LETTER: Record<string, string> = { AMAZON: '"a"', WALMART: '"w"', EBAY: '"e"', KAUFLAND: '"k"' };
-  // Пары тем Primer: display-orange, -blue, -red, -auburn (bgColor-emphasis)
-  const COLOUR: Record<'light' | 'dark', Record<string, string>> = {
-    light: { AMAZON: 'rgb(184, 80, 15)', WALMART: 'rgb(0, 110, 219)', EBAY: 'rgb(223, 12, 36)', KAUFLAND: 'rgb(157, 97, 92)' },
-    dark: { AMAZON: 'rgb(152, 75, 16)', WALMART: 'rgb(0, 91, 209)', EBAY: 'rgb(195, 19, 40)', KAUFLAND: 'rgb(135, 83, 79)' },
+  // Шаг 112 [Р-238]: тихая схема — подложка bgColor-muted и буква fgColor оттенка display Primer: orange, blue, auburn (eBay), brown (Kaufland)
+  const COLOUR: Record<'light' | 'dark', Record<string, [string, string]>> = {
+    light: { AMAZON: ['rgb(255, 231, 209)', 'rgb(162, 70, 16)'], WALMART: ['rgb(209, 240, 255)', 'rgb(0, 95, 204)'], EBAY: ['rgb(242, 233, 233)', 'rgb(138, 85, 81)'], KAUFLAND: ['rgb(238, 234, 226)', 'rgb(117, 95, 67)'] },
+    dark: { AMAZON: ['rgb(49, 23, 8)', 'rgb(237, 131, 38)'], WALMART: ['rgb(0, 26, 71)', 'rgb(77, 160, 255)'], EBAY: ['rgb(39, 24, 23)', 'rgb(191, 149, 146)'], KAUFLAND: ['rgb(36, 28, 20)', 'rgb(182, 154, 109)'] },
   };
   const judge = (where: string, list: Chip[], theme: 'light' | 'dark') => {
     const byChannel = new Map<string, Set<string>>();
@@ -2437,8 +2446,8 @@ test('step 111 [Р-237]: storefronts in tables are platform chips — a letter o
       assert.equal(c.letter, LETTER[c.channel], `${where}: the letter of ${c.channel}`);
       assert.match(c.label ?? '', /^[a-z]+\.[a-z.]+$/, `${where}: the full storefront name is the accessible name`);
       assert.equal(c.title, c.label, `${where}: the full name is the hint`);
-      assert.equal(c.bg, COLOUR[theme][c.channel], `${where} ${theme}: ${c.channel} on its Primer colour`);
-      assert.equal(c.fg, 'rgb(255, 255, 255)', `${where} ${theme}: the letter on emphasis`);
+      assert.equal(c.bg, COLOUR[theme][c.channel]![0], `${where} ${theme}: ${c.channel} on the soft tint of its Primer colour`);
+      assert.equal(c.fg, COLOUR[theme][c.channel]![1], `${where} ${theme}: the letter in the dark tone of the same colour, not white`);
       assert.equal(c.width, 16, `${where}: a 16 px circle`);
       assert.ok(!c.cell.includes(c.label!), `${where}: no long storefront name in the cell — «${c.cell}»`);
       if (byChannel.get(c.channel)!.size > 1) assert.equal(c.short, c.label!.slice(c.label!.indexOf('.')), `${where}: two storefronts of ${c.channel} — the short name beside the chip`);
@@ -2472,6 +2481,91 @@ test('step 111 [Р-237]: storefronts in tables are platform chips — a letter o
   } finally {
     currentApi = euApi;
     await b.setColorScheme(null);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 112 [Р-238] в настоящем браузере (данные синтетические, мир `colors-world.ts` — 16 предложений amazon.com, ebay.com и walmart.com):
+ * чип тихий по числам — тем же расчётом, что правило токенов, но на цветах, которые браузер нарисовал (подложка к фону строки ≤ 1,3, буква
+ * ≥ 4,5, далеко от цвета ошибок); имя продукта и чип — через 6 px и по центру строки на всех 16 строках. Цвет товара — второй строкой:
+ * кружок 10 px только у известного слова (в любом регистре и на четырёх языках) и слово приглушённо; незнакомое слово — только текстом. На
+ * Offers рядом с цветом — идентификатор товара в канале его именем, голого «product» больше нет; в компактных строках — только цвет.
+ * Список Costs & floors — цвет второй строкой под названием
+ */
+test('step 112 [Р-238]: quiet chips 6 px from the name on the middle of the line; the product color under the name — a 10 px sample only for a known word; the channel ID named by the channel', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  await b.setViewport(1440, 900);
+  const hex = (rgb: string) => `#${(rgb.match(/\d+/g) ?? []).slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`;
+  let world = '';
+  const go = async (route: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`); await settled(b, route); };
+  type Row = { title: string; chipLeft: number; titleRight: number; chipMid: number; titleMid: number; titleLines: number; bg: string; fg: string; surface: string;
+    swatch: { kind: string; w: number; h: number } | null; variant: string | null; ref: string | null };
+  const rows = (table: string) => b.evaluate<Row[]>(`[...document.querySelectorAll(${JSON.stringify(`${table} tbody tr`)})].filter((tr) => tr.querySelector('.unit-name')).map((tr) => {
+    const t = tr.querySelector('.unit-title'), c = tr.querySelector('.channel-chip'), tr0 = t.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    const lh = parseFloat(getComputedStyle(t).lineHeight), sw = tr.querySelector('.swatch'), v = tr.querySelector('.unit-variant');
+    let surface = 'rgba(0, 0, 0, 0)'; for (let e = c.parentElement; e && /rgba\\(0, 0, 0, 0\\)|transparent/.test(surface); e = e.parentElement) surface = getComputedStyle(e).backgroundColor;
+    return { title: t.textContent, chipLeft: cr.left, titleRight: tr0.right, chipMid: cr.top + cr.height / 2, titleMid: tr0.top + tr0.height / 2, titleLines: Math.round(tr0.height / lh),
+      bg: getComputedStyle(c).backgroundColor, fg: getComputedStyle(c).color, surface,
+      swatch: sw ? { kind: sw.dataset.swatch, w: sw.getBoundingClientRect().width, h: sw.getBoundingClientRect().height } : null,
+      variant: v ? v.textContent : null, ref: tr.querySelector('.product-ref')?.textContent ?? null };
+  })`);
+  try {
+    currentApi = colorsApi;
+    await b.setColorScheme('light');
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'one workspace — straight into it');
+    await settled(b, 'first screen');
+    world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    for (const theme of ['light', 'dark'] as const) {
+      await b.setColorScheme(theme);
+      await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+      await go('products');
+      const offers = await rows('table.products');
+      assert.equal(offers.length, 16, `${theme}: 16 rows on Offers`);
+      for (const [i, r] of offers.entries()) {
+        const where = `${theme} Offers row ${i + 1} «${r.title}»`;
+        assert.ok(Math.abs(r.chipLeft - r.titleRight - 6) <= 0.5, `${where}: 6 px between the name and the chip — ${(r.chipLeft - r.titleRight).toFixed(1)}`);
+        assert.equal(r.titleLines, 1, `${where}: the name in one line at 1440`);
+        assert.ok(Math.abs(r.chipMid - r.titleMid) <= 1, `${where}: the chip on the middle of the line — ${(r.chipMid - r.titleMid).toFixed(1)} px`);
+        assert.deepEqual(chipProblems(theme, { surface: hex(r.surface), danger: theme === 'light' ? '#d1242f' : '#f85149', chips: { row: { bg: hex(r.bg), fg: hex(r.fg), sources: [] } } }), [],
+          `${where}: a quiet chip as drawn`);
+        assert.doesNotMatch(r.ref ?? '', /^product\b/, `${where}: no bare «product» in the second line`);
+      }
+      const of = (title: string, variant: string | null) => offers.find((r) => r.title === title && r.variant === variant);
+      // Известное слово — кружок 10 px и слово, в любом регистре и на языке продавца; незнакомое — только слово; без цвета — строки цвета нет
+      assert.deepEqual(of('Travel mug', 'green')?.swatch, { kind: 'green', w: 10, h: 10 }, `${theme}: a 10 px sample for a known word`);
+      assert.deepEqual([of('Desk lamp', 'Gray')?.swatch?.kind, of('Kitchen scale', 'gris')?.swatch?.kind], ['grey', 'grey'], `${theme}: «Gray» and «gris» are grey`);
+      assert.equal(of('Wall clock', 'multicolor')?.swatch, null, `${theme}: an unknown word is text only`);
+      // Вторая строка Offers: цвет, затем идентификатор товара в канале именем канала; пустой идентификатор (eBay) не показывается вовсе
+      assert.equal(of('Travel mug', 'green')?.ref, 'green · ASIN B0SYNCOL10', `${theme}: the color, then the ASIN`);
+      assert.equal(of('Travel mug', 'grey')?.ref, 'grey', `${theme}: eBay without an ID — the color only`);
+      assert.equal(of('Bike light', null)?.ref, null, `${theme}: eBay without an ID and a color — no second line`);
+      assert.equal(of('Desk lamp, large', null)?.ref, 'Walmart ID 70012', `${theme}: Walmart — its ID by the channel name`);
+      // Компактные строки — только цвет: идентификатор прячется, цвет остаётся (без него две «Travel mug» одной площадки не различить)
+      // Вид Offers читается из хранилища при открытии экрана: уход на другой экран и возврат открывают его заново
+      await b.evaluate(`(localStorage.setItem('repracer.products.view', JSON.stringify({ compact: true })), true)`);
+      await go('costs');
+      await go('products');
+      const compact = await b.evaluate<Array<{ variant: boolean; ids: boolean }>>(`[...document.querySelectorAll('table.products tbody tr .product-ref')].map((p) => ({
+        variant: !!p.querySelector('.unit-variant') && p.querySelector('.unit-variant').getBoundingClientRect().height > 0,
+        ids: !!p.querySelector('.channel-ids') && p.querySelector('.channel-ids').getBoundingClientRect().height > 0 }))`);
+      assert.ok(compact.filter((x) => x.variant).length === 10 && compact.every((x) => !x.ids), `${theme}: compact rows keep the color and hide the channel ID — ${JSON.stringify(compact)}`);
+      await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+      // Costs & floors — список границ: цвет второй строкой под названием, кружок у известного слова
+      await go('costs');
+      const bounds = await rows('main table');
+      assert.ok(bounds.length >= 15 && bounds.some((r) => r.variant === 'green' && r.swatch?.w === 10) && bounds.some((r) => r.variant === 'multicolor' && r.swatch === null),
+        `${theme} Costs & floors: the color under the name — ${JSON.stringify(bounds.slice(0, 3))}`);
+      for (const r of bounds) assert.ok(Math.abs(r.chipLeft - r.titleRight - 6) <= 0.5, `${theme} Costs & floors «${r.title}»: 6 px between the name and the chip`);
+    }
+  } finally {
+    currentApi = euApi;
+    await b.setColorScheme(null);
+    await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

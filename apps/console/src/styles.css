@@ -442,7 +442,8 @@ table.products .cell { cursor: help; }
 table.products td.offer, table.products th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--divider); }
 table.products th:first-child { z-index: 3; background: var(--surface-muted); }
 table.products tbody tr:hover td.offer { background: var(--surface-muted); }
-.product-ref { font-size: var(--font-size-xs); color: var(--text-3); margin-top: var(--base-size-2); }
+.product-ref { font-size: var(--font-size-xs); color: var(--text-3); margin-top: var(--base-size-2); font-weight: var(--weight-normal); }
+/* шаг 112: во второй строке Offers — цвет товара, затем идентификатор товара в канале именем канала (ASIN, Walmart ID); разделитель — в тексте */
 /* откуда пол — пояснение переносится, а не раздвигает таблицу */
 td.floor .floor-parts { white-space: normal; min-width: 120px; max-width: 200px; margin-left: auto; }
 /* шаг 79: вид таблицы товаров — выбор колонок (меню) и компактные строки */
@@ -470,7 +471,7 @@ table.products td.channel-says .cell { min-width: 150px; max-width: 180px; }
 table.products td.channel-says .badge { white-space: normal; }
 table.products.with-channel td.strategy { white-space: normal; min-width: 140px; }
 table.products.compact td { padding-top: var(--base-size-6); padding-bottom: var(--base-size-6); }
-table.products.compact .product-ref, table.products.compact .floor-parts, table.products.compact .cell-detail, table.products.compact a.secondary-link { display: none; }
+table.products.compact .product-ref .channel-ids, table.products.compact .product-ref .badge, table.products.compact .floor-parts, table.products.compact .cell-detail, table.products.compact a.secondary-link { display: none; }
 .product-ref .badge { margin-left: var(--space-1); }
 td.strategy .strategy-name { font-weight: var(--weight-medium); }
 /* версии стратегии — строкой на версию, статус пилюлей (шаг 79) */
@@ -547,18 +548,40 @@ h2 .badge, h3 .badge { margin-left: var(--space-2); }
 .tone-stop { color: var(--danger); border-color: var(--danger-line); }
 .tone-off { color: var(--text-2); border-color: var(--border); }
 .tone-unknown { color: var(--text-2); border-color: var(--border); border-style: dashed; }
-/* Шаг 111 [Р-237]: чип площадки — кружок её цвета (палитра display Primer) с буквой из data-letter, короткое имя витрины — приглушённо рядом */
-.storefront-tag { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; vertical-align: middle; }
+/* Шаг 111 [Р-237]: чип площадки с буквой из data-letter, короткое имя витрины — приглушённо рядом. Шаг 112 [Р-238]: чип тихий — подложка
+   muted оттенка Primer и строчная полужирная буква тёмным тоном того же оттенка: таблица на 15 строк не мигает цветом, чип читается
+   вторым взглядом. Имя продукта и чип — через 6 px, по центру строки */
+.unit-name { display: inline-flex; align-items: center; gap: var(--base-size-6); vertical-align: top; }
+.storefront-tag { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .channel-chip {
   display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--space-4); height: var(--space-4); border-radius: 50%;
-  background: var(--chip-other); color: var(--on-emphasis); font-size: var(--font-size-xs); line-height: 1; font-weight: var(--weight-heading);
+  background: var(--chip-other-bg); color: var(--chip-other-fg); font-size: var(--font-size-xs); line-height: 1; font-weight: var(--weight-heading);
 }
 .channel-chip::before { content: attr(data-letter); }
-.channel-chip[data-channel="AMAZON"] { background: var(--chip-amazon); }
-.channel-chip[data-channel="WALMART"] { background: var(--chip-walmart); }
-.channel-chip[data-channel="EBAY"] { background: var(--chip-ebay); }
-.channel-chip[data-channel="KAUFLAND"] { background: var(--chip-kaufland); }
+.channel-chip[data-channel="AMAZON"] { background: var(--chip-amazon-bg); color: var(--chip-amazon-fg); }
+.channel-chip[data-channel="WALMART"] { background: var(--chip-walmart-bg); color: var(--chip-walmart-fg); }
+.channel-chip[data-channel="EBAY"] { background: var(--chip-ebay-bg); color: var(--chip-ebay-fg); }
+.channel-chip[data-channel="KAUFLAND"] { background: var(--chip-kaufland-bg); color: var(--chip-kaufland-fg); }
 .chip-short { font-size: var(--font-size-xs); font-weight: var(--weight-medium); color: var(--text-2); }
+/* Шаг 112 [Р-238]: цвет товара — второй строкой под названием: кружок-образец 10 px (только у известного слова) и слово приглушённо */
+.unit-variant-line { display: block; font-size: var(--font-size-xs); color: var(--text-2); font-weight: var(--weight-normal); margin-top: var(--base-size-2); }
+.unit-variant { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text-2); }
+.swatch {
+  flex: none; width: calc(var(--space-2) + var(--base-size-2)); height: calc(var(--space-2) + var(--base-size-2)); border-radius: 50%;
+  box-shadow: inset 0 0 0 var(--border-width) var(--border);
+}
+.swatch[data-swatch="black"] { background: var(--swatch-black); }
+.swatch[data-swatch="white"] { background: var(--swatch-white); }
+.swatch[data-swatch="grey"] { background: var(--swatch-grey); }
+.swatch[data-swatch="red"] { background: var(--swatch-red); }
+.swatch[data-swatch="green"] { background: var(--swatch-green); }
+.swatch[data-swatch="blue"] { background: var(--swatch-blue); }
+.swatch[data-swatch="yellow"] { background: var(--swatch-yellow); }
+.swatch[data-swatch="orange"] { background: var(--swatch-orange); }
+.swatch[data-swatch="purple"] { background: var(--swatch-purple); }
+.swatch[data-swatch="pink"] { background: var(--swatch-pink); }
+.swatch[data-swatch="brown"] { background: var(--swatch-brown); }
+.swatch[data-swatch="teal"] { background: var(--swatch-teal); }
 .channel-name .storefront-tag + .storefront-tag { margin-left: var(--space-1); }
 /* ход задания — Primer ProgressBar: дорожка и полоса цвета успеха */
 progress { appearance: none; width: 280px; height: var(--space-2); border: 0; border-radius: var(--radius); background: var(--track-bg); overflow: hidden; }

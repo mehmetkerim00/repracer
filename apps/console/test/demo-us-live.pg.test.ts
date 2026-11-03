@@ -275,6 +275,15 @@ test('шаг 89: walmart.com в демо — два предложения сн�
     'GET', `/api/worlds/${w}/products?offset=0&limit=50`, guest)).body;
   const walmart = products.rows.filter((r) => r.unit.label.endsWith('· walmart.com'));
   assert.equal(walmart.length, 12, `предложения walmart.com: ${JSON.stringify(products.rows.map((r) => r.unit.label))}`);
+  /**
+   * Шаг 112 [Р-238]: цвет товара демо — атрибутом, а не словом в названии («Travel mug» и grey, а не «Travel mug, grey»): у amazon.com и
+   * ebay.com цвет у каждого предложения и известный (кружок), в названии цвета нет; у walmart.com в названии размер и цвета нет
+   */
+  const colorWord = /, (black|white|grey|blue|green|red)\b/;
+  const colored = products.rows.filter((r) => !r.unit.label.endsWith('· walmart.com') && !/Clearing|Pour-over|Bamboo/.test(r.unit.name));
+  assert.ok(colored.length >= 20 && colored.every((r) => r.unit.color !== null && r.unit.swatch !== null && !colorWord.test(r.unit.name)),
+    JSON.stringify(colored.slice(0, 4).map((r) => [r.unit.name, r.unit.color])));
+  assert.ok(walmart.every((r) => r.unit.color === null && /, (small|large)$/.test(r.unit.name)), JSON.stringify(walmart.slice(0, 3).map((r) => [r.unit.name, r.unit.color])));
   assert.ok(walmart.every((r) => r.currentPrice.startsWith('$')), 'walmart.com — в долларах');
   const unpublished = walmart.filter((r) => r.channelNotes.some((n) => n.code === 'WALMART_UNPUBLISHED'));
   assert.equal(unpublished.length, 2, `сняты с публикации: ${JSON.stringify(walmart.map((r) => [r.unit.label, r.channelNotes.map((n) => n.code)]))}`);

@@ -135,12 +135,12 @@ interface UsScope { writeScopeId: string; productId: string; channelAccountId: s
  * что это массовая правка (окно Р-135: больше пяти предложений за десять минут): в демо её «сделал» владелец со вторым фактором.
  * `validFrom` — до начала прожатой недели: себестоимость действует на момент каждого решения [Р-131]
  */
-/** Шаг 91: с какого номера синтетического названия товара (`demoTitle`) начинаются предложения каждого канала — у лёгких продавцов свои */
+/** Шаг 91: с какого номера синтетического названия товара (`demoProduct`) начинаются предложения каждого канала — у лёгких продавцов свои */
 export interface DemoTitleOffsets { ebay: number; amazon: number; walmart: number }
 const DEMO_TITLE_OFFSETS: DemoTitleOffsets = { ebay: 20, amazon: 40, walmart: 60 };
 
 async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, titles: DemoTitleOffsets = DEMO_TITLE_OFFSETS): Promise<UsScope[]> {
-  const { demoTitle } = await import('@repracer/contract-tests/live');
+  const { demoProduct } = await import('@repracer/contract-tests/live');
   return inTenant(admin, a.tenantId, async (tx) => {
     const { rows } = await tx.query(
       `SELECT ws.write_scope_id, ws.product_id, ws.channel_account_id, om.marketplace, om.channel_product_ref, om.external_sku
@@ -210,7 +210,9 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
         `INSERT INTO tenant_data.guardrail (tenant_id, scope_type, write_scope_id, min_margin_bp, on_violation, version, created_by_membership_id)
          VALUES ($1, 'WRITE_SCOPE', $2, 1200, 'HOLD', 1, $3)`, [a.tenantId, s.writeScopeId, a.ownerMembershipId]);
       // Шаг 68 (K10): название товара — синтетическое, как у Kaufland демо; обнаружение каталога названий не пишет
-      await tx.query(`UPDATE tenant_data.product SET title = $3 WHERE tenant_id = $1 AND product_id = $2`, [a.tenantId, s.productId, demoTitle(ebay ? titles.ebay + k : walmart ? titles.walmart + k : titles.amazon + k)]);
+      // Шаг 112 [Р-238]: цвет — атрибутом товара, как его задал бы продавец импортом «Product details», а не словом в названии
+      const product = demoProduct(ebay ? titles.ebay + k : walmart ? titles.walmart + k : titles.amazon + k);
+      await tx.query(`UPDATE tenant_data.product SET title = $3, color = $4 WHERE tenant_id = $1 AND product_id = $2`, [a.tenantId, s.productId, product.title, product.color]);
       // Нынешняя цена на витрине — как прочитало бы обнаружение: $19.99 у eBay, $18.50 у amazon.com, у walmart.com — цена модели канала
       await tx.query(
         `INSERT INTO channel_data.observed_channel_state (tenant_id, write_scope_id, field, observed_amount_minor, observed_at, received_at, source, sync_status)

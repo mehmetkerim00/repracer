@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { stalestFirst } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
-  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
-import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
+  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
+import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
@@ -117,6 +117,8 @@ export interface MemorySeedScope {
   productId: string;
   /** Шаг 68 (K10): название товара (синтетическое у демо); SKU товара посева — `seedSkuOf` */
   title?: string;
+  /** Шаг 112 [Р-238]: цвет товара словом продавца — свойство товара, одно у всех его предложений */
+  color?: string | null;
   channelAccountId: string;
   marketplace: string;
   externalUnitId: string;
@@ -1676,7 +1678,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
      * движок включает своё право [Р-143], остальное — право менять цены. Прежде здесь для всех видов стояло право на цены, и менеджер
      * остатков в памяти не мог применить файл остатков, который база ему разрешает
      */
-    const right = input.kind === 'STOCK_IMPORT' || input.kind === 'STOCK_SYNC_ENABLE' ? 'MANAGE_CATALOG'
+    const right = input.kind === 'STOCK_IMPORT' || input.kind === 'STOCK_SYNC_ENABLE' || input.kind === 'PRODUCT_IMPORT' ? 'MANAGE_CATALOG'
       : input.kind === 'REPRICING_ENABLE' ? 'ENABLE_REPRICING' : 'MANAGE_PRICING';
     const candidate = this.member(actor.membershipId);
     const member = readOnly ? candidate : candidate && can(candidate.role, right) ? candidate : null;
@@ -2074,6 +2076,29 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   /**
+   * Шаг 112 [Р-238]: цвет товаров из файла — у всех предложений товара сразу (цвет — свойство товара); форму значения держит, как база
+   * (0209), и пишет его тот, кто ведёт каталог
+   */
+  async importProductDetails(_tenantId: string, input: ProductDetailsImportInput, actor: AdminActor): Promise<ProductDetailsImportResult> {
+    const m = this.member(actor.membershipId);
+    if (!m || m.userId !== actor.userId || !can(m.role, 'MANAGE_CATALOG')) return { status: 'FORBIDDEN' };
+    const rowsOf = (productId: string) => [...this.scopes.values()].filter((r) => r.productId === productId);
+    for (const e of input.expected) {
+      const rows = rowsOf(e.productId);
+      if (rows.length === 0) return { status: 'INVALID', cause: 'PRODUCT_NOT_FOUND', productId: e.productId };
+      if ((rows[0]!.color ?? null) !== e.color) return { status: 'CONFLICT', productId: e.productId };
+    }
+    for (const r of input.rows) {
+      if (rowsOf(r.productId).length === 0) return { status: 'INVALID', cause: 'PRODUCT_NOT_FOUND', productId: r.productId };
+      if (r.color !== null && !PRODUCT_COLOR_FORM.test(r.color)) return { status: 'INVALID', cause: 'COLOR_INVALID', productId: r.productId };
+    }
+    const run = input.run && actor.bulkJobId ? this.appendImportRun(input.run, actor.bulkJobId) : undefined;
+    if (run === 'REFUSED') return { status: 'FORBIDDEN' };
+    for (const r of input.rows) for (const row of rowsOf(r.productId)) row.color = r.color;
+    return { status: 'APPLIED', products: input.rows.length, ...(run ? { run } : {}) };
+  }
+
+  /**
    * Шаг 99 [Р-224]: журнал импортов в памяти повторяет стража базы (0193): строку пишет идущее задание своего вида, автор и длительность —
    * из задания, одна строка на задание. Иначе стенд был бы слабее базы, и регрессия «журнал пишет кто угодно» не видна без PostgreSQL
    */
@@ -2084,7 +2109,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (existing) return existing;
     const job = this.bulkJobs.find((j) => j.jobId === bulkJobId);
     if (!job || job.status !== 'RUNNING' || job.leaseUntil === null || Date.parse(job.leaseUntil) <= this.nowMs()) return 'REFUSED';
-    const applyKind: Partial<Record<BulkJobKind, ImportRunInput['kind']>> = { COST_IMPORT: 'COSTS', STOCK_IMPORT: 'STOCK', BOUNDS_EDIT: 'BOUNDS', STRATEGY_ASSIGN: 'STRATEGY' };
+    const applyKind: Partial<Record<BulkJobKind, ImportRunInput['kind']>> = { COST_IMPORT: 'COSTS', STOCK_IMPORT: 'STOCK', BOUNDS_EDIT: 'BOUNDS', STRATEGY_ASSIGN: 'STRATEGY', PRODUCT_IMPORT: 'PRODUCTS' };
     const matches = (job.kind === 'IMPORT_CHECK' && run.outcome === 'CHECKED' && (job.params as { importKind?: unknown }).importKind === run.kind)
       || ((run.outcome === 'APPLIED' || run.outcome === 'REFUSED') && 'checkJobId' in job.params && applyKind[job.kind] === run.kind);
     if (!matches) return 'REFUSED';
@@ -2504,7 +2529,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         const halt = this.activeHalt(s.channelAccountId, s.marketplace);
         const stop = this.activeStop(s.channelAccountId, s.marketplace);
         return {
-          writeScopeId: s.writeScopeId, productId: s.productId, sku: seedSkuOf(s), title: s.title ?? null, channelAccountId: s.channelAccountId, marketplace: s.marketplace, externalUnitId: s.externalUnitId,
+          writeScopeId: s.writeScopeId, productId: s.productId, sku: seedSkuOf(s), title: s.title ?? null, color: s.color ?? null, channelAccountId: s.channelAccountId, marketplace: s.marketplace, externalUnitId: s.externalUnitId,
           channelProductRef: s.channelProductRef, condition: s.condition, gtin: s.gtin ?? null, currency: s.currency, basis: s.basis, taxRegime: s.taxRegime,
           pricingMode: s.pricingMode, status: s.status, strategy: s.strategy, currentPriceMinor: s.currentPriceMinor, bounds: this.boundsOf(s),
           cost: s.cost ?? null, minMarginBp: s.guardrails?.minMarginBp ?? null,

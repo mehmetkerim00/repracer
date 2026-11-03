@@ -1309,7 +1309,9 @@ export const en = {
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart hides this offer because the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''}. To show it again, bring the walmart.com price close to that price — only if your floor allows. TMPrice never changes the price for this on its own.`,
       conditions: { used: 'used', refurbished: 'refurbished', collectible: 'collectible' }, viewOptions: { columns: 'Columns', compact: 'Compact rows' },
       productRef: (ref: string, condition: string, gtin: string | null) => `product ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
-      productId: (ref: string, gtin: string | null) => `product ${ref}${gtin ? ` · EAN ${gtin}` : ''}`,
+      // Шаг 112 [Р-238]: идентификатор товара в канале — именем канала (у Amazon — ASIN), а не словом «product»; пустой — не показывается.
+      // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
+      productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'Walmart ID', EBAY: 'eBay ID', KAUFLAND: 'Kaufland ID' } as Record<string, string>)[channel] ?? 'Product ID'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'competitor data',
       why: 'Why this price', bounds: 'Bounds and floor', noDecisions: 'no decisions yet', enable: 'Enable',
       floorNoMin: 'Minimum price is not set',
@@ -1691,14 +1693,14 @@ export const en = {
     },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
-      links: { title: 'Start a bulk change', bounds: 'Set minimum & maximum price for many offers', strategies: 'Assign a strategy to many offers', costs: 'Import unit costs' },
+      links: { title: 'Start a bulk change', bounds: 'Set minimum & maximum price for many offers', strategies: 'Assign a strategy to many offers', costs: 'Import unit costs', products: 'Import product details (color)' },
       pageTitle: 'Bulk operations', back: '← Offers', historyTitle: 'Past operations', none: 'No bulk operations yet. They appear here when you import unit costs, change the bounds of many offers or assign a strategy to many offers.',
       kinds: {
         COST_IMPORT: 'Import unit costs', REPRICING_ENABLE: 'Enable repricing', STOCK_IMPORT: 'Import stock', STOCK_SYNC_ENABLE: 'Enable stock synchronization', BOUNDS_EDIT: 'Change bounds', BOUNDS_PLAN: 'Compute the bounds differences',
         STRATEGY_ASSIGN: 'Assign strategy', STRATEGY_PREVIEW: 'Preview strategy', PRICE_EVIDENCE: 'Export price evidence',
         PRICE_FEED_EXPORT: 'Export the price feed',
         SCREEN_EXPORT: 'Export a screen',
-        IMPORT_TEMPLATE: 'Build an import template', IMPORT_CHECK: 'Check an import file',
+        IMPORT_TEMPLATE: 'Build an import template', IMPORT_CHECK: 'Check an import file', PRODUCT_IMPORT: 'Import product details',
       },
       queued: 'Queued — the operation starts shortly.',
       preparing: (done: number, total: number | null) => (total === null ? 'Preparing…' : `Preparing: ${done} of ${total}`),
@@ -1792,12 +1794,13 @@ export const en = {
      * колонок файла — английские во всех языках (их читает разбор); пояснение в файле — на языке пространства
      */
     imports: {
-      titles: { COSTS: 'Import unit costs', STOCK: 'Import stock', BOUNDS: 'Import minimum & maximum prices', STRATEGY: 'Import strategy assignments' },
+      titles: { COSTS: 'Import unit costs', STOCK: 'Import stock', BOUNDS: 'Import minimum & maximum prices', STRATEGY: 'Import strategy assignments', PRODUCTS: 'Import product details' },
       intros: {
         COSTS: 'Download the template with your current unit costs, change what you need and upload it. You see every change before anything is applied.',
         STOCK: 'Download the template with the quantities of this stock source, change what you need and upload it. You see every change before anything is applied.',
         BOUNDS: 'Download the template with your current minimum and maximum prices and minimum margins, change what you need and upload it.',
         STRATEGY: 'Download the template with the strategy of every offer, write the strategy you want and upload it. You see every change before anything is applied.',
+        PRODUCTS: 'Download the template with the color of every product, write the color you want and upload it. You see every change before anything is applied.',
       },
       templateCsv: 'Download template (CSV)', templateXlsx: 'Download template (XLSX)',
       templateCaption: 'The template already holds your current values: edit only the cells you want to change.',
@@ -1831,7 +1834,7 @@ export const en = {
       noStockSource: 'Add a stock source kept in TMPrice first — the file goes into it.',
       fields: {
         sku: 'SKU', storefront: 'Storefront', title: 'Title', unit_cost: 'Unit cost', currency: 'Currency', fee_percent: 'Channel fee, %', fixed_fee: 'Fixed fee',
-        quantity: 'Quantity', min_price: 'Minimum price', max_price: 'Maximum price', min_margin_percent: 'Minimum margin, %', strategy: 'Strategy',
+        quantity: 'Quantity', min_price: 'Minimum price', max_price: 'Maximum price', min_margin_percent: 'Minimum margin, %', strategy: 'Strategy', color: 'Color',
       },
       problems: {
         KEY_EMPTY: 'no SKU in the row',
@@ -1859,6 +1862,7 @@ export const en = {
         STRATEGY_NOT_ACTIVE: 'the strategy has no active version',
         STRATEGY_UNAVAILABLE: (why: string) => `the channel does not give the data this strategy needs: ${why}`,
         CHANNEL_PRICING: 'the channel prices this offer itself — TMPrice does not assign a strategy',
+        COLOR_INVALID: 'the color must be a word of at most 40 characters, without line breaks',
       },
       notes: {
         COSTS: [
@@ -1883,8 +1887,13 @@ export const en = {
           'If repricing is on for an offer, its next price decision uses the new strategy.',
           'Rows that start with # are ignored. Upload the file, check it, then apply: a single row with an error stops the whole import.',
         ],
+        PRODUCTS: [
+          'How to fill in: one row per product. Write the color of the product as a word (e.g. grey); leave the cell empty to keep the current color, write - to remove it.',
+          'The color appears under the product name. Common color words (black, white, grey, red, green, blue…) also get a sample circle; any other word is shown as text.',
+          'Rows that start with # are ignored. Upload the file, check it, then apply: a single row with an error stops the whole import.',
+        ],
       },
-      exampleKey: 'example: ABC-123', exampleTitle: 'Garden hose, 15 m', exampleStrategy: 'Beat the lowest price',
+      exampleKey: 'example: ABC-123', exampleTitle: 'Garden hose, 15 m', exampleStrategy: 'Beat the lowest price', exampleColor: 'grey',
       sheets: { data: 'Data', help: 'Help' },
       historyTitle: 'Import history', historyEmpty: 'No imports yet.',
       historyColumns: { when: 'When', who: 'Who', outcome: 'Result', file: 'File', rows: 'Rows', time: 'Time' },

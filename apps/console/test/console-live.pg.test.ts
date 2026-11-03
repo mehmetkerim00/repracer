@@ -503,7 +503,7 @@ test('Р-142: отчёт об импорте и выгрузка ленты це
   const feedByLink = await browserNavigate(api('jobs', `${feedJob.jobId}/artifact`));
   assert.equal(feedByLink.status, 401, 'выгрузка ленты по ссылке без заголовка не отдаётся');
   const feedFile = await consoleDownload('exports (скачивание клиентом консоли)', api('jobs', `${feedJob.jobId}/artifact`));
-  assert.equal(feedFile.text.trim().split('\n')[0], 'time,write_id,decision_id,channel,storefront,sku,offer,price_from,price_to,currency,change_percent,status,source,reason');
+  assert.equal(feedFile.text.trim().split('\n')[0], 'time,write_id,decision_id,channel,storefront,sku,offer,color,price_from,price_to,currency,change_percent,status,source,reason');
   assert.match(feedFile.fileName, /-price-changes-all_\d{4}-\d{2}-\d{2}\.csv$/, 'имя файла говорит о рабочем пространстве, экране и периоде');
 });
 

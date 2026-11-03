@@ -4,6 +4,7 @@ import type {
 } from '@repracer/pricing-pipeline';
 import type { MemberRole } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
+import { swatchOf, type Swatch } from './color.ts';
 
 /**
  * Мир для экранов [Р-67]: состояние хранилища через порт PricingStore.readConsoleState — одинаково в памяти и на PostgreSQL.
@@ -117,6 +118,12 @@ export interface UnitRef {
   /** Шаг 111 [Р-237]: имя продукта без витрины — в таблицах и списках рядом с чипом витрины */
   name: string;
   storefront: StorefrontChip;
+  /**
+   * Шаг 112 [Р-238]: цвет товара словом продавца (импорт «Product details») — второй строкой под названием; кружок-образец — только у
+   * известного слова (`swatch`), незнакомое — только текстом. В подписи `label` цвета нет: выгрузки несут его своей колонкой
+   */
+  color: string | null;
+  swatch: Swatch | null;
 }
 
 /**
@@ -153,6 +160,7 @@ export function unitOf(world: StandWorld, scope: ConsoleScope, m: Messages): Uni
     writeScopeId: scope.writeScopeId, channel, marketplace: scope.marketplace, externalUnitId: scope.externalUnitId,
     channelProductRef: scope.channelProductRef, condition: scope.condition, gtin: scope.gtin,
     label: m.ui.common.unitLabel(name, storefront.full), name, storefront,
+    color: scope.color ?? null, swatch: swatchOf(scope.color),
   };
 }
 

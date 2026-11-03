@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { CHIP_PLATFORMS, chipProblems, type ChipTheme } from './chip-quiet.ts';
 
 /**
  * Шаг 83: правило «ничего не изобретать» [Р-146]. Облик консоли берёт каждое значение из дизайн-системы GitHub Primer
@@ -306,4 +307,55 @@ test('step 96: menu icons are Octicons, verbatim from @primer/octicons, and ever
   const twice = new Map(found.menu);
   twice.set('stop', 'eye');
   assert.match(iconProblems({ ...found, menu: twice }, data).join(' | '), /share the icon eye/);
+});
+
+/**
+ * Шаг 112 [Р-238]: чипы площадок — тихие. Критерий владельца «на 15 строках таблица не мигает цветом, чип читается вторым взглядом» —
+ * числами в каждой теме (светлая, системная тёмная, ручная тёмная): подложка чипа почти не отличается от фона строки (контраст с
+ * `--surface` не больше 1,3), буква на подложке читается (контраст не меньше 4,5 — WCAG AA мелкого текста); цвет чипа далёк от цвета
+ * ошибок (ΔE76 с `--danger` не меньше 25) и чипы различимы между собой (попарно ΔE76 не меньше 15). eBay — не из красных оттенков
+ * Primer: red совпадает с цветом ошибок, а coral в тёмной теме — тот же red
+ */
+function chipThemes(tokensCss: string): Record<string, ChipTheme> {
+  const blockOf = (open: RegExp): string => {
+    const m = open.exec(tokensCss);
+    if (!m) return '';
+    let depth = 0;
+    for (let i = m.index + m[0].length - 1; i < tokensCss.length; i++) {
+      if (tokensCss[i] === '{') depth++;
+      if (tokensCss[i] === '}' && --depth === 0) return tokensCss.slice(m.index, i + 1);
+    }
+    return '';
+  };
+  const themeOf = (block: string): ChipTheme => {
+    const value = new Map([...block.matchAll(/(--[A-Za-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;(?:\s*\/\*\s*primer(?:-dark)?:\s*(--[A-Za-z0-9-]+))?/g)].map((m) => [m[1]!, { hex: m[2]!.toLowerCase(), source: m[3] ?? '' }]));
+    const hex = (name: string) => value.get(name)?.hex ?? '#000000';
+    return {
+      surface: hex('--surface'), danger: hex('--danger'),
+      chips: Object.fromEntries(CHIP_PLATFORMS.map((p) => [p, { bg: hex(`--chip-${p}-bg`), fg: hex(`--chip-${p}-fg`), sources: [value.get(`--chip-${p}-bg`)?.source ?? '', value.get(`--chip-${p}-fg`)?.source ?? ''] }])),
+    };
+  };
+  return { light: themeOf(blockOf(/^:root \{/m)), 'system dark': themeOf(blockOf(/@media \(prefers-color-scheme: dark\) \{/)), 'manual dark': themeOf(blockOf(/^:root\[data-theme="dark"\] \{/m)) };
+}
+
+test('step 112 [Р-238]: platform chips are quiet in every theme — a soft tint, a readable letter, far from the error color, distinct from each other', () => {
+  const themes = chipThemes(readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8'));
+  for (const [name, t] of Object.entries(themes)) {
+    assert.equal(Object.values(t.chips).filter((c) => c.bg !== '#000000' && c.fg !== '#000000').length, 5, `${name}: every platform has a tint and a letter`);
+    assert.deepEqual(chipProblems(name, t), []);
+  }
+  // Красное сначала [Р-94]: чипы шага 111 — сплошной круг emphasis с белой буквой — громкие, а красный eBay читается как ошибка
+  const step111: ChipTheme = { surface: '#ffffff', danger: '#d1242f', chips: {
+    amazon: { bg: '#b8500f', fg: '#ffffff', sources: ['--display-orange-bgColor-emphasis'] }, walmart: { bg: '#006edb', fg: '#ffffff', sources: ['--display-blue-bgColor-emphasis'] },
+    ebay: { bg: '#df0c24', fg: '#ffffff', sources: ['--display-red-bgColor-emphasis'] }, kaufland: { bg: '#9d615c', fg: '#ffffff', sources: ['--display-auburn-bgColor-emphasis'] },
+  } };
+  const old = chipProblems('step 111', step111);
+  for (const p of ['amazon', 'walmart', 'ebay', 'kaufland']) assert.ok(old.some((x) => x.startsWith(`step 111 ${p}: loud`)), `${p}: ${old.join(' | ')}`);
+  assert.ok(old.some((x) => /step 111 ebay: reads as an error/.test(x)) && old.some((x) => /ebay: a red family/.test(x)), old.join(' | '));
+  // Тихий coral у eBay в тёмной теме — тот же red: правило видит его по источнику, даже когда ΔE ещё проходит
+  const coral = { ...themes['manual dark']!, chips: { ...themes['manual dark']!.chips, ebay: { bg: '#3c0614', fg: '#f27d83', sources: ['--display-coral-bgColor-muted', '--display-coral-fgColor'] } } };
+  assert.deepEqual(chipProblems('dark', coral), ['dark ebay: a red family of Primer — the color of errors (coral is red in the dark theme)']);
+  // Белая буква на тихой подложке не читается; одинаковые чипы двух площадок не различить
+  assert.match(chipProblems('x', { ...themes.light!, chips: { amazon: { bg: '#ffe7d1', fg: '#ffffff', sources: [] } } }).join(), /amazon: the letter is hard to read/);
+  assert.match(chipProblems('x', { ...themes.light!, chips: { a: themes.light!.chips.ebay!, b: themes.light!.chips.ebay! } }).join(), /a and b: hard to tell apart/);
 });

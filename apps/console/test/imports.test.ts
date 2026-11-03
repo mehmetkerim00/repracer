@@ -249,3 +249,54 @@ test('step 99: an import apply in its one transaction is shown as busy — a spi
   assert.equal(job({ status: 'SUCCEEDED', phase: 'APPLYING', doneItems: 10_000 }).indeterminate, false);
   assert.equal(job({ status: 'PENDING', phase: null }).indeterminate, false, 'a queued job is not «applying»');
 });
+
+/**
+ * Шаг 112 [Р-238]: импорт «Product details» — цвет товара. Тем же путём, что прочие импорты: шаблон со строкой на товар и его нынешним
+ * цветом, примерка, применение ровно примерки — без второго фактора (цвет забор не двигает) и правом каталога. После применения Offers
+ * показывает цвет у предложения, выгрузка Offers несёт его колонкой `color` словом; «-» снимает цвет; изменение после примерки — отказ.
+ * Красное сначала: до шага вида импорта PRODUCTS не было — маршрут отвечал 400 BAD_REQUEST
+ */
+test('step 112 [Р-238]: Product details — the template per product, check and apply without a second factor; Offers and the Offers file carry the color', async () => {
+  const owner = await login('OWNER');
+  const { file } = await template(owner, 'PRODUCTS', 'csv');
+  assert.match(file.fileName, /^product-details-template\.csv$/);
+  const table = readTable(Buffer.from(String(file.content)));
+  assert.deepEqual(table.rows[0], ['sku', 'title', 'color']);
+  const data = importDataRows(table).map((r) => [...r.cells]);
+  const products = (await live().store.readConsoleState(live().tenantId, live().clock.iso() as never)).scopes;
+  assert.equal(data.length, new Set(products.map((s) => s.productId)).size, 'a row per product, not per offer');
+  assert.ok(data.every((r) => r[2] === ''), 'no color yet');
+  // Два товара получают цвет: известное слово и незнакомое
+  data[0]![2] = 'grey';
+  data[1]![2] = 'multicolor';
+  const checked = await check(owner, 'PRODUCTS', b64([table.rows[0]!, ...data].map((r) => r.join(',')).join('\n')));
+  assert.deepEqual([checked.view.counts.changed, checked.view.counts.rejected], [2, 0], JSON.stringify(checked.view.errors));
+  assert.equal(checked.view.mfaRequired, false, 'the color does not move the fence — no second factor');
+  assert.equal(checked.view.changes[0]!.field, messagesFor('en').ui.imports.fields.color);
+  const done = await job(await apply(owner, 'PRODUCTS', checked));
+  assert.equal(done.status, 'SUCCEEDED', done.error ?? '');
+  assert.match(done.headline, /^Done: 2 rows applied in \d+(\.\d)? s\.$/);
+  assert.equal((await history(owner, 'PRODUCTS')).items[0]!.outcome, messagesFor('en').ui.imports.outcomes.APPLIED);
+  // Offers: у предложений товара — цвет и образец; подпись — без цвета
+  const offers = ((await call(owner, 'GET', api('products'))).body as ProductListView).rows;
+  const grey = offers.find((r) => r.unit.color === 'grey')!;
+  assert.deepEqual([grey.unit.swatch, grey.unit.label.includes('grey')], ['grey', false]);
+  assert.equal(offers.find((r) => r.unit.color === 'multicolor')!.unit.swatch, null, 'an unknown word — no sample');
+  // Выгрузка Offers — колонка color словом сразу после offer
+  const exported = await job(await call(owner, 'POST', api('exports'), { screen: 'offers', format: 'csv', query: {} }));
+  assert.equal(exported.status, 'SUCCEEDED', exported.error ?? '');
+  const csv = readTable(Buffer.from(String(((await call(owner, 'GET', api('jobs', exported.jobId, 'artifact'))) as unknown as { file: { content: string } }).file.content)));
+  const header = csv.rows[0]!;
+  assert.equal(header[header.indexOf('offer') + 1], 'color');
+  const colorOf = new Map(csv.rows.slice(1).map((r) => [r[header.indexOf('write_scope_id')], r[header.indexOf('color')]]));
+  assert.equal(colorOf.get(grey.unit.writeScopeId), 'grey');
+  // «-» снимает цвет; цвет, изменившийся после примерки, — отказ DATA_CHANGED, ничего не применено
+  const clear = await check(owner, 'PRODUCTS', b64(['sku,color', `${data[0]![0]},-`].join('\n')));
+  assert.deepEqual(clear.view.changes.map((c) => [c.from, c.to]), [['grey', '']]);
+  const meanwhile = await check(owner, 'PRODUCTS', b64(['sku,color', `${data[0]![0]},black`].join('\n')));
+  assert.equal((await job(await apply(owner, 'PRODUCTS', meanwhile))).status, 'SUCCEEDED');
+  const stale = await job(await apply(owner, 'PRODUCTS', clear));
+  assert.deepEqual([stale.status, stale.error], ['FAILED', messagesFor('en').ui.jobs.errors.DATA_CHANGED]);
+  const after = ((await call(owner, 'GET', api('products'))).body as ProductListView).rows.find((r) => r.unit.writeScopeId === grey.unit.writeScopeId)!;
+  assert.deepEqual([after.unit.color, after.unit.swatch], ['black', 'black'], 'the stale check overwrote nothing');
+});

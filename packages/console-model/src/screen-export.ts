@@ -46,21 +46,21 @@ export const EXPORT_SCREEN_TITLES: Readonly<Record<ExportScreen, string>> = {
   'prevented-by-rules': 'Protections — prevented by rules', offers: 'Offers', 'offer-competitors': 'Offers — competitors of the last snapshot', inventory: 'Inventory', imports: 'Import history', 'audit-log': 'Stop pricing — audit log',
 };
 
-const PROTECTION_HEADER = ['time', 'section', 'kind', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'price_was', 'price_wanted', 'price_set', 'bound',
+const PROTECTION_HEADER = ['time', 'section', 'kind', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'color', 'price_was', 'price_wanted', 'price_set', 'bound',
   'currency', 'beyond_bound_percent', 'reason_code', 'reason'] as const;
 
 /** Заголовки колонок по экранам — английские всегда (свойство держит тест на экранах ES и FR) */
 export const EXPORT_HEADERS: Readonly<Record<ExportScreen, readonly string[]>> = {
-  'price-changes': ['time', 'write_id', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'price_from', 'price_to', 'currency', 'change_percent', 'status', 'source', 'reason'],
-  decisions: ['time', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'outcome', 'price', 'currency', 'reason'],
+  'price-changes': ['time', 'write_id', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'color', 'price_from', 'price_to', 'currency', 'change_percent', 'status', 'source', 'reason'],
+  decisions: ['time', 'decision_id', 'channel', 'storefront', 'sku', 'offer', 'color', 'outcome', 'price', 'currency', 'reason'],
   'stopped-by-people': PROTECTION_HEADER,
   'prevented-by-rules': PROTECTION_HEADER,
-  offers: ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'current_price', 'floor', 'floor_source', 'min_price', 'max_price', 'currency', 'strategy', 'repricing'],
+  offers: ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'color', 'current_price', 'floor', 'floor_source', 'min_price', 'max_price', 'currency', 'strategy', 'repricing'],
   // Шаг 105 [Р-230]: конкуренты последнего снимка по каждому показанному предложению — строки страницы Competition; шаг 107 [Р-232]:
   // страница продавца — только из идентификатора канала, иначе пусто
-  'offer-competitors': ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'snapshot_at', 'rank', 'seller', 'seller_url', 'is_you', 'holds_buy_box', 'landed_price', 'price',
+  'offer-competitors': ['write_scope_id', 'channel', 'storefront', 'sku', 'offer', 'color', 'snapshot_at', 'rank', 'seller', 'seller_url', 'is_you', 'holds_buy_box', 'landed_price', 'price',
     'shipping', 'currency', 'fulfilment'],
-  inventory: ['product_id', 'sku', 'product', 'gtin', 'on_hand', 'reserved', 'available', 'channel_managed', 'channels'],
+  inventory: ['product_id', 'sku', 'product', 'color', 'gtin', 'on_hand', 'reserved', 'available', 'channel_managed', 'channels'],
   imports: ['time', 'import_run_id', 'import', 'outcome', 'reason_code', 'reason', 'file', 'file_sha256', 'rows_total', 'rows_changed', 'rows_unchanged',
     'rows_rejected', 'duration_seconds', 'by'],
   'audit-log': ['time', 'event_id', 'action', 'action_text', 'actor', 'subject', 'note', 'detail'],
@@ -143,10 +143,13 @@ export function changePercent(from: number | null, to: number | null): string {
 /** Базисные пункты → проценты числом: 1250 → «12.5» */
 const percentOfBp = (bp: number | null | undefined) => (bp === null || bp === undefined ? '' : (bp / 100).toFixed(bp % 100 === 0 ? 0 : bp % 10 === 0 ? 1 : 2));
 
-/** Канал словом, витрина словом, SKU и подпись предложения — как на экране */
+/**
+ * Канал словом, витрина словом, SKU, подпись предложения — как на экране — и цвет товара словом (шаг 112 [Р-238]: своей колонкой, без
+ * кружков; в подписи цвета нет)
+ */
 function unitCells(unit: UnitRef | null, m: Messages): string[] {
-  if (!unit) return ['', '', '', ''];
-  return [(m.values as Record<string, string | undefined>)[unit.channel] ?? unit.channel, storefrontName(unit.channel, unit.marketplace, m), unit.externalUnitId, unit.label];
+  if (!unit) return ['', '', '', '', ''];
+  return [(m.values as Record<string, string | undefined>)[unit.channel] ?? unit.channel, storefrontName(unit.channel, unit.marketplace, m), unit.externalUnitId, unit.label, unit.color ?? ''];
 }
 
 // ------------------------------------------------------------------------------------------------- строки экранов
@@ -240,7 +243,7 @@ export function competitorExportRows(m: Messages, timeZone: string | null,
 /** Inventory — товары страницы остатков в её порядке; по каналу — витрины, посчитанное к публикации, отправленное и подтверждённое */
 export function stockExportRows(m: Messages, items: readonly StockRow[]): string[][] {
   return items.map((r) => [
-    r.productId, r.sku, r.title ?? '', r.gtin ?? '', String(r.onHand), String(r.reserved), String(r.available),
+    r.productId, r.sku, r.title ?? '', r.color ?? '', r.gtin ?? '', String(r.onHand), String(r.reserved), String(r.available),
     String((r.channelManaged ?? []).reduce((sum, c) => sum + c.quantity, 0)),
     r.channels.map((c) => `${c.marketplaces.map((mk) => storefrontName(c.channel, mk, m)).join('+')}: published ${c.published}, sent ${c.sent?.quantity ?? '-'}, confirmed ${c.confirmed?.quantity ?? '-'}`).join('; '),
   ]);

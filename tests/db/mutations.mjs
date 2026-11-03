@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0208_verify_schema_invariants_v59.sql';
+const VERIFY = 'migrations/0210_verify_schema_invariants_v60.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2933,6 +2933,29 @@ export const STEP109_ROWS = [
         node(R109, C109, ['a coupon as text is refused', 'a coupon with a fraction of a cent is refused'], 'resolved')),
       m(replaceInFunction('channel_data.competitor_view_valid(jsonb)', "THEN (o ->> 'couponMinor')::numeric >= (o ->> 'priceMinor')::numeric ELSE false END)", 'THEN false ELSE false END)'),
         node(R109, C109, ['a coupon not below the price is refused', 'a coupon above the price is refused'], 'resolved')),
+    ],
+  },
+];
+
+/**
+ * Шаг 112 [Р-238]: цвет товара (0209) — форма значения; применение импорта «Product details» (задание PRODUCT_IMPORT) пишет в журнал
+ * импортов только строку своего вида; право на вид задания — каталог (правило 14е)
+ */
+const R112 = T('product-details-step112.pg.test.ts');
+const C112 = 'step 112 [Р-238]: the database keeps the form of a product color';
+const J112 = 'step 112 [Р-238]: a Product details apply writes only a PRODUCTS run';
+export const STEP112_ROWS = [
+  {
+    row: 'шаг 112 (Р-238)', critical: false,
+    invariant: 'цвет товара — слово продавца без пробелов по краям и двойных, без управляющих знаков, 1–40 знаков, «нет цвета» — NULL; применение импорта «Product details» пишет в журнал импортов только строку вида PRODUCTS; у вида задания PRODUCT_IMPORT есть право на отмену, известное матрице',
+    mutations: [
+      m(dropConstraint('product_color_form', 'tenant_data.product'),
+        node(R112, C112, ['a color with spaces around is refused', 'a color with a double space is refused', 'a color with a line break is refused',
+          'a color longer than 40 characters is refused', 'an empty color is refused — no color is NULL'], '^accepted$')),
+      m(replaceInFunction('tenant_data.import_run_from_its_job()', "WHEN 'PRODUCT_IMPORT' THEN 'PRODUCTS'", "WHEN 'PRODUCT_IMPORT' THEN NEW.kind"),
+        node(R112, J112, 'a Product details apply writes no unit-cost run', '^accepted$')),
+      m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'PRODUCT_IMPORT' THEN 'MANAGE_CATALOG'", "WHEN p_kind = 'PRODUCT_IMPORT' THEN 'NO_SUCH_RIGHT'"),
+        verify('bulk job kind PRODUCT_IMPORT has no cancel right known to the permission matrix')),
     ],
   },
 ];

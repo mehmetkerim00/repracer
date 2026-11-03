@@ -94,7 +94,7 @@ export { IMPORT_KINDS, XLSX_CONTENT_TYPE } from './store.ts';
 export { ladderSteps } from '@repracer/strategy-engine';
 export type { ClearanceRef, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceInvalidCause, ClearanceChangeRow, ClearanceState, ClearanceEnded } from './store.ts';
 export type { DefaultRuleReason, StrategyAssignmentRef, DefaultStrategyRow, DefaultStrategyResult } from './store.ts';
-export type { ImportKind, ImportRunOutcome, ImportRunInput, ImportRunRow, BoundsImportRowInput, BoundsImportResult, StrategiesImportInput, StrategiesImportResult } from './store.ts';
+export type { ImportKind, ImportRunOutcome, ImportRunInput, ImportRunRow, BoundsImportRowInput, BoundsImportResult, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult } from './store.ts';
 // Шаг 34 [Р-149, Р-150]: онбординг и честное состояние канала
 export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, OnboardingStep, OnboardingPath, ChannelAccountRow, ChannelAccessBlocker, ChannelAuthStatus } from './store.ts';
 export { ONBOARDING_STOCK_STEPS, ONBOARDING_PRICING_STEPS, onboardingStepsOf } from './store.ts';

@@ -576,7 +576,9 @@ const SAME_AS_ENGLISH: Readonly<Record<'es' | 'fr', readonly string[]>> = {
   es: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Demo', 'Deutsch', 'English', 'Español', 'Français',
     'tmprice', 'TMPrice', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com',
     // Шаг 99: код SKU — как в глоссарии, во всех языках; шаг 104: форматы файла
-    'SKU', 'CSV', 'XLSX'],
+    'SKU', 'CSV', 'XLSX',
+    // Шаг 112 [Р-238]: «Color» — испанское слово, которое пишется так же (колонка импорта «Product details»)
+    'Color'],
   fr: ['Price Gate', 'Kaufland', 'Amazon', 'eBay', 'Otto', 'Walmart', 'Kaufland Smart Pricing', 'Deutsch', 'English', 'Español', 'Français',
     'tmprice', 'TMPrice', 'Omnibus', 'Ad', 'Op', 'Buy Box', 'amazon.de', 'amazon.com', 'ebay.de', 'ebay.com', 'walmart.com', 'SKU', 'CSV', 'XLSX',
     // Французские слова, которые пишутся так же

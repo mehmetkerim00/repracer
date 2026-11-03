@@ -25,6 +25,8 @@ export interface LiveProduct {
   idProduct: number;
   /** Шаг 68 (K10): название товара (синтетическое) — подпись предложения на экране */
   title?: string;
+  /** Шаг 112 [Р-238]: цвет товара словом продавца — атрибутом, а не в названии */
+  color?: string | null;
   marketplace: string;
   behaviour: CompetitorBehaviour;
   /** Цена конкурента в начале, по умолчанию 18,00 */
@@ -92,14 +94,14 @@ function scopeOf(p: LiveProduct, account: string): MemorySeedScope {
   const id = String(p.idProduct);
   if (p.bare) {
     return {
-      writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, ...(p.title ? { title: p.title } : {}), channelAccountId: account, marketplace: p.marketplace,
+      writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, ...(p.title ? { title: p.title } : {}), ...(p.color ? { color: p.color } : {}), channelAccountId: account, marketplace: p.marketplace,
       // Шаг 35: id_offer — ключ единицы ОСТАТКА у Kaufland [Р-35]; тот же, что у единицы симулятора
       externalUnitId: id.slice(-6), externalOfferId: `SYN-OFFER-${id}`, channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: 'OFF', strategy: null,
       currentPriceMinor: 1850, minPrice: null, maxPrice: null,
     } as MemorySeedScope;
   }
   return {
-    writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, ...(p.title ? { title: p.title } : {}), channelAccountId: account, marketplace: p.marketplace,
+    writeScopeId: `ws-${p.marketplace}-${id}`, productId: `prod-${p.marketplace}-${id}`, ...(p.title ? { title: p.title } : {}), ...(p.color ? { color: p.color } : {}), channelAccountId: account, marketplace: p.marketplace,
     externalUnitId: id.slice(-6), externalOfferId: `SYN-OFFER-${id}`, channelProductRef: id, condition: 'new', currency: 'EUR', basis: 'GROSS', pricingMode: p.pricingMode ?? 'OFF',
     strategy: p.pricingMode !== 'ENGINE' ? null : p.strategy?.definition ?? { strategyId: 'st-buybox', version: 1, params: { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' }, deadbandMinor: 0 },
     // Шаг 78: человеку — имя, а не идентификатор сценария «st-buybox»

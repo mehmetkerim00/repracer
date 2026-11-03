@@ -1255,7 +1255,9 @@ export const de: Messages = {
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. TMPrice ändert den Preis dafür nie von sich aus.`,
       conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten', compact: 'Kompakte Zeilen' },
       productRef: (ref: string, condition: string, gtin: string | null) => `Produkt ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
-      productId: (ref: string, gtin: string | null) => `Produkt ${ref}${gtin ? ` · EAN ${gtin}` : ''}`,
+      // Шаг 112 [Р-238]: идентификатор товара в канале — именем канала (у Amazon — ASIN), а не словом «product»; пустой — не показывается.
+      // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
+      productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'Walmart-ID', EBAY: 'eBay-ID', KAUFLAND: 'Kaufland-ID' } as Record<string, string>)[channel] ?? 'Produkt-ID'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'Wettbewerbsdaten',
       why: 'Warum dieser Preis', bounds: 'Grenzen und Untergrenze', noDecisions: 'noch keine Entscheidungen', enable: 'Aktivieren',
       floorNoMin: 'Mindestpreis ist nicht gesetzt',
@@ -1634,14 +1636,14 @@ export const de: Messages = {
       empty: 'Nichts zu exportieren: der Bildschirm zeigt keine Zeilen.',
     },
     jobs: {
-      links: { title: 'Eine Massenänderung beginnen', bounds: 'Mindest- und Höchstpreis für viele Angebote festlegen', strategies: 'Vielen Angeboten eine Strategie zuweisen', costs: 'Stückkosten importieren' },
+      links: { title: 'Eine Massenänderung beginnen', bounds: 'Mindest- und Höchstpreis für viele Angebote festlegen', strategies: 'Vielen Angeboten eine Strategie zuweisen', costs: 'Stückkosten importieren', products: 'Produktdetails importieren (Farbe)' },
       pageTitle: 'Massenvorgänge', back: '← Angebote', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge. Sie erscheinen hier, wenn Sie Stückkosten importieren, die Grenzen vieler Angebote ändern oder vielen Angeboten eine Strategie zuweisen.',
       kinds: {
         COST_IMPORT: 'Stückkosten importieren', REPRICING_ENABLE: 'Repricing einschalten', STOCK_IMPORT: 'Bestand importieren', STOCK_SYNC_ENABLE: 'Bestandsabgleich einschalten', BOUNDS_EDIT: 'Grenzen ändern', BOUNDS_PLAN: 'Unterschiede der Grenzen rechnen',
         STRATEGY_ASSIGN: 'Strategie zuweisen', STRATEGY_PREVIEW: 'Strategie vorab rechnen', PRICE_EVIDENCE: 'Preisnachweis ausgeben',
         PRICE_FEED_EXPORT: 'Preisverlauf ausgeben',
         SCREEN_EXPORT: 'Bildschirm exportieren',
-        IMPORT_TEMPLATE: 'Importvorlage erstellen', IMPORT_CHECK: 'Importdatei prüfen',
+        IMPORT_TEMPLATE: 'Importvorlage erstellen', IMPORT_CHECK: 'Importdatei prüfen', PRODUCT_IMPORT: 'Produktdetails importieren',
       },
       queued: 'In der Warteschlange — der Vorgang beginnt gleich.',
       preparing: (done: number, total: number | null) => (total === null ? 'Wird vorbereitet…' : `Wird vorbereitet: ${done} von ${total}`),
@@ -1729,12 +1731,13 @@ export const de: Messages = {
     },
     /** Шаг 99 [Р-224, Р-225]: импорты продавца — заголовки колонок файла английские во всех языках; пояснение — на языке пространства */
     imports: {
-      titles: { COSTS: 'Stückkosten importieren', STOCK: 'Bestand importieren', BOUNDS: 'Mindest- und Höchstpreise importieren', STRATEGY: 'Strategiezuordnungen importieren' },
+      titles: { COSTS: 'Stückkosten importieren', STOCK: 'Bestand importieren', BOUNDS: 'Mindest- und Höchstpreise importieren', STRATEGY: 'Strategiezuordnungen importieren', PRODUCTS: 'Produktdetails importieren' },
       intros: {
         COSTS: 'Laden Sie die Vorlage mit Ihren aktuellen Stückkosten herunter, ändern Sie, was nötig ist, und laden Sie sie hoch. Sie sehen jede Änderung, bevor etwas angewendet wird.',
         STOCK: 'Laden Sie die Vorlage mit den Mengen dieser Bestandsquelle herunter, ändern Sie, was nötig ist, und laden Sie sie hoch. Sie sehen jede Änderung, bevor etwas angewendet wird.',
         BOUNDS: 'Laden Sie die Vorlage mit Ihren aktuellen Mindest- und Höchstpreisen und Mindestmargen herunter, ändern Sie, was nötig ist, und laden Sie sie hoch.',
         STRATEGY: 'Laden Sie die Vorlage mit der Strategie jedes Angebots herunter, tragen Sie die gewünschte Strategie ein und laden Sie sie hoch. Sie sehen jede Änderung, bevor etwas angewendet wird.',
+        PRODUCTS: 'Laden Sie die Vorlage mit der Farbe jedes Produkts herunter, tragen Sie die gewünschte Farbe ein und laden Sie sie hoch. Sie sehen jede Änderung, bevor etwas angewendet wird.',
       },
       templateCsv: 'Vorlage herunterladen (CSV)', templateXlsx: 'Vorlage herunterladen (XLSX)',
       templateCaption: 'Die Vorlage enthält bereits Ihre aktuellen Werte: Ändern Sie nur die Zellen, die sich ändern sollen.',
@@ -1768,7 +1771,7 @@ export const de: Messages = {
       noStockSource: 'Legen Sie zuerst eine in TMPrice geführte Bestandsquelle an — die Datei geht in sie.',
       fields: {
         sku: 'SKU', storefront: 'Storefront', title: 'Titel', unit_cost: 'Stückkosten', currency: 'Währung', fee_percent: 'Kanalprovision, %', fixed_fee: 'Fixe Gebühr',
-        quantity: 'Menge', min_price: 'Mindestpreis', max_price: 'Höchstpreis', min_margin_percent: 'Mindestmarge, %', strategy: 'Strategie',
+        quantity: 'Menge', min_price: 'Mindestpreis', max_price: 'Höchstpreis', min_margin_percent: 'Mindestmarge, %', strategy: 'Strategie', color: 'Farbe',
       },
       problems: {
         KEY_EMPTY: 'keine SKU in der Zeile',
@@ -1796,6 +1799,7 @@ export const de: Messages = {
         STRATEGY_NOT_ACTIVE: 'die Strategie hat keine aktive Version',
         STRATEGY_UNAVAILABLE: (why: string) => `der Kanal liefert nicht die Daten, die diese Strategie braucht: ${why}`,
         CHANNEL_PRICING: 'der Kanal bepreist dieses Angebot selbst — TMPrice ordnet keine Strategie zu',
+        COLOR_INVALID: 'die Farbe muss ein Wort mit höchstens 40 Zeichen sein, ohne Zeilenumbruch',
       },
       notes: {
         COSTS: [
@@ -1820,8 +1824,13 @@ export const de: Messages = {
           'Ist Repricing für ein Angebot eingeschaltet, nutzt seine nächste Preisentscheidung die neue Strategie.',
           'Zeilen, die mit # beginnen, werden ignoriert. Laden Sie die Datei hoch, prüfen Sie sie und wenden Sie sie dann an: Eine einzige Zeile mit Fehler stoppt den ganzen Import.',
         ],
+        PRODUCTS: [
+          'So füllen Sie aus: eine Zeile pro Produkt. Schreiben Sie die Farbe des Produkts als Wort (z. B. grau); leer behält die aktuelle Farbe, - entfernt sie.',
+          'Die Farbe steht unter dem Produktnamen. Gängige Farbwörter (schwarz, weiß, grau, rot, grün, blau …) erhalten zusätzlich einen Farbkreis; jedes andere Wort erscheint als Text.',
+          'Zeilen, die mit # beginnen, werden ignoriert. Laden Sie die Datei hoch, prüfen Sie sie und wenden Sie sie dann an: Eine einzige Zeile mit Fehler stoppt den ganzen Import.',
+        ],
       },
-      exampleKey: 'Beispiel: ABC-123', exampleTitle: 'Gartenschlauch, 15 m', exampleStrategy: 'Den niedrigsten Preis unterbieten',
+      exampleKey: 'Beispiel: ABC-123', exampleTitle: 'Gartenschlauch, 15 m', exampleStrategy: 'Den niedrigsten Preis unterbieten', exampleColor: 'grau',
       sheets: { data: 'Daten', help: 'Hilfe' },
       historyTitle: 'Importverlauf', historyEmpty: 'Noch keine Importe.',
       historyColumns: { when: 'Wann', who: 'Wer', outcome: 'Ergebnis', file: 'Datei', rows: 'Zeilen', time: 'Dauer' },

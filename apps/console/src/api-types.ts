@@ -1,4 +1,4 @@
-import type { BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, StopTarget, StorefrontChip, StrategyListView } from '@repracer/console-model';
+import type { BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, StopTarget, StorefrontChip, StrategyListView, Swatch } from '@repracer/console-model';
 
 /** Контракт сервера стенда и интерфейса: экраны получают готовые модели @repracer/console-model на языке сессии [Р-72] */
 
@@ -62,6 +62,9 @@ export interface BoundsIndexItem {
   /** Шаг 111 [Р-237]: имя продукта и чип витрины — для таблицы */
   name: string;
   storefront: StorefrontChip;
+  /** Шаг 112 [Р-238]: цвет товара — второй строкой под названием */
+  color: string | null;
+  swatch: Swatch | null;
   minPrice: string;
   maxPrice: string;
 }

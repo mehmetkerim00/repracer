@@ -224,7 +224,10 @@ test('screens render from the dictionary: sign-in, products with the effective f
   for (const text of ['Effective floor', 'Next check', 'Status', '€17.75', 'Why this price']) assert.ok(products.includes(text), text);
   // Шаг 68 (K10): предложение — SKU продавца и витрина словами, а не «Kaufland de · unit 4101»; шаг 111 [Р-237]: витрина — чипом площадки,
   // полное имя — подсказкой и доступным именем, длинного «· kaufland.de» в строке нет
-  assert.match(products, /syn-[^ <]+(?:<!-- -->)? <span class="storefront-tag" title="kaufland\.de"><span class="channel-chip" data-channel="KAUFLAND" data-letter="k" role="img" aria-label="kaufland\.de">/);
+  // Шаг 112 [Р-238]: имя и чип — соседние элементы через 6 px (зазор — стиль, а не пробел в тексте)
+  assert.match(products, /<span class="unit-title">syn-[^ <]+<\/span>(?:<!-- -->)? <span class="storefront-tag" title="kaufland\.de"><span class="channel-chip" data-channel="KAUFLAND" data-letter="k" role="img" aria-label="kaufland\.de">/);
+  // Шаг 112 [Р-238]: вторая строка — идентификатор товара в канале именем канала, слова «product» перед ним больше нет
+  assert.match(products, /<div class="product-ref"><span class="channel-ids">Kaufland ID 362000001<\/span><\/div>/);
   assert.ok(!products.includes(' · kaufland.de'), 'длинного имени витрины в строке нет');
   assert.ok(!products.includes('unit 4101'), 'номер единицы канала не подпись предложения');
 
@@ -981,7 +984,7 @@ test('Р-147: список заданий не несёт их итогов', as
  */
 test('Р-143, задача D: право на отмену чужого задания — право на его вид операции', async () => {
   const { canCancelBulkJob, CANCEL_ACTION } = await import('@repracer/console-model');
-  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE', 'IMPORT_TEMPLATE', 'IMPORT_CHECK', 'SCREEN_EXPORT'] as const;
+  const KINDS = ['COST_IMPORT', 'BOUNDS_EDIT', 'BOUNDS_PLAN', 'STRATEGY_ASSIGN', 'STRATEGY_PREVIEW', 'PRICE_EVIDENCE', 'PRICE_FEED_EXPORT', 'REPRICING_ENABLE', 'STOCK_IMPORT', 'STOCK_SYNC_ENABLE', 'IMPORT_TEMPLATE', 'IMPORT_CHECK', 'SCREEN_EXPORT', 'PRODUCT_IMPORT'] as const;
   // Вид задания без решения о праве существовать не может: перечисление полное [Р-146]
   assert.deepEqual(Object.keys(CANCEL_ACTION).sort(), [...KINDS].sort(), 'у каждого вида задания названо право на его отмену');
 

@@ -23,6 +23,8 @@ export interface MemoryStockOffer {
   sku: string;
   /** Шаг 69 (K8): название товара — для поиска и подписи строки экрана остатков */
   title?: string | null;
+  /** Шаг 112 [Р-238]: цвет товара — колонкой выгрузки Inventory */
+  color?: string | null;
   gtin?: string | null;
   channelAccountId: string;
   channel: string;
@@ -365,7 +367,7 @@ export class InMemoryStockStore implements StockStore {
     const products = [...new Map(this.offers.map((o) => [o.productId, o])).values()];
     // Шаг 84.1: порядок — как у PostgreSQL: по убыванию доступного, затем резервов, затем по SKU (байтово, как сортировка базы)
     const rows: StockRow[] = products.map((o) => ({
-      productId: o.productId, sku: o.sku, title: o.title ?? null, gtin: o.gtin ?? null, ...this.availableOfProduct(o.productId),
+      productId: o.productId, sku: o.sku, title: o.title ?? null, color: o.color ?? null, gtin: o.gtin ?? null, ...this.availableOfProduct(o.productId),
       channels: [...this.scopes.values()].filter((s) => s.offer.productId === o.productId).map((s) => this.channelRow(s)),
     })).sort((a, b) => b.available - a.available || b.reserved - a.reserved || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : 1));
     const channelRows = rows.flatMap((r) => r.channels);

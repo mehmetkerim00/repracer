@@ -65,8 +65,8 @@ interface ImportFileParams {
 }
 
 /** Задание применения каждого импорта (то же сопоставление держит страж журнала, 0193) */
-export const APPLY_JOB_OF: Readonly<Record<ImportKind, 'COST_IMPORT' | 'STOCK_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN'>> = {
-  COSTS: 'COST_IMPORT', STOCK: 'STOCK_IMPORT', BOUNDS: 'BOUNDS_EDIT', STRATEGY: 'STRATEGY_ASSIGN',
+export const APPLY_JOB_OF: Readonly<Record<ImportKind, 'COST_IMPORT' | 'STOCK_IMPORT' | 'BOUNDS_EDIT' | 'STRATEGY_ASSIGN' | 'PRODUCT_IMPORT'>> = {
+  COSTS: 'COST_IMPORT', STOCK: 'STOCK_IMPORT', BOUNDS: 'BOUNDS_EDIT', STRATEGY: 'STRATEGY_ASSIGN', PRODUCTS: 'PRODUCT_IMPORT',
 };
 
 const PROGRESS_STEP = 500;
@@ -351,6 +351,18 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           };
         },
       };
+    },
+
+    /**
+     * Шаг 112 [Р-238]: импорт «Product details» — цвет товаров ровно по примерке, одной транзакцией вместе со строкой журнала. Цвет
+     * описывает товар и забор цены не двигает — второй фактор не нужен [Р-225]
+     */
+    async PRODUCT_IMPORT(job: BulkJobRow, ctx: BulkJobContext): Promise<BulkJobWork> {
+      return applyImport('PRODUCTS', job, ctx, async ({ plan }, run) => ctx.store.importProductDetails(ctx.tenantId, {
+        run,
+        rows: plan.changed.map((r) => ({ productId: r.target, color: r.set.color === '' ? null : String(r.set.color) })),
+        expected: plan.changed.map((r) => ({ productId: r.target, color: (r.expected.color ?? null) as string | null })),
+      }, actorOf(ctx)));
     },
 
     /**

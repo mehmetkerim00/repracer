@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type StorefrontChip, type UnitRef } from '@repracer/console-model';
+import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type StorefrontChip, type Swatch, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
 import { Octicon } from './icons.tsx';
@@ -30,9 +30,26 @@ export function StorefrontTag({ chip }: { chip: StorefrontChip }) {
   );
 }
 
-/** Шаг 111 [Р-237]: предложение в таблице и списке — имя продукта и чип витрины вместо «… · amazon.com» */
-export function UnitName({ unit }: { unit: Pick<UnitRef, 'name' | 'storefront'> }) {
-  return <span className="unit-name">{unit.name} <StorefrontTag chip={unit.storefront} /></span>;
+/**
+ * Шаг 112 [Р-238]: цвет товара — кружок-образец (только у известного слова: интерфейс цвет не домысливает) и слово. Кружок — рядом со
+ * словом, а не вместо него; у незнакомого слова («multicolor») — только текст
+ */
+export function ColorVariant({ color, swatch }: { color: string; swatch: Swatch | null }) {
+  return <span className="unit-variant">{swatch ? <span className="swatch" data-swatch={swatch} aria-hidden="true" /> : null}{color}</span>;
+}
+
+/**
+ * Шаг 111 [Р-237]: предложение в таблице и списке — имя продукта и чип витрины вместо «… · amazon.com». Шаг 112 [Р-238]: цвет товара —
+ * второй строкой под названием (`variant={false}` — строку собирает сам экран, как Offers с идентификатором товара в канале)
+ */
+export function UnitName({ unit, variant = true }: { unit: Pick<UnitRef, 'name' | 'storefront'> & Partial<Pick<UnitRef, 'color' | 'swatch'>>; variant?: boolean }) {
+  return (
+    <>
+      {/* Пробел между названием и чипом — для текста (копирование, чтение экрана); во flex-контейнере он не рисуется, зазор — 6 px стиля */}
+      <span className="unit-name"><span className="unit-title">{unit.name}</span> <StorefrontTag chip={unit.storefront} /></span>
+      {variant && unit.color ? <span className="unit-variant-line"><ColorVariant color={unit.color} swatch={unit.swatch ?? null} /></span> : null}
+    </>
+  );
 }
 
 export function errorText(error: unknown, m: Messages): string {

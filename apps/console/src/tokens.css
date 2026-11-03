@@ -31,12 +31,31 @@
   --text-3: #818b98; /* primer: --fgColor-disabled */
   --text-money: #1f2328; /* primer: --fgColor-default */
   --on-emphasis: #ffffff; /* primer: --fgColor-onEmphasis */
-  /* Шаг 111 [Р-237]: чипы площадок — мнемоника, а не бренд: ближайшие цвета палитры display Primer, буква — --on-emphasis */
-  --chip-amazon: #b8500f; /* primer: --display-orange-bgColor-emphasis */
-  --chip-walmart: #006edb; /* primer: --display-blue-bgColor-emphasis */
-  --chip-ebay: #df0c24; /* primer: --display-red-bgColor-emphasis */
-  --chip-kaufland: #9d615c; /* primer: --display-auburn-bgColor-emphasis */
-  --chip-other: #647182; /* primer: --display-gray-bgColor-emphasis */
+  /* Шаг 112 [Р-238]: чипы площадок — тихие: подложка muted оттенка display Primer, буква — fgColor того же оттенка. eBay — auburn, а не red:
+     красный совпадает с цветом ошибок (у coral в тёмной теме — тот же red); Kaufland — brown (за профилем ЕС) */
+  --chip-amazon-bg: #ffe7d1; /* primer: --display-orange-bgColor-muted */
+  --chip-amazon-fg: #a24610; /* primer: --display-orange-fgColor */
+  --chip-walmart-bg: #d1f0ff; /* primer: --display-blue-bgColor-muted */
+  --chip-walmart-fg: #005fcc; /* primer: --display-blue-fgColor */
+  --chip-ebay-bg: #f2e9e9; /* primer: --display-auburn-bgColor-muted */
+  --chip-ebay-fg: #8a5551; /* primer: --display-auburn-fgColor */
+  --chip-kaufland-bg: #eeeae2; /* primer: --display-brown-bgColor-muted */
+  --chip-kaufland-fg: #755f43; /* primer: --display-brown-fgColor */
+  --chip-other-bg: #e8ecf2; /* primer: --display-gray-bgColor-muted */
+  --chip-other-fg: #5c6570; /* primer: --display-gray-fgColor */
+  /* Шаг 112 [Р-238]: кружок-образец цвета товара — ступень 5 шкалы display (почти одна в обеих темах), чёрный и белый — неизменные */
+  --swatch-black: #1f2328; /* primer: --bgColor-black */
+  --swatch-white: #ffffff; /* primer: --bgColor-white */
+  --swatch-grey: #647182; /* primer: --display-gray-scale-5 */
+  --swatch-red: #df0c24; /* primer: --display-red-scale-5 */
+  --swatch-green: #2c8141; /* primer: --display-green-scale-5 */
+  --swatch-blue: #006edb; /* primer: --display-blue-scale-5 */
+  --swatch-yellow: #946a00; /* primer: --display-yellow-scale-5 */
+  --swatch-orange: #b8500f; /* primer: --display-orange-scale-5 */
+  --swatch-purple: #894ceb; /* primer: --display-purple-scale-5 */
+  --swatch-pink: #ce2c85; /* primer: --display-pink-scale-5 */
+  --swatch-brown: #856d4c; /* primer: --display-brown-scale-5 */
+  --swatch-teal: #127e81; /* primer: --display-teal-scale-5 */
 
   /* Ссылки, фокус, выбранное — акцент Primer (синий) */
   --accent: #0969da; /* primer: --fgColor-accent */
@@ -121,6 +140,7 @@
   --font-size-xl: 2rem; /* primer: --base-text-size-xl */
   --line-height: 1.5; /* primer: --base-text-lineHeight-normal */
   --line-height-tight: 1.25; /* primer: --base-text-lineHeight-tight */
+  --weight-normal: 400; /* primer: --base-text-weight-normal */
   --weight-medium: 500; /* primer: --base-text-weight-medium */
   --weight-heading: 600; /* primer: --base-text-weight-semibold */
 
@@ -171,11 +191,31 @@
     --text-3: #656c76; /* primer-dark: --fgColor-disabled */
     --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
     --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
-    --chip-amazon: #984b10; /* primer-dark: --display-orange-bgColor-emphasis */
-    --chip-walmart: #005bd1; /* primer-dark: --display-blue-bgColor-emphasis */
-    --chip-ebay: #c31328; /* primer-dark: --display-red-bgColor-emphasis */
-    --chip-kaufland: #87534f; /* primer-dark: --display-auburn-bgColor-emphasis */
-    --chip-other: #576270; /* primer-dark: --display-gray-bgColor-emphasis */
+    /* Шаг 112 [Р-238]: чипы площадок — тихие: подложка muted оттенка display Primer, буква — fgColor того же оттенка. eBay — auburn, а не red:
+       красный совпадает с цветом ошибок (у coral в тёмной теме — тот же red); Kaufland — brown (за профилем ЕС) */
+    --chip-amazon-bg: #311708; /* primer-dark: --display-orange-bgColor-muted */
+    --chip-amazon-fg: #ed8326; /* primer-dark: --display-orange-fgColor */
+    --chip-walmart-bg: #001a47; /* primer-dark: --display-blue-bgColor-muted */
+    --chip-walmart-fg: #4da0ff; /* primer-dark: --display-blue-fgColor */
+    --chip-ebay-bg: #271817; /* primer-dark: --display-auburn-bgColor-muted */
+    --chip-ebay-fg: #bf9592; /* primer-dark: --display-auburn-fgColor */
+    --chip-kaufland-bg: #241c14; /* primer-dark: --display-brown-bgColor-muted */
+    --chip-kaufland-fg: #b69a6d; /* primer-dark: --display-brown-fgColor */
+    --chip-other-bg: #1c1c1c; /* primer-dark: --display-gray-bgColor-muted */
+    --chip-other-fg: #92a1b5; /* primer-dark: --display-gray-fgColor */
+    /* Шаг 112 [Р-238]: кружок-образец цвета товара — ступень 5 шкалы display (почти одна в обеих темах), чёрный и белый — неизменные */
+    --swatch-black: #010409; /* primer-dark: --bgColor-black */
+    --swatch-white: #ffffff; /* primer-dark: --bgColor-white */
+    --swatch-grey: #6e7f96; /* primer-dark: --display-gray-scale-5 */
+    --swatch-red: #eb3342; /* primer-dark: --display-red-scale-5 */
+    --swatch-green: #388f3f; /* primer-dark: --display-green-scale-5 */
+    --swatch-blue: #0576ff; /* primer-dark: --display-blue-scale-5 */
+    --swatch-yellow: #aa7109; /* primer-dark: --display-yellow-scale-5 */
+    --swatch-orange: #c46212; /* primer-dark: --display-orange-scale-5 */
+    --swatch-purple: #975bf1; /* primer-dark: --display-purple-scale-5 */
+    --swatch-pink: #d34591; /* primer-dark: --display-pink-scale-5 */
+    --swatch-brown: #94774c; /* primer-dark: --display-brown-scale-5 */
+    --swatch-teal: #158a8a; /* primer-dark: --display-teal-scale-5 */
     --accent: #4493f8; /* primer-dark: --fgColor-accent */
     --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
     --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */
@@ -248,11 +288,31 @@
   --text-3: #656c76; /* primer-dark: --fgColor-disabled */
   --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
   --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
-  --chip-amazon: #984b10; /* primer-dark: --display-orange-bgColor-emphasis */
-  --chip-walmart: #005bd1; /* primer-dark: --display-blue-bgColor-emphasis */
-  --chip-ebay: #c31328; /* primer-dark: --display-red-bgColor-emphasis */
-  --chip-kaufland: #87534f; /* primer-dark: --display-auburn-bgColor-emphasis */
-  --chip-other: #576270; /* primer-dark: --display-gray-bgColor-emphasis */
+  /* Шаг 112 [Р-238]: чипы площадок — тихие: подложка muted оттенка display Primer, буква — fgColor того же оттенка. eBay — auburn, а не red:
+     красный совпадает с цветом ошибок (у coral в тёмной теме — тот же red); Kaufland — brown (за профилем ЕС) */
+  --chip-amazon-bg: #311708; /* primer-dark: --display-orange-bgColor-muted */
+  --chip-amazon-fg: #ed8326; /* primer-dark: --display-orange-fgColor */
+  --chip-walmart-bg: #001a47; /* primer-dark: --display-blue-bgColor-muted */
+  --chip-walmart-fg: #4da0ff; /* primer-dark: --display-blue-fgColor */
+  --chip-ebay-bg: #271817; /* primer-dark: --display-auburn-bgColor-muted */
+  --chip-ebay-fg: #bf9592; /* primer-dark: --display-auburn-fgColor */
+  --chip-kaufland-bg: #241c14; /* primer-dark: --display-brown-bgColor-muted */
+  --chip-kaufland-fg: #b69a6d; /* primer-dark: --display-brown-fgColor */
+  --chip-other-bg: #1c1c1c; /* primer-dark: --display-gray-bgColor-muted */
+  --chip-other-fg: #92a1b5; /* primer-dark: --display-gray-fgColor */
+  /* Шаг 112 [Р-238]: кружок-образец цвета товара — ступень 5 шкалы display (почти одна в обеих темах), чёрный и белый — неизменные */
+  --swatch-black: #010409; /* primer-dark: --bgColor-black */
+  --swatch-white: #ffffff; /* primer-dark: --bgColor-white */
+  --swatch-grey: #6e7f96; /* primer-dark: --display-gray-scale-5 */
+  --swatch-red: #eb3342; /* primer-dark: --display-red-scale-5 */
+  --swatch-green: #388f3f; /* primer-dark: --display-green-scale-5 */
+  --swatch-blue: #0576ff; /* primer-dark: --display-blue-scale-5 */
+  --swatch-yellow: #aa7109; /* primer-dark: --display-yellow-scale-5 */
+  --swatch-orange: #c46212; /* primer-dark: --display-orange-scale-5 */
+  --swatch-purple: #975bf1; /* primer-dark: --display-purple-scale-5 */
+  --swatch-pink: #d34591; /* primer-dark: --display-pink-scale-5 */
+  --swatch-brown: #94774c; /* primer-dark: --display-brown-scale-5 */
+  --swatch-teal: #158a8a; /* primer-dark: --display-teal-scale-5 */
   --accent: #4493f8; /* primer-dark: --fgColor-accent */
   --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
   --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */

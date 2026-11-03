@@ -36,6 +36,8 @@ export const CANCEL_ACTION: Readonly<Record<BulkJobKind, PricingAction>> = {
   IMPORT_CHECK: 'MANAGE_PRICING',
   // Шаг 104 [Р-229]: выгрузка экрана — просмотр
   SCREEN_EXPORT: 'VIEW_PRICING',
+  // Шаг 112 [Р-238]: описание товара (цвет) — каталог, как остатки
+  PRODUCT_IMPORT: 'MANAGE_CATALOG',
 };
 
 /** СВОЁ задание отменяет любой участник; чужое — по праву на его вид операции */
@@ -137,6 +139,8 @@ function outcomeText(job: BulkJobRow, m: Messages): string {
     case 'IMPORT_TEMPLATE': return t.doneTemplate(n(r.rows));
     case 'IMPORT_CHECK': return t.doneCheck({ total: n(r.total), changed: n(r.changed), rejected: n(r.rejected) });
     case 'SCREEN_EXPORT': return t.doneScreenExport(n(r.rows), n(r.bytes));
+    // Шаг 112 [Р-238]: применение импорта «Product details» — итог с видом импорта, как у прочих (ветка выше); здесь — на случай без итога
+    case 'PRODUCT_IMPORT': return t.doneImport(n(r.applied), Math.round(n(r.durationMs) / 100) / 10);
   }
 }
 

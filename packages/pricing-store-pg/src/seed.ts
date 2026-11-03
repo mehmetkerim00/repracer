@@ -277,8 +277,9 @@ export async function seedPricingWorld(_pool: PgPool, input: SeedWorldInput): Pr
     let productId = products.get(s.productId);
     if (!productId) {
       productId = randomUUID();
-      await tx.query(`INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind, gtin, title) VALUES ($1, $2, $3, 'SIMPLE', $4, $5)`,
-        [tenantId, productId, seedSkuOf(s), s.gtin ?? null, s.title ?? null]);
+      // Шаг 112 [Р-238]: цвет товара посева — словом, как его задал бы продавец импортом «Product details»
+      await tx.query(`INSERT INTO tenant_data.product (tenant_id, product_id, sku, kind, gtin, title, color) VALUES ($1, $2, $3, 'SIMPLE', $4, $5, $6)`,
+        [tenantId, productId, seedSkuOf(s), s.gtin ?? null, s.title ?? null, s.color ?? null]);
       products.set(s.productId, productId);
       ids.alias(s.productId, productId);
     }
