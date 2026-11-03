@@ -133,7 +133,8 @@ jobs:
     runs-on: ubuntu-24.04
     # Шаг 37: предел поднят с 75 до 110 минут. Полный прогон вырос дважды: прогоны-замеры идут ПО ОДНОМУ (шаг 36), а
     # развёртывания теперь поднимают ещё и профиль production с консолью, у которой при старте заводится демо-тенант.
-    # Первый прогон шага 37 упёрся ровно в это и был снят по пределу на шаге развёртываний
+    # Первый прогон шага 37 упёрся ровно в это и был снят по пределу на шаге развёртываний.
+    # Шаг 111.1 (красная ночь 2026-11-03): каталог мутаций ушёл своим заданием mutations — вместе с тестами задание шло 86–117 минут
     timeout-minutes: 110
     services:
       postgres:
@@ -200,9 +201,6 @@ jobs:
           q "GRANT repracer_retention TO $REPRACER_CH_VERIFIER_USER"
           q "CREATE USER IF NOT EXISTS $REPRACER_CH_READER_USER IDENTIFIED WITH sha256_password BY '$REPRACER_CH_READER_PASSWORD' DEFAULT ROLE repracer_tenant_reader"
           q "GRANT repracer_tenant_reader TO $REPRACER_CH_READER_USER"
-      - name: Mutation check of the schema (Р-95) — a guard removed must fail its own check
-        # Раннер CI — четыре ядра: три параллельные копии базы проходят каталог заметно быстрее двух
-        run: node scripts/db/mutation-check.mjs --jobs 3
       - run: npm run typecheck
       # Шаг 37 [Р-159]: интерфейс собирается ДО тестов — прогон гостя поднимает настоящий процесс консоли, а он отдаёт
       # СОБРАННЫЕ файлы. Без этой сборки прогон проверял бы пустой каталог и молча терял смысл
@@ -214,6 +212,42 @@ jobs:
       # Шаг 37 [Р-159]: сюда добавился профиль production целиком — прокси и КОНСОЛЬ, и путь гостя по нему как браузер
       - name: Deployments start, and the guest walks the production profile (шаг 28 D, шаг 37 A)
         run: PG_HOST=host.docker.internal scripts/deploy-smoke.sh
+
+  # Шаг 111.1 (красная ночь 2026-11-03, Issue #20): каталог мутаций целиком [Р-95] — своим заданием рядом с полным. Одним заданием
+  # с тестами они шли 86, 102 и больше 110 минут на одном и том же коде: на медленном раннере мутации — 57 минут, тесты — больше 50,
+  # и задание снималось по пределу. Тестам каталога нужен только PostgreSQL (как у guards)
+  mutations:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    services:
+      postgres:
+        image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --shm-size=1g --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      REPRACER_PG_URL: postgres://svc_app@127.0.0.1:5432/repracer_eu
+      REPRACER_PG_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+      REPRACER_PG_TEMPLATE: repracer_template
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (шаг 53, закреплено по SHA, OWASP A08)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci
+      - name: Database — migrations, template, smoke tests of the schema
+        run: scripts/db/prepare.sh repracer_eu
+      - name: Mutation check of the schema (Р-95) — a guard removed must fail its own check
+        # Раннер CI — четыре ядра: три параллельные копии базы проходят каталог заметно быстрее двух
+        run: node scripts/db/mutation-check.mjs --jobs 3
 
   # Шаг 35 [Р-154]: демо-стенд живёт виртуальные СУТКИ, затем все экраны обходятся как браузер в пределе 10 с / 8 МБ.
   # Своё задание рядом с полным: сутки на 200 предложениях — около получаса, и внутри полного прогона они вывели бы его за предел.
@@ -401,7 +435,7 @@ jobs:
   # комментарий в открытый, зелёная — комментарий и закрытие. Ворота слияния не сливают, пока такой Issue открыт. Только этому заданию —
   # право на Issues; npm ci не нужен — скрипт на встроенных модулях Node
   night-watch:
-    needs: [fast, guards, clickhouse-compression, full, demo-day, shadow-day, chaos, scale]
+    needs: [fast, guards, clickhouse-compression, full, mutations, demo-day, shadow-day, chaos, scale]
     if: always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

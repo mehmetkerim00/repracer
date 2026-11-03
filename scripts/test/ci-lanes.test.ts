@@ -261,7 +261,7 @@ test('Р-236: сторож ночи — красная ночь открывае
  * расписанию и по запросу, а не на каждый push — тяжёлая полоса запускает их на ветке до слияния, лёгкая их до ночи не ждёт.
  * Быстрые задания (fast, guards, замер сжатия) — на каждый push
  */
-const FULL_JOBS = ['full', 'demo-day', 'shadow-day', 'chaos', 'scale'];
+const FULL_JOBS = ['full', 'mutations', 'demo-day', 'shadow-day', 'chaos', 'scale'];
 const FAST_JOBS = ['fast', 'guards', 'clickhouse-compression'];
 const NIGHT_CONDITION = "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
 
@@ -278,6 +278,10 @@ function workflowFindings(ci: string): string[] {
     if (!body) findings.push(`нет задания ${job}`);
     else if (!body.split('\n').some((line) => line.trim() === NIGHT_CONDITION)) findings.push(`${job}: не только ночью и по запросу`);
   }
+  // Шаг 111.1 (красная ночь 2026-11-03): каталог мутаций целиком и все тесты одним заданием шли 86–117 минут при пределе 110 — на
+  // медленном раннере задание снималось по пределу. Каталог целиком — своим заданием mutations, задание full его не гоняет
+  if (!/run: node scripts\/db\/mutation-check\.mjs --jobs \d+$/m.test(jobs.get('mutations') ?? '')) findings.push('mutations: не проверяет каталог мутаций целиком');
+  if (/mutation-check\.mjs/.test(jobs.get('full') ?? '')) findings.push('full: каталог мутаций и все тесты — одним заданием');
   for (const job of FAST_JOBS) {
     const body = jobs.get(job);
     if (!body) findings.push(`нет задания ${job}`);
@@ -309,5 +313,11 @@ test('Р-236: ночной полный прогон main по расписан�
   // Зубы сторожа: забытое задание в needs, if: failure() (зелёная ночь не закрыла бы Issue), без права на Issues
   assert.deepEqual(workflowFindings(ci.replace(/^( {4}needs: \[[^\]]*), scale\]/m, '$1]')), ['night-watch: не ждёт scale']);
   assert.deepEqual(workflowFindings(ci.replace('if: always() &&', 'if: failure() &&')), ['night-watch: не при любом исходе ночи на main']);
+  // Зубы шага 111.1: каталог мутаций вернулся в full — находка; задание mutations гоняет только критичные строки — находка
+  const back = ci.replace("        run: node scripts/test-all.mjs --scope=full --ci", "        run: node scripts/db/mutation-check.mjs --jobs 3 && node scripts/test-all.mjs --scope=full --ci");
+  assert.deepEqual(workflowFindings(back), ['full: каталог мутаций и все тесты — одним заданием']);
+  const critical = ci.replace(/^( {2}mutations:\n(?: {4}.*\n|\n)*?.*mutation-check\.mjs) --jobs 3$/m, '$1 --critical --jobs 3');
+  assert.notEqual(critical, ci);
+  assert.deepEqual(workflowFindings(critical), ['mutations: не проверяет каталог мутаций целиком']);
   assert.deepEqual(workflowFindings(ci.replace(/^ {6}issues: write\n/m, '')), ['night-watch: нет права issues: write']);
 });
