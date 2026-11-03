@@ -12,6 +12,7 @@ import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages
 import { beginLogin, finishLogin } from '../../../apps/console/src/oidc.ts';
 import { demoProducts, kauflandLiveWorld, WallClock, type KauflandLiveWorld, type LiveProduct } from './live/index.ts';
 import { startKauflandHttpModel, type KauflandChaos, type KauflandHttpModel, type KauflandWriteJournalEntry } from './live/kaufland-http.ts';
+import { killOnWriteExpected, killOnWriteMissProbability } from './chaos/kill-on-write.ts';
 import { lastAppliedWrite, oq220Drift as uncountedCancellations, recognisedAsOq220, type ChannelOrder, type QuantityVersion } from './chaos/oq220.ts';
 
 /**
@@ -77,6 +78,8 @@ let provider: ModelIdentityProvider;
 let secretsDir = '';
 let dist = '';
 const journal: KauflandWriteJournalEntry[] = [];
+/** Шаг 113: сколько раз в раунде тянулся жребий убийства в момент записи — применённая запись при живом и готовом диспетчере */
+const killChances = new Map<number, number>();
 /** Шаг 67: предложения, чьё расхождение количества объяснено OQ-220 в последней проверке, — число идёт в отчёт раунда, чтобы признание не стало слепым пятном */
 const oq220Seen = new Set<string>();
 /** Шаг 90: из признанных — те, что окно до шага 90 (отмены после ПРИМЕНЕНИЯ по времени канала) назвало бы расхождением: класс в отчёте раунда */
@@ -264,7 +267,10 @@ before(async () => {
        * жребий тянется как прежде, чтобы семя повторяло тот же план
        */
       const roll = chaos.random();
-      if (!readyPrinted.has(d) || roll >= killOnWriteShare) return;
+      if (!readyPrinted.has(d)) return;
+      // Шаг 113: шанс раунда — жребий при готовом диспетчере; по ним считается, обязано ли убийство случиться (`chaos/kill-on-write.ts`)
+      killChances.set(currentRound, (killChances.get(currentRound) ?? 0) + 1);
+      if (roll >= killOnWriteShare) return;
       d.kill('SIGKILL');
       kills.push({ round: currentRound, kind: 'dispatcher', atMs: -1 });
     },
@@ -629,17 +635,22 @@ test('шаг 65: хаос — процессы убиваются посреди
     }
     const settled = await quiesce(round);
     const problems = settled.drained ? await invariants(round) : [`queue did not drain in ${QUIESCE_LIMIT_MS / 1000} s: ${JSON.stringify(settled.left).slice(0, 600)}`];
-    const entry = { round, seed: SEED, faults, kills: roundKills, killedOnWrite: kills.filter((k) => k.round === round && k.atMs === -1).length, actions, quiesceMs: settled.waitedMs, budgetRowsChecked: lastBudgetRows, problems, knownOq220: oq220Seen.size, knownOq220BeyondOldWindow: oq220BeyondOldWindow.size, journal: journal.length, violations: model.violations.slice(0, 3) };
+    const entry = { round, seed: SEED, faults, kills: roundKills, killedOnWrite: kills.filter((k) => k.round === round && k.atMs === -1).length, killChances: killChances.get(round) ?? 0, actions, quiesceMs: settled.waitedMs, budgetRowsChecked: lastBudgetRows, problems, knownOq220: oq220Seen.size, knownOq220BeyondOldWindow: oq220BeyondOldWindow.size, journal: journal.length, violations: model.violations.slice(0, 3) };
     report.push(entry);
     console.log(JSON.stringify({ chaosRound: entry }));
     violations.push(...problems.map((p) => `round ${round} (seed ${SEED}): ${p}`));
   }
   assert.deepEqual(model.violations.filter((v) => /Signature|Client-Key|Timestamp|leaked/.test(v)), [], 'ни один запрос процессов не отвергнут проверкой подписи');
   assert.ok(kills.length >= ROUNDS, `процессы убивались: ${kills.length}`);
-  // Ревью шага 65, находка 3: «убийство в момент записи» — не намерение плана, а событие: при ненулевой доле и записях оно обязано случиться
-  const planned = report.filter((r) => ((r.faults as { killDispatcherOnWrite: number }).killDispatcherOnWrite ?? 0) > 0).length;
+  /**
+   * Ревью шага 65, находка 3: «убийство в момент записи» — не намерение плана, а событие. Шаг 113: обязано случиться, только когда промах при
+   * таких шансах почти невозможен (`chaos/kill-on-write.ts`; прежнее «доля есть и записей больше 20» краснило при промахе около 3 %)
+   */
+  const chances = report.map((r) => ({ share: (r.faults as { killDispatcherOnWrite: number }).killDispatcherOnWrite ?? 0, chances: r.killChances as number }));
   const killedOnWrite = report.reduce((n, r) => n + (r.killedOnWrite as number), 0);
-  if (planned > 0 && journal.length > 20) assert.ok(killedOnWrite >= 1, `диспетчер убит в момент записи: ${killedOnWrite} (раундов с долей: ${planned})`);
+  if (killOnWriteExpected(chances)) {
+    assert.ok(killedOnWrite >= 1, `диспетчер убит в момент записи: ${killedOnWrite} (промах при этих шансах — ${killOnWriteMissProbability(chances).toExponential(1)})`);
+  }
   assert.deepEqual(violations, [], `инварианты после раундов хаоса (seed ${SEED})`);
 });
 
