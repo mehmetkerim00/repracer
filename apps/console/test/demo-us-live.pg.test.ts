@@ -180,9 +180,21 @@ test('шаг 68: демо США — решения в долларах, «по�
   const oldest = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${oneAmazon.writeScopeId}&offset=100000`, guest)).body.items.at(-1)!;
   // Шаг 78 (п. 16): удержанное тенью в ленте цен — своя группа на базе: счётчик «held by shadow mode», фильтр отдаёт ровно его, и в
   // «replaced by a newer price» удержанное тенью не попадает (до шага 78 экран сценария говорил «replaced 513» о записях, которых не было)
-  const feed = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed`, guest)).body;
+  /**
+   * Шаг 113.2 (красная ночь 2026-11-04, 1296 против 1295): демо живёт, и между счётчиком и страницей фильтра оно удерживает новые записи —
+   * два запроса видят ленту в разные моменты. Страница фильтра сверяется со счётчиком, только если счётчик до неё и после неё одинаков
+   * (лента только растёт): тогда оба видели одно и то же; иначе — повтор
+   */
+  const feedOf = async () => (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed`, guest)).body;
+  let feed = await feedOf();
+  let held = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed?status=SHADOW_HELD`, guest)).body;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const after = await feedOf();
+    if (after.counts.shadowHeld === feed.counts.shadowHeld) break;
+    feed = after;
+    held = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed?status=SHADOW_HELD`, guest)).body;
+  }
   assert.ok(feed.counts.shadowHeld > 0, `лента демо в тени считает удержанное тенью своей группой: ${JSON.stringify(feed.counts)}`);
-  const held = (await call<PriceFeedView>('GET', `/api/worlds/${w}/feed?status=SHADOW_HELD`, guest)).body;
   assert.equal(held.page.total, feed.counts.shadowHeld, 'фильтр «held by shadow mode» отдаёт ровно столько, сколько говорит счётчик');
   const heldText = messagesFor('en').ui.feed.statuses.SHADOW_HELD;
   assert.ok(held.items.length > 0 && held.items.every((i) => i.status === heldText), `строки фильтра — удержанные тенью: ${held.items.slice(0, 3).map((i) => i.status).join(', ')}`);
