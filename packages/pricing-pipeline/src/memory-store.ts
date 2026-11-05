@@ -1,14 +1,15 @@
 import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/channel-port';
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
+import { listingStatusStep, type LatestListingState } from './listing-status.ts';
 import { stalestFirst } from './reconciliation.ts';
-import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
+import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
-import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, strategyAvailability, type CreepState } from '@repracer/strategy-engine';
@@ -293,6 +294,10 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly lossVerdicts: Array<{ checkId: string; verdict: NotificationLossVerdict['verdict']; pushSnapshotId: string | null; decidedAt: Instant }> = [];
   /** Журнал обработанных уведомлений: как UNIQUE (tenant_id, channel, notification_id) в 0083 */
   readonly inboundNotifications = new Map<string, InboundNotificationEntry>();
+  /** Шаг 114: журнал сырья уведомлений — как channel_data.notification_journal (одна строка на уведомление, 0213) */
+  readonly notificationJournal = new Map<string, RawInboundNotificationEntry>();
+  /** Шаг 114: статус и проблемы листинга — как channel_data.listing_status (0213) */
+  readonly listingStatus: Array<ListingStatusObservation & { channelAccountId: string }> = [];
   private readonly scopes = new Map<string, ScopeRow>();
   private readonly competitorDaily = new Map<string, DailyRange[]>();
   private readonly competitorState = new Map<string, CompetitorRow>();
@@ -1318,6 +1323,58 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async markNotificationProcessed(_tenantId: string, entry: InboundNotificationEntry): Promise<void> {
     const key = `${this.channel}|${entry.notificationId}`;
     if (!this.inboundNotifications.has(key)) this.inboundNotifications.set(key, { ...entry });
+  }
+
+  /** Шаг 114: как ON CONFLICT (tenant_id, channel, notification_id) DO NOTHING у журнала сырья */
+  async recordInboundNotification(_tenantId: string, entry: RawInboundNotificationEntry): Promise<'NEW' | 'REPEAT'> {
+    const key = `${this.channel}|${entry.notificationId}`;
+    if (this.notificationJournal.has(key)) return 'REPEAT';
+    this.notificationJournal.set(key, { ...entry });
+    return 'NEW';
+  }
+
+  /** Шаг 114: то же правило, что у базы (listingStatusStep): уведомление — всегда, опрос — только изменение; переход — у ENGINE */
+  async recordListingStatus(_tenantId: string, channelAccountId: string, observations: readonly ListingStatusObservation[], notification?: InboundNotificationEntry): Promise<ListingStatusRecord> {
+    if (notification) {
+      const key = `${this.channel}|${notification.notificationId}`;
+      if (this.inboundNotifications.has(key)) return { recorded: 0, duplicateNotification: true, lostBuyable: [] };
+      this.inboundNotifications.set(key, { ...notification });
+    }
+    let recorded = 0;
+    const lostBuyable: ListingStatusRecord['lostBuyable'] = [];
+    for (const o of observations) {
+      if (o.sourceEventId !== null && this.listingStatus.some((x) => x.source === 'NOTIFICATION' && x.sourceEventId === o.sourceEventId)) continue;
+      const same = this.listingStatus.filter((x) => x.channelAccountId === channelAccountId && x.marketplace === o.marketplace && x.externalSku === o.externalSku);
+      const latestOf = <K extends 'status' | 'issues'>(part: K) => {
+        const rows = same.filter((x) => x[part] !== null);
+        const top = rows.reduce<(typeof rows)[number] | null>((a, b) => (!a || Date.parse(b.observedAt) >= Date.parse(a.observedAt) ? b : a), null);
+        return top ? { value: top[part]!, observedAt: top.observedAt } : null;
+      };
+      const step = listingStatusStep(o, { status: latestOf('status') as LatestListingState['status'], issues: latestOf('issues') as LatestListingState['issues'] });
+      if (!step.write) continue;
+      this.listingStatus.push({ ...o, channelAccountId });
+      recorded += 1;
+      const engine = [...this.scopes.values()].some((sc) => sc.channelAccountId === channelAccountId && sc.marketplace === o.marketplace
+        && sc.externalUnitId === o.externalSku && sc.pricingMode === 'ENGINE');
+      if (step.lostBuyable && engine) lostBuyable.push({ marketplace: o.marketplace, externalSku: o.externalSku });
+    }
+    return { recorded, duplicateNotification: false, lostBuyable };
+  }
+
+  /** Шаг 114: уведомления, дошедшие за сутки, — по журналу сырья */
+  async notificationSources(_tenantId: string, at: Instant): Promise<NotificationSourceFacts[]> {
+    const since = Date.parse(at) - 24 * 3_600_000;
+    const byAccount = new Map<string, RawInboundNotificationEntry[]>();
+    for (const e of this.notificationJournal.values()) byAccount.set(e.channelAccountId, [...(byAccount.get(e.channelAccountId) ?? []), e]);
+    return [...byAccount].map(([channelAccountId, entries]) => {
+      const recent = entries.filter((e) => Date.parse(e.receivedAt) > since);
+      const counts = new Map<string, number>();
+      for (const e of recent) counts.set(e.notificationType, (counts.get(e.notificationType) ?? 0) + 1);
+      return {
+        channelAccountId, lastReceivedAt: entries.map((e) => e.receivedAt).sort().at(-1) ?? null,
+        last24h: [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([notificationType, count]) => ({ notificationType, count })),
+      };
+    });
   }
 
   /** Р-189 (E-22): режим пакетов аккаунтов eBay; нет строки — проба (как NULL в `channel_account.ebay_batch_mode`) */
@@ -2555,6 +2612,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         .map((o) => [`${o.channelAccountId}|${o.marketplace}|${o.externalSku}`, { ...o }])).values()],
       pricingHealth: [...new Map([...this.pricingHealth].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
         .map((h) => [`${h.channelAccountId}|${h.marketplace}|${h.channelProductRef}|${h.condition}`, { ...h }])).values()],
+      listingStatus: this.consoleListingStatus(),
       stops: this.stops.map((s) => ({ ...s })),
       divergenceCases: this.divergenceCases.map((c) => ({ ...c })),
       fxRates: [...this.fxRates],
@@ -2566,6 +2624,25 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами; в памяти — те же правила, что у базы ------------------
+
+  /** Шаг 114: последний статус каждого предложения и принудительные действия последнего наблюдения проблем — как запрос мира базы */
+  private consoleListingStatus(): ConsoleListingStatusRow[] {
+    const key = (x: { channelAccountId: string; marketplace: string; externalSku: string }) => `${x.channelAccountId}|${x.marketplace}|${x.externalSku}`;
+    const latest = <K extends 'status' | 'issues'>(part: K) => {
+      const out = new Map<string, (typeof this.listingStatus)[number]>();
+      for (const x of this.listingStatus) {
+        if (x[part] === null) continue;
+        const prev = out.get(key(x));
+        if (!prev || Date.parse(x.observedAt) >= Date.parse(prev.observedAt)) out.set(key(x), x);
+      }
+      return out;
+    };
+    const issues = latest('issues');
+    return [...latest('status').values()].map((x) => ({
+      channelAccountId: x.channelAccountId, marketplace: x.marketplace, externalSku: x.externalSku, buyable: x.status!.buyable, deleted: x.status!.deleted,
+      source: x.source, observedAt: x.observedAt, enforcementActions: issues.get(key(x))?.issues?.enforcementActions ?? null,
+    }));
+  }
 
   private consoleWrite(w: WriteRow): ConsoleWriteRow {
     return {
@@ -2767,6 +2844,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       offerChannelPricing: this.offerChannelPricing.map((o) => ({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds, source: o.source })),
       pricingHealth: this.pricingHealth.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channelProductRef, issueType: h.issueType, thresholdMinor: h.competitivePriceThreshold?.amountMinor ?? null })),
       inboundNotifications: [...this.inboundNotifications.values()].map((n) => ({ notificationId: n.notificationId, notificationType: n.notificationType })),
+      notificationJournal: [...this.notificationJournal.values()].map((n) => ({ notificationId: n.notificationId, notificationType: n.notificationType, envelope: n.envelope })),
+      listingStatus: this.listingStatus.map((l) => ({ marketplace: l.marketplace, externalSku: l.externalSku, source: l.source, buyable: l.status?.buyable ?? null,
+        enforcementActions: l.issues ? [...l.issues.enforcementActions].sort() : null })),
       snapshotLog: this.snapshotLog.map((l) => ({ channelProductRef: l.key.channelProductRef, verdict: l.verdict, source: l.snapshot.source, delivery: l.delivery })),
       lossChecks: this.lossChecks.map((c) => ({
         channelProductRef: c.channelProductRef, compared: c.compared, heldMinor: c.heldMinor, pollMinor: c.pollMinor,

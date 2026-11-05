@@ -1,4 +1,4 @@
-import type { AdapterCallContext, ChannelError, ConfirmationRequest, ConfirmationResult, IdentifiedObservation, ReadBackRequest, ReadBackResult, WriteScopeId } from '@repracer/channel-port';
+import type { AdapterCallContext, ChannelError, ConfirmationRequest, ConfirmationResult, IdentifiedObservation, ListingStatusFacts, ReadBackRequest, ReadBackResult, WriteScopeId } from '@repracer/channel-port';
 import type { ListingsItem } from '@repracer/amazon-client';
 import { logConservative } from './conservative.ts';
 import { marketplaceInfo } from './descriptor.ts';
@@ -54,6 +54,8 @@ export async function readBackAmazon(options: AmazonAdapterOptions, ctx: Adapter
       const summary = (item.summaries ?? []).find((s) => s.marketplaceId === marketplace);
       const identity = { region: session.region, marketplace, externalSku: sku, ...(summary?.asin ? { channelProductRef: summary.asin } : {}) };
       const liveness = summary?.status ? { isLive: summary.status.includes('BUYABLE'), reasons: summary.status.includes('BUYABLE') ? [] : ['NOT_BUYABLE'] } : undefined;
+      // Шаг 114: статус и проблемы листинга своей витрины — то же наблюдение, что у уведомления (pipeline записывает его рядом со значением)
+      const listingStatus = listingStatusOf(item, marketplace);
       if (r.writeScope.field === 'PRICE') {
         const owned = channelOwnedPricing(item, marketplace);
         if (owned.repricer || owned.bounds) {
@@ -68,7 +70,7 @@ export async function readBackAmazon(options: AmazonAdapterOptions, ctx: Adapter
         const effective = hasDiscountedPrice(item, marketplace) ? null : purchasePrice(item, marketplace);
         logConservative(options.deps.logger, ctx, 'AMZ_C04_OUR_PRICE_VALUE_WITH_TAX', { marketplace });
         observations.push({ identity, field: 'PRICE', value: { field: 'PRICE', price }, observedAt, source: 'READBACK',
-          ...(effective ? { effectivePrice: effective } : {}), ...(liveness ? { liveness } : {}) });
+          ...(effective ? { effectivePrice: effective } : {}), ...(liveness ? { liveness } : {}), ...(listingStatus ? { listingStatus } : {}) });
       } else {
         const quantity = merchantQuantity(item);
         if (quantity === null) {
@@ -82,11 +84,29 @@ export async function readBackAmazon(options: AmazonAdapterOptions, ctx: Adapter
           }
           continue;
         }
-        observations.push({ identity: { region: session.region, marketplace, externalSku: sku }, field: 'QUANTITY', value: { field: 'QUANTITY', quantity }, observedAt, source: 'READBACK' });
+        observations.push({ identity: { region: session.region, marketplace, externalSku: sku }, field: 'QUANTITY', value: { field: 'QUANTITY', quantity }, observedAt, source: 'READBACK',
+          ...(listingStatus ? { listingStatus } : {}) });
       }
     }
   }
   return { observations, failures };
+}
+
+/**
+ * Шаг 114: статус листинга витрины — сводка (`summaries[].status`: BUYABLE, DISCOVERABLE; отсутствие флага — «нет»); проблемы — issues
+ * своей витрины (без `marketplaceIds` — у всех): серьёзности и принудительные действия; проблем нет — NONE, как у уведомления.
+ * Удалённого листинга чтение не отдаёт (404 — отказ чтения), поэтому `deleted` здесь всегда ложь. Сводки витрины нет — наблюдения нет
+ */
+export function listingStatusOf(item: ListingsItem, marketplace: string, withIssues = true): ListingStatusFacts | null {
+  const summary = (item.summaries ?? []).find((s) => s.marketplaceId === marketplace);
+  if (!summary || !Array.isArray(summary.status)) return null;
+  const own = (item.issues ?? []).filter((i) => !i.marketplaceIds || i.marketplaceIds.includes(marketplace));
+  const severities = [...new Set(own.map((i) => i.severity).filter((v) => v === 'ERROR' || v === 'WARNING' || v === 'INFO'))];
+  const actions = [...new Set(own.flatMap((i) => i.enforcements?.actions ?? []).map((a) => a?.action).filter((a): a is string => typeof a === 'string' && /^[A-Z][A-Z_]{0,63}$/.test(a)))];
+  return {
+    status: { buyable: summary.status.includes('BUYABLE'), discoverable: summary.status.includes('DISCOVERABLE'), deleted: false },
+    issues: withIssues ? { severities: severities.length > 0 ? severities : ['NONE'], enforcementActions: actions.slice(0, 12) } : null,
+  };
 }
 
 /** Подтверждение [AMZ_C05]: совпало — APPLIED; нет — PENDING в окне, NOT_APPLIED после; отказ чтения — UNKNOWN с ошибкой */

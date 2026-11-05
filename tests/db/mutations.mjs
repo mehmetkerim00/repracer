@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0212_verify_schema_invariants_v61.sql';
+const VERIFY = 'migrations/0214_verify_schema_invariants_v62.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2956,6 +2956,48 @@ export const STEP112_ROWS = [
         node(R112, J112, 'a Product details apply writes no unit-cost run', '^accepted$')),
       m(replaceInFunction('security.bulk_job_cancel_action(text)', "WHEN p_kind = 'PRODUCT_IMPORT' THEN 'MANAGE_CATALOG'", "WHEN p_kind = 'PRODUCT_IMPORT' THEN 'NO_SUCH_RIGHT'"),
         verify('bulk job kind PRODUCT_IMPORT has no cancel right known to the permission matrix')),
+    ],
+  },
+];
+
+/**
+ * Шаг 114: приёмник уведомлений Amazon, часть А (0213). Журнал сырья — одна строка на уведомление и формы (конверт, вид идентификатора и
+ * типа, размер тела); статус листинга — источник, ссылка на уведомление ровно у уведомления, части статуса и проблем, значения проблем,
+ * форма SKU, одно наблюдение на уведомление. Каждая снятая защита ловится своим утверждением теста шага [Р-99]
+ */
+const R114 = T('notifications-step114.pg.test.ts');
+const J114 = 'step 114: the database keeps the form of the raw journal';
+const L114 = 'step 114: the database keeps the form of a listing status observation';
+export const STEP114_ROWS = [
+  {
+    row: 'шаг 114 (журнал сырья уведомлений)', critical: false,
+    invariant: 'журнал сырья уведомлений — одна строка на уведомление тенанта и канала; конверт — SQS или EVENTBRIDGE; идентификатор и тип — вида приёмника; тело — не больше мегабайта',
+    mutations: [
+      m(dropConstraint('notification_journal_once', 'channel_data.notification_journal'), node(R114, J114, 'a second row of the same notification is refused', '^accepted$')),
+      m(dropConstraint('notification_journal_envelope_known', 'channel_data.notification_journal'), node(R114, J114, 'an unknown envelope is refused', '^accepted$')),
+      m(dropConstraint('notification_journal_ids_form', 'channel_data.notification_journal'),
+        node(R114, J114, ['a notification id outside the receiver form is refused', 'a notification type that is not a channel word is refused'], '^accepted$')),
+      m(dropConstraint('notification_journal_body_size', 'channel_data.notification_journal'), node(R114, J114, 'a body over a megabyte is refused', '^accepted$')),
+      // Только на добавление — общими проверками смоук-мира (строка у таблицы есть, Р-103)
+      m(dropTrigger('zz_append_only', 'channel_data.notification_journal'), smoke('append-only channel_data.notification_journal')),
+      m(dropTrigger('zz_no_truncate', 'channel_data.notification_journal'), smoke('truncate channel_data.notification_journal')),
+    ],
+  },
+  {
+    row: 'шаг 114 (статус листинга)', critical: false,
+    invariant: 'наблюдение статуса листинга — известного источника; идентификатор уведомления ровно у наблюдения из уведомления; статус — тремя флагами или никак, проблемы — серьёзностями и действиями или никак, хотя бы одна часть; значения проблем — слова канала; SKU без управляющих знаков; одно наблюдение на уведомление',
+    mutations: [
+      m(dropConstraint('listing_status_source_known', 'channel_data.listing_status'), node(R114, L114, 'an unknown source is refused', '^accepted$')),
+      m(dropConstraint('listing_status_notification_ref', 'channel_data.listing_status'),
+        node(R114, L114, ['a notification observation without its notification id is refused', 'a polled observation with a notification id is refused'], '^accepted$')),
+      m(dropConstraint('listing_status_parts', 'channel_data.listing_status'),
+        node(R114, L114, ['a status with a missing flag is refused', 'an observation with neither status nor issues is refused', 'issues without their enforcement actions are refused'], '^accepted$')),
+      m(dropConstraint('listing_status_issue_values', 'channel_data.listing_status'),
+        node(R114, L114, ['an unknown severity is refused', 'an enforcement action that is not a channel word is refused'], '^accepted$')),
+      m(dropConstraint('listing_status_sku_form', 'channel_data.listing_status'), node(R114, L114, 'a SKU with a control character is refused', '^accepted$')),
+      m(dropConstraint('listing_status_once_per_notification', 'channel_data.listing_status'), node(R114, L114, 'a second observation of the same notification is refused', '^accepted$')),
+      m(dropTrigger('zz_append_only', 'channel_data.listing_status'), smoke('append-only channel_data.listing_status')),
+      m(dropTrigger('zz_no_truncate', 'channel_data.listing_status'), smoke('truncate channel_data.listing_status')),
     ],
   },
 ];

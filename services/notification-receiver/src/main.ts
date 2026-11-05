@@ -1,6 +1,6 @@
 import { systemClock } from '@repracer/channel-port';
 import { createAmazonAdapter, TwoLevelBudget } from '@repracer/amazon-adapter';
-import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
+import { createNotificationReceiver, createSqsClient, pipelineSink, storeJournal, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
 import type { AdapterDependencies } from '@repracer/channel-port';
 import { createPricingPipeline } from '@repracer/pricing-pipeline';
 import { createPool, PgAlertSink, PgPricingStore, PgSellerRouter, type PgPool } from '@repracer/pricing-store-pg';
@@ -56,7 +56,8 @@ export async function startReceiverProcess(config: ReceiverConfig = loadReceiver
     region: config.region,
     applicationId: config.applicationId,
     router: new PgSellerRouter(inboundPool),
-    ledger: storeLedger(store),
+    // Шаг 114: сырьё — в журнал уведомлений до пути решения; повтор доставки — не ошибка и не вторая строка
+    ledger: storeLedger(store), journal: storeJournal(store),
     sink: pipelineSink(pipeline),
     alerts,
     logger: sink.logger,

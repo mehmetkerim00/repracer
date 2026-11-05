@@ -24,7 +24,11 @@ export type {
   ConsoleDistrustRow,
   ConsoleOfferChannelPricingRow,
   ConsolePricingHealthRow,
+  ConsoleListingStatusRow,
   InboundNotificationEntry,
+  ListingStatusRecord,
+  NotificationSourceFacts,
+  RawInboundNotificationEntry,
   OfferChannelPricingObservation,
   ConsoleHaltRow,
   ConsoleIntentRow,
@@ -83,6 +87,7 @@ export {
   type TierConfig,
 } from './polling.ts';
 export { EXPLANATION_RULESETS } from './dictionary.ts';
+export { listingNotBuyableAlerts, listingStatusStep, type LatestListingState, type LatestPart } from './listing-status.ts';
 export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, MemberRoleChangeResult, DiscoveryStop, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, BuyboxHolderObservation, CompetitionData, CompetitionDataRow, OfferHolderFilter, OfferPageFilter, OfferSortKey } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, rotation, snapshotDigest, stalestFirst, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
 export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';

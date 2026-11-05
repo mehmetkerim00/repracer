@@ -30,6 +30,7 @@ function world(routes: Record<string, SellerRoute[]> = { [SELLER]: [{ tenantId: 
   const clock = { nowMs: Date.parse('2026-09-17T10:00:00.000Z') };
   const sqs = new FakeSqs(clock);
   const processed = new Set<string>();
+  const journal = new Set<string>();
   const ledger: NotificationLedger = {
     async wasProcessed(route, id) { return processed.has(`${route.tenantId}|${id}`); },
     async markProcessed(route, e) { processed.add(`${route.tenantId}|${e.notificationId}`); },
@@ -42,6 +43,8 @@ function world(routes: Record<string, SellerRoute[]> = { [SELLER]: [{ tenantId: 
     queueUrl: QUEUE, region: 'EU', applicationId: APP,
     router: { resolve: async (region, sellerId) => (region === 'EU' ? routes[sellerId] ?? [] : []) },
     ledger,
+    // Шаг 114: журнал сырья — у этих тестов в памяти, его поведение — eventbridge.test.ts
+    journal: { record: async (route, entry) => (journal.has(`${route.tenantId}|${entry.notificationId}`) ? 'REPEAT' : (journal.add(`${route.tenantId}|${entry.notificationId}`), 'NEW')) },
     sink: { async deliver(route, delivery, e) {
       if (failures > 0) { failures -= 1; throw new Error('database unavailable'); }
       delivered.push({ route, delivery, type: e.notificationType, id: e.notificationId });

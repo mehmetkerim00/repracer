@@ -81,6 +81,8 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
                   {a.channelLimitText ? <p className="note">{a.channelLimitText}</p> : null}
                   <p className="note">{a.authorizationText}</p>
                   {a.discoveryText ? <p className="note">{a.discoveryText}</p> : null}
+                  {/* Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */}
+                  {a.dataSourceText ? <p className="note">{a.dataSourceText}</p> : null}
                   {a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}
                 </div>
                 <div className="account-writers"><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></div>

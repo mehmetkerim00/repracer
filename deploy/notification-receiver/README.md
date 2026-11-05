@@ -7,6 +7,12 @@
 **Живой очереди и подписки нет** (OQ-167): развёртывание готово заранее, проверено живым прогоном шага 27 на модели очереди
 ([docs/evidence/step27-live-background.md](../../docs/evidence/step27-live-background.md)).
 
+**Шаг 114 [Р-239]:** очередь одна на два пути — SP-API кладёт ANY_OFFER_CHANGED и PRICING_HEALTH, правило EventBridge — уведомления
+листингов событием EventBridge; приёмник различает конверт и пишет сообщение в журнал сырья (`channel_data.notification_journal`) до
+пути решения. Живая привязка — часть Б: шаги и критерии успеха — [docs/amazon-notifications-part-b.md](../../docs/amazon-notifications-part-b.md),
+идентификаторы — шаблон `part-b.env.example` (значения — в файле секретов вне репозитория), проверка заполненного файла «да/нет» без
+значений — `node --experimental-strip-types services/notification-receiver/src/part-b.ts <файл>`.
+
 ## Запуск
 
 ```

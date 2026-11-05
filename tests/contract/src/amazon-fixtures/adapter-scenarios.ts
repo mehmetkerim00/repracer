@@ -134,7 +134,8 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
     [
       { id: 'foreign-seller', kind: 'inbound', delivery: aoc('syn-notification-0101', 1780, 'A9SYNOTHERSELLER'), expect: { kind: 'REJECTED', error: { code: 'TENANT_MISMATCH', class: 'REQUIRES_HUMAN' } } },
       { id: 'not-json', kind: 'inbound', delivery: { method: 'POST', url: 'https://sqs.invalid/q', rawBody: 'not json' }, expect: { kind: 'REJECTED', responseStatus: 400, error: { code: 'VALIDATION' } } },
-      { id: 'other-type', kind: 'inbound', delivery: delivery({ NotificationType: 'LISTINGS_ITEM_ISSUES_CHANGE', NotificationMetadata: { NotificationId: 'syn-notification-0102' } }), expect: { kind: 'REJECTED', responseStatus: 400 } },
+      // Шаг 114: уведомления листингов адаптер теперь разбирает — «не тот тип» — тип, которого он не знает (ORDER_CHANGE снимка моделей)
+      { id: 'other-type', kind: 'inbound', delivery: delivery({ NotificationType: 'ORDER_CHANGE', NotificationMetadata: { NotificationId: 'syn-notification-0102' } }), expect: { kind: 'REJECTED', responseStatus: 400 } },
       { id: 'pricing-health-with-pascal-keys', kind: 'inbound', delivery: delivery({ NotificationType: 'PRICING_HEALTH', NotificationMetadata: { NotificationId: 'syn-notification-0104' } }), expect: { kind: 'REJECTED', responseStatus: 400 } },
       { id: 'store-not-enabled', kind: 'inbound', delivery: delivery(anyOfferChanged('syn-notification-0103', US, 'B000007001', { $clockIso: -5_000 }, [{ seller: 'Synthetic Competitor', minor: 1780, buyBoxWinner: true, currency: 'USD' }])),
         expect: { kind: 'EVENTS', deliveryId: 'amazon:syn-notification-0103', events: [] } },

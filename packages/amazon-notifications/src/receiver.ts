@@ -1,5 +1,5 @@
 import type { AdapterLogger, AlertSink, ChannelAccountId, InboundDelivery, TenantId } from '@repracer/channel-port';
-import { parseEnvelope, type NotificationEnvelope } from './envelope.ts';
+import { parseEnvelope, type EnvelopeWrapper, type NotificationEnvelope, type ParsedEnvelope } from './envelope.ts';
 import { md5Hex, type SqsClient, type SqsMessage } from './sqs.ts';
 
 /**
@@ -21,6 +21,12 @@ import { md5Hex, type SqsClient, type SqsMessage } from './sqs.ts';
  *    снимок SNAPSHOT_TOO_OLD), сбой обработки — сообщение остаётся, повтор с растущей паузой; после maxReceiveCount — CRITICAL-алерт,
  *    дальше — очередь недоставленных по политике переадресации (условие инфраструктуры). Устаревшие данные конкурентов стратегия не
  *    использует (требование свежести, Р-39), догона опросом у Amazon нет [Р-119].
+ *  - ЖУРНАЛ СЫРЬЯ (шаг 114). До пути решения сообщение ложится в журнал уведомлений тенанта как пришло из очереди, с конвертом
+ *    (channel_data.notification_journal, 0213): одна строка на NotificationId. Повтор доставки — не ошибка и не вторая строка: журнал
+ *    отвечает REPEAT, обработку решает журнал обработанных. Процесс, умерший после записи сырья и до обработки, ничего не теряет —
+ *    сообщение не удалено из очереди и придёт снова; умерший после обработки и до удаления — ничего не удваивает.
+ *  - ДВА КОНВЕРТА (шаг 114). ANY_OFFER_CHANGED и PRICING_HEALTH SP-API кладёт в очередь сам, уведомления листингов приходят событием
+ *    EventBridge с той же очередью-целью (envelope.ts, A-33). Путь решения получает уведомление SP-API без конверта EventBridge.
  */
 
 export type AmazonRegion = 'NA' | 'EU' | 'FE';
@@ -33,6 +39,21 @@ export interface SellerRoute {
 /** Аккаунты тенантов, подключившие продавца в регионе. Межтенантный поиск только по идентификатору — ролью маршрутизатора (0083) */
 export interface SellerRouter {
   resolve(region: AmazonRegion, sellerId: string): Promise<SellerRoute[]>;
+}
+
+/** Шаг 114: запись журнала сырья — тело сообщения, как оно пришло из очереди */
+export interface RawNotificationEntry {
+  notificationId: string;
+  notificationType: string;
+  envelope: EnvelopeWrapper;
+  eventTime: string | null;
+  receivedAt: string;
+  rawBody: string;
+}
+
+/** Шаг 114: журнал сырья тенанта — NEW у первой доставки, REPEAT у повтора (повтор не ошибка и не вторая строка) */
+export interface NotificationJournal {
+  record(route: SellerRoute, entry: RawNotificationEntry): Promise<'NEW' | 'REPEAT'>;
 }
 
 /** Журнал обработанных уведомлений тенанта */
@@ -71,14 +92,21 @@ export const DEFAULT_RECEIVER_POLICY: ReceiverPolicy = {
   silenceAlertAfterMs: 30 * 60_000, lateAfterMs: 15 * 60_000,
 };
 
-export const SUPPORTED_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(['ANY_OFFER_CHANGED', 'PRICING_HEALTH']);
+/**
+ * Шаг 114: и уведомления листингов — статус (покупаемость, удаление) и проблемы листинга. Схема снимка LISTINGS_ITEM_STATUS_CHANGE
+ * перечисляет тип как «LISTINGS_ITEM_STATUS_CHANGED», страница, пример схемы и createSubscription — «LISTINGS_ITEM_STATUS_CHANGE»:
+ * принимаются оба написания одного типа
+ */
+export const SUPPORTED_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(['ANY_OFFER_CHANGED', 'PRICING_HEALTH',
+  'LISTINGS_ITEM_STATUS_CHANGE', 'LISTINGS_ITEM_STATUS_CHANGED', 'LISTINGS_ITEM_ISSUES_CHANGE']);
 
 export type MessageOutcome =
   | 'DELIVERED' | 'DUPLICATE' | 'REJECTED_BY_ADAPTER' | 'FOREIGN_APPLICATION' | 'UNKNOWN_SELLER' | 'UNSUPPORTED_TYPE' | 'UNPARSEABLE' | 'CORRUPT' | 'RETRY' | 'GIVEN_UP';
 
 export interface PollReport {
   received: number;
-  outcomes: Array<{ messageId: string; outcome: MessageOutcome; notificationId?: string; late?: boolean }>;
+  /** journal — что ответил журнал сырья (шаг 114): NEW — первая доставка, REPEAT — повтор */
+  outcomes: Array<{ messageId: string; outcome: MessageOutcome; notificationId?: string; late?: boolean; journal?: 'NEW' | 'REPEAT' }>;
   deleted: number;
   deleteFailed: number;
   queueError?: string;
@@ -92,6 +120,8 @@ export interface ReceiverOptions {
   applicationId: string;
   router: SellerRouter;
   ledger: NotificationLedger;
+  /** Шаг 114: журнал сырья — обязателен: сообщение, не легшее в журнал, в путь решения не идёт */
+  journal: NotificationJournal;
   sink: NotificationSink;
   alerts: AlertSink;
   logger: AdapterLogger;
@@ -119,7 +149,7 @@ export function createNotificationReceiver(options: ReceiverOptions): Notificati
   const log = (level: 'INFO' | 'WARN', code: string, details: Record<string, string | number | boolean | null>) =>
     options.logger.log({ level, code, message: code, details });
 
-  async function handle(message: SqsMessage, parsed: ReturnType<typeof parseEnvelope>, toDelete: SqsMessage[]): Promise<PollReport['outcomes'][number]> {
+  async function handle(message: SqsMessage, parsed: ParsedEnvelope, toDelete: SqsMessage[]): Promise<PollReport['outcomes'][number]> {
     const base = { messageId: message.messageId };
     // Тело искажено по дороге: не удаляем — придёт снова, после maxReceiveCount уйдёт в очередь недоставленных
     if (md5Hex(message.body) !== message.md5OfBody.toLowerCase()) {
@@ -131,7 +161,8 @@ export function createNotificationReceiver(options: ReceiverOptions): Notificati
     }
     if (!parsed.ok) {
       toDelete.push(message);
-      await alert('NOTIFICATION_UNPARSEABLE', 'CRITICAL', { messageId: message.messageId, problem: parsed.problem });
+      // Шаг 114 (A-33): у непонятого события EventBridge — имена ключей `detail`, без значений: по ним разбирается форма живой очереди
+      await alert('NOTIFICATION_UNPARSEABLE', 'CRITICAL', { messageId: message.messageId, problem: parsed.problem, ...(parsed.detailKeys !== undefined ? { detailKeys: parsed.detailKeys } : {}) });
       return { ...base, outcome: 'UNPARSEABLE' };
     }
     const e = parsed.envelope;
@@ -158,15 +189,23 @@ export function createNotificationReceiver(options: ReceiverOptions): Notificati
     let delivered = 0;
     let rejected = 0;
     let duplicates = 0;
+    let journal: 'NEW' | 'REPEAT' = 'NEW';
+    // Путь решения знает формат SP-API: событию EventBridge — уведомление из `detail`, сообщению очереди — его тело как есть
+    const notificationBody = e.wrapper === 'EVENTBRIDGE' ? JSON.stringify(parsed.notification) : message.body;
     try {
       for (const route of routes) {
+        // Шаг 114: сырьё — до обработки; повтор доставки журнал узнаёт, а обработку решает журнал обработанных
+        const recorded = await options.journal.record(route, {
+          notificationId: e.notificationId, notificationType: e.notificationType, envelope: e.wrapper, eventTime: e.eventTime, receivedAt, rawBody: message.body,
+        });
+        if (recorded === 'REPEAT') journal = 'REPEAT';
         if (await options.ledger.wasProcessed(route, e.notificationId)) {
           duplicates += 1;
           continue;
         }
         const delivery: InboundDelivery = {
           claimed: { tenantId: route.tenantId as TenantId, channelAccountId: route.channelAccountId as ChannelAccountId },
-          method: 'SQS', url: options.queueUrl, headers: { 'x-sqs-message-id': message.messageId }, rawBody: message.body, receivedAt,
+          method: 'SQS', url: options.queueUrl, headers: { 'x-sqs-message-id': message.messageId, 'x-repracer-envelope': e.wrapper }, rawBody: notificationBody, receivedAt,
           notification: { notificationId: e.notificationId, notificationType: e.notificationType, eventTime: e.eventTime },
         };
         const result = await options.sink.deliver(route, delivery, e);
@@ -184,16 +223,16 @@ export function createNotificationReceiver(options: ReceiverOptions): Notificati
       const count = message.attributes.approximateReceiveCount ?? 1;
       if (count >= policy.maxReceiveCount) {
         await alert('NOTIFICATION_GIVING_UP', 'CRITICAL', { messageId: message.messageId, notificationType: e.notificationType, receiveCount: count });
-        return { ...withId, outcome: 'GIVEN_UP' };
+        return { ...withId, outcome: 'GIVEN_UP', journal };
       }
       const pause = Math.min(policy.retryMaxSeconds, policy.retryBaseSeconds * 2 ** Math.max(0, count - 1));
       await options.sqs.changeVisibility(message.receiptHandle, pause);
       log('WARN', 'NOTIFICATION_RETRY', { messageId: message.messageId, receiveCount: count, retryInSeconds: pause, error: String((error as Error).name ?? 'Error') });
-      return { ...withId, outcome: 'RETRY' };
+      return { ...withId, outcome: 'RETRY', journal };
     }
     toDelete.push(message);
     const outcome: MessageOutcome = delivered > 0 ? 'DELIVERED' : rejected > 0 ? 'REJECTED_BY_ADAPTER' : duplicates > 0 ? 'DUPLICATE' : 'DELIVERED';
-    return { ...withId, outcome, ...(late ? { late: true } : {}) };
+    return { ...withId, outcome, journal, ...(late ? { late: true } : {}) };
   }
 
   return {
@@ -261,6 +300,13 @@ export function storeLedger(store: {
     wasProcessed: (route, notificationId) => store.wasNotificationProcessed(route.tenantId, route.channelAccountId, notificationId),
     markProcessed: (route, entry) => store.markNotificationProcessed(route.tenantId, { channelAccountId: route.channelAccountId, ...entry }),
   };
+}
+
+/** Шаг 114: журнал сырья на хранилище пути решения (PricingStore.recordInboundNotification) — без зависимости от пакета хранилища */
+export function storeJournal(store: {
+  recordInboundNotification(tenantId: string, entry: RawNotificationEntry & { channelAccountId: string }): Promise<'NEW' | 'REPEAT'>;
+}): NotificationJournal {
+  return { record: (route, entry) => store.recordInboundNotification(route.tenantId, { channelAccountId: route.channelAccountId, ...entry }) };
 }
 
 /**

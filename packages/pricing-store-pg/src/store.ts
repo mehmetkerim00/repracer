@@ -5,8 +5,10 @@ import {
 import { DEFAULT_RETRY_POLICY, retryPolicyFor } from '@repracer/write-dispatcher';
 import {
   type BulkJobArtifact, type BulkJobCreated, type BulkJobInput, type BulkJobOutcome, type BulkJobProgress, type BulkJobRow,
+  type ConsoleListingStatusRow, type ListingStatusRecord, type NotificationSourceFacts, type RawInboundNotificationEntry,
 } from '@repracer/pricing-pipeline';
-import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, offerIdentityOf, type CompetitorOffer, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
+import { insertListingStatus, insertRawNotification } from './inbound.ts';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, offerIdentityOf, type CompetitorOffer, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type ListingStatusObservation, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { OmnibusPriorPrice } from '@repracer/pricing-model';
@@ -2276,6 +2278,39 @@ export class PgPricingStore implements PricingStore {
     await this.tx(tenantId, async (tx) => { await this.insertNotification(tx, tenantId, entry); });
   }
 
+  /** Шаг 114: журнал сырья уведомлений (0213) — до пути решения; повтор доставки — REPEAT */
+  async recordInboundNotification(tenantId: string, entry: RawInboundNotificationEntry): Promise<'NEW' | 'REPEAT'> {
+    return this.tx(tenantId, (tx) => insertRawNotification(tx, tenantId, entry));
+  }
+
+  /** Шаг 114: статус листинга одним путём из трёх источников; у уведомления — журнал обработанных той же транзакцией (OQ-171) */
+  async recordListingStatus(tenantId: string, channelAccountId: string, observations: readonly ListingStatusObservation[], notification?: InboundNotificationEntry): Promise<ListingStatusRecord> {
+    return this.tx(tenantId, async (tx) => {
+      if (notification && !(await this.insertNotification(tx, tenantId, notification))) return { recorded: 0, duplicateNotification: true, lostBuyable: [] };
+      return { ...(await insertListingStatus(tx, tenantId, channelAccountId, observations)), duplicateNotification: false };
+    });
+  }
+
+  /** Шаг 114: уведомления, дошедшие за сутки, — по журналу сырья (индекс `notification_journal_account_recent_idx`) */
+  async notificationSources(tenantId: string, at: Instant): Promise<NotificationSourceFacts[]> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT a.channel_account_id,
+                (SELECT max(j.received_at) FROM channel_data.notification_journal j WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id) AS last_at,
+                coalesce((SELECT jsonb_agg(jsonb_build_object('type', t.notification_type, 'count', t.n) ORDER BY t.notification_type)
+                            FROM (SELECT j.notification_type, count(*) AS n FROM channel_data.notification_journal j
+                                   WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id AND j.received_at > $2::timestamptz - interval '24 hours'
+                                   GROUP BY j.notification_type) t), '[]'::jsonb) AS recent
+           FROM tenant_data.channel_account a WHERE a.tenant_id = $1
+            AND EXISTS (SELECT 1 FROM channel_data.notification_journal j WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id)
+          ORDER BY a.channel_account_id`, [tenantId, at]);
+      return rows.map((r) => ({
+        channelAccountId: r.channel_account_id, lastReceivedAt: r.last_at ? iso(r.last_at) : null,
+        last24h: (r.recent as Array<{ type: string; count: number }>).map((x) => ({ notificationType: x.type, count: Number(x.count) })),
+      }));
+    });
+  }
+
   /** Находка 4 ревью шага 21: сохраняется то превью, что видел человек, — стратегии единиц с тех пор не менялись */
   private static async assertExpected(tx: Tx, tenantId: string, expected: StrategySaveInput['expected']): Promise<Row[]> {
     if (!expected) return [];
@@ -2689,6 +2724,24 @@ export class PgPricingStore implements PricingStore {
           competitivePriceThreshold: r.competitive_price_threshold_minor !== null && r.currency && r.price_basis
             ? { amountMinor: Number(r.competitive_price_threshold_minor), currency: r.currency, basis: r.price_basis } : null,
         }));
+      /**
+       * Шаг 114: последний статус листинга предложения и принудительные действия последнего наблюдения проблем — пилюля «Not buyable on
+       * Amazon». Ключ — как у ценообразования канала (номер единицы, иначе SKU); у мира страницы — только её единицы (шаг 67, п. 3)
+       */
+      const listingStatus = (await q(`SELECT DISTINCT ON (l.channel_account_id, l.marketplace, l.external_sku)
+                                             l.channel_account_id, l.marketplace, l.external_sku, l.buyable, l.deleted, l.source, l.observed_at,
+                                             (SELECT i.enforcement_actions FROM channel_data.listing_status i
+                                               WHERE i.tenant_id = l.tenant_id AND i.channel_account_id = l.channel_account_id AND i.marketplace = l.marketplace
+                                                 AND i.external_sku = l.external_sku AND i.severities IS NOT NULL
+                                               ORDER BY i.observed_at DESC, i.recorded_at DESC LIMIT 1) AS enforcement_actions
+                                        FROM channel_data.listing_status l
+                                       WHERE l.tenant_id = $1 AND l.buyable IS NOT NULL
+                                             ${onlyKeys('l.channel_account_id, l.marketplace, l.external_sku', `s.channel_account_id, m.marketplace, coalesce(m.external_unit_id, m.external_sku, '')`)}
+                                       ORDER BY l.channel_account_id, l.marketplace, l.external_sku, l.observed_at DESC, l.recorded_at DESC`, only ? [tenantId, only, onlyProducts] : [tenantId]))
+        .map((r): ConsoleListingStatusRow => ({
+          channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, buyable: r.buyable, deleted: r.deleted,
+          source: r.source, observedAt: iso(r.observed_at), enforcementActions: r.enforcement_actions ?? null,
+        }));
       const distrusts = (await q(`SELECT channel_distrust_id, channel_account_id, marketplace, reason_code, details, detected_at, released_at, released_by_membership_id, release_note
                                     FROM channel_data.channel_distrust WHERE tenant_id = $1 ORDER BY detected_at`))
         .map((r): ConsoleDistrustRow => ({
@@ -2736,7 +2789,7 @@ export class PgPricingStore implements PricingStore {
         .map((r) => ({ rulesetId: r.ruleset_id, kind: r.kind, definition: r.definition }) as DictionaryRuleset);
       const [tenantRow] = await q(`SELECT demo FROM tenant_data.tenant WHERE tenant_id = $1`);
       return {
-        tenantId, demo: tenantRow?.demo === true, scopes, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, stops, divergenceCases,
+        tenantId, demo: tenantRow?.demo === true, scopes, writes, halts, haltReviews, distrusts, offerChannelPricing, pricingHealth, listingStatus, stops, divergenceCases,
         fxRates: fx.map((f) => ({ source: 'ECB', rateDate: f.rate_date, base: 'EUR', quote: f.quote_currency, rateMicros: Number(f.rate_micros), availableFrom: f.available_from })),
         members, strategies, strategyVersions, explanationRulesets,
       };
@@ -3952,6 +4005,8 @@ export class PgPricingStore implements PricingStore {
                                     LEFT JOIN channel_data.notification_loss_verdict v ON v.tenant_id = c.tenant_id AND v.notification_loss_check_id = c.notification_loss_check_id
                                    WHERE c.tenant_id = $1 ORDER BY c.poll_observed_at, c.channel_product_ref`);
       const inbound = await q(`SELECT notification_id, notification_type FROM channel_data.inbound_notification WHERE tenant_id = $1 ORDER BY processed_at, notification_id`);
+      const journal = await q(`SELECT notification_id, notification_type, envelope FROM channel_data.notification_journal WHERE tenant_id = $1 ORDER BY recorded_at, notification_id`);
+      const listings = await q(`SELECT marketplace, external_sku, source, buyable, enforcement_actions FROM channel_data.listing_status WHERE tenant_id = $1 ORDER BY recorded_at, observed_at`);
       const cases = await q(`SELECT write_scope_id, expected_amount_minor, observed_amount_minor, cause, status FROM channel_data.divergence_case
                                WHERE tenant_id = $1 ORDER BY opened_at`);
       const states = await q(`SELECT marketplace, channel_product_ref, condition, observed_at, buybox_amount_minor, offers, currency, suggested_price_minor
@@ -3969,6 +4024,9 @@ export class PgPricingStore implements PricingStore {
         offerChannelPricing: ocp.map((o) => ({ marketplace: o.marketplace, externalSku: o.external_sku, automatedPricing: o.automated_pricing, channelBounds: o.channel_bounds, source: o.source })),
         pricingHealth: health.map((h) => ({ marketplace: h.marketplace, channelProductRef: h.channel_product_ref, issueType: h.issue_type, thresholdMinor: h.competitive_price_threshold_minor === null ? null : Number(h.competitive_price_threshold_minor) })),
         inboundNotifications: inbound.map((n) => ({ notificationId: n.notification_id, notificationType: n.notification_type })),
+        notificationJournal: journal.map((n) => ({ notificationId: n.notification_id, notificationType: n.notification_type, envelope: n.envelope })),
+        listingStatus: listings.map((l) => ({ marketplace: l.marketplace, externalSku: l.external_sku, source: l.source, buyable: l.buyable,
+          enforcementActions: l.enforcement_actions ? [...(l.enforcement_actions as string[])].sort() : null })),
         snapshotLog: snapshotLog.map((l) => ({ channelProductRef: l.channel_product_ref, verdict: l.sanity_verdict, source: l.source, delivery: l.delivery })),
         lossChecks: lossChecks.map((c) => ({
           channelProductRef: c.channel_product_ref, compared: c.compared, heldMinor: c.held_minor === null ? null : Number(c.held_minor),

@@ -81,6 +81,11 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-0000000
 INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time,
   competitive_price_threshold_minor, currency, notification_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, 'EUR', 'SYN-N-R103-H');
+-- Шаг 114 (0213): журнал сырья уведомлений и статус листинга
+INSERT INTO channel_data.notification_journal (tenant_id, channel_account_id, channel, notification_id, notification_type, envelope, event_time, received_at, raw_body)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'SYN-N-R103-J', 'LISTINGS_ITEM_STATUS_CHANGE', 'EVENTBRIDGE', now(), now(), '{}');
+INSERT INTO channel_data.listing_status (tenant_id, channel_account_id, channel, marketplace, external_sku, source, buyable, discoverable, deleted, observed_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-SKU', 'DISCOVERY', true, true, false, now());
 -- Шаг 24, A (0086) [Р-122]: журнал полных снимков конкурентов
 INSERT INTO channel_data.competitor_snapshot_log (tenant_id, competitor_snapshot_id, received_at, observed_at, channel_account_id, channel, marketplace, channel_product_ref, condition, source, sanity_verdict, delivery, snapshot)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a9124000-0000-4000-8000-000000000001', now(), now(), 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'KAUFLAND_BUYBOX', 'ACCEPT', 'POLL', '{"offers": []}');
@@ -713,6 +718,8 @@ SELECT pg_temp.expect_fail('truncate channel_data.competitor_snapshot_log', $q$ 
 SELECT pg_temp.expect_fail('truncate channel_data.notification_loss_check', $q$ ALTER TABLE channel_data.notification_loss_verdict DISABLE TRIGGER zz_no_truncate; TRUNCATE channel_data.notification_loss_check, channel_data.notification_loss_verdict $q$, 'TRUNCATE of channel_data.notification_loss_check is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.notification_loss_verdict', $q$ TRUNCATE channel_data.notification_loss_verdict $q$, 'TRUNCATE of channel_data.notification_loss_verdict is forbidden');
 SELECT pg_temp.expect_fail('truncate channel_data.inbound_notification', $q$ TRUNCATE channel_data.inbound_notification $q$, 'TRUNCATE of channel_data.inbound_notification is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.notification_journal', $q$ TRUNCATE channel_data.notification_journal $q$, 'TRUNCATE of channel_data.notification_journal is forbidden');
+SELECT pg_temp.expect_fail('truncate channel_data.listing_status', $q$ TRUNCATE channel_data.listing_status $q$, 'TRUNCATE of channel_data.listing_status is forbidden');
 SELECT pg_temp.expect_fail('pricing health threshold without its currency (Р-71)', $q$
   INSERT INTO channel_data.offer_pricing_health (tenant_id, channel_account_id, channel, marketplace, channel_product_ref, condition, issue_type, event_time, competitive_price_threshold_minor, currency, notification_id)
   VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'KAUFLAND', 'de', 'R103-1', 'new', 'BuyBoxDisqualification', now(), 1999, NULL, 'SYN-N-R71') $q$, 'offer_pricing_health_threshold_money');

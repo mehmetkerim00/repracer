@@ -67,6 +67,8 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
         fulfillment: fulfillment.kind === 'MERCHANT' ? 'MERCHANT' : 'CHANNEL',
         ...(price ? { currentPrice: price } : {}), ...(quantity !== null ? { currentQuantity: quantity } : {}),
         ...(s.status ? { isLive: s.status.includes('BUYABLE') } : {}),
+        // Шаг 114: статус сводки витрины — наблюдение «статус листинга»; проблемы обнаружение не запрашивает
+        ...(s.status ? { listingStatus: { status: { buyable: s.status.includes('BUYABLE'), discoverable: s.status.includes('DISCOVERABLE'), deleted: false }, issues: null } } : {}),
         channelPricing: { automatedPricing: owned.repricer, channelBounds: owned.bounds },
       });
     }

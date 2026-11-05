@@ -240,7 +240,7 @@
         "url": "https://sqs.eu-west-1.amazonaws.com.invalid/000000000000/repracer-syn-notifications",
         "headers": {},
         "body": {
-          "NotificationType": "LISTINGS_ITEM_ISSUES_CHANGE",
+          "NotificationType": "ORDER_CHANGE",
           "NotificationMetadata": {
             "NotificationId": "syn-notification-0102"
           }

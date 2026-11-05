@@ -611,15 +611,17 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
          * Шаг 103 [Р-228]: у карточки аккаунта — стратегия по умолчанию для новых предложений: строки умолчаний, активные стратегии (мир без
          * единиц — только справочник стратегий) и доступность на канале тем же правилом, что у превью и импорта стратегий [Р-39]
          */
-        const [rows, defaultRows, strategyWorld] = await Promise.all([
+        const [rows, defaultRows, strategyWorld, sources] = await Promise.all([
           connect ? connect.connections(live.tenantId) : Promise.resolve({ accounts: [], pending: [] }),
           live.store.defaultStrategies(live.tenantId), live.view(viewer, { scopeIds: [] }),
+          // Шаг 114: уведомления, дошедшие за сутки, — экран говорит, откуда данные аккаунта Amazon (уведомления или только опрос)
+          live.store.notificationSources ? live.store.notificationSources(live.tenantId, live.clock.iso() as never) : Promise.resolve(null),
         ]);
         const defaults: DefaultStrategyInput = {
           rows: defaultRows, strategies: activeStrategyChoices(strategyWorld, m), availability: strategyAvailableOn, canEdit: can(viewer.role, 'MANAGE_PRICING'),
           ...(services.people ? { people: services.people } : {}),
         };
-        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m, defaults));
+        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m, defaults, sources));
       }
       /**
        * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — правом назначать стратегии (владелец и менеджер), без

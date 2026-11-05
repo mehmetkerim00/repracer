@@ -22,7 +22,7 @@ const assert: typeof strictAssert = new Proxy(strictAssert, {
 
 import { ClickHouseHttp } from '@repracer/analytics-export';
 import { OutboxRelay, TOPICS, type KeyedMessage } from '@repracer/broker';
-import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
+import { createNotificationReceiver, createSqsClient, pipelineSink, storeJournal, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
 import { FakeSqs } from '@repracer/amazon-notifications/testing';
 import { createPool, inTenant, PgPricingStore, type PgPool } from '@repracer/pricing-store-pg';
 import { createScheduler, jobSource, PgSchedulerState, pgJobDeps, runScheduler, type JobDeps } from '@repracer/scheduler';
@@ -172,7 +172,7 @@ before(async () => {
     sqs: createSqsClient({ queueUrl: QUEUE_URL, fetch: sqs.fetch, credentials: async () => ({ accessKeyId: 'SYNTHETICKEYID00000', secretAccessKey: 'syn-secret-access-key', sessionToken: undefined }), now: () => new Date(clock.nowMs()) }),
     queueUrl: QUEUE_URL, region: 'EU',
     applicationId: 'amzn1.sellerapps.app.syn-live', router: { async resolve() { return [{ tenantId: a.seeded.tenantId, channelAccountId: a.seeded.ids.dbId('20000000-0000-4000-8000-000000002702') }]; } },
-    ledger: storeLedger(new PgPricingStore(pools.appPool)), sink: pipelineSink(a.receiverPipeline()),
+    ledger: storeLedger(new PgPricingStore(pools.appPool)), journal: storeJournal(new PgPricingStore(pools.appPool)), sink: pipelineSink(a.receiverPipeline()),
     alerts: { async raise(alert) { alerts.push(alert as never); } }, logger: { log: () => {} }, now: () => new Date(clock.nowMs()),
     sleep: async () => {},
   });

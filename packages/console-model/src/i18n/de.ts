@@ -612,6 +612,13 @@ export const de: Messages = {
       unpublished: 'Nicht veröffentlicht (Preis nicht wettbewerbsfähig)',
       unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Anderswo günstiger: ${elsewhere}.` : 'Anderswo günstiger.'} Seit ${when}; TMPrice ändert den Preis hier nicht.`,
       unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart hat dieses Angebot am ${when} von walmart.com genommen: dasselbe Produkt ist anderswo günstiger${elsewhere ? ` (${elsewhere})` : ''} — auf einem anderen Kanal oder bei Walmart selbst —, Käufer auf walmart.com sehen es nicht mehr. Bringen Sie den Preis auf walmart.com in die Nähe dieses Preises, dann veröffentlicht Walmart das Angebot wieder; TMPrice ändert den Preis hier nicht für Sie.`,
+      /** Шаг 114: Amazon больше не продаёт предложение — статус без BUYABLE (уведомление, чтение после записи или обнаружение) */
+      notBuyable: 'Bei Amazon nicht kaufbar',
+      notBuyableShort: (when: string, why: string | null) => `${why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}.` : 'Amazon verkauft es nicht.'} Seit ${when}.`,
+      notBuyableDetail: (when: string, source: string, why: string | null, deleted: boolean) => `${deleted ? 'Amazon meldet dieses Angebot als gelöscht' : 'Amazon meldet dieses Angebot als nicht kaufbar'} (${source}, ${when})${why ? `: ${why}` : ''}. Kunden können es erst wieder kaufen, wenn Amazon es freigibt; TMPrice berechnet und sendet den Preis weiter wie gewohnt.`,
+      notBuyableWhatToDo: 'Öffnen Sie das Angebot in Seller Central und sehen Sie sich seine Probleme an: Häufige Ursache ist ein Preis außerhalb des Mindest- oder Höchstpreises der SKU.',
+      listingSources: { NOTIFICATION: 'Benachrichtigung von Amazon', READBACK: 'gelesen nach unserer letzten Preisaktualisierung', DISCOVERY: 'Katalogabgleich' },
+      enforcement: { LISTING_SUPPRESSED: 'das Angebot ist unterdrückt', SEARCH_SUPPRESSED: 'es ist in der Suche ausgeblendet', ATTRIBUTE_SUPPRESSED: 'eine Produktangabe wurde abgelehnt', CATALOG_ITEM_REMOVED: 'das Produkt wurde aus dem Amazon-Katalog entfernt', OTHER: 'eine andere Einschränkung durch Amazon' },
     },
     applying: {
       idle: 'Nichts in Arbeit', idleDetail: 'Jeder entschiedene Preis hat den Kanal erreicht oder endete mit Grund',
@@ -913,6 +920,16 @@ export const de: Messages = {
         revoke: 'Bestandsaktualisierungen widerrufen',
         revoked: (scopes: number, writes: number, inFlight: number) => `Widerrufen: Bestandsaktualisierungen an diesen Kanal sind aus. Abgleich für ${scopes} Angebot(e) ausgeschaltet, ${writes} nicht gesendete Bestandsänderung(en) verworfen.${inFlight > 0 ? ` ${inFlight} Änderung(en) waren vor dem Widerruf bereits an den Kanal gesendet und lassen sich nicht zurückholen; sie werden nicht wiederholt.` : ''}`,
       },
+      /** Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */
+      dataSource: {
+        notifications: (when: string, parts: string) => `Datenquelle: Benachrichtigungen von Amazon, die letzte ${when}; in 24 Stunden: ${parts}. Die Prüfung nach jeder Preisaktualisierung und der Katalogabgleich laufen weiter.`,
+        polling: 'Datenquelle: nur Abfragen — in 24 Stunden hat uns keine Benachrichtigung von Amazon erreicht. Der Angebotsstatus kommt aus der Prüfung nach jeder Preisaktualisierung und aus dem Katalogabgleich; Angebote der Konkurrenz für die Preisberechnung kommen nur mit Benachrichtigungen.',
+        parts: {
+          offers: (n: number) => `${n} ${n === 1 ? 'Änderung' : 'Änderungen'} der Konkurrenz`,
+          status: (n: number) => `${n} ${n === 1 ? 'Statusänderung' : 'Statusänderungen'} von Angeboten`,
+          pricing: (n: number) => `${n} ${n === 1 ? 'Preiswarnung' : 'Preiswarnungen'}`,
+        },
+      },
       externalEdits: {
         count: (n: number) => `Fremde Änderungen in den letzten 24 Stunden: ${n}`,
         note: 'Eine fremde Änderung ist ein Preis oder Bestand im Kanal, den wir nicht gesendet haben und der von unserem Ziel abweicht: Jemand anderes — ein anderes Tool oder eine manuelle Änderung — verändert diesen Kanal.',
@@ -1203,6 +1220,8 @@ export const de: Messages = {
         // Шаг 49 [Р-189, E-22]: режим пакетов eBay; [Р-192]: удаление данных пользователем eBay — оба поднимает функция базы (0142)
         EBAY_MULTI_SKU_REFUSED: { what: 'eBay hat für dieses Konto abgelehnt, mehrere Produkte in einem Aufruf zu ändern: Ab jetzt senden wir Ihre eBay-Preis- und Bestandsänderungen einzeln pro Produkt', step: 'Sie müssen nichts tun: Die Änderungen kommen weiterhin an, nur mit mehr Aufrufen. Wir haben eBay gefragt, ob mehrere Produkte pro Aufruf erlaubt sind, und stellen erst nach einer Antwort zurück.' },
         EBAY_BATCH_OUTCOME_NOT_RECORDED: { what: 'Wir konnten nicht speichern, ob eBay für dieses Konto mehrere Produkte in einem Aufruf annimmt', step: 'Ihre Änderungen wurden gesendet und ihre Ergebnisse erfasst; nur der Sammelmodus bleibt unverändert und wird beim nächsten Sammelaufruf erneut geprüft. Melden Sie sich bei uns, wenn sich das wiederholt.' },
+        LISTING_NOT_BUYABLE: { what: 'Der Kanal verkauft ein Angebot nicht mehr, dessen Preis TMPrice berechnet', step: 'Öffnen Sie das Angebot im Kanal-Backoffice und sehen Sie sich seine Probleme an: Häufige Ursache ist ein Preis außerhalb der im Kanal gesetzten Preisgrenzen. TMPrice berechnet und sendet den Preis weiter.' },
+        LISTING_STATUS_NOT_RECORDED: { what: 'Wir konnten den nach einer Preisaktualisierung gelesenen Angebotsstatus nicht speichern', step: 'Die Preisaktualisierung und ihr Ergebnis wurden erfasst; nur der Angebotsstatus wartet auf das nächste Lesen oder die nächste Benachrichtigung. Melden Sie sich bei uns, wenn sich das wiederholt.' },
         EBAY_ACCOUNT_DELETED_BY_USER: { what: 'Der eBay-Nutzer dieses Kontos hat eBay gebeten, seine Daten zu löschen: Wir haben die Zugangstoken gelöscht und das Konto getrennt', step: 'An dieses eBay-Konto wird nichts mehr gesendet. Verbinden lässt es sich nur mit einer neuen Zustimmung bei eBay — öffnen Sie die Kanalkonten in der Konsole, wenn das Konto weiterarbeiten soll.' },
         C10_OTHER_TOOLS: { what: 'Vor der Migration eines eBay-Angebots: Andere Programme, die es über die Trading API bearbeiten, müssen benannt werden', step: 'Nennen Sie jedes Tool, das dieses Angebot bearbeitet; nach der Migration laufen dessen und unsere Änderungen auseinander.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'Vor der Migration eines eBay-Angebots: Die Option „Nicht vorrätig“ ist ausgeschaltet', step: 'Schalten Sie die Option „Nicht vorrätig“ in Ihren eBay-Einstellungen ein, damit Bestand 0 das Angebot nicht beendet.' },

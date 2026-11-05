@@ -16,6 +16,8 @@ export interface ListingsIssue {
   attributeNames?: string[];
   categories?: string[];
   marketplaceIds?: string[];
+  /** definitions.IssueEnforcements: принудительные действия Amazon (LISTING_SUPPRESSED снимает возможность купить) — шаг 114 */
+  enforcements?: { actions?: Array<{ action?: string }>; exemption?: { status?: string } };
 }
 
 /** definitions.ListingsItemSubmissionResponse */

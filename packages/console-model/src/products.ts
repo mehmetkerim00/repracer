@@ -62,7 +62,7 @@ export interface OfferFilter {
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
 export type ChannelNote = StatusCell & {
-  code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED';
+  code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED' | 'LISTING_NOT_BUYABLE';
   /** Шаг 96 (аудит А6): короткое «что делать» у пилюли — раскрывается по ссылке */
   whatToDo?: { label: string; text: string };
 };
@@ -234,6 +234,24 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
     notes.push({
       code: 'PRICING_HEALTH', tone: 'warn', label: n.pricingHealth(health.issueType),
       detail: n.pricingHealthDetail(m.when(health.occurredAt), health.competitivePriceThreshold ? m.money(health.competitivePriceThreshold.amountMinor, health.competitivePriceThreshold.currency) : null),
+    });
+  }
+  /**
+   * Шаг 114: Amazon не продаёт предложение — последний статус без BUYABLE из любого источника (уведомление, чтение после записи,
+   * обнаружение). Это состояние предложения, как снятие с публикации Walmart: покупатель его не видит. Движок цену не меняет —
+   * экран называет, что сказал Amazon, словами, и что сделать
+   */
+  const listing = (world.state.listingStatus ?? []).find((l) => l.channelAccountId === scope.channelAccountId && l.marketplace === scope.marketplace
+    && l.externalSku === scope.externalUnitId);
+  if (listing && !listing.buyable) {
+    const enforcement = n.enforcement as Record<string, string | undefined>;
+    const why = listing.enforcementActions && listing.enforcementActions.length > 0
+      ? [...new Set(listing.enforcementActions.map((a) => enforcement[a] ?? n.enforcement.OTHER))].join(', ') : null;
+    notes.push({
+      code: 'LISTING_NOT_BUYABLE', tone: 'stop', label: n.notBuyable,
+      detail: n.notBuyableDetail(m.when(listing.observedAt), n.listingSources[listing.source], why, listing.deleted),
+      short: n.notBuyableShort(m.when(listing.observedAt), why),
+      whatToDo: { label: m.ui.products.whatToDo, text: n.notBuyableWhatToDo },
     });
   }
   return notes;

@@ -32,3 +32,24 @@ Markdown-версии (суффикс `.md`), поле `updatedAt` страни�
 
 Подпись SigV4 приёмника проверена на эталоне `packages/amazon-notifications/test/sigv4_reference.py` (стандартная библиотека Python по
 алгоритму страницы IAM), а не на ответе AWS: доступа к аккаунту AWS нет.
+
+## Шаг 114: EventBridge — уведомления листингов в ту же очередь (загружено 2026-11-05)
+
+Уведомления листингов SP-API идут только через EventBridge; правило с целью-очередью кладёт событие EventBridge в ту же очередь, что
+ANY_OFFER_CHANGED и PRICING_HEALTH (решение владельца — одна очередь). Что SP-API кладёт в `detail` события, страницы не говорят — A-33
+(channel-capabilities.md): разбор строгий, проверка — на живой очереди части Б ([docs/amazon-notifications-part-b.md](../../docs/amazon-notifications-part-b.md)).
+
+| Страница | updatedAt | Что взято | SHA-256 |
+|---|---|---|---|
+| https://docs.aws.amazon.com/eventbridge/latest/ref/overiew-event-structure.html | — | поля конверта события: `version`, `id`, `detail-type`, `source`, `account`, `time`, `region`, `resources`, `detail` | `a9cc9060a945e8971054f1c1705f7e9ca0326091312e2feafd41b1e9561895bd` |
+| https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-targets.html | — | цель — очередь SQS (стандартная, fair, FIFO); очередь, зашифрованная ключом AWS (AWS owned key), целью быть не может; ключ KMS очереди — права `kms:Decrypt`, `kms:GenerateDataKey` для `events.amazonaws.com` | `3e603fb2abd5e230b441621abdaaf62fc879f6248ff0969de5683af9f593677a` |
+| https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-use-resource-based.html | — | политика очереди для правила: `events.amazonaws.com`, `sqs:SendMessage`, условие `ArnEquals` `aws:SourceArn` = ARN правила `arn:aws:events:<регион>:<аккаунт>:rule/<шина>/<правило>`; без роли исполнения действует политика ресурса | `187764459859b76d001bbe507a49a10494a15971166477589c244f55fba46eab` |
+| https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-saas.html | — | шина партнёра называется именем источника партнёра; события источника, не связанного с шиной, отбрасываются сразу; состояние источника — `ACTIVE` | `2cb9ee60db798a2af13f4cd2ca7d4d73bd3ff4122ad1706a29390b814b95d227` |
+| https://developer-docs.amazon/sp-api/docs/set-up-notifications-with-amazon-eventbridge.md | 2026-09-09T22:50:03Z | только EventBridge: `LISTINGS_ITEM_STATUS_CHANGE`, `LISTINGS_ITEM_ISSUES_CHANGE`, `LISTINGS_ITEM_MFN_QUANTITY_CHANGE` и ещё четыре типа; один адресат EventBridge на аккаунт AWS; `createDestination` — без авторизации продавца (grantless); источник партнёра `aws.partner/sellingpartnerapi.amazon.com/{AWS Account Id}/{Application Id}`; связать с шиной, флажки пустые; шаблон правила — `source` с префиксом `aws.partner/sellingpartnerapi.amazon.com`, по желанию `detail-type`; для проверки — очередь SQS целью | `a5cf5ef335f6de7f007dbfc079b5710a8c8ee593f3adaa243287e5dc5bcf0b59` |
+| https://developer-docs.amazon/sp-api/docs/notification-type-values.md | 2026-10-28T19:09:44Z | `LISTINGS_ITEM_STATUS_CHANGE` 1.0: `SellerId`, `MarketplaceId`, `Asin`, `Sku`, `CreatedDate`, `Status` (BUYABLE, DISCOVERABLE, DELETED; отсутствие — «нет»); `LISTINGS_ITEM_ISSUES_CHANGE` 2023-12-13: `Severities` (ERROR, WARNING, NONE), `EnforcementActions` (LISTING_SUPPRESSED снимает возможность купить), версия 1.0 — «deprecated soon»; оба — Workflow EventBridge. Расхождение снимка: таблица пишет «SellerID», схема и пример — «SellerId»; схема `ListingsItemStatusChangeNotification.json` (модели 2026-10-29) перечисляет тип как `LISTINGS_ITEM_STATUS_CHANGED` | `c12d2f18e98351916797f45742e26a8b5f9cc1fca8f626f74189c7a4128f468d` |
+| https://developer-docs.amazon/sp-api/docs/notifications-api.md | 2026-09-09T22:50:10Z | роли операций: `createDestination`, `getDestinations`, `deleteDestination` — grantless; `createSubscription` и `getSubscription` — роль, связанная с типом уведомления (страница role-mappings, в снимке её нет) | `876af86c488fb519f58fa510bd04d3474688e93c649ccfcf406b33b897295137` |
+| https://developer-docs.amazon/sp-api/docs/terminology.md | 2026-09-09T23:47:54Z | термины: шина событий, источник событий партнёра | `98707510db42fccc26d587083805c8013d855b17b518b9eb0a8aadd3038d0f53` |
+
+Тела запросов `createDestination` (`resourceSpecification.sqs.arn`, `resourceSpecification.eventBridge.{region, accountId}`) и
+`createSubscription` (`payloadVersion`, `destinationId`, `processingDirective`) — по модели снимка
+`vendor/amazon/sp-api-models/2026-10-29/models/notifications-api-model/`.

@@ -640,6 +640,13 @@ export const es: Messages = {
       /** Шаг 89: строка таблицы — коротко; полное объяснение — подсказкой и в журнале */
       unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Más barata en otro lugar: ${elsewhere}.` : 'Más barata en otro lugar.'} Desde ${when}; TMPrice no cambia el precio aquí.`,
       unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart retiró esta oferta de walmart.com (${when}): el mismo producto está más barato en otro lugar${elsewhere ? ` (${elsewhere})` : ''} — en otro canal o vendido por el propio Walmart — y los compradores de walmart.com ya no la ven. Acerque el precio en walmart.com a ese precio y Walmart volverá a publicar la oferta; TMPrice no cambia el precio por usted aquí.`,
+      /** Шаг 114: Amazon больше не продаёт предложение — статус без BUYABLE (уведомление, чтение после записи или обнаружение) */
+      notBuyable: 'No se puede comprar en Amazon',
+      notBuyableShort: (when: string, why: string | null) => `${why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}.` : 'Amazon no la vende.'} Desde ${when}.`,
+      notBuyableDetail: (when: string, source: string, why: string | null, deleted: boolean) => `${deleted ? 'Amazon informa que esta oferta fue eliminada' : 'Amazon informa que esta oferta no se puede comprar'} (${source}, ${when})${why ? `: ${why}` : ''}. Los compradores no pueden comprarla hasta que Amazon la habilite de nuevo; TMPrice sigue calculando y enviando su precio como siempre.`,
+      notBuyableWhatToDo: 'Abra la oferta en Seller Central y revise sus problemas: una causa habitual es un precio fuera del precio mínimo o máximo del SKU.',
+      listingSources: { NOTIFICATION: 'aviso de Amazon', READBACK: 'leído tras nuestra última actualización de precio', DISCOVERY: 'revisión del catálogo' },
+      enforcement: { LISTING_SUPPRESSED: 'la oferta está suprimida', SEARCH_SUPPRESSED: 'está oculta en la búsqueda', ATTRIBUTE_SUPPRESSED: 'se rechazó un dato del producto', CATALOG_ITEM_REMOVED: 'el producto se retiró del catálogo de Amazon', OTHER: 'otra restricción de Amazon' },
     },
     applying: {
       idle: 'Nada en curso', idleDetail: 'Cada precio decidido llegó al canal o terminó con un motivo',
@@ -953,6 +960,16 @@ export const es: Messages = {
         revoke: 'Revocar actualizaciones de inventario',
         revoked: (scopes: number, writes: number, inFlight: number) => `Revocado: las actualizaciones de inventario a este canal están desactivadas. Sincronización desactivada para ${scopes} ${scopes === 1 ? 'oferta' : 'ofertas'}; ${writes} ${writes === 1 ? 'actualización de inventario no enviada descartada' : 'actualizaciones de inventario no enviadas descartadas'}.${inFlight > 0 ? ` ${inFlight} ${inFlight === 1 ? 'actualización ya se había enviado al canal antes de la revocación y no se puede recuperar; no se reintenta' : 'actualizaciones ya se habían enviado al canal antes de la revocación y no se pueden recuperar; no se reintentan'}.` : ''}`,
       },
+      /** Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */
+      dataSource: {
+        notifications: (when: string, parts: string) => `Origen de los datos: avisos de Amazon, el último ${when}; en 24 horas: ${parts}. La comprobación tras cada actualización de precio y la revisión del catálogo siguen funcionando.`,
+        polling: 'Origen de los datos: solo consultas — no nos llegó ningún aviso de Amazon en 24 horas. El estado de las ofertas viene de la comprobación tras cada actualización de precio y de la revisión del catálogo; las ofertas de la competencia para el precio llegan solo con avisos.',
+        parts: {
+          offers: (n: number) => `${n} ${n === 1 ? 'cambio' : 'cambios'} de la competencia`,
+          status: (n: number) => `${n} ${n === 1 ? 'cambio' : 'cambios'} de estado de ofertas`,
+          pricing: (n: number) => `${n} ${n === 1 ? 'aviso' : 'avisos'} de precio`,
+        },
+      },
       externalEdits: {
         count: (n: number) => `Ediciones externas en las últimas 24 horas: ${n}`,
         note: 'Una edición externa es un precio o una cantidad de inventario en el canal que no enviamos nosotros y que difiere de nuestro objetivo: alguien más (otra herramienta o una edición manual) está cambiando este canal.',
@@ -1255,6 +1272,8 @@ export const es: Messages = {
         // Шаг 49 [Р-189, E-22]: режим пакетов eBay; [Р-192]: удаление данных пользователем eBay — оба поднимает функция базы (0142)
         EBAY_MULTI_SKU_REFUSED: { what: 'eBay rechazó actualizar varios productos en una sola llamada para esta cuenta: a partir de ahora enviamos sus cambios de precio e inventario de eBay con un producto por llamada', step: 'Usted no tiene que hacer nada: los cambios siguen llegando, solo que con más llamadas. Preguntamos a eBay si se permiten varios productos por llamada y solo volveremos al modo anterior cuando responda.' },
         EBAY_BATCH_OUTCOME_NOT_RECORDED: { what: 'no pudimos guardar si eBay acepta varios productos en una sola llamada para esta cuenta', step: 'Sus cambios se enviaron y sus resultados quedaron registrados; solo el modo por lotes sigue como estaba y se vuelve a comprobar con el siguiente lote. Contáctenos si esto se repite.' },
+        LISTING_NOT_BUYABLE: { what: 'el canal dejó de vender una oferta cuyo precio calcula TMPrice', step: 'Abra la oferta en el panel de vendedor del canal y revise sus problemas: una causa habitual es un precio fuera de los límites de precio fijados en el canal. TMPrice sigue calculando y enviando su precio.' },
+        LISTING_STATUS_NOT_RECORDED: { what: 'no pudimos guardar el estado de la oferta leído tras una actualización de precio', step: 'La actualización de precio y su resultado quedaron registrados; solo el estado de la oferta espera la próxima lectura o el próximo aviso. Contáctenos si esto se repite.' },
         EBAY_ACCOUNT_DELETED_BY_USER: { what: 'el usuario de eBay de esta cuenta pidió a eBay que eliminara sus datos: eliminamos los tokens de acceso y desconectamos la cuenta', step: 'Ya no se envía nada a esta cuenta de eBay. Solo se puede volver a conectar con un nuevo consentimiento en eBay; abra Cuentas de canal en la consola si esta cuenta debe seguir funcionando.' },
         C10_OTHER_TOOLS: { what: 'antes de migrar un anuncio de eBay: hay que indicar los otros programas que lo editan mediante la Trading API', step: 'Declare cada herramienta que edita este anuncio de eBay; después de la migración, sus ediciones y las nuestras divergen.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'antes de migrar un anuncio de eBay: el control de falta de existencias está desactivado', step: 'Active el control de falta de existencias (out-of-stock control) en su configuración de eBay para que la cantidad 0 no finalice el anuncio.' },

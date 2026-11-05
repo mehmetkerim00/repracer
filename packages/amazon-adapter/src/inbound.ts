@@ -1,4 +1,4 @@
-import type { CompetitorOffer, CompetitorSnapshot, InboundDelivery, InboundResult, Money, PriceBasis, PricingHealthObservation } from '@repracer/channel-port';
+import type { CompetitorOffer, CompetitorSnapshot, InboundDelivery, InboundResult, ListingStatusObservation, Money, PriceBasis, PricingHealthObservation } from '@repracer/channel-port';
 import { logConservative } from './conservative.ts';
 import { marketplaceInfo, SOURCE_ANY_OFFER_CHANGED } from './descriptor.ts';
 import { channelError } from './errors.ts';
@@ -13,6 +13,22 @@ import { openSession, type AmazonAdapterOptions } from './session.ts';
  */
 
 interface Price { Amount?: unknown; CurrencyCode?: unknown }
+/**
+ * Шаг 114: уведомления листингов (notification-type-values; схема ListingsItemStatusChangeNotification.json снимка): ключи с заглавной.
+ * LISTINGS_ITEM_STATUS_CHANGE 1.0 — Status (BUYABLE, DISCOVERABLE, DELETED; отсутствие флага — «нет»); LISTINGS_ITEM_ISSUES_CHANGE
+ * 2023-12-13 — Severities (ERROR, WARNING, NONE) и EnforcementActions. Схемы ISSUES_CHANGE в снимке моделей нет — форма со страницы
+ */
+interface ListingNotification {
+  NotificationType?: unknown;
+  PayloadVersion?: unknown;
+  EventTime?: unknown;
+  NotificationMetadata?: { NotificationId?: unknown };
+  Payload?: { SellerId?: unknown; SellerID?: unknown; MarketplaceId?: unknown; Asin?: unknown; Sku?: unknown; Status?: unknown; Severities?: unknown; EnforcementActions?: unknown };
+}
+const LISTING_STATUS_TYPES = new Set(['LISTINGS_ITEM_STATUS_CHANGE', 'LISTINGS_ITEM_STATUS_CHANGED']);
+const LISTING_ISSUES_TYPE = 'LISTINGS_ITEM_ISSUES_CHANGE';
+/** Перечисления значений — слова канала заглавными; список не длиннее дюжины */
+const words = (v: unknown, max = 12): string[] | null => (Array.isArray(v) && v.length <= max && v.every((x) => typeof x === 'string' && /^[A-Z][A-Z_]{0,63}$/.test(x)) ? [...new Set(v as string[])] : null);
 interface HealthMoney { amount?: unknown; currencyCode?: unknown }
 interface PricingHealth {
   notificationType?: unknown;
@@ -67,20 +83,26 @@ export async function handleInboundAmazon(options: AmazonAdapterOptions, deliver
   }
   const aoc = raw as Notification;
   const ph = raw as PricingHealth;
-  const type = aoc.NotificationType === 'ANY_OFFER_CHANGED' ? 'ANY_OFFER_CHANGED' : ph.notificationType === 'PRICING_HEALTH' ? 'PRICING_HEALTH' : null;
-  const id = type === 'ANY_OFFER_CHANGED' ? aoc.NotificationMetadata?.NotificationId : ph.notificationMetadata?.notificationId;
+  const li = raw as ListingNotification;
+  const listingType = typeof li.NotificationType === 'string' && (LISTING_STATUS_TYPES.has(li.NotificationType) || li.NotificationType === LISTING_ISSUES_TYPE)
+    ? (li.NotificationType === LISTING_ISSUES_TYPE ? 'LISTING_ISSUES' : 'LISTING_STATUS') : null;
+  const type = aoc.NotificationType === 'ANY_OFFER_CHANGED' ? 'ANY_OFFER_CHANGED' : ph.notificationType === 'PRICING_HEALTH' ? 'PRICING_HEALTH' : listingType;
+  const id = type === 'PRICING_HEALTH' ? ph.notificationMetadata?.notificationId : aoc.NotificationMetadata?.NotificationId;
   // Тот же допустимый вид, что у приёмника очереди (envelope.ts): иначе приёмник запишет уведомление обработанным, а адаптер его отклонит
   if (!type || typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(id)) {
-    return { kind: 'REJECTED', error: channelError('VALIDATION', 'BATCH', 'only ANY_OFFER_CHANGED or PRICING_HEALTH with a NotificationId is accepted'), responseStatus: 400 };
+    return { kind: 'REJECTED', error: channelError('VALIDATION', 'BATCH', 'only ANY_OFFER_CHANGED, PRICING_HEALTH or a listings item notification with a NotificationId is accepted'), responseStatus: 400 };
   }
   logConservative(options.deps.logger, ctx, 'AMZ_C08_NOTIFICATION_NOT_SIGNED', {});
-  const sellerId = type === 'ANY_OFFER_CHANGED' ? aoc.Payload?.AnyOfferChangedNotification?.SellerId : ph.payload?.sellerId;
+  const sellerId = type === 'ANY_OFFER_CHANGED' ? aoc.Payload?.AnyOfferChangedNotification?.SellerId : type === 'PRICING_HEALTH' ? ph.payload?.sellerId
+    // Таблица страницы у LISTINGS_ITEM_STATUS_CHANGE пишет «SellerID», схема и пример — «SellerId»
+    : li.Payload?.SellerId ?? li.Payload?.SellerID;
   if (sellerId === undefined || sellerId !== session.sellerId) {
     await options.deps.alerts.raise({ code: 'AMAZON_NOTIFICATION_SELLER_MISMATCH', severity: 'CRITICAL', tenantId: ctx.tenantId, channelAccountId: ctx.channelAccountId,
       correlationId: ctx.correlationId, details: { notificationId: id } });
     return { kind: 'REJECTED', error: channelError('TENANT_MISMATCH', 'ACCOUNT', 'notification SellerId does not match the channel account', { raiseAlert: true }), responseStatus: 200 };
   }
-  const marketplaceRaw = type === 'ANY_OFFER_CHANGED' ? aoc.Payload?.AnyOfferChangedNotification?.OfferChangeTrigger?.MarketplaceId : ph.payload?.offerChangeTrigger?.marketplaceId;
+  const marketplaceRaw = type === 'ANY_OFFER_CHANGED' ? aoc.Payload?.AnyOfferChangedNotification?.OfferChangeTrigger?.MarketplaceId
+    : type === 'PRICING_HEALTH' ? ph.payload?.offerChangeTrigger?.marketplaceId : li.Payload?.MarketplaceId;
   const marketplace = typeof marketplaceRaw === 'string' ? marketplaceRaw : '';
   const info = marketplaceInfo(marketplace);
   const deliveryId = `amazon:${id}`;
@@ -90,7 +112,37 @@ export async function handleInboundAmazon(options: AmazonAdapterOptions, deliver
     return { kind: 'EVENTS', deliveryId, events: [], acknowledgeStatus: 200 };
   }
   const basis = info.basis as PriceBasis;
+  if (type === 'LISTING_STATUS' || type === 'LISTING_ISSUES') return listingNotification(li, type, id, marketplace, deliveryId);
   return type === 'ANY_OFFER_CHANGED' ? anyOfferChanged(aoc, id, marketplace, basis, session.sellerId, deliveryId) : pricingHealth(ph, id, marketplace, basis, deliveryId);
+}
+
+/**
+ * Шаг 114: статус или проблемы листинга — то же наблюдение, что у обратного чтения и обнаружения. Момент — EventTime (обязателен по
+ * схеме); SKU обязателен; проблемы — только версия 2023-12-13, на неё и подписка (1.0 — «deprecated soon»). Неизвестное значение
+ * статуса не отказ: отсутствие BUYABLE — «не покупается» по определению страницы, лишнее слово ничего не меняет
+ */
+function listingNotification(body: ListingNotification, type: 'LISTING_STATUS' | 'LISTING_ISSUES', id: string, marketplace: string, deliveryId: string): InboundResult {
+  const p = body.Payload!;
+  const sku = typeof p.Sku === 'string' && p.Sku.length > 0 && p.Sku.length <= 200 && !/[\u0000-\u001f]/.test(p.Sku) ? p.Sku : null;
+  const observedAt = instantOf(body.EventTime);
+  const refuse = (why: string): InboundResult => ({ kind: 'REJECTED', error: channelError('VALIDATION', 'BATCH', why, { raiseAlert: true }), responseStatus: 400 });
+  if (!sku || !observedAt) return refuse('listings item notification lacks Sku or EventTime');
+  const base = { marketplace, externalSku: sku, channelProductRef: asinOf(p.Asin), observedAt, source: 'NOTIFICATION' as const, sourceEventId: id };
+  let listing: ListingStatusObservation;
+  if (type === 'LISTING_STATUS') {
+    const values = words(p.Status);
+    if (!values) return refuse('LISTINGS_ITEM_STATUS_CHANGE: Status is not a list of status values');
+    listing = { ...base, status: { buyable: values.includes('BUYABLE'), discoverable: values.includes('DISCOVERABLE'), deleted: values.includes('DELETED') }, issues: null };
+  } else {
+    if (body.PayloadVersion !== '2023-12-13') return refuse('LISTINGS_ITEM_ISSUES_CHANGE: only payload version 2023-12-13 is subscribed');
+    const severities = words(p.Severities, 3);
+    const actions = p.EnforcementActions === undefined ? [] : words(p.EnforcementActions);
+    if (!severities || severities.length === 0 || !severities.every((v) => v === 'ERROR' || v === 'WARNING' || v === 'NONE') || !actions) {
+      return refuse('LISTINGS_ITEM_ISSUES_CHANGE: Severities or EnforcementActions are not lists of known values');
+    }
+    listing = { ...base, status: null, issues: { severities, enforcementActions: actions } };
+  }
+  return { kind: 'EVENTS', deliveryId, events: [{ kind: 'LISTING_STATUS', listing }], acknowledgeStatus: 200 };
 }
 
 /** Шаг 97: рейтинг продавца — доля положительных отзывов (0–100) и их число; значение вне схемы не берётся */

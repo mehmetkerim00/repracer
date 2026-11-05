@@ -128,6 +128,33 @@ export interface IdentifiedObservation {
    */
   ownRecordOnly?: boolean;
   liveness?: { isLive: boolean; reasons: string[] };
+  /** Шаг 114: состояние листинга, прочитанное вместе со значением (Amazon getListingsItem: сводка витрины и issues) */
+  listingStatus?: ListingStatusFacts;
+}
+
+/**
+ * Шаг 114: состояние листинга, как его назвал канал. Amazon: статус сводки витрины (BUYABLE, DISCOVERABLE, у уведомления — и DELETED) и
+ * проблемы листинга (серьёзность и принудительные действия: LISTING_SUPPRESSED снимает возможность купить). Отсутствие флага в статусе —
+ * «нет», а не «неизвестно» (notification-type-values, ListingsItemStatus); null у части — источник эту часть не назвал
+ */
+export interface ListingStatusFacts {
+  status: { buyable: boolean; discoverable: boolean; deleted: boolean } | null;
+  issues: { severities: string[]; enforcementActions: string[] } | null;
+}
+
+/**
+ * Шаг 114: одно наблюдение «статус и проблемы листинга» из трёх источников — уведомление (LISTINGS_ITEM_STATUS_CHANGE,
+ * LISTINGS_ITEM_ISSUES_CHANGE), обратное чтение после записи и обнаружение каталога. Данные канала ≤ 18 мес [Р-3]; в решение о цене не
+ * входит — состояние предложения для продавца и CRITICAL, когда включённое предложение перестало продаваться
+ */
+export interface ListingStatusObservation extends ListingStatusFacts {
+  marketplace: string;
+  externalSku: string;
+  channelProductRef: string | null;
+  observedAt: Instant;
+  source: 'NOTIFICATION' | 'READBACK' | 'DISCOVERY';
+  /** Идентификатор уведомления; у чтения и обнаружения — null */
+  sourceEventId: string | null;
 }
 
 export interface ReadBackRequest {
@@ -251,6 +278,8 @@ export interface DiscoveredOffer {
   currentPrice?: Money;
   currentQuantity?: number;
   isLive?: boolean;
+  /** Шаг 114: статус листинга сводки витрины (Amazon searchListingsItems); проблемы обнаружение не читает */
+  listingStatus?: ListingStatusFacts;
   /**
    * Р-120: собственное ценообразование канала у оффера, прочитанное при обнаружении. automatedPricing — привязка к правилу
    * автоматического ценообразования (Amazon), channelBounds — границы цены на стороне канала. Нет поля — канал этого не сообщает.
@@ -318,6 +347,8 @@ export interface PricingHealthObservation {
 export type InboundEvent =
   | { kind: 'OBSERVATION'; observation: IdentifiedObservation }
   | { kind: 'PRICING_HEALTH'; health: PricingHealthObservation }
+  /** Шаг 114: статус или проблемы листинга из уведомления — то же наблюдение, что дают обратное чтение и обнаружение */
+  | { kind: 'LISTING_STATUS'; listing: ListingStatusObservation }
   | { kind: 'COMPETITOR_SNAPSHOT'; snapshot: CompetitorSnapshot }
   | { kind: 'ORDER_LINE'; orderLine: OrderLine }
   | { kind: 'OFFER_REMOVED'; identity: OfferIdentity; occurredAt: Instant }

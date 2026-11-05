@@ -39,6 +39,7 @@ import { competeWithOf, runStrategy, strategyAvailability } from '@repracer/stra
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { planPollingTiers } from './polling.ts';
 import { PIPELINE_WRITE_FIELD, type ClearanceEnded, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
+import { listingNotBuyableAlerts } from './listing-status.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
   HaltSampleObservation,
@@ -850,10 +851,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
      * снимок или состояние PRICING_HEALTH. Повтор — notification DUPLICATE, ничего не записано. Если записать нечего (отказ адаптера,
      * витрина не подключена), журнал пишется отдельно: решения и снимка, с которыми он должен быть атомарен, нет
      */
-    async processInbound(delivery: InboundDelivery): Promise<{ inbound: InboundResult; snapshots: SnapshotReport[]; pricingHealth: number; notification: 'RECORDED' | 'DUPLICATE' | 'NONE' }> {
+    async processInbound(delivery: InboundDelivery): Promise<{ inbound: InboundResult; snapshots: SnapshotReport[]; pricingHealth: number; listingStatus: number; notification: 'RECORDED' | 'DUPLICATE' | 'NONE' }> {
       const inbound = await adapter.handleInbound(delivery);
       const snapshots: SnapshotReport[] = [];
       let pricingHealth = 0;
+      let listingStatus = 0;
       const entry: InboundNotificationEntry | undefined = delivery.notification
         ? { channelAccountId: delivery.claimed.channelAccountId, ...delivery.notification, receivedAt: delivery.receivedAt }
         : undefined;
@@ -864,7 +866,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
           await store.markNotificationProcessed(delivery.claimed.tenantId, pending);
           notification = 'RECORDED';
         }
-        return { inbound, snapshots, pricingHealth, notification };
+        return { inbound, snapshots, pricingHealth, listingStatus, notification };
       };
       if (inbound.kind !== 'EVENTS') return finish();
       const ctx: AdapterCallContext = {
@@ -876,7 +878,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       for (const event of inbound.events) {
         if (event.kind === 'COMPETITOR_SNAPSHOT') {
           const report = await processSnapshot(ctx, event.snapshot, pending);
-          if (report.notification === 'DUPLICATE') return { inbound, snapshots, pricingHealth, notification: 'DUPLICATE' as const };
+          if (report.notification === 'DUPLICATE') return { inbound, snapshots, pricingHealth, listingStatus, notification: 'DUPLICATE' as const };
           if (report.notification === 'RECORDED') {
             pending = undefined;
             notification = 'RECORDED';
@@ -885,13 +887,26 @@ export function createPricingPipeline(deps: PipelineDeps) {
         } else if (event.kind === 'RESOURCE_CHANGED' && event.competitorQuery) snapshots.push(...(await pollCompetitors(ctx, [event.competitorQuery], { delivery: 'PUSH_FETCH' })).snapshots);
         else if (event.kind === 'PRICING_HEALTH') {
           const recorded = await store.recordPricingHealth(ctx.tenantId, ctx.channelAccountId, event.health, pending);
-          if (recorded === 'DUPLICATE_NOTIFICATION') return { inbound, snapshots, pricingHealth, notification: 'DUPLICATE' as const };
+          if (recorded === 'DUPLICATE_NOTIFICATION') return { inbound, snapshots, pricingHealth, listingStatus, notification: 'DUPLICATE' as const };
           if (pending) {
             pending = undefined;
             notification = 'RECORDED';
           }
           await emit(ctx, [{ kind: 'alert', code: 'OFFER_PRICING_HEALTH', severity: 'WARNING', details: { marketplace: event.health.marketplace, issueType: event.health.issueType } }]);
           pricingHealth += 1;
+        } else if (event.kind === 'LISTING_STATUS') {
+          /**
+           * Шаг 114: статус листинга из уведомления — тот же путь, что у обратного чтения и обнаружения (recordListingStatus): одно
+           * наблюдение, одно правило перехода. В решение о цене не входит; уведомление — в журнал обработанных той же транзакцией
+           */
+          const recorded = await store.recordListingStatus(ctx.tenantId, ctx.channelAccountId, [event.listing], pending);
+          if (recorded.duplicateNotification) return { inbound, snapshots, pricingHealth, listingStatus, notification: 'DUPLICATE' as const };
+          if (pending) {
+            pending = undefined;
+            notification = 'RECORDED';
+          }
+          if (recorded.lostBuyable.length > 0) await emit(ctx, listingNotBuyableAlerts(recorded.lostBuyable));
+          listingStatus += recorded.recorded;
         }
       }
       return finish();
@@ -1186,6 +1201,14 @@ export function createPricingPipeline(deps: PipelineDeps) {
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]
           : []));
         recorded += await store.recordOfferChannelPricing(ctx.tenantId, ctx.channelAccountId, observations);
+        // Шаг 114: статус листинга сводки витрины — то же наблюдение, что у уведомления; строка — только при изменении
+        const listings = result.items.flatMap((o) => (o.listingStatus && o.identity.marketplace && o.identity.externalSku
+          ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, channelProductRef: o.identity.channelProductRef ?? null, observedAt: deps.now(),
+              source: 'DISCOVERY' as const, sourceEventId: null, ...o.listingStatus }] : []));
+        if (listings.length > 0) {
+          const listed = await store.recordListingStatus(ctx.tenantId, ctx.channelAccountId, listings);
+          if (listed.lostBuyable.length > 0) await emit(ctx, listingNotBuyableAlerts(listed.lostBuyable));
+        }
         // Шаг 44 [Р-179]: оффер канала становится каталогом тенанта — иначе после подключения продавцу нечего настраивать
         catalogued += await store.recordDiscoveredOffers(ctx.tenantId, ctx.channelAccountId, result.items.flatMap((o) => (o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku ?? null, externalUnitId: o.identity.externalUnitId ?? null,

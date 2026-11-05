@@ -1,4 +1,4 @@
-import type { AdapterCallContext, AlertSink, ChannelAdapter, DispatchResult, FieldWrite, IdentifiedObservation, Instant, WriteField, WriteOutcome } from '@repracer/channel-port';
+import type { AdapterCallContext, AlertSink, ChannelAdapter, DispatchResult, FieldWrite, IdentifiedObservation, Instant, ListingStatusObservation, WriteField, WriteOutcome } from '@repracer/channel-port';
 import {
   coreError,
   DEFAULT_RETRY_POLICY,
@@ -90,6 +90,11 @@ export interface WriteQueueStore {
    * Возвращает режим после итога. Каталог аккаунтов читает режим на каждом вызове адаптера — повтор идёт уже в новом режиме.
    */
   recordEbayBatchOutcome(tenantId: string, channelAccountId: string, multiSkuAccepted: boolean): Promise<string>;
+  /**
+   * Шаг 114: статус листинга, прочитанный вместе со значением при сверке, — то же наблюдение, что у уведомления и обнаружения
+   * (PricingStore.recordListingStatus). lostBuyable — включённые предложения, переставшие продаваться этим наблюдением
+   */
+  recordListingStatus?(tenantId: string, channelAccountId: string, observations: readonly ListingStatusObservation[]): Promise<{ lostBuyable: Array<{ marketplace: string; externalSku: string }> }>;
 }
 
 export type DispatchStep =
@@ -265,6 +270,23 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
     });
   }
 
+  /**
+   * Шаг 114: статус листинга из обратного чтения — в наблюдение «статус и проблемы»; включённое предложение перестало продаваться —
+   * CRITICAL тем же кодом, что у уведомления и обнаружения (listingNotBuyableAlerts пути решения). Сбой записи наблюдения сверку не
+   * роняет: итог записи важнее состояния витрины, а состояние придёт следующим чтением или уведомлением
+   */
+  async function recordListing(tenantId: string, channelAccountId: string, observation: IdentifiedObservation): Promise<void> {
+    const { marketplace, externalSku, channelProductRef } = observation.identity;
+    if (!observation.listingStatus || !deps.store.recordListingStatus || !marketplace || !externalSku) return;
+    try {
+      const r = await deps.store.recordListingStatus(tenantId, channelAccountId, [{ marketplace, externalSku, channelProductRef: channelProductRef ?? null,
+        observedAt: observation.observedAt, source: 'READBACK', sourceEventId: null, ...observation.listingStatus }]);
+      for (const l of r.lostBuyable) await alert(tenantId, 'LISTING_NOT_BUYABLE', 'CRITICAL', { marketplace: l.marketplace, externalSku: l.externalSku });
+    } catch {
+      await alert(tenantId, 'LISTING_STATUS_NOT_RECORDED', 'WARNING', { marketplace });
+    }
+  }
+
   async function readBack(tenantId: string, channelAccountId: string, write: FieldWrite): Promise<{ result: Reconciliation; observation?: IdentifiedObservation }> {
     const ctx = callContext(tenantId, channelAccountId, `reconcile:${write.channelWriteId}:${write.attemptNo}`);
     try {
@@ -274,6 +296,7 @@ export function createWriteDispatcher(deps: WriteDispatcherDeps): WriteDispatche
       if (failure) return { result: { kind: 'UNKNOWN', error: failure.error } };
       const observation = result.observations.find((o) => o.field === write.value.field);
       if (!observation) return { result: { kind: 'UNKNOWN', error: null } };
+      await recordListing(tenantId, channelAccountId, observation);
       if (sameWriteValue(observation.value, write.value)) return { result: { kind: 'APPLIED', ...(observation.ownRecordOnly === true ? { ownRecordOnly: true } : {}) }, observation };
       const observedMinor = observation.value.field === 'PRICE' ? observation.value.price.amountMinor : null;
       return { result: { kind: 'NOT_APPLIED', observedMinor }, observation };

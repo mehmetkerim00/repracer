@@ -9,7 +9,7 @@ import { createWriteDispatcher, type WriteDispatcher, type WriteQueueStore } fro
 import { amazonRequestChecker, channelFetch, ebayRequestChecker, kauflandAuthChecker, ScriptedChannel, type ChannelBehaviour, type TraceEntry } from './channel.ts';
 import { neverWrittenAttributes } from '@repracer/channel-port';
 import { match } from './matchers.ts';
-import { createNotificationReceiver, createSqsClient, pipelineSink, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
+import { createNotificationReceiver, createSqsClient, pipelineSink, storeJournal, storeLedger, type NotificationReceiver } from '@repracer/amazon-notifications';
 import { FakeSqs } from '@repracer/amazon-notifications/testing';
 import { SimulatedKauflandChannel, type KauflandChannelModelSpec } from '../simulator/kaufland-channel.ts';
 import { SimulatedEbayChannel, type EbayChannelModelSpec } from '../simulator/ebay-channel.ts';
@@ -178,7 +178,7 @@ function standReceiver(pipeline: PricingPipeline, store: PricingStoreUnderTest, 
     queueUrl: STAND_QUEUE, region: (world.account.region ?? 'EU') as 'EU' | 'NA' | 'FE', applicationId: STAND_APPLICATION,
     router: { resolve: async (region, sellerId) => (region === (world.account.region ?? 'EU') && sellerId === world.account.externalAccountId
       ? [{ tenantId: world.tenantId, channelAccountId: world.channelAccountId }] : []) },
-    ledger: storeLedger(store.store),
+    ledger: storeLedger(store.store), journal: storeJournal(store.store),
     sink: { recordsLedger: true, async deliver(route, delivery, envelope) {
       if (failSink.n > 0) { failSink.n -= 1; throw new Error('synthetic store failure'); }
       return inner.deliver(route, delivery, envelope);

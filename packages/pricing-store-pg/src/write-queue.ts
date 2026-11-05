@@ -1,4 +1,4 @@
-import { offerIdentityOf, type FieldWrite, type Instant, type OfferIdentity, type PriceBasis, type WriteOutcome, type WriteValue } from '@repracer/channel-port';
+import { offerIdentityOf, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type WriteOutcome, type WriteValue } from '@repracer/channel-port';
 import { floorCauseFromDatabase, priceBasisMismatch, sellerActionFor } from '@repracer/pricing-model';
 import {
   planOutcomeTransition,
@@ -14,6 +14,7 @@ import {
   type WriteReason,
 } from '@repracer/write-dispatcher';
 import { inTenant, type PgPool, type Tx } from './db.ts';
+import { insertListingStatus } from './inbound.ts';
 
 /**
  * Очередь записей в каналы на PostgreSQL [Р-64]. Состояние записи и единицы ведут триггеры channel_write (0008, 0018,
@@ -150,6 +151,11 @@ export class PgWriteQueueStore implements WriteQueueStore {
   constructor(pool: PgPool, options: PgWriteQueueStoreOptions = {}) {
     this.pool = pool;
     this.scanPool = options.scanPool ?? null;
+  }
+
+  /** Шаг 114: статус листинга, прочитанный при сверке, — тем же путём, что уведомление и обнаружение (inbound.ts) */
+  async recordListingStatus(tenantId: string, channelAccountId: string, observations: readonly ListingStatusObservation[]): Promise<{ lostBuyable: Array<{ marketplace: string; externalSku: string }> }> {
+    return inTenant(this.pool, tenantId, (tx) => insertListingStatus(tx, tenantId, channelAccountId, observations));
   }
 
   async claimNext(tenantId: string, writeScopeId: string, now: Instant, policy: RetryPolicy): Promise<ClaimResult> {

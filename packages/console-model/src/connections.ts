@@ -64,6 +64,30 @@ export interface ConnectionAccountView {
   externalEditsNote: string;
   /** Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта; null — экрану не дали данных или аккаунт отключён */
   defaultStrategy: DefaultStrategyView | null;
+  /**
+   * Шаг 114: откуда данные аккаунта Amazon — уведомления, дошедшие за сутки (по видам), или только опрос. null — у канала без
+   * уведомлений в очереди (Kaufland, eBay, Walmart) или экрану не дали данных
+   */
+  dataSourceText: string | null;
+}
+
+/** Шаг 114: уведомления аккаунта за сутки — по журналу сырья (NotificationSourceFacts хранилища) */
+export interface NotificationSourceInput {
+  channelAccountId: string;
+  lastReceivedAt: string | null;
+  last24h: ReadonlyArray<{ notificationType: string; count: number }>;
+}
+
+/** Шаг 114: уведомления за сутки по видам — словами; ни одного — «только опрос», а не пусто */
+export function dataSourceText(source: NotificationSourceInput | undefined, m: Messages): string {
+  const t = m.ui.connections.dataSource;
+  const count = (pred: (type: string) => boolean) => (source?.last24h ?? []).filter((x) => pred(x.notificationType)).reduce((a, x) => a + x.count, 0);
+  const offers = count((x) => x === 'ANY_OFFER_CHANGED');
+  const status = count((x) => x.startsWith('LISTINGS_ITEM_'));
+  const pricing = count((x) => x === 'PRICING_HEALTH');
+  if (!source?.lastReceivedAt || offers + status + pricing === 0) return t.polling;
+  const parts = [offers > 0 ? t.parts.offers(offers) : null, status > 0 ? t.parts.status(status) : null, pricing > 0 ? t.parts.pricing(pricing) : null].filter((x): x is string => x !== null);
+  return t.notifications(m.when(source.lastReceivedAt), parts.join(', '));
 }
 
 /** Шаг 103 [Р-228]: выбор умолчания — «None» и активные стратегии; недоступная на канале — с причиной и не выбирается [Р-39] */
@@ -256,6 +280,7 @@ export function connectionsView(
   connectable: readonly ConnectableChannel[],
   m: Messages,
   defaults: DefaultStrategyInput | null = null,
+  notificationSources: readonly NotificationSourceInput[] | null = null,
 ): ConnectionsView {
   const t = m.ui.connections;
   const canManage = can(input.role, 'MANAGE_TENANT');
@@ -294,6 +319,9 @@ export function connectionsView(
       channelLimitText: channelLimitText(a.channel, m),
       ...externalWritersView(a, input.role, m),
       defaultStrategy: defaults && a.authStatus !== 'DISCONNECTED' ? defaultStrategyView(a, defaults, m) : null,
+      // Шаг 114: очередь уведомлений есть только у Amazon (ANY_OFFER_CHANGED, PRICING_HEALTH, уведомления листингов через EventBridge)
+      dataSourceText: notificationSources && a.channel === 'AMAZON' && a.authStatus !== 'DISCONNECTED'
+        ? dataSourceText(notificationSources.find((x) => x.channelAccountId === a.channelAccountId), m) : null,
     };
   });
   const channels = connectable.map((c): ConnectionChannelView => {

@@ -2,7 +2,7 @@ import type { CompetitorView, FloorRaiseReason, OmnibusPriorPrice, PreviousOffer
 import type { CreepState } from '@repracer/strategy-engine';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
-import type { ChannelBoundValues, CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
+import type { ChannelBoundValues, CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, ListingStatusObservation, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type {
@@ -781,6 +781,51 @@ export interface InboundNotificationEntry {
   receivedAt: Instant;
 }
 
+/** Шаг 114: запись журнала сырья уведомлений — тело сообщения очереди с конвертом, до пути решения */
+export interface RawInboundNotificationEntry {
+  channelAccountId: string;
+  notificationId: string;
+  notificationType: string;
+  envelope: 'SQS' | 'EVENTBRIDGE';
+  eventTime: Instant | null;
+  receivedAt: Instant;
+  rawBody: string;
+}
+
+/**
+ * Шаг 114: итог записи наблюдений статуса листинга. duplicateNotification — уведомление уже записано (ничего не записано заново);
+ * lostBuyable — включённые предложения (ENGINE), которые этим наблюдением перестали продаваться: прежний известный статус — «покупается»
+ * или неизвестен, новый и самый поздний — «не покупается». Переход называется один раз: неизменное состояние второй строкой не пишется
+ */
+export interface ListingStatusRecord {
+  recorded: number;
+  duplicateNotification: boolean;
+  lostBuyable: Array<{ marketplace: string; externalSku: string }>;
+}
+
+/** Шаг 114: последний статус листинга предложения для экрана Offers (данные канала, 18 мес) — со своими проблемами, если они известны */
+export interface ConsoleListingStatusRow {
+  channelAccountId: string;
+  marketplace: string;
+  externalSku: string;
+  buyable: boolean;
+  deleted: boolean;
+  source: 'NOTIFICATION' | 'READBACK' | 'DISCOVERY';
+  observedAt: Instant;
+  /** Принудительные действия последнего наблюдения проблем; null — проблемы не наблюдались */
+  enforcementActions: string[] | null;
+}
+
+/**
+ * Шаг 114: откуда у аккаунта данные канала — уведомления, принятые за последние сутки, по видам; пусто — данные идут только опросом
+ * (обратное чтение после записи, обнаружение каталога, сверка по кругу). Считается по журналу сырья — тому, что действительно дошло
+ */
+export interface NotificationSourceFacts {
+  channelAccountId: string;
+  lastReceivedAt: Instant | null;
+  last24h: Array<{ notificationType: string; count: number }>;
+}
+
 /** Повод запроса на переоценку — вход пола, который изменился [Р-209…Р-211]; тот же перечень, что у причины подъёма */
 export type FloorRaiseAfter = FloorRaiseReason;
 /** Шаг 73: единица для подъёма к полу без наблюдения конкурентов; `after` — повод (null — следующая ступень лестницы [Р-208]) */
@@ -982,6 +1027,15 @@ export interface PricingStore {
   /** Шаг 23: журнал обработанных уведомлений тенанта — повтор доставки из очереди не обрабатывается второй раз */
   wasNotificationProcessed(tenantId: string, channelAccountId: string, notificationId: string): Promise<boolean>;
   markNotificationProcessed(tenantId: string, entry: InboundNotificationEntry): Promise<void>;
+  /** Шаг 114: журнал сырья — NEW у первой доставки, REPEAT у повтора (повтор доставки — не ошибка и не вторая строка) */
+  recordInboundNotification(tenantId: string, entry: RawInboundNotificationEntry): Promise<'NEW' | 'REPEAT'>;
+  /**
+   * Шаг 114: статус и проблемы листинга — одним путём из уведомления, обратного чтения и обнаружения. Уведомление — в журнал обработанных
+   * той же транзакцией (OQ-171); чтение и обнаружение пишут строку, только когда состояние части изменилось
+   */
+  recordListingStatus(tenantId: string, channelAccountId: string, observations: readonly ListingStatusObservation[], notification?: InboundNotificationEntry): Promise<ListingStatusRecord>;
+  /** Шаг 114: уведомления аккаунтов тенанта за последние сутки — экран Channels говорит, откуда данные */
+  notificationSources?(tenantId: string, at: Instant): Promise<NotificationSourceFacts[]>;
 
   listDueHalts(tenantId: string, channelAccountId: string, now: Instant): Promise<HaltInfo[]>;
   getHalt(tenantId: string, haltId: string): Promise<HaltInfo | null>;
@@ -1367,6 +1421,8 @@ export interface ConsoleState {
   offerChannelPricing: ConsoleOfferChannelPricingRow[];
   /** Шаг 23: последнее уведомление PRICING_HEALTH по каждому офферу */
   pricingHealth: ConsolePricingHealthRow[];
+  /** Шаг 114: последний статус листинга по каждому предложению (Amazon) — пилюля «Not buyable on Amazon» */
+  listingStatus?: ConsoleListingStatusRow[];
   stops: ConsoleStopRow[];
   divergenceCases: ConsoleDivergenceRow[];
   fxRates: FxQuote[];

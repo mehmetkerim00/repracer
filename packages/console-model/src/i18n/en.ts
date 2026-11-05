@@ -640,6 +640,13 @@ export const en = {
       /** Шаг 89: строка таблицы — коротко; полное объяснение — подсказкой и в журнале */
       unpublishedShort: (when: string, elsewhere: string | null) => `${elsewhere ? `Cheaper elsewhere: ${elsewhere}.` : 'Cheaper elsewhere.'} Since ${when}; TMPrice does not change the price here.`,
       unpublishedDetail: (when: string, elsewhere: string | null) => `Walmart took this offer off walmart.com on ${when}: the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''} — on another channel or sold by Walmart itself — and shoppers on walmart.com no longer see it. Bring the walmart.com price close to that price and Walmart publishes the offer again; TMPrice does not change the price for you here.`,
+      /** Шаг 114: Amazon больше не продаёт предложение — статус без BUYABLE (уведомление, чтение после записи или обнаружение) */
+      notBuyable: 'Not buyable on Amazon',
+      notBuyableShort: (when: string, why: string | null) => `${why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}.` : 'Amazon does not sell it.'} Since ${when}.`,
+      notBuyableDetail: (when: string, source: string, why: string | null, deleted: boolean) => `${deleted ? 'Amazon reports this offer as deleted' : 'Amazon reports this offer as not buyable'} (${source}, ${when})${why ? `: ${why}` : ''}. Shoppers cannot buy it until Amazon makes it buyable again; TMPrice keeps calculating and sending its price as usual.`,
+      notBuyableWhatToDo: 'Open the offer in Seller Central and look at its issues: a price outside the Min/Max price of the SKU is a common cause.',
+      listingSources: { NOTIFICATION: 'Amazon notification', READBACK: 'read after our last price update', DISCOVERY: 'catalog scan' },
+      enforcement: { LISTING_SUPPRESSED: 'the offer is suppressed', SEARCH_SUPPRESSED: 'it is hidden from search', ATTRIBUTE_SUPPRESSED: 'a product detail was rejected', CATALOG_ITEM_REMOVED: 'the product was removed from the Amazon catalog', OTHER: 'another restriction by Amazon' },
     },
     applying: {
       idle: 'Nothing in progress', idleDetail: 'Every decided price reached the channel or ended with a reason',
@@ -953,6 +960,16 @@ export const en = {
         revoke: 'Revoke stock updates',
         revoked: (scopes: number, writes: number, inFlight: number) => `Revoked: stock updates to this channel are off. Synchronization switched off for ${scopes} ${scopes === 1 ? 'offer' : 'offers'}, ${writes} unsent stock ${writes === 1 ? 'update' : 'updates'} dropped.${inFlight > 0 ? ` ${inFlight} ${inFlight === 1 ? 'update' : 'updates'} had already been sent to the channel before the revocation and cannot be recalled; they are not retried.` : ''}`,
       },
+      /** Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */
+      dataSource: {
+        notifications: (when: string, parts: string) => `Data source: Amazon notifications, the last one ${when}; in 24 hours: ${parts}. The check after each price update and the catalog scan keep running alongside.`,
+        polling: 'Data source: polling only — no Amazon notifications reached us in 24 hours. Offer status comes from the check after each price update and from the catalog scan; competitor offers for pricing arrive only with notifications.',
+        parts: {
+          offers: (n: number) => `${n} competitor ${n === 1 ? 'update' : 'updates'}`,
+          status: (n: number) => `${n} offer status ${n === 1 ? 'change' : 'changes'}`,
+          pricing: (n: number) => `${n} price ${n === 1 ? 'warning' : 'warnings'}`,
+        },
+      },
       externalEdits: {
         count: (n: number) => `External edits in the last 24 hours: ${n}`,
         note: 'An external edit is a price or a stock quantity in the channel that we did not send and that differs from our target: someone else — another tool or a manual edit — changes this channel.',
@@ -1255,6 +1272,8 @@ export const en = {
         // Шаг 49 [Р-189, E-22]: режим пакетов eBay; [Р-192]: удаление данных пользователем eBay — оба поднимает функция базы (0142)
         EBAY_MULTI_SKU_REFUSED: { what: 'eBay refused to update several products in one call for this account: from now on we send your eBay price and stock changes one product per call', step: 'Nothing is to be done by you: the changes still arrive, only with more calls. We have asked eBay whether several products per call are allowed and switch back only after an answer.' },
         EBAY_BATCH_OUTCOME_NOT_RECORDED: { what: 'we could not store whether eBay accepts several products in one call for this account', step: 'Your changes were sent and their results recorded; only the batch mode stays as it was and is checked again with the next batch. Contact us if this repeats.' },
+        LISTING_NOT_BUYABLE: { what: 'the channel stopped selling an offer that TMPrice prices', step: 'Open the offer in the channel back office and look at its issues: a price outside the price limits set in the channel is a common cause. TMPrice keeps calculating and sending its price.' },
+        LISTING_STATUS_NOT_RECORDED: { what: 'we could not store the offer status read after a price update', step: 'The price update and its result were recorded; only the offer status waits for the next read or notification. Contact us if this repeats.' },
         EBAY_ACCOUNT_DELETED_BY_USER: { what: 'the eBay user of this account asked eBay to delete their data: we deleted the access tokens and disconnected the account', step: 'Nothing is sent to this eBay account any more. It can be connected again only with a new consent on eBay — open Channel accounts in the console if this account should keep working.' },
         C10_OTHER_TOOLS: { what: 'before migrating an eBay listing: other programs that edit it through the Trading API must be named', step: 'Declare every tool that edits this eBay listing; after migration their edits and ours diverge.' },
         C11_OUT_OF_STOCK_CONTROL: { what: 'before migrating an eBay listing: out-of-stock control is off', step: 'Turn on out-of-stock control in your eBay settings so that quantity 0 does not end the listing.' },
