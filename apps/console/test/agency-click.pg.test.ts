@@ -127,7 +127,8 @@ test('Р-182: клик агентства из 50 тенантов — обра�
    */
   assert.ok(Math.max(...measured.list!) <= 3, `список миров: ${measured.list}`);
   assert.ok(Math.max(...measured.onboarding!) <= 20, `клик в экран пути: ${measured.onboarding}`);
-  assert.ok(Math.max(...measured.products!) <= 30, `клик в товары: ${measured.products}`);
+  // Шаг 114: +1 к прежним 30 — статус листинга предложений страницы (одно обращение на страницу, ключи страницы, шаг 67 п. 3), не на тенант
+  assert.ok(Math.max(...measured.products!) <= 31, `клик в товары: ${measured.products}`);
 });
 
 test('Р-182: кэш миров снимается изменением членства — следующим же запросом, без ожидания срока', async () => {
