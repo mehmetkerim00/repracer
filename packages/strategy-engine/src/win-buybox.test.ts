@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CompetitorOffer, CompetitorSnapshot, CompetitorSourceDescriptor } from '@repracer/channel-port';
-import { markAcceptedBySanity, type StrategyParams } from '@repracer/pricing-model';
+import { markAcceptedBySanity, validateReason, type StrategyParams } from '@repracer/pricing-model';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, runStrategy, strategyAvailability, type CreepState, type EngineInput, type EngineResult } from './index.ts';
 
 /**
@@ -192,17 +192,60 @@ test('step 97: the fulfilment handicap applies only when the channel named both 
   assert.equal(landed.proposedMinor, 1700 + 299 - 5 - 499);
 });
 
-test('step 97 [Р-221]: without a named holder, Win the Buy Box is not evaluated and Match the Buy Box does not undercut its own price', () => {
+test('step 97 [Р-221]: without a named holder, Match the Buy Box does not undercut its own price', () => {
   const unknownHolder: Market = { holder: null, winnerMinor: 1800, selfMinor: 1800 };
-  const r = runStrategy(input(win(), unknownHolder, 0));
-  assert.equal(r.kind, 'NOT_EVALUATED');
-  assert.equal(r.kind === 'NOT_EVALUATED' && r.reason.params.unmet, 'BUYBOX_WINNER');
   const match: StrategyParams = { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP' };
   const held = intentOf(runStrategy(input(match, unknownHolder, 0)));
   assert.equal(held.intentClass, 'NO_OP');
   assert.equal(held.reason.code, 'BUYBOX_HOLDER_UNKNOWN', 'our price is the Buy Box price: it may be ours, and undercutting it would chase our own price down');
   const cheaper = intentOf(runStrategy(input(match, { holder: null, winnerMinor: 1800, selfMinor: 1850 }, 0)));
   assert.equal(cheaper.proposedMinor, 1795, 'the Buy Box price is not ours: the holder is someone else, undercut as usual');
+});
+
+/**
+ * Шаг 115.2 (решение владельца по докладу 115): стратегия, которой нужен держатель, без него цену не двигает — и причина видна в журнале цен так же,
+ * как у NO_ELIGIBLE_COMPETITORS: решение «без изменения» со своим кодом, а не только стадия отчёта. Причин две: снимок с группами просмотров,
+ * где большинства нет [Р-235], и снимок, где держателя никто не назвал (уведомление Amazon, проекция при пересчёте)
+ */
+const noHolder: Market = { holder: null, winnerMinor: 1800, selfMinor: 1900 };
+const noMajority = (m: Market, minutes: number) => markAcceptedBySanity({ ...snapshot(m, minutes), buyboxSegments: [
+  { sellerRef: 'Harbor Goods', isSelf: false, membership: 'NON_PRIME', viewSharePct: 50 }, { sellerRef: 'Pine & Co', isSelf: false, membership: 'PRIME', viewSharePct: 50 },
+] }, 'test');
+const NEEDS_HOLDER: Array<[string, StrategyParams]> = [
+  ['Win the Buy Box', win()],
+  ['Match the Buy Box under a filter', { type: 'MATCH_BUYBOX', undercutMinor: 5, holdWhenWinning: true, atBound: 'CAP', competeWith: 'CHANNEL' }],
+  ['Beat the lowest, Buy Box anchor, under a filter', { type: 'BEAT_LOWEST', undercutMinor: 5, scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP', anchor: 'BUYBOX', competeWith: 'CHANNEL' }],
+];
+
+test('step 115.2: a strategy that needs the holder keeps the price and names why — no majority of views, or no holder named', () => {
+  for (const [label, params] of NEEDS_HOLDER) {
+    const split = intentOf(runStrategy(input(params, noHolder, 0, { snapshot: noMajority(noHolder, 0) })));
+    assert.deepEqual([split.intentClass, split.proposedMinor, split.reason.code, split.reason.params.buyboxHolder], ['NO_OP', 1900, 'BUYBOX_HOLDER_REQUIRED', 'NO_MAJORITY'], label);
+    assert.deepEqual(validateReason(split.reason), [], label);
+    const unnamed = intentOf(runStrategy(input(params, noHolder, 0)));
+    assert.deepEqual([unnamed.intentClass, unnamed.proposedMinor, unnamed.reason.code, unnamed.reason.params.buyboxHolder], ['NO_OP', 1900, 'BUYBOX_HOLDER_REQUIRED', 'NOT_NAMED'], label);
+    assert.deepEqual(validateReason(unnamed.reason), [], label);
+  }
+  // Цены на витрине ещё нет — удержание на полу стратегии, как у NO_ELIGIBLE_COMPETITORS
+  const noPrice = intentOf(runStrategy(input(win(), noHolder, 0, { currentPriceMinor: null })));
+  assert.deepEqual([noPrice.intentClass, noPrice.proposedMinor, noPrice.reason.code], ['NO_OP', 1500, 'BUYBOX_HOLDER_REQUIRED']);
+});
+
+test('step 115.2: only a missing holder becomes that decision — other gaps stay «not evaluated», a price below the floor still rises, a named holder decides', () => {
+  // Снимок устарел: держатель неизвестен, но и данные старые — стратегия не считалась, и причина не держатель
+  const stale = runStrategy(input(win(), noHolder, 0, { now: at(60) }));
+  assert.equal(stale.kind, 'NOT_EVALUATED');
+  assert.equal(stale.kind === 'NOT_EVALUATED' && stale.reason.params.unmet, 'BUYBOX_WINNER,STALENESS');
+  // Buy Box в снимке нет вовсе: «держатель неизвестен» было бы неправдой
+  const { buybox: _absent, ...without } = snapshot(noHolder, 0);
+  const absent = runStrategy(input(win(), noHolder, 0, { snapshot: markAcceptedBySanity(without, 'test') }));
+  assert.equal(absent.kind === 'NOT_EVALUATED' && absent.reason.params.unmet, 'BUYBOX_PRICE,BUYBOX_WINNER');
+  // Цена ниже пола поднимается без данных конкурентов [Р-210]: удержание её там не оставит
+  const low = intentOf(runStrategy(input(win(), { holder: null, winnerMinor: 1800, selfMinor: 1450 }, 0)));
+  assert.deepEqual([low.intentClass, low.proposedMinor, low.reason.code], ['CHANGED', 1500, 'RAISED_TO_FLOOR']);
+  // Держатель назван — обычный путь
+  const named = intentOf(runStrategy(input(win(), { holder: 'OTHER', winnerMinor: 1800, selfMinor: 1900 }, 0)));
+  assert.deepEqual([named.intentClass, named.proposedMinor], ['CHANGED', 1795]);
 });
 
 test('step 97 [Р-39]: availability — Win the Buy Box needs a named holder, Match the Buy Box only the price', () => {

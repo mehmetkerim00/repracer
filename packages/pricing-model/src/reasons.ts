@@ -143,6 +143,8 @@ export const ENGINE_REASON_CODES = [
   // Шаг 97 [Р-221]: «Match the Buy Box» — канал не называет держателя (Amazon, A-29), а наша цена равна цене Buy Box: возможно, Buy Box
   // наш, и подрезать самих себя нельзя — цена держится
   'BUYBOX_HOLDER_UNKNOWN',
+  // Шаг 115.2: стратегии нужен держатель Buy Box, а его нет — цена держится, и причина видна в журнале цен, а не только в стадиях отчёта
+  'BUYBOX_HOLDER_REQUIRED',
   // Шаг 97 [Р-219]: «Win the Buy Box» держит Buy Box; подъём (creep) — не чаще периода, после потери — пауза; у потолка — без подъёма
   'CREEP_PACED',
   'CREEP_PAUSED',
@@ -316,6 +318,8 @@ export const ANCHOR_SETTINGS = ['BUYBOX', 'LOWEST', 'LOWER_OF_TWO'] as const;
 export const ANCHOR_KINDS = ['BUYBOX', 'LOWEST'] as const;
 /** Шаг 101 [Р-226]: держатель Buy Box вне фильтра или его исполнение не названо — ориентир Buy Box под фильтром недоступен */
 export const BUYBOX_HOLDER_STATES = ['EXCLUDED', 'UNKNOWN'] as const;
+/** Шаг 115.2: почему держателя нет: группы просмотров без большинства [Р-235] или снимок без групп, где держателя канал не назвал (A-29) */
+export const BUYBOX_HOLDER_GAPS = ['NO_MAJORITY', 'NOT_NAMED'] as const;
 /**
  * Шаг 101 [Р-226]: почему у «меньшей из двух» ориентир Buy Box не участвовал: Buy Box нет в снимке, он наш, держатель неизвестен (канал не
  * назвал, а цена равна нашей, или под фильтром исполнение не названо), держатель вне фильтра, доставка Buy Box не названа (сравнение с доставкой)
@@ -603,6 +607,8 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   LADDER_PACED: { currentMinor: money('TENANT'), floorMinor: money('TENANT'), nextStepAt: instant('TENANT'), currency: currency() },
   /** Шаг 97 [Р-221]: держатель Buy Box неизвестен, наша цена — цена Buy Box: подрезать возможно самих себя нельзя */
   BUYBOX_HOLDER_UNKNOWN: { buyboxMinor: money('CHANNEL'), currentMinor: money('TENANT'), currency: currency() },
+  /** Шаг 115.2: стратегии нужен держатель Buy Box, а его нет: сумм нет, цену решения показывает своя колонка */
+  BUYBOX_HOLDER_REQUIRED: { buyboxHolder: oneOf(BUYBOX_HOLDER_GAPS, 'CHANNEL') },
   /** Шаг 97 [Р-219]: подъём не чаще периода планового пересчёта канала */
   CREEP_PACED: { currentMinor: money('TENANT'), nextStepAt: instant('TENANT'), currency: currency() },
   /** Шаг 97 [Р-219]: пауза подъёма после потери Buy Box */

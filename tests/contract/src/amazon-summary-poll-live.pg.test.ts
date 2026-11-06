@@ -116,20 +116,23 @@ test('step 115 [Р-240]: the summary decides — snapshots are accepted on the d
 
 test('step 115 (Q11): Win the Buy Box decides on Amazon where the views name a holder and holds where nobody has the majority; the share is counted', async () => {
   const decisions = async (idx: number[]) => (await observer.query(
-    `SELECT count(*) FILTER (WHERE d.intent_class = 'CHANGED')::int AS proposed, count(*) FILTER (WHERE d.no_change_reason = 'COMPETITOR_REQUIREMENT_NOT_MET')::int AS unmet, count(*)::int AS n
-       FROM channel_data.price_decision d WHERE d.write_scope_id = ANY($1::uuid[])`, [idx.map((i) => world.seeded.ids.dbId(`ws-amz-${world.asins[i]}`))])).rows[0] as { proposed: number; unmet: number; n: number };
+    `SELECT count(*) FILTER (WHERE d.intent_class = 'CHANGED')::int AS proposed, count(*) FILTER (WHERE d.no_change_reason = 'BUYBOX_HOLDER_REQUIRED')::int AS holder_required, count(*)::int AS n
+       FROM channel_data.price_decision d WHERE d.write_scope_id = ANY($1::uuid[])`, [idx.map((i) => world.seeded.ids.dbId(`ws-amz-${world.asins[i]}`))])).rows[0] as { proposed: number; holder_required: number; n: number };
   const named = await decisions(WIN_MAJORITY);
   assert.ok(named.proposed > 0, `a named holder gives the strategy its target: ${JSON.stringify(named)}`);
   const held = await decisions(WIN_NO_MAJORITY);
   assert.equal(held.proposed, 0, `nobody has the majority — the strategy proposes nothing: ${JSON.stringify(held)}`);
-  // Решения нет — стратегия говорит почему: цена самой большой группы есть, держатель не назван
+  // Шаг 115.2: причина — в журнале цен, у каждого решения об этих предложениях; у предложений с держателем её нет
+  assert.ok(held.n > 0 && held.holder_required === held.n, `every decision of these offers names the missing holder: ${JSON.stringify(held)}`);
+  assert.equal(named.holder_required, 0, `a named holder is not that reason: ${JSON.stringify(named)}`);
+  // В снимке цена самой большой группы есть, держатель не назван; причина говорит именно о большинстве просмотров
   clock.advance(31_000);
   const ctx = { tenantId: world.seeded.tenantId, channelAccountId: world.seeded.channelAccountId, correlationId: 'step115-win', deadline: clock.iso(60_000) };
   const read = await world.pipelineForDbIds().pollCompetitors(ctx as never, [{ marketplace: 'ATVPDKIKX0DER', channelProductRef: world.asins[WIN_NO_MAJORITY[0]!]!, condition: 'new' }] as never);
   assert.equal(read.snapshots[0]?.snapshot?.buybox?.isSelf, null, 'the snapshot names no holder');
   const stages = JSON.stringify(read.snapshots[0]?.scopes[0]?.stages);
-  assert.match(stages, /COMPETITOR_REQUIREMENT_NOT_MET/);
-  assert.match(stages, /BUYBOX_WINNER/);
+  assert.match(stages, /BUYBOX_HOLDER_REQUIRED/);
+  assert.match(stages, /NO_MAJORITY/);
   const { rows: spans } = await observer.query(`SELECT holder, count(*)::int AS n FROM channel_data.buybox_span GROUP BY 1`);
   assert.ok(spans.some((s) => s.holder === 'OTHER'), `spans of a named holder: ${JSON.stringify(spans)}`);
   assert.ok(!spans.some((s) => s.holder === 'NONE'), `«no majority» is not «no Buy Box»: ${JSON.stringify(spans)}`);

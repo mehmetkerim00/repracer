@@ -23,6 +23,7 @@ const titles: Record<AnyReasonCode, string> = {
   ALREADY_WINNING_BUYBOX: 'Ya tiene la Buy Box', NO_COMPETITOR_OFFERS: 'Sin competidores', TARGET_OUTSIDE_BOUNDS_HOLD: 'Objetivo fuera de los límites — se mantiene', CHANNEL_BOUNDS_HOLD: 'Fuera de los límites de precio del canal — no se envía', CLEARANCE_BELOW_CHANNEL_MIN: 'Liquidación por debajo del mínimo del canal',
   BUYBOX_WIN_TARGET: 'Ganar la Buy Box', CREEP_UP: 'Subido un paso mientras gana', CREEP_STEP_BACK: 'Buy Box perdida — vuelta al último precio ganador',
   CAPPED_AT_CREEP_CEILING: 'Por debajo del precio que perdió la Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Titular de la Buy Box no indicado — se mantiene',
+  BUYBOX_HOLDER_REQUIRED: 'Sin titular único de la Buy Box — se mantiene',
   ANCHOR_UNDERCUT: 'Precio según su referencia', COMPETITORS_FILTERED: 'Competidores filtrados por logística', NO_ELIGIBLE_COMPETITORS: 'Sin competidores tras su filtro — se mantiene',
   CREEP_PACED: 'Siguiente subida, más tarde', CREEP_PAUSED: 'Subidas en pausa tras perder la Buy Box', CREEP_AT_MAX: 'En su precio máximo — sin subida',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Datos del canal insuficientes', COST_INPUTS_MISSING: 'Faltan datos de costos', MARGIN_UNATTAINABLE: 'Margen inalcanzable',
@@ -151,6 +152,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_STEP_BACK: (f) => `La Buy Box se perdió en ${f.money('lostAtMinor')} justo después de una subida — vuelta a ${f.money('backToMinor')}, el último precio que la mantuvo; las subidas se pausan hasta ${f.when('pausedUntil')}.`,
   CAPPED_AT_CREEP_CEILING: (f) => `Mientras las subidas están en pausa, ${f.money('ceilingMinor')}, el precio con el que se perdió la Buy Box, es el tope: el objetivo ${f.money('targetMinor')} se mantiene por debajo.`,
   BUYBOX_HOLDER_UNKNOWN: (f) => `Este canal no indica quién tiene la Buy Box. Su precio ${f.money('currentMinor')} es igual al de la Buy Box (${f.money('buyboxMinor')}), así que la Buy Box puede ser suya; ponerse por debajo sería perseguir su propio precio a la baja. El precio se mantiene.`,
+  BUYBOX_HOLDER_REQUIRED: (f) => `${f.get('buyboxHolder') === 'NO_MAJORITY' ? 'Ningún vendedor tiene más de la mitad de las visitas, así que nadie cuenta como titular de la Buy Box.' : 'Este canal no indicó quién tiene la Buy Box.'} Su estrategia sigue a un titular indicado, así que el precio se mantiene.`,
   // Шаг 101 [Р-226]: ориентир, фильтр и «никого после фильтра»
   ANCHOR_UNDERCUT: (f) => `${anchorLine(f)}; ${(f.get('undercutMinor') as number) > 0 ? `${f.money('undercutMinor')} por debajo` : 'igualado'}${(f.get('handicapMinor') as number) > 0 ? `, ${f.money('handicapMinor')} más porque el canal gestiona el envío de esa oferta y no el suyo` : ''}${(f.get('ownShippingMinor') as number) > 0 ? `, menos su envío de ${f.money('ownShippingMinor')}` : ''}: ${f.money('targetMinor')}.`,
   COMPETITORS_FILTERED: (f) => `Competir con: ${competeWithText(f)} — ${f.get('offersConsidered') === 1 ? 'se consideró' : 'se consideraron'} ${f.count('offersConsidered')} de ${f.count('offersTotal')} ${f.get('offersTotal') === 1 ? 'oferta' : 'ofertas'}${(f.get('offersUnknown') as number) > 0 ? `; ${f.count('offersUnknown')} ${f.get('offersUnknown') === 1 ? 'excluida' : 'excluidas'}: logística desconocida` : ''}.`,
@@ -290,6 +292,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CREEP_STEP_BACK: (f) => `La Buy Box se perdió justo después de una subida — vuelta a ${f.money('backToMinor')}, el último precio que la mantuvo; subidas en pausa hasta ${f.when('pausedUntil')}.`,
   CAPPED_AT_CREEP_CEILING: () => 'Mientras las subidas estaban en pausa, el objetivo se mantuvo por debajo del precio con el que se perdió la Buy Box.',
   BUYBOX_HOLDER_UNKNOWN: (f) => `Este canal no indica quién tiene la Buy Box; su precio ${f.money('currentMinor')} era igual al de la Buy Box, así que podía ser suya — el precio se mantuvo.`,
+  BUYBOX_HOLDER_REQUIRED: () => 'No se indicó un titular único de la Buy Box y su estrategia sigue a un titular indicado, así que el precio se mantuvo.',
   // Шаг 101 [Р-226]: цены, число предложений, ориентир и фильтр — не вечные (ориентир и фильтр живут 18 месяцев рядом с подрезом)
   ANCHOR_UNDERCUT: (f) => `Quedó por debajo de la referencia de su estrategia vista en ese momento (rebaja: ${step(f)}). ${keptNote}`,
   COMPETITORS_FILTERED: () => `Solo se consideraron los competidores que cumplían su filtro de logística. ${keptNote}`,

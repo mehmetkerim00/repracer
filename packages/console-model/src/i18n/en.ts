@@ -22,6 +22,7 @@ const titles: Record<AnyReasonCode, string> = {
   ALREADY_WINNING_BUYBOX: 'Already winning the Buy Box', NO_COMPETITOR_OFFERS: 'No competitors', TARGET_OUTSIDE_BOUNDS_HOLD: 'Target outside bounds — kept', CHANNEL_BOUNDS_HOLD: 'Outside the channel\'s own price bounds — not sent', CLEARANCE_BELOW_CHANNEL_MIN: 'Clearance below the channel\'s own minimum',
   BUYBOX_WIN_TARGET: 'Win the Buy Box', CREEP_UP: 'Raised one step while winning', CREEP_STEP_BACK: 'Buy Box lost — back to the last winning price',
   CAPPED_AT_CREEP_CEILING: 'Kept below the price that lost the Buy Box', BUYBOX_HOLDER_UNKNOWN: 'Buy Box holder not named — kept',
+  BUYBOX_HOLDER_REQUIRED: 'No single Buy Box holder — kept',
   ANCHOR_UNDERCUT: 'Price from your anchor', COMPETITORS_FILTERED: 'Competitors filtered by fulfillment', NO_ELIGIBLE_COMPETITORS: 'No competitors left after your filter — kept',
   CREEP_PACED: 'Next raise later', CREEP_PAUSED: 'Raises paused after losing the Buy Box', CREEP_AT_MAX: 'At your maximum price — no raise',
   COMPETITOR_REQUIREMENT_NOT_MET: 'Not enough channel data', COST_INPUTS_MISSING: 'Cost data missing', MARGIN_UNATTAINABLE: 'Margin unattainable',
@@ -150,6 +151,7 @@ const reasons: Record<AnyReasonCode, Template> = {
   CREEP_STEP_BACK: (f) => `The Buy Box was lost at ${f.money('lostAtMinor')} right after a raise — back to ${f.money('backToMinor')}, the last price that held it; raises pause until ${f.when('pausedUntil')}.`,
   CAPPED_AT_CREEP_CEILING: (f) => `While raises are paused, ${f.money('ceilingMinor')} — the price at which the Buy Box was lost — is the ceiling: the target ${f.money('targetMinor')} is kept below it.`,
   BUYBOX_HOLDER_UNKNOWN: (f) => `This channel does not say who holds the Buy Box. Your price ${f.money('currentMinor')} equals the Buy Box price ${f.money('buyboxMinor')}, so the Buy Box may be yours — undercutting it would chase your own price down; the price stays.`,
+  BUYBOX_HOLDER_REQUIRED: (f) => `${f.get('buyboxHolder') === 'NO_MAJORITY' ? 'No seller has more than half of the views, so nobody counts as the Buy Box holder.' : 'This channel did not say who holds the Buy Box.'} Your strategy follows a named holder, so the price stays.`,
   // Шаг 101 [Р-226]: ориентир, фильтр и «никого после фильтра»
   ANCHOR_UNDERCUT: (f) => `${anchorLine(f)}; ${(f.get('undercutMinor') as number) > 0 ? `${f.money('undercutMinor')} below it` : 'matched'}${(f.get('handicapMinor') as number) > 0 ? `, ${f.money('handicapMinor')} more because the channel fulfills that offer and not you` : ''}${(f.get('ownShippingMinor') as number) > 0 ? `, minus your shipping ${f.money('ownShippingMinor')}` : ''}: ${f.money('targetMinor')}.`,
   COMPETITORS_FILTERED: (f) => `Compete with: ${competeWithText(f)} — considered ${f.count('offersConsidered')} of ${f.count('offersTotal')} ${f.get('offersTotal') === 1 ? 'offer' : 'offers'}${(f.get('offersUnknown') as number) > 0 ? `; ${f.count('offersUnknown')} excluded: fulfillment unknown` : ''}.`,
@@ -290,6 +292,7 @@ const reasonsWithoutChannel: Partial<Record<AnyReasonCode | SanityNoteCode, Temp
   CREEP_STEP_BACK: (f) => `The Buy Box was lost right after a raise — back to ${f.money('backToMinor')}, the last price that held it; raises paused until ${f.when('pausedUntil')}.`,
   CAPPED_AT_CREEP_CEILING: () => 'While raises were paused, the target was kept below the price at which the Buy Box was lost.',
   BUYBOX_HOLDER_UNKNOWN: (f) => `This channel does not say who holds the Buy Box; your price ${f.money('currentMinor')} equalled the Buy Box price, so it may have been yours — the price stayed.`,
+  BUYBOX_HOLDER_REQUIRED: () => 'No single Buy Box holder was named, so your strategy, which follows a named holder, kept the price.',
   // Шаг 101 [Р-226]: цены, число предложений, ориентир и фильтр — не вечные (ориентир и фильтр живут 18 месяцев рядом с подрезом)
   ANCHOR_UNDERCUT: (f) => `Went below the anchor of your strategy seen at that moment by ${step(f)}. ${keptNote}`,
   COMPETITORS_FILTERED: () => `Only competitors that passed your fulfillment filter were considered. ${keptNote}`,

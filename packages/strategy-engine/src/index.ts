@@ -370,6 +370,16 @@ export function runStrategy(input: EngineInput): EngineResult {
       // её не держит
       return propose(step.to, [step.reason], null, true, FLOOR_RAISE_RULE);
     }
+    /**
+     * Шаг 115.2 (решение владельца): Buy Box есть, а держатель неизвестен — единственное, чего не хватило стратегии. Это настоящее решение «без изменения» со своей
+     * причиной, как у NO_ELIGIBLE_COMPETITORS: иначе цена стояла бы молча, а причина жила бы только в стадиях отчёта. Группы просмотров в снимке и держателя нет —
+     * большинства просмотров нет [Р-235]; групп нет (уведомление Amazon, проекция при пересчёте) — держателя канал не назвал. Устаревший снимок и снимок без
+     * Buy Box сюда не попадают: там причина другая
+     */
+    if (unmet.length === 1 && unmet[0] === 'BUYBOX_WINNER') {
+      const why = r('BUYBOX_HOLDER_REQUIRED', { buyboxHolder: (snapshot!.buyboxSegments?.length ?? 0) > 0 ? 'NO_MAJORITY' : 'NOT_NAMED' });
+      return holdOrRaise(current ?? floorMinor, why, [why], null);
+    }
     return notEvaluated(r('COMPETITOR_REQUIREMENT_NOT_MET', {
       unmet: unmet.join(','), requiredCompleteness: req.kind, requiredN: req.minN ?? null,
       actualCompleteness: snapshot?.completeness.kind ?? null, actualN: snapshot?.completeness.kind === 'TOP_N' ? snapshot.completeness.n : null,

@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { BoundsView, DecisionTrace, ShadowView } from '@repracer/console-model';
+import type { BoundsView, DecisionListView, DecisionTrace, ShadowView } from '@repracer/console-model';
 import type { StandToken } from '../src/api-types.ts';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { amazonLiveWorld, VirtualClock, type AmazonLiveWorld } from '@repracer/contract-tests/live';
+import { noViewMajority } from '@repracer/contract-tests/simulator';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { createShadowDigest } from '@repracer/alert-delivery/shadow-digest';
@@ -33,6 +34,12 @@ const US_MARKETPLACE = 'ATVPDKIKX0DER';
 const VIRTUAL_HOURS = Number(process.env.REPRACER_US_HOURS ?? 2);
 const OFFERS = 40;
 const SCREEN_LIMIT_SECONDS = 10;
+/**
+ * Шаг 115.2: одно предложение первого окна опроса — «Win the Buy Box» у товара, где просмотры делятся без большинства. Номер в мире — `B0LIVE<tag><i>`
+ * [Р-235]: остальные предложения мира прежние
+ */
+const WIN_NO_MAJORITY = Array.from({ length: 20 }, (_, i) => i).find((i) => noViewMajority(`B0LIVE4200${String(i).padStart(2, '0')}`))!;
+const WIN_NO_MAJORITY_STRATEGY = { strategyId: 'st-amz-win', version: 1, deadbandMinor: 0, params: { type: 'WIN_BUYBOX' as const, undercutMinor: 1, fulfillmentHandicapMinor: 0, creepUp: false, creepStepBp: 100, atBound: 'CAP' as const } };
 
 let db: IsolatedDatabase;
 let world: AmazonLiveWorld;
@@ -104,6 +111,7 @@ before(async () => {
     us: true, engine: true, writeMode: 'SHADOW',
     appPool, adminPool, provisioningPool: db.pool('svc_provisioning', 1), dispatcherPool: db.pool('svc_dispatcher', 2),
     fxLoaderPool: db.pool('svc_fx_loader', 1),
+    strategyOf: (i) => (i === WIN_NO_MAJORITY ? WIN_NO_MAJORITY_STRATEGY : undefined) as never,
   });
   const seeded = world.seeded;
   const store = new PgPricingStore(appPool, { adminPool, bulkWorkerPool: db.pool('svc_bulk_worker', 2) });
@@ -251,6 +259,30 @@ test('Р-172, Р-61: движок работает в долларах, пол �
   Object.assign(numbers, { costConversion: conversion[0] });
   Object.assign(numbers, { whySteps: why.body.steps.length, whySeconds: why.seconds });
   assert.ok(why.body.steps.length >= 5, `шагов объяснения: ${why.body.steps.length}`);
+});
+
+/**
+ * Шаг 115.2 (решение владельца по докладу 115): причина удержания видна продавцу теми же экранами, что у NO_ELIGIBLE_COMPETITORS: журнал цен и квитанция, через
+ * HTTP как браузер [Р-136]. Сумм в причине нет: цену решения показывает своя колонка
+ */
+test('шаг 115.2: стратегия без держателя — причина в журнале цен и в квитанции, словами, без кодов', async () => {
+  const ws = world.seeded.ids.dbId(`ws-amz-${world.asins[WIN_NO_MAJORITY]}`);
+  const list = await call<DecisionListView>('журнал решений предложения', 'GET', `${api('decisions')}?writeScopeId=${ws}&outcome=NO_CHANGE&offset=0&limit=50`);
+  assert.equal(list.status, 200, JSON.stringify(list.body).slice(0, 300));
+  const held = list.body.items.filter((d) => d.reason === 'No single Buy Box holder — kept');
+  assert.ok(held.length > 0, `журнал называет причину: ${JSON.stringify(list.body.items.slice(0, 3))}`);
+  const reasons = new Set<string>();
+  for (const item of held.slice(0, 12)) {
+    const receipt = await call<DecisionTrace>('квитанция удержания', 'GET', api('decisions', item.decisionId));
+    assert.equal(receipt.status, 200, JSON.stringify(receipt.body).slice(0, 300));
+    const step = receipt.body.steps.find((s) => s.key === 'STRATEGY');
+    assert.equal(step?.items[0]?.label, 'No single Buy Box holder — kept', JSON.stringify(step));
+    if (step?.items[0]?.reason) reasons.add(step.items[0].reason.text);
+  }
+  const text = [...reasons].join(' ');
+  assert.match(text, /No seller has more than half of the views/, `снимок опроса с группами просмотров: ${text}`);
+  assert.doesNotMatch(text, /BUYBOX_HOLDER|NO_MAJORITY|NOT_NAMED|Р-\d+|A-\d{2}/, text);
+  Object.assign(numbers, { holderRequired: { decisions: held.length, reasons: [...reasons] } });
 });
 
 test('Р-173: недельный дайджест по-английски несёт ДОЛЛАРЫ и не обещает заработка', async () => {
