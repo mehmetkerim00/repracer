@@ -141,6 +141,9 @@ node --experimental-strip-types services/notification-receiver/src/part-b.ts <ф
   — `detail-type` равен типу, `source` начинается с `aws.partner/sellingpartnerapi.amazon.com`, в `detail` — `NotificationType`,
   `Payload`, `NotificationMetadata`. Сверяем только ИМЕНА ключей; тела в чат и в документы не копируем (данные продавца). Если форма
   другая — приёмник отклонит событие алертом `NOTIFICATION_UNPARSEABLE` с проблемой и списком ключей `detail`: по нему правится разбор.
+- [ ] **Форма идентификатора приложения (A-34).** У боевого приложения идентификатор `amzn1.sp.solution.…`, а примеры снимка показывают
+  `amzn1.sellerapps.app.…`. Сверить: имя источника партнёра (шаг 4.2) и `NotificationMetadata.ApplicationId` первого уведомления — та же
+  строка, что в `REPRACER_AMAZON_APPLICATION_ID`. Сверяем равенство, значения в чат не копируем.
 - [ ] Приёмник запущен с этой очередью: в первый час нет алертов `NOTIFICATION_UNPARSEABLE`, `NOTIFICATION_FOREIGN_APPLICATION`,
   `NOTIFICATION_UNKNOWN_SELLER`; очередь недоставленных пуста.
 - [ ] Экран Channels у аккаунта Amazon: «Data source: Amazon notifications, the last one …» вместо «polling only».
@@ -153,5 +156,6 @@ node --experimental-strip-types services/notification-receiver/src/part-b.ts <ф
 |---|---|---|
 | `createDestination` — 400 или 403 | ответ SP-API | скоуп grantless (раздел «До звонка») |
 | В очереди нет уведомлений листингов | EventBridge → источник партнёра | источник связан с шиной? правило на шине партнёра? цель — та очередь? второе разрешение политики? |
+| `NOTIFICATION_FOREIGN_APPLICATION` на всех уведомлениях | алерт; `ApplicationId` первого сообщения | форма идентификатора другая (A-34): в `REPRACER_AMAZON_APPLICATION_ID` — та строка, что присылает Amazon |
 | Сообщения уходят в очередь недоставленных | алерт `NOTIFICATION_GIVING_UP` | журнал приёмника по `messageId`; сбой базы или пути решения |
 | `NOTIFICATION_UNPARSEABLE` с `EVENTBRIDGE_*` | алерт, поле `detailKeys` | форма `detail` не та, что в A-33: правка `packages/amazon-notifications/src/envelope.ts` со сценарием |

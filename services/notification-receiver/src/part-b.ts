@@ -10,6 +10,10 @@ import { readFileSync } from 'node:fs';
  * между значениями (один регион, один аккаунт AWS, одна очередь в адресе и ARN, источник партнёра — формата страницы
  * set-up-notifications-with-amazon-eventbridge: `aws.partner/sellingpartnerapi.amazon.com/{AWS Account Id}/{Application Id}`), а не
  * то, что AWS и Amazon примут их: это проверяет только живой вызов части Б.
+ *
+ * Шаг 114.1 (P1-03): приложение SP-API — две формы идентификатора: `amzn1.sp.solution.…` (боевое приложение в нынешнем портале разработчика,
+ * проверка ключей 2026-11-05) и `amzn1.sellerapps.app.…` (примеры снимка моделей). Какую форму Amazon подставит в имя источника партнёра и в
+ * `ApplicationId` уведомления, снимок не говорит — A-34, проверяется на звонке части Б. Поэтому проверка принимает обе и сверяет равенство
  */
 export const PART_B_KEYS = [
   'REPRACER_AMAZON_REGION', 'REPRACER_AWS_REGION', 'REPRACER_AWS_ACCOUNT_ID', 'REPRACER_AMAZON_APPLICATION_ID',
@@ -22,6 +26,7 @@ export const PART_B_KEYS = [
 export interface PartBCheck { check: string; ok: boolean }
 
 /** Заглушка шаблона: пусто, угловые скобки, нули аккаунта или слово-подсказка */
+const APPLICATION_ID = 'amzn1\\.(?:sp\\.solution|sellerapps\\.app)\\.[A-Za-z0-9-]+';
 const placeholder = (v: string | undefined) => !v || /<[^>]*>|^0{12}$|:0{12}:|\/0{12}\/|REPLACE|CHANGE_ME/i.test(v);
 
 /** Файл KEY=VALUE: пустые строки и комментарии пропускаются, кавычки вокруг значения снимаются */
@@ -41,14 +46,14 @@ export function checkPartB(env: Readonly<Record<string, string | undefined>>): P
   const url = /^https:\/\/sqs\.([a-z0-9-]+)\.amazonaws\.com\/(\d{12})\/([A-Za-z0-9_-]{1,80})$/.exec(v('REPRACER_SQS_QUEUE_URL'));
   const queueArn = /^arn:aws:sqs:([a-z0-9-]+):(\d{12}):([A-Za-z0-9_-]{1,80})$/.exec(v('REPRACER_SQS_QUEUE_ARN'));
   const dlqArn = /^arn:aws:sqs:([a-z0-9-]+):(\d{12}):([A-Za-z0-9_-]{1,80})$/.exec(v('REPRACER_SQS_DLQ_ARN'));
-  const source = /^aws\.partner\/sellingpartnerapi\.amazon\.com\/(\d{12})\/(amzn1\.sellerapps\.app\.[A-Za-z0-9-]+)$/.exec(v('REPRACER_EVENTBRIDGE_PARTNER_SOURCE'));
+  const source = new RegExp(`^aws\\.partner/sellingpartnerapi\\.amazon\\.com/(\\d{12})/(${APPLICATION_ID})$`).exec(v('REPRACER_EVENTBRIDGE_PARTNER_SOURCE'));
   const bus = /^arn:aws:events:([a-z0-9-]+):(\d{12}):event-bus\/(.+)$/.exec(v('REPRACER_EVENTBRIDGE_BUS_ARN'));
   const rule = /^arn:aws:events:([a-z0-9-]+):(\d{12}):rule\/(.+)\/([A-Za-z0-9._-]{1,64})$/.exec(v('REPRACER_EVENTBRIDGE_RULE_ARN'));
   const region = v('REPRACER_AWS_REGION');
   const account = v('REPRACER_AWS_ACCOUNT_ID');
   checks.push(
     { check: 'регион SP-API — EU, NA или FE', ok: ['EU', 'NA', 'FE'].includes(v('REPRACER_AMAZON_REGION')) },
-    { check: 'приложение — вида amzn1.sellerapps.app.…', ok: /^amzn1\.sellerapps\.app\.[A-Za-z0-9-]+$/.test(v('REPRACER_AMAZON_APPLICATION_ID')) },
+    { check: 'приложение — вида amzn1.sp.solution.… или amzn1.sellerapps.app.…', ok: new RegExp(`^${APPLICATION_ID}$`).test(v('REPRACER_AMAZON_APPLICATION_ID')) },
     { check: 'аккаунт AWS — 12 цифр', ok: /^\d{12}$/.test(account) },
     { check: 'адрес очереди, ARN очереди и очереди недоставленных, шина и правило — правильного вида', ok: !!(url && queueArn && dlqArn && bus && rule) },
     { check: 'всё в одном регионе AWS', ok: !!(url && queueArn && dlqArn && bus && rule) && [url[1], queueArn[1], dlqArn[1], bus[1], rule[1]].every((r) => r === region) },

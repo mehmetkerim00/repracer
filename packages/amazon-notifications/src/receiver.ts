@@ -116,7 +116,7 @@ export interface ReceiverOptions {
   sqs: SqsClient;
   queueUrl: string;
   region: AmazonRegion;
-  /** amzn1.sellerapps.app.… нашего приложения */
+  /** Идентификатор нашего приложения: amzn1.sp.solution.… или amzn1.sellerapps.app.… (A-34); сравнивается равенством с `ApplicationId` уведомления */
   applicationId: string;
   router: SellerRouter;
   ledger: NotificationLedger;

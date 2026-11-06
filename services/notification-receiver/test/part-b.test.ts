@@ -44,6 +44,18 @@ test('step 114: a consistent filled file passes every check; each kind of incons
   assert.deepEqual(failed({ ...FILLED, REPRACER_SPAPI_DESTINATION_ID_EVENTBRIDGE: FILLED.REPRACER_SPAPI_DESTINATION_ID_SQS! }), ['адресаты SQS и EventBridge — разные']);
 });
 
+test('step 114.1 (P1-03): the production app id of the current developer portal (amzn1.sp.solution.…) is a valid application — and the partner source, bus and rule built on it pass', () => {
+  const app = 'amzn1.sp.solution.syn00000-0000-4000-8000-000000000114';
+  const source = `aws.partner/sellingpartnerapi.amazon.com/123456789012/${app}`;
+  const filled = { ...FILLED, REPRACER_AMAZON_APPLICATION_ID: app, REPRACER_EVENTBRIDGE_PARTNER_SOURCE: source,
+    REPRACER_EVENTBRIDGE_BUS_ARN: `arn:aws:events:us-east-1:123456789012:event-bus/${source}`,
+    REPRACER_EVENTBRIDGE_RULE_ARN: `arn:aws:events:us-east-1:123456789012:rule/${source}/syn-listings-to-queue` };
+  assert.deepEqual(failed(filled), []);
+  // Контроли: чужой вид значения — по-прежнему «нет»; источник с другим приложением — своей причиной. Частая ошибка заполнения — LWA client id вместо приложения
+  assert.ok(failed({ ...filled, REPRACER_AMAZON_APPLICATION_ID: 'amzn1.application-oa2-client.syn0114' }).includes('приложение — вида amzn1.sp.solution.… или amzn1.sellerapps.app.…'));
+  assert.deepEqual(failed({ ...filled, REPRACER_AMAZON_APPLICATION_ID: 'amzn1.sp.solution.someone-else' }), ['источник партнёра — наше приложение']);
+});
+
 test('step 114: the report says only yes or no — no value of the file appears in it, whole or in part', () => {
   const dir = mkdtempSync(join(tmpdir(), 'part-b-'));
   try {

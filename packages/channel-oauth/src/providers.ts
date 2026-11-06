@@ -51,7 +51,7 @@ export const AMAZON_SELLER_CENTRAL: Readonly<Record<string, string>> = {
 };
 
 export interface AmazonLwaConfig {
-  /** `application_id` приложения SP-API (`amzn1.sellerapps.app.…`) */
+  /** `application_id` приложения SP-API (`amzn1.sp.solution.…` или `amzn1.sellerapps.app.…`, A-34) */
   applicationId: string;
   clientId: string;
   clientSecret: string;
