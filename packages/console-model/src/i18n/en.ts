@@ -963,7 +963,10 @@ export const en = {
       /** Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */
       dataSource: {
         notifications: (when: string, parts: string) => `Data source: Amazon notifications, the last one ${when}; in 24 hours: ${parts}. The check after each price update and the catalog scan keep running alongside.`,
-        polling: 'Data source: polling only — no Amazon notifications reached us in 24 hours. Offer status comes from the check after each price update and from the catalog scan; competitor offers for pricing arrive only with notifications.',
+        polling: 'Data source: polling only — no Amazon notifications reached us in 24 hours, and no competitor summary has been read yet. Offer status comes from the check after each price update and from the catalog scan.',
+        // Шаг 115 [Р-240]: опрос сводки — источник конкурентов; сколько лет самому давнему чтению
+        polled: (minutes: number) => `Data source: polling only — no Amazon notifications reached us in 24 hours. Competitor offers for pricing come from the Amazon competitive summary, read in turns: the oldest reading is ${minutes} min old. Offer status comes from the check after each price update and from the catalog scan.`,
+        polledAlongside: (minutes: number) => ` The competitive summary is read in turns too: the oldest reading is ${minutes} min old.`,
         parts: {
           offers: (n: number) => `${n} competitor ${n === 1 ? 'update' : 'updates'}`,
           status: (n: number) => `${n} offer status ${n === 1 ? 'change' : 'changes'}`,
@@ -1302,7 +1305,7 @@ export const en = {
         ANALYTICS_PARTITION_FORCE_DROPPED: { what: 'a partition that was never exported was force-dropped — that history is lost', step: 'Write down the named partitions and find the cause of the failed export: those days cannot be restored.' },
         COMPETITOR_POLL_BUDGET_EXCEEDED: { what: 'competitor polling no longer fits into the request budget of the channel', step: 'Check in the event how many offers were demoted to the cold tier, and decide about the budget or the cadence.' },
         COMPETITOR_POLL_FAILURES: { what: 'a large share of the competitor queries of one account fails', step: 'Check the first error code from the event: credentials of the account, reachability of the channel, or its rate limit.' },
-        AMAZON_RECONCILIATION_CIRCLE_SLOW: { what: 'the reconciliation circle at Amazon takes longer than intended', step: 'Check how many accounts share the request limit of the application: the circle grows with every account.' },
+        AMAZON_SUMMARY_ROUND_SLOW: { what: 'the competitor round at Amazon takes longer than an hour', step: 'Prices follow the market more slowly on this account: the catalog is larger than one request every 31 seconds covers in an hour. Compare the offers in the event with the request limit; a higher limit comes from Amazon support.' },
         SCHEDULER_JOB_FAILING: { what: 'a periodic job of the scheduler fails several times in a row', step: 'Take the job name and the error code from the event and check the log of the scheduler process.' },
         SCHEDULER_JOB_LAGGING: { what: 'a periodic job is running behind its schedule', step: 'Check that the scheduler process is running and whether a job is holding its lease; for the export, lag means lost history.' },
         SCHEDULER_LEASE_LOST: { what: 'the scheduler lost the lease of a job while it was running', step: 'Check whether more than one scheduler process is running: exactly one is intended.' },
@@ -1404,7 +1407,7 @@ export const en = {
       gapAbove: (amount: string) => `${amount} above the Buy Box winner, with shipping`, gapNone: 'At or below the winner’s price with shipping',
       // Шаг 109 [Р-234]: купон — рядом с базовой ценой; стратегии считают по базовой
       withCoupon: (price: string) => `(${price} with coupon)`,
-      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) — Buy Box по группам покупателей и купоны, со своим моментом
+      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала — Buy Box по группам покупателей и купоны, со своим моментом
       summary: {
         title: (channel: string) => `${channel} competitive summary`, observed: 'As of',
         segmentsTitle: 'Buy Box by customer views', viewsOf: (pct: string) => `${pct} of views`,
@@ -1416,7 +1419,7 @@ export const en = {
         couponNote: 'Prices are decided on the base price: a coupon is clipped at checkout and not every customer sees it.',
         // Шаг 109.1 [Р-71]: суммы предложений не в валюте витрины не печатаются — строка называет валюту, если она одна
         hiddenOffers: (n: number, currency: string | null) => `${n} ${n === 1 ? 'offer' : 'offers'} in ${currency ?? 'other currencies'} ${n === 1 ? 'is' : 'are'} not shown`,
-        note: (channel: string) => `${channel} names the Buy Box offer for each group of customers in this summary. It is read for checking only and does not move prices.`,
+        note: (channel: string) => `${channel} names the Buy Box offer for each group of customers in this summary. The seller with more than half of the views counts as the Buy Box holder, and prices are decided from this summary.`,
       },
       share: {
         title: 'Buy Box share', caption: 'By snapshots, not by sales: each reading counts until the next one, at most 24 hours.',

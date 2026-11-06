@@ -963,7 +963,10 @@ export const fr: Messages = {
       /** Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */
       dataSource: {
         notifications: (when: string, parts: string) => `Source des données : notifications d’Amazon, la dernière ${when} ; en 24 heures : ${parts}. La vérification après chaque mise à jour de prix et le parcours du catalogue continuent en parallèle.`,
-        polling: 'Source des données : interrogations seulement — aucune notification d’Amazon ne nous est parvenue en 24 heures. Le statut des offres vient de la vérification après chaque mise à jour de prix et du parcours du catalogue ; les offres de la concurrence pour le prix n’arrivent qu’avec les notifications.',
+        polling: 'Source des données : interrogations seulement — aucune notification d’Amazon ne nous est parvenue en 24 heures, et la synthèse concurrentielle n’a pas encore été lue. Le statut des offres vient de la vérification après chaque mise à jour de prix et du parcours du catalogue.',
+        // Шаг 115 [Р-240]: опрос сводки — источник конкурентов; сколько лет самому давнему чтению
+        polled: (minutes: number) => `Source des données : interrogations seulement — aucune notification d’Amazon ne nous est parvenue en 24 heures. Les offres de la concurrence pour le prix viennent de la synthèse concurrentielle d’Amazon, lue à tour de rôle : la lecture la plus ancienne date de ${minutes} min. Le statut des offres vient de la vérification après chaque mise à jour de prix et du parcours du catalogue.`,
+        polledAlongside: (minutes: number) => ` La synthèse concurrentielle est aussi lue à tour de rôle : la lecture la plus ancienne date de ${minutes} min.`,
         parts: {
           offers: (n: number) => `${n} ${n === 1 ? 'changement' : 'changements'} de la concurrence`,
           status: (n: number) => `${n} ${n === 1 ? 'changement' : 'changements'} de statut des offres`,
@@ -1302,7 +1305,7 @@ export const fr: Messages = {
         ANALYTICS_PARTITION_FORCE_DROPPED: { what: 'une partition jamais exportée a été supprimée de force — cet historique est perdu', step: 'Notez les partitions indiquées et trouvez la cause de l’échec de l’export : ces jours ne peuvent pas être restaurés.' },
         COMPETITOR_POLL_BUDGET_EXCEEDED: { what: 'l’interrogation des concurrents ne tient plus dans le budget de requêtes du canal', step: 'Vérifiez dans l’événement combien d’offres ont été rétrogradées au niveau froid, et décidez du budget ou de la cadence.' },
         COMPETITOR_POLL_FAILURES: { what: 'une grande part des requêtes sur la concurrence d’un compte échoue', step: 'Vérifiez le premier code d’erreur de l’événement : identifiants du compte, joignabilité du canal ou sa limite de débit.' },
-        AMAZON_RECONCILIATION_CIRCLE_SLOW: { what: 'le cycle de rapprochement chez Amazon prend plus de temps que prévu', step: 'Vérifiez combien de comptes partagent la limite de requêtes de l’application : le cycle s’allonge avec chaque compte.' },
+        AMAZON_SUMMARY_ROUND_SLOW: { what: 'le tour des concurrents chez Amazon prend plus d’une heure', step: 'Les prix suivent le marché plus lentement sur ce compte : le catalogue dépasse ce que couvre une requête toutes les 31 secondes en une heure. Comparez les offres de l’événement à la limite de requêtes ; une limite plus élevée s’obtient auprès du support Amazon.' },
         SCHEDULER_JOB_FAILING: { what: 'une tâche périodique du planificateur échoue plusieurs fois de suite', step: 'Relevez le nom de la tâche et le code d’erreur dans l’événement et consultez le journal du processus planificateur.' },
         SCHEDULER_JOB_LAGGING: { what: 'une tâche périodique est en retard sur son calendrier', step: 'Vérifiez que le processus planificateur tourne et si une tâche détient son bail ; pour l’export, un retard signifie un historique perdu.' },
         SCHEDULER_LEASE_LOST: { what: 'le planificateur a perdu le bail d’une tâche pendant son exécution', step: 'Vérifiez si plusieurs processus planificateurs tournent : un seul est prévu.' },
@@ -1404,7 +1407,7 @@ export const fr: Messages = {
       gapAbove: (amount: string) => `${amount} au-dessus du gagnant de la Buy Box, livraison comprise`, gapNone: 'Au prix du gagnant ou en dessous, livraison comprise',
       // Шаг 109 [Р-234]: купон — рядом с базовой ценой; стратегии считают по базовой
       withCoupon: (price: string) => `(${price} avec coupon)`,
-      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) — Buy Box по группам покупателей и купоны, со своим моментом
+      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала — Buy Box по группам покупателей и купоны, со своим моментом
       summary: {
         title: (channel: string) => `Synthèse de la concurrence ${channel}`, observed: 'Au',
         segmentsTitle: 'Buy Box selon les vues des clients', viewsOf: (pct: string) => `${pct} des vues`,
@@ -1416,7 +1419,7 @@ export const fr: Messages = {
         couponNote: 'Les prix sont décidés sur le prix de base\u00a0: un coupon s’active au paiement et tous les clients ne le voient pas.',
         // Шаг 109.1 [Р-71]: суммы предложений не в валюте витрины не печатаются — строка называет валюту, если она одна
         hiddenOffers: (n: number, currency: string | null) => `${n} ${n === 1 ? 'offre' : 'offres'} ${currency ? `en ${currency}` : 'dans d’autres devises'} ${n === 1 ? 'n’est pas affichée' : 'ne sont pas affichées'}`,
-        note: (channel: string) => `${channel} indique dans cette synthèse l’offre de la Buy Box pour chaque groupe de clients. Elle sert uniquement au contrôle et ne fait pas bouger les prix.`,
+        note: (channel: string) => `${channel} indique dans cette synthèse l’offre de la Buy Box pour chaque groupe de clients. Le vendeur qui a plus de la moitié des vues compte comme détenteur de la Buy Box, et les prix sont décidés à partir de cette synthèse.`,
       },
       share: {
         title: 'Part de Buy Box', caption: 'D’après les lectures des données de la concurrence, pas d’après les ventes : chaque lecture compte jusqu’à la suivante, 24 heures au plus.',

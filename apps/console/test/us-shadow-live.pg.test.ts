@@ -67,13 +67,12 @@ async function signIn(): Promise<void> {
 }
 
 /**
- * Ход мира. Решения на Amazon ведут УВЕДОМЛЕНИЯ, а не опрос: `getCompetitiveSummary` — 0,033 запроса в секунду с
- * всплеском 1 [док], поллинг конкурентов невозможен в принципе [Р-46, жёсткие ограничения Amazon]. Поэтому такт — это
- * `betweenTicks()`: приёмник разбирает снимки ANY_OFFER_CHANGED, срок доставки которых наступил, и каждый из них идёт
- * настоящим путём решения [Р-128].
+ * Ход мира. Решения на Amazon ведут и уведомления, и опрос сводки [Р-240]: такт — это `betweenTicks()`: приёмник разбирает снимки
+ * ANY_OFFER_CHANGED, срок доставки которых наступил, и каждый из них идёт настоящим путём решения [Р-128].
  *
  * Рядом — ОДИН опрос на такт: он держит утверждение «тень читает канал по-настоящему» [Р-171] и не нарушает предел
- * канала (один вызов на пять виртуальных минут против разрешённых 0,033 в секунду).
+ * канала (один вызов на пять виртуальных минут против разрешённых 0,033 в секунду). Круг опроса планировщика — свой прогон,
+ * tests/contract/src/amazon-summary-poll-live.pg.test.ts.
  */
 async function advance(hours: number): Promise<void> {
   const pipeline = world.pipelineForDbIds();
@@ -82,7 +81,7 @@ async function advance(hours: number): Promise<void> {
     const ctx = { tenantId: world.seeded.tenantId, channelAccountId: world.seeded.channelAccountId, correlationId: 'us-shadow', deadline: clock.iso(120_000) };
     /**
      * Опрос идёт ПАКЕТОМ по всем предложениям: `getCompetitiveSummary` принимает до 20 ASIN в запросе (модель,
-     * `CompetitiveSummaryRequestList.maxItems` — AMZ_C11), и ограничитель считает ЗАПРОСЫ, а не товары. Отказ
+     * `CompetitiveSummaryRequestList.maxItems`), и ограничитель считает ЗАПРОСЫ, а не товары. Отказ
      * ограничителя — нормальный исход такта, а не ошибка прогона: он и есть жёсткое ограничение канала.
      */
     await pipeline.pollCompetitors(ctx as never,

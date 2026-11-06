@@ -31,7 +31,7 @@ export const PIPELINE_CONVERSIONS: ReadonlyArray<{ file: string; kaufland: strin
     file: 'pipeline-halt-auto-release.json', kaufland: 'pipeline-halt-auto-release.json', id: 'amazon/pipeline/halt-auto-release',
     title: 'Р-119: автоматическое снятие остановки витрины по выборке на Amazon неприменимо — свойство канала',
     patch: (s) => {
-      s.description = 'Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon опроса нет: getCompetitiveSummary — 0.033 запроса в секунду [AMZ_C07]. Р-119: это свойство канала (ChannelDescriptor.haltRelease = MANUAL_ONLY, platform.channel_behaviour), а не пробел — проверка остановок не пробует читать конкурентов и не пишет провал выборки; остановку снимает только человек.';
+      s.description = 'Преобразован из kaufland/pipeline-halt-auto-release.json. Р-52 снимает остановку по свежей независимой выборке, а выборка — это опрос конкурентов. У Amazon выборку брать не из чего: весь бюджет getCompetitiveSummary (0.033 запроса в секунду) занят опросом по кругу [Р-240]. Р-119: это свойство канала (ChannelDescriptor.haltRelease = MANUAL_ONLY, platform.channel_behaviour), а не пробел — проверка остановок не пробует читать конкурентов и не пишет провал выборки; остановку снимает только человек.';
       s.exchanges = [];
       s.tags = [...s.tags, 'r119'];
       stepExpect(s, 'review-due-halt', [{ outcome: 'MANUAL_ONLY', sampleSize: 0, failedCount: 0, snapshots: [], failures: [] }]);

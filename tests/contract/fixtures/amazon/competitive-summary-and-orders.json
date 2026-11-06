@@ -3,8 +3,8 @@
   "id": "amazon/port/competitive-summary",
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
-  "title": "Р-121: getCompetitiveSummary — снимок только для сверки",
-  "description": "Шаг 24. Сверка потерь ANY_OFFER_CHANGED [AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY без единого победителя Buy Box, своё предложение — по SellerId. Шаг 109: тот же вызов — featuredBuyingOptions: предложения в Buy Box по сегментам с долей просмотров [Р-235]; купон предложения — отдельной ценой [Р-234]. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).",
+  "title": "Р-240: getCompetitiveSummary — снимок источника решений: держатель Buy Box большинством просмотров, цена, исполнение",
+  "description": "Шаг 24, шаг 115 [Р-240, AMZ_C11]: пакет до 20 ASIN, lowestPricedOffers New/Consumer, снимок источника AMAZON_COMPETITIVE_SUMMARY: единого победителя Buy Box канал не называет, держатель — продавец большинства просмотров [Р-235], цена и доставка — его предложения; своё предложение — по SellerId. Шаг 109: тот же вызов — featuredBuyingOptions: предложения в Buy Box по сегментам с долей просмотров [Р-235]; купон предложения — отдельной ценой [Р-234]. Ошибка товара в пакете — отказ этого товара; состояние не new — UNSUPPORTED без запроса. Второй пакет сразу — RATE_LIMITED ограничителем (0.033 rps, burst 1), без обращения к Amazon. Строки заказов — сценарий orders-merchant-whitelist (шаг 51).",
   "tags": [
     "port",
     "r-121"
@@ -80,6 +80,18 @@
               "kind": "TOP_N",
               "n": 2
             },
+            "buybox": {
+              "price": {
+                "amountMinor": 1779,
+                "currency": "EUR",
+                "basis": "GROSS"
+              },
+              "shipping": {
+                "amountMinor": 0
+              },
+              "isSelf": false,
+              "sellerRef": "A1SYNCOMPETITOR"
+            },
             "offers": [
               {
                 "isSelf": false,
@@ -93,6 +105,7 @@
                   "amountMinor": 0
                 },
                 "fulfillment": "AFN",
+                "holdsBuyBox": true,
                 "couponPrice": {
                   "amountMinor": 1699,
                   "currency": "EUR",
@@ -208,7 +221,7 @@
     },
     {
       "id": "summary-batch",
-      "note": "getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]",
+      "note": "getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — источник решений [Р-240, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]",
       "request": {
         "method": "POST",
         "path": "/batches/products/pricing/2022-05-01/items/competitiveSummary",
@@ -425,11 +438,7 @@
     "noAlerts": true,
     "logs": [
       {
-        "code": "AMZ_C07_COMPETITOR_PULL_UNAVAILABLE",
-        "count": 2
-      },
-      {
-        "code": "AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION",
+        "code": "AMZ_C11_COMPETITIVE_SUMMARY_POLL",
         "count": 2
       },
       {

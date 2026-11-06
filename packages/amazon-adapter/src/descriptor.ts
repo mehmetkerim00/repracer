@@ -20,8 +20,10 @@ export const AMAZON_RATE_LIMITS = {
   patchListingsItem: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 500 } },
   getListingsItem: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
   searchListingsItems: { pair: { ratePerSecond: 5, burst: 5 }, application: { ratePerSecond: 100 } },
-  // Модель productPricing_2022-05-01 (Usage Plan): 0.033 rps, burst 1. Лимит уровня приложения не документирован — равен лимиту пары [AMZ_C11, A-15]
-  getCompetitiveSummary: { pair: { ratePerSecond: 0.033, burst: 1 }, application: { ratePerSecond: 0.033, documented: false } },
+  // Модель productPricing_2022-05-01 (Usage Plan): 0.033 rps, burst 1 — бюджет ПАРЫ продавец-приложение [Р-240]. Лимит приложения не документирован и
+  // не предполагается (A-15): приравнять его к паре значило бы поделить один запрос в 30 секунд на всех продавцов, как у searchOrders ниже (ревью
+  // шага 51, находка 4). Превышение покажет 429 канала при нашем темпе пары — провал работы своим кодом (SCHEDULER_JOB_FAILING: RATE_LIMITED)
+  getCompetitiveSummary: { pair: { ratePerSecond: 0.033, burst: 1 }, application: null },
   // Шаг 51, снимок 2026-09-29 (Usage Plan в описании операции): searchOrders 0.0056 rps, burst 20; getInventorySummaries 2 rps, burst 2.
   // Лимит уровня приложения моделью не описан [A-23]. Ревью шага 51, находка 4: приравнять его к лимиту пары нельзя — это одно ведро на
   // ВСЕ аккаунты процесса, и уже два аккаунта с чтением заказов раз в 5 минут исчерпали бы его (заказы читались бы с отставанием в часы —
@@ -87,12 +89,11 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
     { owner: 'SELLER_APPLICATION_OPERATION' as const, operation, requestsPerSecond: r.pair.ratePerSecond, burst: r.pair.burst, source: 'DOCUMENTED' as const },
     r.application === null
       ? { owner: 'APPLICATION' as const, operation, source: 'UNKNOWN' as const }
-      : { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond,
-        source: 'documented' in r.application && r.application.documented === false ? 'UNKNOWN' as const : 'DOCUMENTED' as const },
+      : { owner: 'APPLICATION' as const, operation, requestsPerSecond: r.application.ratePerSecond, source: 'DOCUMENTED' as const },
   ]),
   capabilities: [],
-  // Р-119: опроса конкурентов нет (getCompetitiveSummary 0.033 rps, AMZ_C07) — выборку для Р-52 взять неоткуда
-  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor polling on Amazon, a fresh independent sample cannot be taken' },
+  // Р-119: выборку для Р-52 брать не из чего: весь бюджет getCompetitiveSummary (0.033 rps) занят опросом по кругу [Р-240]
+  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: the whole getCompetitiveSummary budget (0.033 rps) goes to the rotation poll, a fresh independent sample cannot be taken' },
   // Р-124: модели SP-API 2026-09-16 (vendor/amazon/sp-api-models) не описывают истории цен оффера — полнота с подключения
   priceHistory: { kind: 'UNAVAILABLE', basis: 'SP-API models snapshot 2026-09-16 has no offer price history operation' },
   // Р-212 (шаг 74): ступень лестницы к полу — не чаще планового пересчёта; решение проекта, а не факт канала (шаг 75 — одна константа)
@@ -117,21 +118,23 @@ export const AMAZON_DESCRIPTOR: ChannelDescriptor = {
       role: 'PRIMARY',
     },
     {
-      // Р-121: только сверка потерь ANY_OFFER_CHANGED по кругу — 0.033 rps не позволяют опрашивать все товары для решения (AMZ_C07, AMZ_C11)
+      // Шаг 115 [Р-240]: источник решений — окно каталога раз в 31 с на пару, пакет до 20 товаров; он же страхует уведомления там, где они приходят [Р-121, AMZ_C11]
       source: SOURCE_COMPETITIVE_SUMMARY,
       kind: 'PULL',
       completeness: { kind: 'TOP_N', n: 20 },
       conditions: ['new'],
-      // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет [AMZ_C11]; держатель для доли Buy Box —
-      // продавец большинства просмотров (шаг 109, Р-235), стратегии он держателя не даёт
-      hasBuyboxWinner: false,
-      hasBuyboxPrice: false,
-      hasFulfilment: false,
+      // featuredBuyingOptions — сегменты по членству Prime и месту покупателя, единого победителя нет: держатель — продавец большинства просмотров
+      // [Р-235], цена — его предложения; большинства нет — цена самой большой группы и держатель неизвестен [Р-240, AMZ_C11]
+      hasBuyboxWinner: true,
+      hasBuyboxPrice: true,
+      // Модель: fulfillmentType — обязательное поле предложения
+      hasFulfilment: true,
       hasOwnRank: false,
       hasShipping: true,
       typicalStalenessSeconds: null,
       availability: 'AVAILABLE',
-      role: 'RECONCILIATION',
+      role: 'PRIMARY',
+      rotation: true,
       holderByViewShare: true,
     },
   ],

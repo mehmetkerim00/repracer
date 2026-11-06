@@ -24,12 +24,12 @@ export interface JobConfig {
   /** Срок уведомления сверки — ДОПУЩЕНИЕ до замера K-10 и A-08 (OQ-175) */
   lossGraceSeconds: number;
   /**
-   * getCompetitiveSummary: 0.033 rps, burst 1 [док] — вызов не чаще раза в 1/0.033 = 30,3 с, округлено вверх до 31 с, на ВСЕ аккаунты Amazon
-   * приложения (лимит приложения не документирован, A-15). Было 30 с: в живом режиме (Р-128) каждый второй вызов отклонял ограничитель
+   * getCompetitiveSummary: 0.033 rps, burst 1 [док] — вызов не чаще раза в 1/0.033 = 30,3 с, округлено вверх до 31 с, на пару продавец-приложение [Р-240]
+   * (лимит приложения не документирован и не предполагается, A-15). Было 30 с: в живом режиме (Р-128) каждый второй вызов отклонял ограничитель
    */
   amazonCallSeconds: number;
   amazonBatch: number;
-  amazonCircleWarnHours: number;
+  amazonRoundWarnMinutes: number;
   haltReviewEverySeconds: number;
   /**
    * Обход офферов [Р-120]. Шаг 56 (ревью шага 55, находка 4): заход — раз в час, НОВЫЙ круг — не чаще `discoveryCircleEverySeconds` (сутки,
@@ -90,7 +90,7 @@ export const CAPABILITY_JOBS = {
 
 export const DEFAULT_JOB_CONFIG: JobConfig = {
   pollEverySeconds: 60, pollBudgetRps: 10, pollMaxQueries: 600, lossReviewEverySeconds: 300, lossGraceSeconds: DEFAULT_LOSS_GRACE_SECONDS,
-  amazonCallSeconds: 31, amazonBatch: 20, amazonCircleWarnHours: 24, haltReviewEverySeconds: 300, discoveryEverySeconds: 3_600, discoveryCircleEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300, orderLinesFirstLookbackSeconds: 86_400,
+  amazonCallSeconds: 31, amazonBatch: 20, amazonRoundWarnMinutes: 60, haltReviewEverySeconds: 300, discoveryEverySeconds: 3_600, discoveryCircleEverySeconds: 86_400, discoveryAppQuotas: { EBAY_TRADING: 3000 }, orderLinesEverySeconds: 300, orderLinesFirstLookbackSeconds: 86_400,
   exportOffsetSeconds: 1_800, exportLookbackDays: 13, maintenanceEverySeconds: 3_600, alertsDeliverEverySeconds: 60,
   // Находка 3 ревью шага 43: заход ЕЖЕДНЕВНЫЙ — письмо о прошлой закрытой неделе, недоставленное повторяется каждые сутки
   shadowDigestEverySeconds: 86_400,
@@ -166,7 +166,7 @@ export interface JobCatalogEntry { name: string; scope: 'GLOBAL' | 'ACCOUNT'; wh
 export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'competitor-poll', scope: 'ACCOUNT', when: 'каждые 60 с, товары по ярусам 120 с / 1 ч / 24 ч', missed: 'LATEST: следующий запуск опрашивает все товары, чей ярус истёк; решения по опросу задерживаются на время простоя' },
   { name: 'notification-loss-review', scope: 'ACCOUNT', when: 'каждые 5 мин', missed: 'LATEST: следующий запуск решает все просроченные проверки; вердикт ищет уведомление в журнале снимков, который хранится 3 суток после выгрузки (риск 26)' },
-  { name: 'amazon-reconcile-rotation', scope: 'ACCOUNT', when: '31 с × число аккаунтов Amazon, аккаунты — со сдвигом на 31 с', missed: 'LATEST: окно круга — по числу успешных запусков; окно, отклонённое каналом, повторяется; пропуск не пропускает товары, круг сдвигается на время простоя' },
+  { name: 'amazon-summary-poll', scope: 'ACCOUNT', when: 'раз в 31 с на аккаунт (бюджет пары продавец-приложение, 0.033 запроса в секунду): окно до 20 предложений, самые давние первыми; 1 000 предложений — круг около 26 минут', missed: 'LATEST: решения по конкурентам Amazon задерживаются на время простоя, цены не меняются; окно, отклонённое каналом, повторяется первым; пропуск не пропускает товары, круг сдвигается на время простоя' },
   { name: 'halt-review', scope: 'ACCOUNT', when: 'каждые 5 мин (каналы с выборкой)', missed: 'LATEST: остановка снимается позже' },
   { name: 'order-lines', scope: 'ACCOUNT', when: 'каждые 5 мин', missed: 'LATEST: окно чтения — с предыдущего запуска; пропуск ничего не теряет, резервации создаются позже, доступный остаток в каналах завышен на время пропуска' },
   { name: 'scheduled-recompute', scope: 'ACCOUNT', when: 'период планового пересчёта канала (15 мин): сперва единицы с запросом базы на переоценку и лестницы к полу (шаг 73), потом единицы без решения за 24 часа; до 1000 тех и других за заход', missed: 'LATEST: фиксированные и маржинальные цены пересчитываются позже, подъём к полу после роста себестоимости и ступени лестницы ждут; у канала без данных конкурентов (eBay) решений нет всё время простоя' },
@@ -330,14 +330,15 @@ export function jobSource(deps: JobDeps): JobSource {
 
       // Работы по аккаунтам
       const accounts = await deps.accounts();
-      const rotationAccounts = accounts.filter((a) => (deps.descriptorOf(a.channel)?.competitorSources ?? []).some((s) => s.kind === 'PULL' && s.role === 'RECONCILIATION' && s.availability === 'AVAILABLE'));
+      // Шаг 115 [Р-240]: источник с опросом по кругу — окно раз в 31 с вместо ярусного опроса
+      const rotationAccounts = accounts.filter((a) => (deps.descriptorOf(a.channel)?.competitorSources ?? []).some((s) => s.kind === 'PULL' && s.rotation === true && s.availability === 'AVAILABLE'));
       for (const a of accounts) {
         const d = deps.descriptorOf(a.channel);
         if (!d) continue;
         const scope = { tenantId: a.tenantId, channelAccountId: a.channelAccountId };
         const pipeline = () => deps.pipelineFor(a);
         const reconcile = reconcileEnabled(a, d);
-        if ((d.competitorSources ?? []).some((s) => s.kind === 'PULL' && s.role === 'PRIMARY' && s.availability === 'AVAILABLE')) {
+        if ((d.competitorSources ?? []).some((s) => s.kind === 'PULL' && s.role === 'PRIMARY' && s.rotation !== true && s.availability === 'AVAILABLE')) {
           specs.push({
             name: 'competitor-poll', scope, retryKind: 'CHANNEL', intervalSeconds: cfg.pollEverySeconds, catchUp: 'LATEST', firstDueAt: immediately,
             lagWarningSeconds: 600, lagCriticalSeconds: hours(1), leaseSeconds: 300,
@@ -367,24 +368,32 @@ export function jobSource(deps: JobDeps): JobSource {
             },
           });
         }
-        if (reconcile && rotationAccounts.includes(a)) {
-          // Лимит вызова делят все аккаунты Amazon приложения: темп на аккаунт — 31 с × число аккаунтов (OQ-176); первый запуск аккаунта
-          // сдвинут на 31 с × его номер — иначе все аккаунты начинают в одном такте и отклоняются ограничителем приложения
-          const interval = Math.ceil(cfg.amazonCallSeconds * rotationAccounts.length);
-          const offsetMs = rotationAccounts.indexOf(a) * cfg.amazonCallSeconds * 1000;
+        if (rotationAccounts.includes(a)) {
+          /**
+           * Шаг 115 [Р-240]: опрос сводки — источник решений. Бюджет — пары продавец-приложение: 31 с на аккаунт, сколько бы аккаунтов ни было; лимит приложения не
+           * документирован и не предполагается (A-15). Если он есть, он покажет себя 429 при нашем темпе: провал работы кодом RATE_LIMITED и CRITICAL
+           * SCHEDULER_JOB_FAILING — повод для разбора, а не молчание. Первый запуск сдвинут внутри периода: аккаунты не идут в базу одним тактом
+           */
+          const interval = cfg.amazonCallSeconds;
+          const offsetMs = (rotationAccounts.indexOf(a) % interval) * 1000;
           specs.push({
-            name: 'amazon-reconcile-rotation', scope, retryKind: 'CHANNEL', intervalSeconds: interval, catchUp: 'LATEST', firstDueAt: (n) => new Date(Date.parse(n) + offsetMs).toISOString(),
-            lagWarningSeconds: interval * 10, lagCriticalSeconds: Math.max(hours(3), interval * 60), leaseSeconds: 120,
+            name: 'amazon-summary-poll', scope, retryKind: 'CHANNEL', intervalSeconds: interval, catchUp: 'LATEST', firstDueAt: (n) => new Date(Date.parse(n) + offsetMs).toISOString(),
+            lagWarningSeconds: 600, lagCriticalSeconds: hours(1), leaseSeconds: 120,
             async run({ startedAt, runIndex }) {
-              const r = await pipeline().reconcileRotation(ctxOf(a, startedAt, 'amazon-reconcile-rotation', 50), { size: cfg.amazonBatch, cycle: runIndex, graceSeconds: cfg.lossGraceSeconds });
-              // Шаг 26 (живой режим, Р-128): окно, которое канал отдал не целиком, — провал запуска: номер окна не сдвигается, окно
-              // повторяется. Иначе отклонённые товары пропускались в каждом круге и не сверялись ни разу (ревью шага 26, находка 9а)
-              if (r.failures.length > 0) throw new Error(`${r.failures[0]?.error.code ?? 'CHANNEL_FAILED'}: reconciliation window ${runIndex} read ${r.queries - r.failures.length} of ${r.queries}`);
-              const circleHours = (Math.ceil(r.total / cfg.amazonBatch) * interval) / 3600;
-              return {
-                items: r.queries,
-                ...(circleHours > cfg.amazonCircleWarnHours ? { alerts: [{ code: 'AMAZON_RECONCILIATION_CIRCLE_SLOW', severity: 'WARNING' as const, details: { offers: r.total, circleHours: Math.round(circleHours * 10) / 10, accounts: rotationAccounts.length } }] } : {}),
-              };
+              const ctx = ctxOf(a, startedAt, 'amazon-summary-poll', 50);
+              // Р-121: без подписки каждое движение рынка было бы «потерей» — сверка там, где уведомления приходят; прогон с явным `reconcileEnabled` решает сам
+              const armed = deps.reconcileEnabled ? reconcile : await pipeline().notificationsFlowing(ctx);
+              const r = await pipeline().pollRotation(ctx, { size: cfg.amazonBatch, cycle: runIndex, reconcile: armed, graceSeconds: cfg.lossGraceSeconds });
+              // Окно, отклонённое целиком, — провал запуска: пауза растёт, номер окна не сдвигается, окно повторяется первым. Отказ по одному товару — не провал: остальной каталог идёт в своём темпе
+              if (r.windowFailure) throw new Error(`${r.windowFailure.code}: competitive summary window ${runIndex} read ${r.snapshots.length} of ${r.queries}`);
+              const failed = r.failures.length + r.processingFailed;
+              const roundMinutes = Math.round((Math.ceil(r.total / cfg.amazonBatch) * interval) / 60);
+              const alerts: JobAlert[] = [
+                ...(r.queries > 0 && failed / r.queries > failuresShareAlert ? [{ code: 'COMPETITOR_POLL_FAILURES', severity: 'WARNING' as const, details: {
+                  due: r.queries, channelFailures: r.failures.length, processingFailures: r.processingFailed, firstError: r.failures[0]?.error.code ?? 'PROCESSING' } }] : []),
+                ...(roundMinutes > cfg.amazonRoundWarnMinutes ? [{ code: 'AMAZON_SUMMARY_ROUND_SLOW', severity: 'WARNING' as const, details: { offers: r.total, roundMinutes } }] : []),
+              ];
+              return { items: r.queries - failed, ...(alerts.length ? { alerts } : {}) };
             },
           });
         }

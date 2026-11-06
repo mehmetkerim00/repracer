@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { AdapterCallContext, ChannelAdapter, CompetitorOffer, CompetitorSnapshot, FieldWrite } from '@repracer/channel-port';
 import { createPricingPipeline, type MemorySeedScope } from '@repracer/pricing-pipeline';
-import { inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
+import { createPool, inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { approved, contextOf, engineCost, explained } from './drafts.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
@@ -157,12 +157,22 @@ test('step 101 [Р-39, Р-226]: the filter needs a source that names fulfilment 
   assert.deepEqual(await unmet('WALMART', win), {}, 'without a filter Win the Buy Box stays available on Walmart');
   assert.deepEqual(await unmet('KAUFLAND', { ...win, competeWith: 'MERCHANT' }), {}, 'Kaufland /buybox names fulfilment');
   const beatBb = { type: 'BEAT_LOWEST', scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP', anchor: 'BUYBOX' };
+  assert.deepEqual(await unmet('AMAZON', { ...beatBb, competeWith: 'CHANNEL' }), {}, 'step 115 [Р-240]: on Amazon the competitive summary names the holder and fulfilment');
+  /**
+   * Шаг 115 [Р-240]: держателя на Amazon называет только сводка. Источник без держателя — уведомление `ANY_OFFER_CHANGED` (A-29): дальше до конца теста сводка недоступна в этой
+   * изолированной базе, правило смотрится на нём. Справочник правит только миграция — поэтому суперпользователь
+   */
+  const adminUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); adminUrl.pathname = `/${db.name}`;
+  const superuser = createPool(adminUrl.toString(), { max: 1, applicationName: 'repracer-step115-source' });
+  const summaryAvailability = (value: string) => superuser.query(`UPDATE platform.competitor_source SET availability = $1 WHERE channel = 'AMAZON' AND source = 'AMAZON_COMPETITIVE_SUMMARY'`, [value]);
+  await summaryAvailability('UNAVAILABLE');
+  try {
   assert.deepEqual(await unmet('AMAZON', beatBb), {}, 'a Buy Box anchor needs only the Buy Box price');
   assert.equal(JSON.stringify((await unmet('AMAZON', { ...beatBb, competeWith: 'CHANNEL' })).AMAZON_ANY_OFFER_CHANGED ?? null), JSON.stringify(['BUYBOX_WINNER']),
     'under a filter a Buy Box anchor needs the holder');
   assert.deepEqual(await unmet('AMAZON', { ...beatBb, anchor: 'LOWER_OF_TWO', competeWith: 'CHANNEL' }), {}, 'the lower of the two works without the holder');
 
-  // Страж назначения [Р-39] читает фильтр версии из таблицы подреза: «Match the Buy Box» только с FBA — не на Amazon (держатель не назван)
+  // Страж назначения [Р-39] читает фильтр версии из таблицы подреза: «Match the Buy Box» только с FBA — не там, где держатель не назван
   const amazon = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin,
     fixtureTenantId: '10000000-0000-4000-8000-000000000102', fixtureChannelAccountId: AMAZON_ACCOUNT, fixtureChannel: 'AMAZON', fixtureRegion: 'EU',
     fixtureExternalAccountId: 'A1SYN101', marketplaces: ['A1PA6795UKMFR9'], clock: now(),
@@ -179,6 +189,10 @@ test('step 101 [Р-39, Р-226]: the filter needs a source that names fulfilment 
   }, amazon.userId);
   await assert.rejects(assign('CHANNEL'), /is not available on channel AMAZON.*BUYBOX_WINNER/, 'a filtered Match the Buy Box is not assigned where the holder is not named');
   await assign(null);
+  } finally {
+    await summaryAvailability('AVAILABLE');
+    await superuser.end();
+  }
 });
 
 test('step 101 [Р-218, Р-226]: the database refuses a malformed filter on the competitor view', async () => {

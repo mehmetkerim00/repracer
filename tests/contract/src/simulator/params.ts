@@ -151,6 +151,11 @@ export interface AmazonModelParams {
   fbaDefaultWrite: 'NOT_APPLIED' | 'SWITCHES_TO_MERCHANT';
   /** A-22 (шаг 52): ставится ли quantityFulfilled у строк заказа PARTIALLY_SHIPPED */
   partialShipmentReported: boolean;
+  /**
+   * A-15 (шаг 115): лимит приложения на getCompetitiveSummary, запросов в секунду, — то, что этому продавцу остаётся от остальных; null — приложение не ограничивает сверх пары.
+   * Не документирован; вариант показывает, как мешающий лимит выглядит для опроса: 429 при темпе пары
+   */
+  summaryApplicationRps: number | null;
 }
 
 export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: ParameterSpec<AmazonModelParams[K]> } = {
@@ -177,6 +182,7 @@ export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: Param
     default: { pageSizeCap: null, emptyPageFirst: false }, alternatives: [{ pageSizeCap: null, emptyPageFirst: false }, { pageSizeCap: 2, emptyPageFirst: true }],
   },
   fbaDefaultWrite: { question: 'A-21', status: 'OPEN', meaning: 'запись DEFAULT по SKU сети Amazon', default: 'NOT_APPLIED', alternatives: ['NOT_APPLIED', 'SWITCHES_TO_MERCHANT'] },
+  summaryApplicationRps: { question: 'A-15', status: 'OPEN', meaning: 'лимит приложения на getCompetitiveSummary, запросов в секунду', default: null, alternatives: [null, 0.01] },
   partialShipmentReported: { question: 'A-22', status: 'OPEN', meaning: 'quantityFulfilled у строк частично отгруженного заказа', default: true, alternatives: [true, false] },
 };
 

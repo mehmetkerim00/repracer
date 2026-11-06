@@ -36,6 +36,19 @@ test('step 114: an offer Amazon does not sell carries the stop pill with what Am
   assert.match(channelNotes(world([row({ deleted: true, source: 'DISCOVERY' })]), scope as never, en)[0]!.detail, /deleted \(catalog scan/);
 });
 
+test('step 115 [Р-240]: Channels says how old the polled competitor data is — with no notifications and alongside them, on every language', () => {
+  const now = Date.parse('2026-11-06T10:30:00.000Z');
+  const polled = { offers: 1000, oldestAt: '2026-11-06T10:06:00.000Z' };
+  const en = messagesFor('en');
+  const only = dataSourceText({ channelAccountId: 'a', lastReceivedAt: null, last24h: [], polled }, en, now);
+  assert.match(only, /^Data source: polling only — .*Amazon competitive summary, read in turns: the oldest reading is 24 min old\./);
+  const both = dataSourceText({ channelAccountId: 'a', lastReceivedAt: '2026-11-06T10:29:30.000Z', last24h: [{ notificationType: 'ANY_OFFER_CHANGED', count: 3 }], polled }, en, now);
+  assert.match(both, /^Data source: Amazon notifications, .*the oldest reading is 24 min old\.$/);
+  for (const locale of ['es', 'fr', 'de'] as const) assert.match(dataSourceText({ channelAccountId: 'a', lastReceivedAt: null, last24h: [], polled }, messagesFor(locale), now), /24 Min|24 min/, locale);
+  // Опрос ещё не читал — строка не обещает возраст, которого нет
+  assert.equal(dataSourceText({ channelAccountId: 'a', lastReceivedAt: null, last24h: [], polled: null }, en, now), en.ui.connections.dataSource.polling);
+});
+
 test('step 114: Channels says where the data of an Amazon account comes from — notifications of the last 24 hours by kind, or polling only', () => {
   const en = messagesFor('en');
   assert.equal(dataSourceText(undefined, en), en.ui.connections.dataSource.polling);

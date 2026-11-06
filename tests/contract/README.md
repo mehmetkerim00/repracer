@@ -156,7 +156,7 @@ Node ≥ 22, TypeScript исполняется через `--experimental-strip-
 | `channel-repricer-detected.json` | Правило ценообразования у оффера — PATCH не отправляется, `CHANNEL_REPRICER_ACTIVE` [Р-115] | ✅ чужой репрайсер |
 | `channel-bounds-present.json` | Границы цены в Amazon — `CHANNEL_BOUNDS_PRESENT` [Р-114] | |
 | `quantity-region.json` | Остаток — одно значение на SKU в регионе; заголовок `x-amzn-RateLimit-Limit` (AMZ_C10) | |
-| `competitors-and-orders-unsupported.json` | Опрос конкурентов и заказы — отказ UNSUPPORTED, а не пустой ответ (AMZ_C07) | |
+| `competitors-and-orders-unsupported.json` | Заказы — отказ UNSUPPORTED, а не пустой ответ; опрос конкурентов — `competitive-summary-and-orders.json` [Р-240] | |
 | `tenant-mismatch.json` | Чужой тенант — отказ до обращения к Amazon [Р-31] | |
 | `pipeline-channel-repricer-blocks-scope.json` | Правило у оффера до записи и после неё (обратное чтение): единица BLOCKED сразу, HELD с действием продавца | ✅ чужой репрайсер в пути решения |
 | `pipeline-price-basis-mismatch-halt.json` | Цена покупателя = отправленная × 1,19: недоверие каналу [Р-118], фиксированная цена второго товара удерживается; оператор и владелец без второго фактора снять не могут, владелец снимает | ✅ сверка базы цены |

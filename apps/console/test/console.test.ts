@@ -1223,17 +1223,17 @@ test('step 103 [Р-228]: the console sets the default strategy of a channel acco
     await call(owner, 'POST', path, { channelAccountId: 'acc-unknown', strategyId: null }),
   ].map((r) => `${r.status} ${(r.body as { error?: { code: string } }).error?.code}`);
   assert.equal(JSON.stringify(refused), JSON.stringify(['400 BAD_REQUEST', '404 ACCOUNT_NOT_FOUND']));
-  // «Win the Buy Box» на Amazon недоступна: держатель Buy Box не назван (A-29) — база и модель отказывают одинаково, причина словами
+  // Самая дешёвая по всему рынку на Amazon недоступна: канал отдаёт верхние предложения, а не весь рынок — база и модель отказывают одинаково, причина словами
   const amazonId = 'amazon/pipeline/console-channel-trust';
   const amazonOwner = await login('OWNER');
-  const saved = await liveOf(amazonId).store.saveStrategy(liveOf(amazonId).tenantId, { strategyId: null, name: 'Win the Buy Box', deadbandMinor: 0, assignTo: [],
-    params: { type: 'WIN_BUYBOX', undercutMinor: 1, fulfillmentHandicapMinor: 0, creepUp: false, creepStepBp: 100, atBound: 'CAP' } as never },
+  const saved = await liveOf(amazonId).store.saveStrategy(liveOf(amazonId).tenantId, { strategyId: null, name: 'Beat the whole market', deadbandMinor: 0, assignTo: [],
+    params: { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'MARKET', compareLanded: false, atBound: 'CAP' } as never },
     { membershipId: account('OWNER').membershipAlias, userId: account('OWNER').userAlias, mfa: false });
   assert.equal(saved.status, 'SAVED', JSON.stringify(saved));
   const win = await call(amazonOwner, 'POST', api(amazonId, 'connections', 'default-strategy'),
     { channelAccountId: liveOf(amazonId).accounts[0]!.channelAccountId, strategyId: (saved as { strategy: { strategyId: string } }).strategy.strategyId });
   assert.equal(win.status, 409, JSON.stringify(win.body));
-  assert.match((win.body as { error: { message: string } }).error.message, /^This strategy cannot be the default on this channel: it needs .*the Buy Box winner/);
+  assert.match((win.body as { error: { message: string } }).error.message, /^This strategy cannot be the default on this channel: it needs .*a complete offer list/);
 });
 
 

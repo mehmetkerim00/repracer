@@ -236,13 +236,14 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
   const lossScopes = [8301, 8302, 8303].map((u) => ({ ...fixedScope(u, 1999, 1850), pricingMode: 'OFF' as const }));
   const rotation = scenario(
     'amazon/pipeline/notification-loss-rotation',
-    'Р-121: сверка ANY_OFFER_CHANGED опросом по кругу — расхождение без уведомления до срока — подозрение на потерю с алертом',
-    'Шаг 24. У ANY_OFFER_CHANGED нет номеров последовательности, очередь SQS теряет без следа (риск 21). getCompetitiveSummary — 0.033 запроса в секунду, до 20 ASIN: сверка идёт по кругу, окно товаров аккаунта сдвигается каждый цикл [AMZ_C11]. Последнее принятое состояние трёх товаров — наименьшая цена конкурента 18.00. Опрос: B000008301 — 17.80, уведомления не будет; B000008302 — 18.00; B000008303 — 17.50, ANY_OFFER_CHANGED приходит через 5 минут. Снимки опроса — в журнал с вердиктом RECONCILIATION, в решение не идут. Через 16 минут база ставит «задержка» товару 3 и «подозрение на потерю» товару 1; один CRITICAL-алерт. Сверяется наименьшая цена конкурента: победителя Buy Box ответ не даёт.',
+    'Р-121, Р-240: опрос по кругу решает цену и страхует ANY_OFFER_CHANGED — расхождение без уведомления до срока — подозрение на потерю с алертом',
+    'Шаг 24. У ANY_OFFER_CHANGED нет номеров последовательности, очередь SQS теряет без следа (риск 21). getCompetitiveSummary — 0.033 запроса в секунду, до 20 ASIN: опрос идёт по кругу (шаг 115: он и решает цену), окно товаров аккаунта сдвигается каждый цикл [AMZ_C11]. Последнее принятое состояние трёх товаров — наименьшая цена конкурента 18.00. Опрос: B000008301 — 17.80, уведомления не будет; B000008302 — 18.00; B000008303 — 17.50, ANY_OFFER_CHANGED приходит через 5 минут. Снимки опроса — в журнал с вердиктом RECONCILIATION, в решение не идут. Через 16 минут база ставит «задержка» товару 3 и «подозрение на потерю» товару 1; один CRITICAL-алерт. Сверяется наименьшая цена конкурента: победителя Buy Box ответ не даёт.',
     ['pipeline', 'r-121', 'notification-loss'],
     lossScopes,
     [
       { id: 'rotation-window', kind: 'pipelineReconcileRotation', size: 20, cycle: 0, graceSeconds: 900,
-        expect: { queries: 3, failures: [], snapshots: [], reconciliation: { matched: 1, diverged: 2, noBaseline: 0, notNewer: 0, logged: 3 } } } as Step,
+        // Шаг 115 [Р-240]: снимки опроса идут путём решения (здесь движок выключен — OFF), сверка — там же, в транзакции снимка
+        expect: { queries: 3, failures: [], windowFailure: null, snapshots: refs.map((r) => ({ channelProductRef: r, verdict: 'ACCEPT' })), reconciliation: { matched: 1, diverged: 2, noBaseline: 0, notNewer: 0, logged: 0 } } } as Step,
       { id: 'five-minutes', kind: 'advanceClock', ms: 300_000 },
       { id: 'late-any-offer-changed', kind: 'pipelineInbound', delivery: delivery(anyOfferChanged('syn-notification-0301', DE, refs[2]!, { $clockIso: -60_000 },
         [{ seller: 'Synthetic Competitor', minor: 1750, buyBoxWinner: true }, { seller: 'self', minor: 1850 }])),
@@ -269,7 +270,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
           { channelProductRef: refs[2], compared: 'LOWEST_COMPETITOR', heldMinor: 1800, pollMinor: 1750, verdict: 'DELAYED' },
         ] },
         snapshotLog: { $unordered: [
-          ...refs.map((r) => ({ channelProductRef: r, verdict: 'RECONCILIATION', delivery: 'POLL', source: 'AMAZON_COMPETITIVE_SUMMARY' })),
+          ...refs.map((r) => ({ channelProductRef: r, verdict: 'ACCEPT', delivery: 'POLL', source: 'AMAZON_COMPETITIVE_SUMMARY' })),
           { channelProductRef: refs[2], delivery: 'PUSH', source: 'AMAZON_ANY_OFFER_CHANGED' },
         ] },
       },

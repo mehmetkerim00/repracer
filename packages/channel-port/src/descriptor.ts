@@ -85,10 +85,15 @@ export interface CompetitorSourceDescriptor {
   role: 'PRIMARY' | 'RECONCILIATION';
   /**
    * Шаг 109 [Р-235]: источник называет предложения в Buy Box по сегментам покупателей с долей просмотров (Amazon getCompetitiveSummary,
-   * `featuredBuyingOptions`). Держатель для доли Buy Box — продавец, у которого сумма долей его сегментов больше половины; иначе неизвестен.
-   * Отдельно от `hasBuyboxWinner`: единого держателя такой источник не называет, и стратегии он держателя не даёт (роль RECONCILIATION)
+   * `featuredBuyingOptions`). Держатель — продавец, у которого сумма долей его сегментов больше половины; иначе неизвестен. Шаг 115 [Р-240]:
+   * адаптер кладёт этого держателя и его цену в `buybox` снимка: у такого источника `hasBuyboxWinner` значит «называет большинством просмотров»
    */
   holderByViewShare?: boolean;
+  /**
+   * Шаг 115 [Р-240]: опрос по кругу вместо ярусного — квота мала (Amazon getCompetitiveSummary: 0.033 запроса в секунду на пару, пакет 20
+   * товаров), и окно каталога читается одним запросом раз в период, самые давние первыми. Работа планировщика — `amazon-summary-poll`
+   */
+  rotation?: boolean;
 }
 
 export interface MarketplaceDescriptor {

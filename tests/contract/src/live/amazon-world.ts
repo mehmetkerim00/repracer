@@ -28,6 +28,8 @@ export interface AmazonLiveWorld {
   /** Сверка: моменты, когда канал ответил снимком по ASIN (без отказа ограничителя) */
   comparedAt: Map<string, number[]>;
   betweenTicks(): Promise<void>;
+  /** Шаг 115: такт без уведомлений — только диспетчер записей: мир, где конкуренты известны лишь из опроса сводки */
+  sweep(): Promise<void>;
   pipelineForDbIds(): PricingPipeline;
   /** Приёмник уведомлений зовёт путь решения с идентификаторами базы в claimed */
   receiverPipeline(): { processInbound(delivery: InboundDelivery): Promise<{ inbound: { kind: string }; notification: 'RECORDED' | 'DUPLICATE' | 'NONE' }> };
@@ -44,6 +46,8 @@ export async function amazonLiveWorld(input: {
   us?: boolean;
   /** Движок включён с самого начала: прогон смотрит на решения, а не на путь их включения */
   engine?: boolean;
+  /** Шаг 115: своя стратегия предложения (по умолчанию — подрезать самого дешёвого на цент) */
+  strategyOf?: (index: number) => MemorySeedScope['strategy'];
   writeMode?: 'SHADOW' | 'LIVE';
   /** Роль загрузчика курсов: нужна, когда себестоимость в евро, а цена в долларах [Р-61] */
   fxLoaderPool?: PgPool;
@@ -72,7 +76,7 @@ export async function amazonLiveWorld(input: {
   const scopes: MemorySeedScope[] = asins.map((asin, i) => ({
     writeScopeId: `ws-amz-${asin}`, productId: `prod-amz-${asin}`, channelAccountId: accountFixture, marketplace, externalUnitId: `SYN-SKU-${asin}`,
     channelProductRef: asin, condition: 'new', currency, basis, taxRegime: tax.regime,
-    pricingMode: input.engine === true ? 'ENGINE' : 'OFF', strategy, currentPriceMinor: 1850,
+    pricingMode: input.engine === true ? 'ENGINE' : 'OFF', strategy: input.strategyOf?.(i) ?? strategy, currentPriceMinor: 1850,
     /**
      * Витрина США: `min_price` 14,00 — ВЫШЕ трёх ступеней спуска конкурента (12,50, 10,50, 9,00). Так пол удерживает цену
      * не один раз за цикл, а трижды, и числа Р-173 в прогоне не зависят от того, попал ли такт в единственную низкую
@@ -162,6 +166,10 @@ export async function amazonLiveWorld(input: {
     async betweenTicks() {
       // Приёмник уведомлений: снимки ANY_OFFER_CHANGED, срок доставки которых наступил
       for (const snapshot of port.drainSnapshots()) await pipeline.processSnapshot({ ...ctx, deadline: clock.iso(60_000) }, snapshot);
+      await dispatcher.sweep({ pendingMinAgeMs: 0 });
+      events.stamp();
+    },
+    async sweep() {
       await dispatcher.sweep({ pendingMinAgeMs: 0 });
       events.stamp();
     },

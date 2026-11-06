@@ -2502,7 +2502,7 @@ export const STEP97_ROWS = [
   },
   {
     row: 'шаг 97 (Р-39, Р-221)', critical: false,
-    invariant: '«Win the Buy Box» недоступна, где канал не называет держателя Buy Box (Amazon, A-29); «Match the Buy Box» нужна только цена Buy Box',
+    invariant: '«Win the Buy Box» недоступна, где ни один источник канала не называет держателя Buy Box (уведомление Amazon его не называет, A-29; называет сводка, Р-240); «Match the Buy Box» нужна только цена Buy Box',
     mutations: [
       m(replaceInFunction('channel_data.strategy_unmet(text,jsonb)', "IF bb_winner AND NOT s.has_buybox_winner THEN u := u || 'BUYBOX_WINNER'::text; END IF;", 'NULL;'),
         node(CP, 'Win the Buy Box needs a named holder', 'Win the Buy Box is unavailable where the channel does not name the holder', '^\\{\\}$')),

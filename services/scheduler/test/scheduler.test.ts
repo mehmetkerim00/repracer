@@ -117,7 +117,7 @@ function jobDeps(): JobDeps {
   };
 }
 
-test('Р-126: the job source gives each account only the jobs its channel supports; Amazon accounts share the getCompetitiveSummary pace', async () => {
+test('Р-126, step 115 [Р-240]: the job source gives each account only the jobs its channel supports; each Amazon account polls the summary at its own pair budget', async () => {
   const deps = jobDeps();
   const specs = await jobSource(deps).jobs('2026-09-17T10:00:00.000Z');
   const byAccount = (id: string) => specs.filter((s) => s.scope?.channelAccountId === id).map((s) => `${s.name}/${s.intervalSeconds}`).sort();
@@ -125,11 +125,58 @@ test('Р-126: the job source gives each account only the jobs its channel suppor
   // Kaufland: buy_box_changed — ранний доступ, сверки нет по умолчанию; опрос и проверка остановки выборкой есть
   // Шаг 47: пересчёт цен, не зависящих от конкурентов, — у каждого аккаунта (у eBay это единственный источник решений)
   assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000001'), ['competitor-poll/60', 'halt-review/300', 'offer-discovery/3600', 'scheduled-recompute/900']);
-  // Amazon: опроса для решения нет [AMZ_C07], остановка снимается только человеком [Р-119]; сверка по кругу — 31 с × 2 аккаунта (0.033 rps = 30,3 с)
-  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-reconcile-rotation/62', 'notification-loss-review/300', 'offer-discovery/3600', 'scheduled-recompute/900']);
+  // Шаг 115 [Р-240]: Amazon — опрос сводки решает цену: 31 с на пару продавец-приложение (0.033 rps = 30,3 с), сколько бы аккаунтов ни было; ярусного опроса нет
+  // (его такт и бюджет — запросы по одному, а не окно в 20 товаров на вызов раз в 31 с); остановка снимается только человеком [Р-119]
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000002'), ['amazon-summary-poll/31', 'notification-loss-review/300', 'offer-discovery/3600', 'scheduled-recompute/900']);
+  assert.deepEqual(byAccount('20000000-0000-4000-8000-000000000003'), ['amazon-summary-poll/31', 'notification-loss-review/300', 'offer-discovery/3600', 'scheduled-recompute/900']);
   const withPush = await jobSource({ ...deps, reconcileEnabled: () => true }).jobs('2026-09-17T10:00:00.000Z');
   assert.ok(withPush.some((s) => s.name === 'notification-loss-review' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000001'),
     'Kaufland reconciliation is switched on per account when early access to buy_box_changed is granted');
+});
+
+/** Шаг 115 [Р-240]: работа опроса сводки с заглушкой пути решения */
+async function summaryPollJob(pipeline: object, extra: Partial<JobDeps> = {}) {
+  const specs = await jobSource({ ...jobDeps(), pipelineFor: () => pipeline as never, ...extra }).jobs('2026-11-06T10:00:00.000Z');
+  const job = specs.find((s) => s.name === 'amazon-summary-poll' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000002')!;
+  return { job, run: (runIndex = 3) => job.run({ startedAt: '2026-11-06T10:30:00.000Z', runIndex } as never) };
+}
+const window = (over: object = {}) => ({ snapshots: [], failures: [], processingFailed: 0, queries: 20, total: 100, windowFailure: null, ...over });
+
+test('step 115 [Р-240, Р-121]: the summary poll reads a window of 20 every run and checks for lost notifications only where they actually arrive', async () => {
+  const calls: Array<{ size: number; cycle: number; reconcile: boolean; graceSeconds?: number }> = [];
+  let flowing = false;
+  const pipeline = { notificationsFlowing: async () => flowing, pollRotation: async (_ctx: unknown, o: (typeof calls)[number]) => { calls.push(o); return window(); } };
+  const { run } = await summaryPollJob(pipeline);
+  assert.deepEqual((await run()).items, 20);
+  // Подписки нет: каждое движение рынка было бы «потерей» — ложный CRITICAL на каждом круге
+  assert.deepEqual(calls[0], { size: 20, cycle: 3, reconcile: false, graceSeconds: 900 });
+  flowing = true;
+  await run(4);
+  assert.deepEqual(calls[1], { size: 20, cycle: 4, reconcile: true, graceSeconds: 900 }, 'notifications arrive — the poll insures against losing them');
+  // Прогон, явно включивший сверку, не спрашивает журнал уведомлений (мир стенда уведомления в журнал сырья не пишет)
+  const forced = await summaryPollJob({ ...pipeline, notificationsFlowing: async () => { throw new Error('not asked'); } }, { reconcileEnabled: () => true });
+  await forced.run();
+  assert.equal(calls[2]?.reconcile, true);
+});
+
+test('step 115 [Р-240]: a refused item does not fail the run — the rest of the catalog keeps its pace; a large share of refusals raises the known alert', async () => {
+  const notFound = { query: {}, error: { code: 'NOT_FOUND', scope: 'ITEM' } };
+  const few = await summaryPollJob({ notificationsFlowing: async () => false, pollRotation: async () => window({ failures: [notFound] }) });
+  const r = await few.run();
+  assert.deepEqual([r.items, r.alerts], [19, undefined]);
+  const many = await summaryPollJob({ notificationsFlowing: async () => false, pollRotation: async () => window({ failures: Array.from({ length: 6 }, () => notFound) }) });
+  assert.deepEqual((await many.run()).alerts?.map((a) => [a.code, a.severity]), [['COMPETITOR_POLL_FAILURES', 'WARNING']]);
+});
+
+test('step 115 [Р-240]: a refused request fails the run by its own code — the pause grows, and RATE_LIMITED at our pace is how an application limit would show (A-15)', async () => {
+  const { run } = await summaryPollJob({ notificationsFlowing: async () => false, pollRotation: async () => window({ windowFailure: { code: 'RATE_LIMITED', scope: 'BATCH' }, snapshots: [], failures: [] }) });
+  await assert.rejects(run(), /^Error: RATE_LIMITED: /);
+});
+
+test('step 115 [Р-240]: a round longer than an hour names itself; 1 000 offers are about 26 minutes and raise nothing', async () => {
+  const round = async (total: number) => (await (await summaryPollJob({ notificationsFlowing: async () => false, pollRotation: async () => window({ total }) })).run()).alerts;
+  assert.equal(await round(1000), undefined);
+  assert.deepEqual((await round(2400))?.map((a) => [a.code, a.severity, a.details]), [['AMAZON_SUMMARY_ROUND_SLOW', 'WARNING', { offers: 2400, roundMinutes: 62 }]]);
 });
 
 test('Р-124: neither channel snapshot has a price history operation — the descriptors say so and completeness counts from connection', () => {

@@ -223,7 +223,8 @@ export function buyboxFacts(input: BuyboxFactsInput): BuyboxFacts {
       : bb ? { minor: bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0), landed: bb.shipping !== undefined } : null
     : holder === 'UNKNOWN' && bb ? { minor: bb.price.amountMinor + (bb.shipping?.amountMinor ?? 0), landed: bb.shipping !== undefined } : null;
   const gapMinor = holder === 'OTHER' && winnerLanded !== null && ownLanded !== null ? ownLanded - winnerLanded : null;
-  return { state: 'OK', holderNamed, shareNamed, holder, seller, price, gapMinor, share, observedAt: input.snapshot.observedAt };
+  // Шаг 115 [Р-240]: называет ли держателя ЭТОТ снимок: у Amazon сводка называет, уведомление — нет; строкам снимка без держателя «не держит» говорить не о чем
+  return { state: 'OK', holderNamed: holderNamed && !(bb && bb.isSelf === null), shareNamed, holder, seller, price, gapMinor, share, observedAt: input.snapshot.observedAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -249,8 +250,8 @@ export interface CompetitionRow {
 }
 
 /**
- * Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (снимок сверки) на странице Competition — со своим моментом: предложения в
- * Buy Box по группам покупателей с долей просмотров, держатель большинства и купоны конкурентов. Цены она не двигает
+ * Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала на странице Competition — со своим моментом: предложения в Buy Box по группам
+ * покупателей с долей просмотров, держатель большинства и купоны конкурентов. Шаг 115 [Р-240]: по этой же сводке решается цена
  */
 export interface CompetitionSummaryView {
   title: string;

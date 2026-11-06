@@ -60,6 +60,11 @@ export interface RequestInit {
   body?: unknown;
   /** Повтор после неопределённого исхода; по умолчанию — только GET */
   idempotent?: boolean;
+  /**
+   * Шаг 115 [Р-240]: 429 не повторяется внутри вызова. У операции с квотой раз в 30 секунд повтор через полсекунды только расходует следующее
+   * окно; следующий запуск работы и есть повтор
+   */
+  noThrottleRetry?: boolean;
   signal?: AbortSignal;
 }
 
@@ -202,7 +207,7 @@ export function createSpApiClient(options: SpApiClientOptions): SpApiClient {
         }
         // 429 — запрос не принят; 5xx и транспорт — исход неизвестен, повтор только идемпотентного запроса
         const unknown = transport !== null || (response !== null && response.status >= 500);
-        if ((response?.status === 429 || (unknown && idempotent)) && attempt < retry.maxAttempts) {
+        if (((response?.status === 429 && init.noThrottleRetry !== true) || (unknown && idempotent)) && attempt < retry.maxAttempts) {
           await sleep(backoff(attempt, retry));
           continue;
         }

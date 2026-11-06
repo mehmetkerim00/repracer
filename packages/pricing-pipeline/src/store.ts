@@ -824,6 +824,8 @@ export interface NotificationSourceFacts {
   channelAccountId: string;
   lastReceivedAt: Instant | null;
   last24h: Array<{ notificationType: string; count: number }>;
+  /** Шаг 115 [Р-240]: опрос конкурентов аккаунта: сколько предложений прочитано и самое давнее чтение; null — не опрашивался */
+  polled?: { offers: number; oldestAt: Instant } | null;
 }
 
 /** Повод запроса на переоценку — вход пола, который изменился [Р-209…Р-211]; тот же перечень, что у причины подъёма */
@@ -948,7 +950,7 @@ export interface PricingStore {
    * Р-121: сверка по кругу — size товаров аккаунта, окно по номеру вызова cycle; все товары покрываются за ceil(n / size) вызовов подряд.
    * total — число товаров круга (время полного круга, OQ-176)
    */
-  pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }>;
+  pickRotationWindow(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }>;
   /**
    * Р-47, Р-126 (шаг 25): товары аккаунта для ярусного опроса планировщика — время последнего опроса (не последнего состояния: его
    * обновляют уведомления) и оценка волатильности: изменений цены конкурентов за 48 часов × 15 (движения хранятся 2 суток, Р-42); движение
@@ -1036,6 +1038,8 @@ export interface PricingStore {
   recordListingStatus(tenantId: string, channelAccountId: string, observations: readonly ListingStatusObservation[], notification?: InboundNotificationEntry): Promise<ListingStatusRecord>;
   /** Шаг 114: уведомления аккаунтов тенанта за последние сутки — экран Channels говорит, откуда данные */
   notificationSources?(tenantId: string, at: Instant): Promise<NotificationSourceFacts[]>;
+  /** Шаг 115 [Р-121, Р-240]: ANY_OFFER_CHANGED аккаунта дошло до журнала сырья не раньше момента `since` */
+  notificationsFlowing?(tenantId: string, channelAccountId: string, since: Instant): Promise<boolean>;
 
   listDueHalts(tenantId: string, channelAccountId: string, now: Instant): Promise<HaltInfo[]>;
   getHalt(tenantId: string, haltId: string): Promise<HaltInfo | null>;

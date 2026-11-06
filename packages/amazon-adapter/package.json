@@ -2,14 +2,15 @@
   "name": "@repracer/amazon-adapter",
   "version": "0.1.0",
   "private": true,
-  "description": "AmazonAdapter: implementation of @repracer/channel-port for Amazon SP-API Listings Items v2021-08-01 on the spec snapshot of step 20. Prices and quantity via patchListingsItem, confirmation by getListingsItem, competitors by ANY_OFFER_CHANGED; never writes channel bounds or automated pricing rules (Р-114).",
+  "description": "AmazonAdapter: implementation of @repracer/channel-port for Amazon SP-API Listings Items v2021-08-01 on the spec snapshot of step 20. Prices and quantity via patchListingsItem, confirmation by getListingsItem, competitors by the getCompetitiveSummary rotation poll and ANY_OFFER_CHANGED; never writes channel bounds or automated pricing rules (Р-114).",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
     "@repracer/amazon-client": "0.1.0",
-    "@repracer/channel-port": "0.1.0"
+    "@repracer/channel-port": "0.1.0",
+    "@repracer/pricing-model": "0.1.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

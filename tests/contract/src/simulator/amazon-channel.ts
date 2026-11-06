@@ -15,6 +15,8 @@ import { SeededRandom } from './random.ts';
  * - searchOrders (Orders 2026-01-01): ровно одно из createdAfter и lastUpdatedAfter, фильтры marketplaceIds и fulfilledBy, наборы includedData,
  *   страницы maxResultsPerPage 1…100 с paginationToken; данные покупателя — только по набору BUYER, если не велит иное параметр A-20;
  * - getInventorySummaries (FBA Inventory v1): granularityType=Marketplace, одна витрина, sellerSkus ≤ 50; только SKU сети Amazon;
+ * - getCompetitiveSummary (Product Pricing 2022-05-01, шаг 115): пакет до 20 запросов, предложения New/Consumer и предложения в Buy Box по сегментам — форма настоящего ответа
+ *   песочницы (docs/evidence/step108-sp-api-recon-exchanges.json); лимит приложения не документирован — параметр A-15;
  * - лимиты запросов — token bucket по таблице Usage Plan каждой операции снимка; превышение — 429 (ответ из перечня ответов операции).
  * Коды ошибок SP-API в моделях не перечислены — тела ошибок модели синтетические (код с приставкой SYN_). Все данные синтетические.
  */
@@ -34,6 +36,17 @@ export interface SimAmazonOfferSpec {
    * По умолчанию синтетическое «Synthetic product <sku>»; null — сводка без названия
    */
   title?: string | null;
+}
+
+/** Шаг 115: предложение конкурента на витрине для getCompetitiveSummary; `views` — сегменты, где оно показано в Buy Box, с долей просмотров */
+export interface SimAmazonCompetitorSpec {
+  asin: string;
+  marketplace: string;
+  sellerId: string;
+  priceMinor: number;
+  shippingMinor?: number;
+  fulfillmentType?: 'AFN' | 'MFN';
+  views?: Array<{ membership: 'PRIME' | 'NON_PRIME' | 'DEFAULT'; pct: number }>;
 }
 
 export interface SimAmazonOrderSpec {
@@ -56,6 +69,8 @@ export interface AmazonChannelModelSpec {
   region: 'EU' | 'NA';
   offers: SimAmazonOfferSpec[];
   orders?: SimAmazonOrderSpec[];
+  /** Шаг 115: предложения других продавцов для getCompetitiveSummary (ключ `competitors` — у модели Kaufland) */
+  rivals?: SimAmazonCompetitorSpec[];
 }
 
 interface OfferState {
@@ -87,6 +102,7 @@ const USAGE_PLAN: Readonly<Record<string, { rate: number; burst: number }>> = {
   patchListingsItem: { rate: 5, burst: 5 },
   searchOrders: { rate: 0.0056, burst: 20 },
   getInventorySummaries: { rate: 2, burst: 2 },
+  getCompetitiveSummary: { rate: 0.033, burst: 1 },
 };
 
 const CURRENCY: Readonly<Record<string, { currency: string; region: 'EU' | 'NA' }>> = {
@@ -134,6 +150,8 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
   private readonly accessToken: string;
   private readonly offers = new Map<string, OfferState>();
   private readonly buckets = new Map<string, Bucket>();
+  /** A-15: общий лимит приложения на getCompetitiveSummary; null — не ограничивает сверх пары */
+  private readonly applicationSummary: Bucket | null;
   private readonly startMs: number;
   private readonly rng: SeededRandom;
   private submissions = 0;
@@ -157,6 +175,7 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
         });
       }
     }
+    this.applicationSummary = this.params.summaryApplicationRps === null ? null : new Bucket(this.params.summaryApplicationRps, 1, this.startMs);
     for (const [op, p] of Object.entries(USAGE_PLAN)) {
       this.buckets.set(op, new Bucket(p.rate, op === 'getListingsItem' ? this.params.readBurst : p.burst, this.startMs));
     }
@@ -198,6 +217,26 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
     };
   }
 
+  /** Шаг 115: один ответ пакета getCompetitiveSummary — форма настоящего ответа песочницы; своё предложение — из листинга продавца */
+  private summaryResponse(asin: string, marketplaceId: string) {
+    const currencyCode = CURRENCY[marketplaceId]?.currency ?? 'EUR';
+    const money = (minor: number) => ({ amount: major(minor), currencyCode });
+    const offerOf = (o: SimAmazonCompetitorSpec) => ({
+      sellerId: o.sellerId, condition: 'New', subCondition: 'New', fulfillmentType: o.fulfillmentType ?? 'MFN', listingPrice: money(o.priceMinor),
+      shippingOptions: [{ shippingOptionType: 'DEFAULT', price: money(o.shippingMinor ?? 0) }],
+    });
+    const own = [...this.offers.values()].filter((o) => o.asin === asin && o.marketplace === marketplaceId).map((o) => offerOf({ asin, marketplace: marketplaceId, sellerId: this.spec.sellerId, priceMinor: o.priceMinor }));
+    const others = (this.spec.rivals ?? []).filter((c) => c.asin === asin && c.marketplace === marketplaceId);
+    const featured = others.filter((c) => (c.views ?? []).length > 0).map((c) => ({ ...offerOf(c),
+      featuredOfferSegments: c.views!.map((v) => ({ customerMembership: v.membership, segmentDetails: { glanceViewWeightPercentage: v.pct } })) }));
+    const lowest = [...own, ...others.map(offerOf)].sort((a, b) => a.listingPrice.amount - b.listingPrice.amount);
+    return {
+      status: { statusCode: 200, reasonPhrase: 'Success' },
+      body: { asin, marketplaceId, ...(featured.length > 0 ? { featuredBuyingOptions: [{ buyingOptionType: 'New', segmentedFeaturedOffers: featured }] } : {}),
+        lowestPricedOffers: [{ lowestPricedOffersInput: { itemCondition: 'New', offerType: 'Consumer' }, offers: lowest }] },
+    };
+  }
+
   reply(request: ObservedRequest, nowMs: number): { exchangeId: string; reply: ChannelReply } | { violation: string } {
     this.nowMs = Math.max(this.nowMs, nowMs);
     this.settle();
@@ -205,7 +244,8 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
     const listing = /^\/listings\/2021-08-01\/items\/([^/]+)(?:\/([^/]+))?$/.exec(path);
     const operation = path === '/auth/o2/token' ? 'lwaToken'
       : listing ? (listing[2] ? (method === 'PATCH' ? 'patchListingsItem' : 'getListingsItem') : 'searchListingsItems')
-        : path === '/orders/2026-01-01/orders' ? 'searchOrders' : path === '/fba/inventory/v1/summaries' ? 'getInventorySummaries' : `${method} ${path}`;
+        : path === '/orders/2026-01-01/orders' ? 'searchOrders' : path === '/fba/inventory/v1/summaries' ? 'getInventorySummaries'
+          : path === '/batches/products/pricing/2022-05-01/items/competitiveSummary' ? 'getCompetitiveSummary' : `${method} ${path}`;
     this.stats.requests[operation] = (this.stats.requests[operation] ?? 0) + 1;
     const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
       ({ exchangeId: `sim:${operation}`, reply: { kind: 'response' as const, status, headers: { 'content-type': 'application/json', ...headers }, body } });
@@ -228,7 +268,18 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
       this.stats.rateLimited += 1;
       return json(429, synError('QUOTA_EXCEEDED', `usage plan of ${operation} exceeded`), { 'x-amzn-RateLimit-Limit': String(plan.rate) });
     }
+    // A-15: лимит приложения не документирован; вариант модели — приложение, у которого остальные продавцы уже заняли запас (тот же ответ, что у лимита пары)
+    if (operation === 'getCompetitiveSummary' && this.applicationSummary && !this.applicationSummary.take(this.nowMs)) {
+      this.stats.rateLimited += 1;
+      return json(429, synError('QUOTA_EXCEEDED', 'application limit of getCompetitiveSummary exceeded'));
+    }
     const limitHeader = { 'x-amzn-RateLimit-Limit': String(plan.rate) };
+    if (operation === 'getCompetitiveSummary') {
+      const requests = (request.body as { requests?: Array<{ asin: string; marketplaceId: string }> } | null)?.requests ?? [];
+      // Модель: CompetitiveSummaryRequestList — minItems 1, maxItems 20
+      if (requests.length < 1 || requests.length > 20) return json(400, synError('INVALID_INPUT', 'requests must hold 1 to 20 items'));
+      return json(200, { responses: requests.map((r) => this.summaryResponse(r.asin, r.marketplaceId)) }, limitHeader);
+    }
 
     if (listing) {
       if (decodeURIComponent(listing[1]!) !== this.spec.sellerId) return json(403, synError('FORBIDDEN', 'seller of the token does not match the path'));

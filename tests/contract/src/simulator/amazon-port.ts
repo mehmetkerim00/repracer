@@ -26,6 +26,7 @@ import type {
 } from '@repracer/channel-port';
 import { AMAZON_DESCRIPTOR } from '@repracer/amazon-adapter';
 import { DEFAULT_ERROR_CLASS, isNeverWritten } from '@repracer/channel-port';
+import { holderByViewShare } from '@repracer/pricing-model';
 import { SEARCH_LISTINGS_ITEMS_CAP } from './amazon-channel.ts';
 import { rankForBuyBox, type BuyBoxRuleSpec } from './buybox-rule.ts';
 import { defaultAmazonParams, type AmazonModelParams } from './params.ts';
@@ -107,7 +108,7 @@ export const AMAZON_SIM_DESCRIPTOR: ChannelDescriptor = {
   apiMode: 'AMAZON_LISTINGS_ITEMS',
   region: 'EU',
   apiVersion: 'listings-items-2021-08-01 (simulated)',
-  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: no competitor polling on Amazon' },
+  haltRelease: { kind: 'MANUAL_ONLY', basis: 'Р-119: the summary budget goes to the rotation poll' },
   priceHistory: { kind: 'UNAVAILABLE', basis: 'SP-API models snapshot 2026-09-16 has no offer price history operation' },
   // Граница суток amazon.de не подтверждена (A-03, Р-65): значение нужно типу, бюджетов правок модель не ведёт
   marketplaces: [{ code: AMAZON_DE, currency: 'EUR', priceBasis: 'GROSS', timeZone: 'Europe/Berlin' }],
@@ -345,9 +346,9 @@ export class SimulatedAmazonPort implements ChannelAdapter {
   }
 
   /**
-   * Р-128 (шаг 26): getCompetitiveSummary — источник сверки AMAZON_COMPETITIVE_SUMMARY, как адаптер Amazon (listing.ts): без победителя
-   * Buy Box, полнота — число предложений, момент — время ответа. Модель отдавала снимок источника уведомлений ANY_OFFER_CHANGED:
-   * сверка по кругу сравнивала уведомление с уведомлением
+   * Р-128 (шаг 26): getCompetitiveSummary — источник AMAZON_COMPETITIVE_SUMMARY, как адаптер Amazon (listing.ts): полнота — число предложений,
+   * момент — время ответа. Модель отдавала снимок источника уведомлений ANY_OFFER_CHANGED: сверка по кругу сравнивала уведомление с уведомлением.
+   * Шаг 115 [Р-240]: и цена и держатель Buy Box — тем же правилом, что адаптер: большинство просмотров или цена самой большой группы с неизвестным держателем
    */
   private summaryOf(marketplace: string, asin: string, observedAt: number): CompetitorSnapshot {
     const pushed = this.snapshotOf(marketplace, asin, observedAt);
@@ -355,29 +356,39 @@ export class SimulatedAmazonPort implements ChannelAdapter {
      * Шаг 109 [Р-234]: купон — у части продавцов (по продавцу и товару) 5 % от цены, как акция COUPON сводки (`discountedPrice`). Шаг 109
      * [Р-235]: Buy Box по группам покупателей с долей просмотров (`featuredBuyingOptions`). Как канал делит группы, он не публикует — это
      * допущение модели: группы без Prime и с неизвестным статусом видят победителя по правилу мира, группа Prime — самое дешёвое предложение
-     * с исполнением каналом (FBA); у каждого четвёртого товара просмотры делятся без большинства (45 / 40 / 15)
+     * с исполнением каналом (FBA); у каждого четвёртого товара просмотры делятся без большинства (45 / 40 / 15, у двух продавцов — поровну)
      */
     const offers = pushed.offers.map((o) => {
       const coupon = !o.isSelf && o.sellerRef && hashOf(`${o.sellerRef}|${asin}`) % 3 === 0 ? Math.round(o.price.amountMinor * 0.95) : null;
-      return { isSelf: o.isSelf, ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice,
+      return { isSelf: o.isSelf, ...(o.sellerRef ? { sellerRef: o.sellerRef } : {}), price: o.price, shipping: o.shipping, totalPrice: o.totalPrice, ...(o.fulfillment ? { fulfillment: o.fulfillment } : {}),
         ...(coupon !== null && coupon > 0 && coupon < o.price.amountMinor ? { couponPrice: { ...o.price, amountMinor: coupon } } : {}) };
     }) as CompetitorSnapshot['offers'];
     const { offers: market, winner } = this.marketOf(marketplace, asin);
     const seg = (o: (typeof market)[number], membership: string, viewSharePct: number) => ({ ...(o.isSelf ? {} : { sellerRef: o.sellerRef }), isSelf: o.isSelf, membership, viewSharePct });
-    const h = hashOf(asin);
     const landed = (o: (typeof market)[number]) => o.minor + o.shippingMinor;
     // Победитель правила мира — копия строки рынка: сравнение по продавцу, а не по ссылке
     const same = (a: { isSelf: boolean; sellerRef: string } | undefined, b: { isSelf: boolean; sellerRef: string } | undefined) => !!a && !!b && a.isSelf === b.isSelf && a.sellerRef === b.sellerRef;
     const fba = market.filter((o) => o.channelFulfilled).sort((a, b) => landed(a) - landed(b))[0];
     const others = market.filter((o) => !same(o, winner));
     const second = fba && !same(fba, winner) ? fba : others[0];
+    const h = hashOf(asin);
     const segments = !winner ? []
-      : h % 4 === 3 && second
-        ? [seg(winner, 'NON_PRIME', 45), seg(second, 'PRIME', 40), seg(others.find((o) => !same(o, second)) ?? second, 'DEFAULT', 15)]
+      : noViewMajority(asin) && second
+        // Шаг 115: продавцов всего двое — поровну: ровно половина не большинство (иначе «второй» получал 55 % и держателя называла модель)
+        ? (() => { const third = others.find((o) => !same(o, second)); return third ? [seg(winner, 'NON_PRIME', 45), seg(second, 'PRIME', 40), seg(third, 'DEFAULT', 15)] : [seg(winner, 'NON_PRIME', 50), seg(second, 'PRIME', 50)]; })()
         : [seg(winner, 'NON_PRIME', 50 + (h % 21)), seg(fba ?? winner, 'PRIME', 40 - (h % 21)), seg(winner, 'DEFAULT', 10)];
+    const majority = holderByViewShare(segments);
+    const money = (minor: number) => ({ ...this.money(), amountMinor: minor });
+    const shareOf = (key: string) => segments.filter((x) => (x.isSelf ? 'self' : x.sellerRef) === key).reduce((sum, x) => sum + x.viewSharePct, 0);
+    const keyOf = (o: (typeof market)[number]) => (o.isSelf ? 'self' : o.sellerRef);
+    const shown = market.filter((o) => segments.some((x) => (x.isSelf ? 'self' : x.sellerRef) === keyOf(o))).sort((a, b) => shareOf(keyOf(b)) - shareOf(keyOf(a)));
+    const top = majority ? shown.find((o) => (majority.holder === 'SELF' ? o.isSelf : o.sellerRef === majority.sellerRef)) : shown[0];
+    const marked = majority ? offers.map((o) => ((majority.holder === 'SELF' ? o.isSelf : o.sellerRef === majority.sellerRef) ? { ...o, holdsBuyBox: true } : o)) : offers;
     return {
       marketplace, channelProductRef: asin, condition: 'new', source: 'AMAZON_COMPETITIVE_SUMMARY', observedAt: new Date(observedAt).toISOString(),
-      completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers, ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
+      completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) },
+      ...(top ? { buybox: { price: money(top.minor), shipping: money(top.shippingMinor), isSelf: majority ? majority.holder === 'SELF' : null, ...(majority?.holder === 'OTHER' && majority.sellerRef ? { sellerRef: majority.sellerRef } : {}) } } : {}),
+      offers: marked, ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
     };
   }
 
@@ -459,6 +470,11 @@ export class SimulatedAmazonPort implements ChannelAdapter {
 }
 
 /** Шаг 109: детерминированный хеш строки модели — какие продавцы дают купон и как делятся просмотры у товара */
+/** Шаг 115: у каждого четвёртого товара модели просмотры делятся без большинства (допущение модели, см. `summaryOf`) */
+export function noViewMajority(asin: string): boolean {
+  return hashOf(asin) % 4 === 3;
+}
+
 function hashOf(text: string): number {
   let h = 7;
   for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) >>> 0;

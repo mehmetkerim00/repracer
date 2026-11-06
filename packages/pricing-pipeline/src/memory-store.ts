@@ -1361,20 +1361,32 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return { recorded, duplicateNotification: false, lostBuyable };
   }
 
-  /** Шаг 114: уведомления, дошедшие за сутки, — по журналу сырья */
+  /** Шаг 114: уведомления, дошедшие за сутки, — по журналу сырья. Шаг 115 [Р-240]: и возраст данных опроса — по отметкам опроса */
   async notificationSources(_tenantId: string, at: Instant): Promise<NotificationSourceFacts[]> {
     const since = Date.parse(at) - 24 * 3_600_000;
     const byAccount = new Map<string, RawInboundNotificationEntry[]>();
     for (const e of this.notificationJournal.values()) byAccount.set(e.channelAccountId, [...(byAccount.get(e.channelAccountId) ?? []), e]);
-    return [...byAccount].map(([channelAccountId, entries]) => {
+    const polledBy = new Map<string, Instant[]>();
+    for (const [key, polledAt] of this.pollState) {
+      const account = key.slice(0, key.indexOf('|'));
+      polledBy.set(account, [...(polledBy.get(account) ?? []), polledAt]);
+    }
+    return [...new Set([...byAccount.keys(), ...polledBy.keys()])].sort().map((channelAccountId) => {
+      const entries = byAccount.get(channelAccountId) ?? [];
       const recent = entries.filter((e) => Date.parse(e.receivedAt) > since);
       const counts = new Map<string, number>();
       for (const e of recent) counts.set(e.notificationType, (counts.get(e.notificationType) ?? 0) + 1);
+      const polled = polledBy.get(channelAccountId) ?? [];
       return {
         channelAccountId, lastReceivedAt: entries.map((e) => e.receivedAt).sort().at(-1) ?? null,
         last24h: [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([notificationType, count]) => ({ notificationType, count })),
+        polled: polled.length > 0 ? { offers: polled.length, oldestAt: [...polled].sort()[0]! } : null,
       };
     });
+  }
+
+  async notificationsFlowing(_tenantId: string, channelAccountId: string, since: Instant): Promise<boolean> {
+    return [...this.notificationJournal.values()].some((e) => e.channelAccountId === channelAccountId && e.notificationType === 'ANY_OFFER_CHANGED' && Date.parse(e.receivedAt) > Date.parse(since));
   }
 
   /** Р-189 (E-22): режим пакетов аккаунтов eBay; нет строки — проба (как NULL в `channel_account.ebay_batch_mode`) */
@@ -2418,7 +2430,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     for (const q of queries) this.pollState.set(`${channelAccountId}|${productKey(q)}`, at);
   }
 
-  async pickReconciliationSample(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
+  async pickRotationWindow(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
     const refs = new Map<string, CompetitorQuery>();
     for (const s of this.scopes.values()) {
       if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
@@ -2706,7 +2718,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async competitionSummary(_tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {
     const s = this.scopes.get(writeScopeId);
     if (!s) return null;
-    const last = this.snapshotLog.filter((e) => e.verdict === 'RECONCILIATION' && e.key.channelAccountId === s.channelAccountId && e.key.marketplace === s.marketplace
+    // Шаг 115 [Р-240]: сводка Amazon идёт путём решения — принятая, как у снимка сверки
+    const last = this.snapshotLog.filter((e) => (e.verdict === 'RECONCILIATION' || (e.snapshot.source === 'AMAZON_COMPETITIVE_SUMMARY' && e.verdict === 'ACCEPT')) && e.key.channelAccountId === s.channelAccountId && e.key.marketplace === s.marketplace
       && e.key.channelProductRef === s.channelProductRef && e.key.condition === s.condition)
       .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)).at(-1);
     return last ? { snapshot: last.snapshot, source: last.snapshot.source, observedAt: last.snapshot.observedAt } : null;

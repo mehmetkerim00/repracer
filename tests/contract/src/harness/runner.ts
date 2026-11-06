@@ -212,8 +212,9 @@ async function runPipelineStep(
     case 'pipelineReviewNotificationLoss':
       return { result: await pipeline.reviewNotificationLoss(callContext(step.ctx, step.id, scenario, clock)) };
     case 'pipelineReconcileRotation':
-      return { result: await pipeline.reconcileRotation(callContext(step.ctx, step.id, scenario, clock),
-        { size: step.size, cycle: step.cycle, ...(step.graceSeconds ? { graceSeconds: step.graceSeconds } : {}) }) };
+      // Шаг 115 [Р-240]: тот же опрос по кругу, сверка потерь включена: сценарий — про подписку, которая есть
+      return { result: await pipeline.pollRotation(callContext(step.ctx, step.id, scenario, clock),
+        { size: step.size, cycle: step.cycle, reconcile: true, ...(step.graceSeconds ? { graceSeconds: step.graceSeconds } : {}) }) };
     case 'pipelineRecompute':
       return { result: await pipeline.recompute(callContext(step.ctx, step.id, scenario, clock), step.writeScopeId, step.trigger) };
     case 'pipelineEnableRepricing':

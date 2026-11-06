@@ -2294,20 +2294,36 @@ export class PgPricingStore implements PricingStore {
   /** Шаг 114: уведомления, дошедшие за сутки, — по журналу сырья (индекс `notification_journal_account_recent_idx`) */
   async notificationSources(tenantId: string, at: Instant): Promise<NotificationSourceFacts[]> {
     return this.tx(tenantId, async (tx) => {
+      // Шаг 115 [Р-240]: и возраст данных опроса — по отметкам опроса аккаунта (`competitor_poll_state`, ключ — тенант и аккаунт)
       const { rows } = await tx.query(
         `SELECT a.channel_account_id,
                 (SELECT max(j.received_at) FROM channel_data.notification_journal j WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id) AS last_at,
                 coalesce((SELECT jsonb_agg(jsonb_build_object('type', t.notification_type, 'count', t.n) ORDER BY t.notification_type)
                             FROM (SELECT j.notification_type, count(*) AS n FROM channel_data.notification_journal j
                                    WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id AND j.received_at > $2::timestamptz - interval '24 hours'
-                                   GROUP BY j.notification_type) t), '[]'::jsonb) AS recent
-           FROM tenant_data.channel_account a WHERE a.tenant_id = $1
-            AND EXISTS (SELECT 1 FROM channel_data.notification_journal j WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id)
+                                   GROUP BY j.notification_type) t), '[]'::jsonb) AS recent,
+                p.offers AS polled_offers, p.oldest_at AS polled_oldest_at
+           FROM tenant_data.channel_account a
+           LEFT JOIN LATERAL (SELECT count(*) AS offers, min(ps.last_polled_at) AS oldest_at FROM channel_data.competitor_poll_state ps
+                               WHERE ps.tenant_id = a.tenant_id AND ps.channel_account_id = a.channel_account_id) p ON true
+          WHERE a.tenant_id = $1
+            AND (p.offers > 0 OR EXISTS (SELECT 1 FROM channel_data.notification_journal j WHERE j.tenant_id = a.tenant_id AND j.channel_account_id = a.channel_account_id))
           ORDER BY a.channel_account_id`, [tenantId, at]);
       return rows.map((r) => ({
         channelAccountId: r.channel_account_id, lastReceivedAt: r.last_at ? iso(r.last_at) : null,
         last24h: (r.recent as Array<{ type: string; count: number }>).map((x) => ({ notificationType: x.type, count: Number(x.count) })),
+        polled: Number(r.polled_offers) > 0 ? { offers: Number(r.polled_offers), oldestAt: iso(r.polled_oldest_at) } : null,
       }));
+    });
+  }
+
+  /** Шаг 115 [Р-121, Р-240]: индекс журнала — по аккаунту и времени; у аккаунта с уведомлениями ответ — первая же строка нужного вида */
+  async notificationsFlowing(tenantId: string, channelAccountId: string, since: Instant): Promise<boolean> {
+    return this.tx(tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT 1 FROM channel_data.notification_journal j
+          WHERE j.tenant_id = $1 AND j.channel_account_id = $2 AND j.received_at > $3::timestamptz AND j.notification_type = 'ANY_OFFER_CHANGED' LIMIT 1`, [tenantId, channelAccountId, since]);
+      return rows.length > 0;
     });
   }
 
@@ -3173,14 +3189,16 @@ export class PgPricingStore implements PricingStore {
   async competitionSummary(tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {
     if (!UUID_FORM.test(writeScopeId)) return null;
     return inTenant(this.admin('competitionSummary'), tenantId, async (tx) => {
-      // Индекс журнала (0086) — товар аккаунта по времени получения; снимков сверки среди снимков товара немного — фильтр по вердикту.
+      // Индекс журнала (0086) — товар аккаунта по времени получения. Шаг 115 [Р-240]: сводка Amazon идёт путём решения — принятая, как у снимка сверки; последняя сводка товара
+      // не дальше круга опроса от начала индекса: фильтр дешёв и при частых уведомлениях.
       // Журнал хранит состояние, как его назвал снимок (строчными), привязка — заглавными (dbCondition)
       const { rows: [r] } = await tx.query(
         `SELECT l.snapshot, l.source, l.observed_at
            FROM tenant_data.offer_mapping m JOIN LATERAL (
              SELECT x.snapshot, x.source, x.observed_at FROM channel_data.competitor_snapshot_log x
               WHERE x.tenant_id = m.tenant_id AND x.channel_account_id = m.channel_account_id AND x.marketplace = m.marketplace
-                AND x.channel_product_ref = m.channel_product_ref AND x.condition = lower(m.condition) AND x.sanity_verdict = 'RECONCILIATION'
+                AND x.channel_product_ref = m.channel_product_ref AND x.condition = lower(m.condition)
+                AND (x.sanity_verdict = 'RECONCILIATION' OR (x.source = 'AMAZON_COMPETITIVE_SUMMARY' AND x.sanity_verdict = 'ACCEPT'))
               ORDER BY x.received_at DESC LIMIT 1) l ON true
           WHERE m.tenant_id = $1 AND m.price_write_scope_id = $2 AND m.status <> 'ENDED' LIMIT 1`, [tenantId, writeScopeId]);
       return r ? { snapshot: r.snapshot as CompetitorSnapshot, source: r.source, observedAt: iso(r.observed_at) } : null;
@@ -3608,7 +3626,7 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async pickReconciliationSample(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
+  async pickRotationWindow(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
     return this.tx(tenantId, async (tx) => {
       /**
        * Офферы аккаунта с товаром канала. Шаг 55 (OQ-241): первыми — те, чья ПОСЛЕДНЯЯ СВЕРКА давнее (`competitor_poll_state`, её ставит

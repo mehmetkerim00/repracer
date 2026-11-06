@@ -1,5 +1,6 @@
-import type { AdapterCallContext, BuyboxSegment, CompetitorOffer, CompetitorQuery, CompetitorReadResult, DiscoveredOffer, Instant, Money, OrderLine, Page, PageRequest, PriceBasis } from '@repracer/channel-port';
+import type { AdapterCallContext, BuyboxSegment, CompetitorOffer, CompetitorQuery, CompetitorReadResult, CompetitorSnapshot, DiscoveredOffer, Instant, Money, OrderLine, Page, PageRequest, PriceBasis } from '@repracer/channel-port';
 import type { CompetitiveSummaryBatchRequest, CompetitiveSummaryBatchResponse, CompetitiveSummaryResponseBody, InventorySummariesResponse, ItemSearchResults, MoneyType, OrderItemRecord, OrderRecord, PricingOffer, SearchOrdersResponse } from '@repracer/amazon-client';
+import { holderByViewShare } from '@repracer/pricing-model';
 import { logConservative } from './conservative.ts';
 import { AMAZON_MARKETPLACES, COMPETITIVE_SUMMARY_BATCH_MAX, COMPETITIVE_SUMMARY_PATH, FBA_SUMMARIES_PATH, FBA_SUMMARIES_SKUS_MAX, marketplaceInfo, ORDERS_PAGE_MAX, ORDERS_PATH, SEARCH_PAGE_MAX, SOURCE_COMPETITIVE_SUMMARY } from './descriptor.ts';
 import { ChannelCallError, channelError, classifyFailure } from './errors.ts';
@@ -223,11 +224,10 @@ function orderLine(item: OrderItemRecord, head: OrderHead): { line: OrderLine } 
 }
 
 /**
- * Р-121 (шаг 24): getCompetitiveSummary — только сверка потерь ANY_OFFER_CHANGED [AMZ_C11]. Снимок источника AMAZON_COMPETITIVE_SUMMARY
- * (роль RECONCILIATION): предложения — lowestPricedOffers New/Consumer, без единого победителя Buy Box; момент наблюдения — время ответа.
- * Пакет — до 20 товаров одного региона сессии; ограничитель — операция getCompetitiveSummary (0.033 rps, burst 1).
- * Шаг 109: тот же вызов просит и `featuredBuyingOptions` — предложения в Buy Box по сегментам покупателей с долей просмотров [Р-235];
- * у предложения — цена с купоном, если канал её назвал [Р-234]. Набор шире — запросов не больше: лимит считается на вызов
+ * Шаг 115 [Р-240]: getCompetitiveSummary — источник решений [AMZ_C11]. Снимок источника AMAZON_COMPETITIVE_SUMMARY: предложения — lowestPricedOffers
+ * New/Consumer; Buy Box — из `featuredBuyingOptions`: предложения по сегментам покупателей с долей просмотров [Р-235], цена и держатель — `buyboxOf`;
+ * момент наблюдения — время ответа. Пакет — до 20 товаров одного региона сессии; ограничитель — операция getCompetitiveSummary (0.033 rps, burst 1,
+ * на пару продавец-приложение). У предложения — цена с купоном, если канал её назвал [Р-234]. Набор шире — запросов не больше: лимит считается на вызов
  */
 export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: AdapterCallContext, queries: readonly CompetitorQuery[]): Promise<CompetitorReadResult> {
   const failures: CompetitorReadResult['failures'] = [];
@@ -240,16 +240,12 @@ export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: 
   for (const query of queries) {
     const m = marketplaceInfo(query.marketplace);
     if (query.condition !== 'new') {
-      failures.push({ query, error: channelError('UNSUPPORTED', 'ITEM', 'competitive summary reconciliation reads the new condition only (AMZ_C11)') });
+      failures.push({ query, error: channelError('UNSUPPORTED', 'ITEM', 'the competitive summary poll reads the new condition only (AMZ_C11)') });
     } else if (!m || m.region !== session.region || !/^[A-Z0-9]{10}$/.test(query.channelProductRef)) {
       failures.push({ query, error: channelError('VALIDATION', 'ITEM', 'competitive summary query needs an ASIN of a storefront in the region of the account') });
     } else supported.push(query);
   }
-  if (supported.length > 0) {
-    // Снимок опроса — только сверка: решение о цене его не получает (роль RECONCILIATION) [AMZ_C07]
-    logConservative(options.deps.logger, ctx, 'AMZ_C07_COMPETITOR_PULL_UNAVAILABLE', { queries: supported.length });
-    logConservative(options.deps.logger, ctx, 'AMZ_C11_COMPETITIVE_SUMMARY_RECONCILIATION', { queries: supported.length });
-  }
+  if (supported.length > 0) logConservative(options.deps.logger, ctx, 'AMZ_C11_COMPETITIVE_SUMMARY_POLL', { queries: supported.length });
   for (let i = 0; i < supported.length; i += COMPETITIVE_SUMMARY_BATCH_MAX) {
     const batch = supported.slice(i, i + COMPETITIVE_SUMMARY_BATCH_MAX);
     const rest = supported.slice(i);
@@ -264,8 +260,8 @@ export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: 
         method: 'GET', uri: '/products/pricing/2022-05-01/items/competitiveSummary',
       })),
     };
-    // Чтение: повтор безопасен
-    const result = await session.client.request<CompetitiveSummaryBatchResponse>('POST', COMPETITIVE_SUMMARY_PATH, { body, idempotent: true });
+    // Чтение: повтор после сбоя безопасен; 429 не повторяется внутри вызова [Р-240]: у квоты раз в 30 секунд повтором станет следующий запуск работы
+    const result = await session.client.request<CompetitiveSummaryBatchResponse>('POST', COMPETITIVE_SUMMARY_PATH, { body, idempotent: true, noThrottleRetry: true });
     if (!result.ok) {
       const error = classifyFailure(result, 'BATCH', nowMs(options));
       failures.push(...batch.map((query) => ({ query, error })));
@@ -285,28 +281,70 @@ export async function readCompetitorsAmazon(options: AmazonAdapterOptions, ctx: 
       const lowest = (r.body.lowestPricedOffers ?? []).find((l) => l.lowestPricedOffersInput?.itemCondition === 'New' && l.lowestPricedOffersInput?.offerType === 'Consumer');
       const offers: CompetitorOffer[] = [];
       for (const o of lowest?.offers ?? []) {
-        const price = summaryMoney(o.listingPrice, basis);
-        if (!price || price.amountMinor === 0) continue;
-        const shippingOption = (o.shippingOptions ?? []).find((x) => x.shippingOptionType === 'DEFAULT');
-        const shipping = shippingOption ? summaryMoney(shippingOption.price, basis) : null;
-        const isSelf = o.sellerId === session.sellerId;
-        const coupon = couponPrice(o, price, basis);
-        offers.push({
-          isSelf, ...(typeof o.sellerId === 'string' && !isSelf ? { sellerRef: o.sellerId } : {}), price,
-          ...(shipping ? { shipping, totalPrice: { ...price, amountMinor: price.amountMinor + shipping.amountMinor } } : {}),
-          ...(typeof o.subCondition === 'string' ? { condition: o.subCondition.toLowerCase() } : {}),
-          fulfillment: o.fulfillmentType === 'AFN' ? 'AFN' : 'MFN',
-          ...(coupon ? { couponPrice: coupon } : {}),
-        });
+        const offer = summaryOffer(o, session.sellerId, basis);
+        if (offer) offers.push(offer);
       }
       const segments = buyboxSegmentsOf(r.body, session.sellerId);
+      const buybox = buyboxOf(r.body, segments, session.sellerId, basis);
+      // Держатель — в строках снимка: стратегия берёт у него доставку и исполнение. Вне наименьших предложений — добавляется: это настоящее предложение канала
+      if (buybox?.holder) {
+        const own = offers.filter((o) => (buybox.snapshot.isSelf ? o.isSelf : o.sellerRef === buybox.snapshot.sellerRef));
+        if (own.length === 0) {
+          const added = summaryOffer(buybox.holder, session.sellerId, basis);
+          if (added) own.push(added), offers.push(added);
+        }
+        for (const o of own) o.holdsBuyBox = true;
+      }
       snapshots.push({
         marketplace: query.marketplace, channelProductRef: query.channelProductRef, condition: 'new', source: SOURCE_COMPETITIVE_SUMMARY, observedAt,
-        completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, offers, ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
+        completeness: { kind: 'TOP_N', n: Math.max(1, offers.length) }, ...(buybox ? { buybox: buybox.snapshot } : {}), offers, ...(segments.length > 0 ? { buyboxSegments: segments } : {}),
       });
     }
   }
   return { snapshots, failures };
+}
+
+/** Предложение сводки как предложение снимка: цена нулевая или непонятная — строки нет; исполнение — только названное каналом [Р-226] */
+function summaryOffer(o: PricingOffer, sellerId: string, basis: PriceBasis): CompetitorOffer | null {
+  const price = summaryMoney(o.listingPrice, basis);
+  if (!price || price.amountMinor === 0) return null;
+  const shippingOption = (o.shippingOptions ?? []).find((x) => x.shippingOptionType === 'DEFAULT');
+  const shipping = shippingOption ? summaryMoney(shippingOption.price, basis) : null;
+  const isSelf = o.sellerId === sellerId;
+  const coupon = couponPrice(o, price, basis);
+  return {
+    isSelf, ...(typeof o.sellerId === 'string' && !isSelf ? { sellerRef: o.sellerId } : {}), price,
+    ...(shipping ? { shipping, totalPrice: { ...price, amountMinor: price.amountMinor + shipping.amountMinor } } : {}),
+    ...(typeof o.subCondition === 'string' ? { condition: o.subCondition.toLowerCase() } : {}),
+    ...(o.fulfillmentType === 'AFN' || o.fulfillmentType === 'MFN' ? { fulfillment: o.fulfillmentType } : {}),
+    ...(coupon ? { couponPrice: coupon } : {}),
+  };
+}
+
+/**
+ * Шаг 115 [Р-240]: цена и держатель Buy Box сводки. Единого победителя канал не называет: предложения идут по сегментам покупателей с долей просмотров.
+ * Большинство просмотров у одного продавца [Р-235] — он держатель, цена и доставка — его предложения с наибольшей долей. Большинства нет — цена
+ * предложения с наибольшей долей, держатель неизвестен (`isSelf: null`, как цена Buy Box без продавца у ANY_OFFER_CHANGED): стратегии, которой нужен
+ * держатель, это не годится, и отрезка доли нет. Предложений в Buy Box нет вовсе — Buy Box в снимке нет
+ */
+function buyboxOf(body: CompetitiveSummaryResponseBody, segments: readonly BuyboxSegment[], sellerId: string, basis: PriceBasis):
+  { snapshot: NonNullable<CompetitorSnapshot['buybox']>; holder: PricingOffer | null } | null {
+  const featured = (body.featuredBuyingOptions ?? []).filter((option) => option?.buyingOptionType === 'New').flatMap((option) => option.segmentedFeaturedOffers ?? []);
+  const shareOf = (o: (typeof featured)[number]) => (o.featuredOfferSegments ?? []).reduce((sum, x) => {
+    const pct = x?.segmentDetails?.glanceViewWeightPercentage;
+    return typeof pct === 'number' && Number.isFinite(pct) && pct >= 0 && pct <= 100 ? sum + pct : sum;
+  }, 0);
+  const majority = holderByViewShare(segments);
+  const candidates = majority ? featured.filter((o) => (majority.holder === 'SELF' ? o.sellerId === sellerId : o.sellerId === majority.sellerRef)) : featured;
+  const top = [...candidates].sort((a, b) => shareOf(b) - shareOf(a))[0];
+  const price = top ? summaryMoney(top.listingPrice, basis) : null;
+  if (!top || !price || price.amountMinor === 0) return null;
+  const shippingOption = (top.shippingOptions ?? []).find((x) => x.shippingOptionType === 'DEFAULT');
+  const shipping = shippingOption ? summaryMoney(shippingOption.price, basis) : null;
+  return {
+    snapshot: { price, ...(shipping ? { shipping } : {}), isSelf: majority ? majority.holder === 'SELF' : null, ...(majority?.holder === 'OTHER' && majority.sellerRef ? { sellerRef: majority.sellerRef } : {}) },
+    holder: majority ? top : null,
+  };
 }
 
 /**
@@ -325,7 +363,7 @@ function couponPrice(o: PricingOffer, price: Money, basis: PriceBasis): Money | 
 }
 
 /**
- * Шаг 109 [Р-235]: предложения в Buy Box по сегментам — `featuredBuyingOptions` с `buyingOptionType` New (сверка читает новое состояние).
+ * Шаг 109 [Р-235]: предложения в Buy Box по сегментам — `featuredBuyingOptions` с `buyingOptionType` New (опрос читает новое состояние).
  * Доля просмотров сегмента — `segmentDetails.glanceViewWeightPercentage` (число, в модели необязательное: сегмента без доли нет в снимке)
  */
 function buyboxSegmentsOf(body: CompetitiveSummaryResponseBody, sellerId: string): BuyboxSegment[] {

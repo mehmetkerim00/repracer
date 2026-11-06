@@ -76,18 +76,24 @@ export interface NotificationSourceInput {
   channelAccountId: string;
   lastReceivedAt: string | null;
   last24h: ReadonlyArray<{ notificationType: string; count: number }>;
+  /** Шаг 115 [Р-240]: опрос сводки конкурентов: сколько предложений прочитано и самое давнее чтение */
+  polled?: { offers: number; oldestAt: string } | null;
 }
 
-/** Шаг 114: уведомления за сутки по видам — словами; ни одного — «только опрос», а не пусто */
-export function dataSourceText(source: NotificationSourceInput | undefined, m: Messages): string {
+/**
+ * Шаг 114: уведомления за сутки по видам — словами; ни одного — «только опрос», а не пусто. Шаг 115 [Р-240]: опрос сводки — источник конкурентов, и строка
+ * называет, сколько лет самому давнему чтению: продавец видит, как свежи данные, по которым решается цена
+ */
+export function dataSourceText(source: NotificationSourceInput | undefined, m: Messages, nowMs: number = Number.NaN): string {
   const t = m.ui.connections.dataSource;
   const count = (pred: (type: string) => boolean) => (source?.last24h ?? []).filter((x) => pred(x.notificationType)).reduce((a, x) => a + x.count, 0);
   const offers = count((x) => x === 'ANY_OFFER_CHANGED');
   const status = count((x) => x.startsWith('LISTINGS_ITEM_'));
   const pricing = count((x) => x === 'PRICING_HEALTH');
-  if (!source?.lastReceivedAt || offers + status + pricing === 0) return t.polling;
+  const minutes = source?.polled && Number.isFinite(nowMs) ? Math.max(0, Math.round((nowMs - Date.parse(source.polled.oldestAt)) / 60_000)) : null;
+  if (!source?.lastReceivedAt || offers + status + pricing === 0) return minutes === null ? t.polling : t.polled(minutes);
   const parts = [offers > 0 ? t.parts.offers(offers) : null, status > 0 ? t.parts.status(status) : null, pricing > 0 ? t.parts.pricing(pricing) : null].filter((x): x is string => x !== null);
-  return t.notifications(m.when(source.lastReceivedAt), parts.join(', '));
+  return `${t.notifications(m.when(source.lastReceivedAt), parts.join(', '))}${minutes === null ? '' : t.polledAlongside(minutes)}`;
 }
 
 /** Шаг 103 [Р-228]: выбор умолчания — «None» и активные стратегии; недоступная на канале — с причиной и не выбирается [Р-39] */
@@ -321,7 +327,7 @@ export function connectionsView(
       defaultStrategy: defaults && a.authStatus !== 'DISCONNECTED' ? defaultStrategyView(a, defaults, m) : null,
       // Шаг 114: очередь уведомлений есть только у Amazon (ANY_OFFER_CHANGED, PRICING_HEALTH, уведомления листингов через EventBridge)
       dataSourceText: notificationSources && a.channel === 'AMAZON' && a.authStatus !== 'DISCONNECTED'
-        ? dataSourceText(notificationSources.find((x) => x.channelAccountId === a.channelAccountId), m) : null,
+        ? dataSourceText(notificationSources.find((x) => x.channelAccountId === a.channelAccountId), m, nowMs) : null,
     };
   });
   const channels = connectable.map((c): ConnectionChannelView => {

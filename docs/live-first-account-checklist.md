@@ -174,9 +174,10 @@
 Уведомление `ANY_OFFER_CHANGED` держателя не называет (A-29, Р-221). Образец `getItemOffers` в песочнице `IsBuyBoxWinner` не несёт
 (шаг 108, находка 7).
 
-Шаг 109 [Р-235] построил: круг сверки `getCompetitiveSummary` просит и `featuredBuyingOptions` — предложение в Buy Box по группам
-покупателей с долей просмотров. Держатель для доли Buy Box — продавец, чья сумма долей больше 50 %; большинства нет — держатель
-неизвестен и в долю не считается. Снимок уведомления держателя по-прежнему не называет: «Win the Buy Box» на Amazon недоступна.
+Шаг 109 [Р-235] и шаг 115 [Р-240] построили: опрос `getCompetitiveSummary` решает цену и просит `featuredBuyingOptions` — предложение в Buy
+Box по группам покупателей с долей просмотров. Держатель — продавец, чья сумма долей больше 50 %, цена — его предложения; большинства нет — цена самой
+большой группы, держатель неизвестен, в долю не считается. Снимок уведомления держателя по-прежнему не называет, а «Win the Buy Box» на Amazon держится
+на этой сводке. **Это главная проверка дня для пилота на опросе.**
 Проверено только на образце песочницы ([evidence/step108-sp-api-recon.md](evidence/step108-sp-api-recon.md)) — здесь финальная
 проверка.
 
@@ -187,20 +188,23 @@
 - **Вызов:**
   - `getCompetitiveSummary` (`/batches/products/pricing/2022-05-01/items/competitiveSummary`) по 1–3 ASIN тестовых SKU с конкурентами:
     `marketplaceId=ATVPDKIKX0DER`, `includedData=featuredBuyingOptions,lowestPricedOffers`, `lowestPricedOffersInputs` New/Consumer —
-    ровно так просит адаптер. Ровно один вызов: 0.033 rps, burst 1 **[док]**, ведро — то же, что у круга сверки (AMZ_C11); либо смотреть
-    первый круг сверки в журнале снимков и на странице Competition;
+    ровно так просит адаптер. Ровно один вызов: 0.033 rps, burst 1 **[док]**, ведро — то же, что у опроса (AMZ_C11); либо смотреть
+    первый круг опроса в журнале снимков и на странице Competition;
   - `getItemOffers` (`/products/pricing/v0/items/{Asin}/offers`, `MarketplaceId=ATVPDKIKX0DER`, `ItemCondition=New`) по тем же ASIN:
     0.5 rps, burst 1 **[док]**.
 - **Успех:**
   - **сводка:** в `featuredBuyingOptions[].segmentedFeaturedOffers[]` есть `sellerId` и `featuredOfferSegments[]` с
     `customerMembership` и `segmentDetails.glanceViewWeightPercentage`; держатель по правилу шага 109 посчитан;
+  - **доставка и исполнение:** у предложений `lowestPricedOffers` есть `fulfillmentType` и `shippingOptions` с `DEFAULT`, у FBA тоже. Без доставки у
+    конкурента стратегии, сравнивающие цену с доставкой, и «Win the Buy Box» держат цену (`COMPETITOR_REQUIREMENT_NOT_MET: SHIPPING`) — записать, как часто;
+  - **своё предложение** — среди `lowestPricedOffers` или `featuredBuyingOptions`; вне их `OWN_SHIPPING` не даёт сравнить цену с доставкой — записать, как часто;
   - **`getItemOffers`:** у предложений есть `IsBuyBoxWinner` и `SellerId`. По модели победителей до двух — с Prime и без;
   - **сверка двух источников:** держатель по долям — среди победителей `getItemOffers`; цена Buy Box (`Summary.BuyBoxPrices`) сходится
     со сводкой;
   - **A-15:** если в A5 пришло уведомление по тому же ASIN, `lowestPricedOffers` и `Offers` уведомления — один набор.
 - **Если иначе:**
   - `featuredBuyingOptions` пуст или без долей → отрезков держателя нет, доля Buy Box amazon.com не считается, держатель — «неизвестен
-    (пока)» [Р-221]; доложить владельцу;
+    (пока)» [Р-221], а «Win the Buy Box» держит цену — Q11 открывается заново: доложить владельцу;
   - держатель по долям не совпал с `IsBuyBoxWinner` → доложить владельцу, какой источник считать держателем (A-29);
   - в боевом `getItemOffers` нет `IsBuyBoxWinner` → план A-29 через `getItemOffers` теряет основу; записать в A-29;
   - у конкурентов есть `promotions[]` с `COUPON` → на Competition видна цена с купоном рядом с базовой [Р-234]; стратегии считают по
@@ -211,7 +215,7 @@
 
 У приложения песочницы обмен `client_credentials` со scope `sellingpartnerapi::notifications` дал 400 `invalid_scope` (шаг 108,
 находка 10). А `createDestination` по модели снимка — операция без продавца (grantless). Без адресата нет подписок `ANY_OFFER_CHANGED`
-и `PRICING_HEALTH`, а конкуренты решения на Amazon — только `ANY_OFFER_CHANGED` (AMZ_C07).
+и `PRICING_HEALTH`. Конкуренты решения от этого не зависят: их даёт опрос сводки [Р-240]; уведомления ускоряют реакцию и страхуются тем же опросом.
 
 - **Что проверяем:**
   - токен без продавца на боевом приложении;
@@ -233,8 +237,8 @@
   - у товара — снимок конкурентов и решение тени;
   - записаны `EventTime` и `SentTimestamp` первого сообщения и `maxReceiveCount` политики очереди.
 - **Если иначе:**
-  - `invalid_scope` и на боевом приложении → репрайсинг по рынку на Amazon стоит. Доложить владельцу: вопрос к регистрации
-    приложения;
+  - `invalid_scope` и на боевом приложении → репрайсинг идёт на опросе [Р-240], уведомлений нет: Channels говорит «polling only» с возрастом данных, тикет в поддержку
+    идёт параллельно;
   - за 15 минут ни одного уведомления → это ещё не провал: `ANY_OFFER_CHANGED` приходит при изменении предложений и только при активном
     своём **[док]**. Ждать неделю тени; WARNING `NOTIFICATION_QUEUE_SILENT` после 30 минут тишины — ожидаем;
   - `maxReceiveCount` очереди ≠ 5 → привести политику очереди и параметр приёмника к одному числу. Иначе CRITICAL
@@ -334,7 +338,7 @@ Denied, Unauthorized, Expired Token, Invalid Signature or Resource Not Found».
 |---|---|---|---|
 | A-03, Р-204 | Граница суток amazon.com | Панель оператора, экран day boundaries | Не меньше 7 суток тени, перерыв между решениями не больше 36 ч, решения есть. Оператор принимает худшим окном со вторым фактором ([runbook-day-boundary.md](runbook-day-boundary.md)); без этого перевод в бой — 409 |
 | A-08, A-14, OQ-175 | Задержка `ANY_OFFER_CHANGED` (`EventTime` → `SentTimestamp` → приём), повторы через часы | Журнал приёмника, WARNING `NOTIFICATION_LATE` | Распределение задержек. По нему уточняются срок сверки (сейчас 15 минут — допущение) и пороги приёмника 30 и 15 минут |
-| A-15, OQ-176, OQ-241 | Круг сверки `getCompetitiveSummary` | Алерты `AMAZON_RECONCILIATION_CIRCLE_SLOW`, `NOTIFICATION_LOSS_SUSPECTED` | Круг не дольше суток. Подозрения на потерю разобраны: потеря или разные наборы `lowestPricedOffers` и `Offers` уведомления |
+| A-15, OQ-176, OQ-241 | Круг опроса `getCompetitiveSummary` [Р-240] | Экран Channels (возраст данных), работа `amazon-summary-poll` в панели, алерты `AMAZON_SUMMARY_ROUND_SLOW`, `SCHEDULER_JOB_FAILING` с `RATE_LIMITED`, `NOTIFICATION_LOSS_SUSPECTED` (только когда уведомления приходят) | Круг — около 26 минут на 1 000 предложений. Ни одного 429 при темпе пары: 429 — лимит приложения, стоп-доклад владельцу (A-15). Подозрения на потерю разобраны: потеря или разные наборы `lowestPricedOffers` и `Offers` уведомления |
 | A-13, OQ-168 | `PRICING_HEALTH`: значения `issueType`; приходит ли уведомление о восстановлении Featured Offer | Журнал приёмника, Offers | Значения записаны. Без уведомления о восстановлении состояние на экране не снимается — доложить владельцу |
 | A-30 | Отчёт неактивных (заказан в A3) | Ответ отчёта | Совпадает с A3; ценовые ошибки названы причиной |
 | A-20, A-22 | Первый заказ FBM: статусы, частичная отгрузка (`quantityFulfilled`), отмена целиком (`cancellation.cancellationExecution`) | Работа `order-lines`, экран остатков | Строки — OPEN, SHIPPED или CANCELLED по правилу AMZ_C12; резервация держится до полной отгрузки строки |

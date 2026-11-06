@@ -302,7 +302,7 @@ test(`шаг 65: масштаб — каталог ${OFFERS} предложен�
 
   // ---------------------------------------------------------------- круги
   await timed('reconciliation sample (one call of the Amazon reconciliation circle reads the account)', SCREEN_SECONDS,
-    () => store.pickReconciliationSample(tenant, account, 20, 0), (r) => ({ rows: r.total }));
+    () => store.pickRotationWindow(tenant, account, 20, 0), (r) => ({ rows: r.total }));
   const ctx = { tenantId: k.world.tenantId, channelAccountId: k.world.channelAccountId, correlationId: 'scale', deadline: k.clock.iso(3_600_000) } as never;
   /**
    * Круг обнаружения — дважды: первый заводит в каталог предложения, которых в нём нет (новые товары продавца; у только что подключённого

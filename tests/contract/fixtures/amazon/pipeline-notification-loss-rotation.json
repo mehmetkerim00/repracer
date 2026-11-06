@@ -3,8 +3,8 @@
   "id": "amazon/pipeline/notification-loss-rotation",
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
-  "title": "Р-121: сверка ANY_OFFER_CHANGED опросом по кругу — расхождение без уведомления до срока — подозрение на потерю с алертом",
-  "description": "Шаг 24. У ANY_OFFER_CHANGED нет номеров последовательности, очередь SQS теряет без следа (риск 21). getCompetitiveSummary — 0.033 запроса в секунду, до 20 ASIN: сверка идёт по кругу, окно товаров аккаунта сдвигается каждый цикл [AMZ_C11]. Последнее принятое состояние трёх товаров — наименьшая цена конкурента 18.00. Опрос: B000008301 — 17.80, уведомления не будет; B000008302 — 18.00; B000008303 — 17.50, ANY_OFFER_CHANGED приходит через 5 минут. Снимки опроса — в журнал с вердиктом RECONCILIATION, в решение не идут. Через 16 минут база ставит «задержка» товару 3 и «подозрение на потерю» товару 1; один CRITICAL-алерт. Сверяется наименьшая цена конкурента: победителя Buy Box ответ не даёт.",
+  "title": "Р-121, Р-240: опрос по кругу решает цену и страхует ANY_OFFER_CHANGED — расхождение без уведомления до срока — подозрение на потерю с алертом",
+  "description": "Шаг 24. У ANY_OFFER_CHANGED нет номеров последовательности, очередь SQS теряет без следа (риск 21). getCompetitiveSummary — 0.033 запроса в секунду, до 20 ASIN: опрос идёт по кругу (шаг 115: он и решает цену), окно товаров аккаунта сдвигается каждый цикл [AMZ_C11]. Последнее принятое состояние трёх товаров — наименьшая цена конкурента 18.00. Опрос: B000008301 — 17.80, уведомления не будет; B000008302 — 18.00; B000008303 — 17.50, ANY_OFFER_CHANGED приходит через 5 минут. Снимки опроса — в журнал с вердиктом RECONCILIATION, в решение не идут. Через 16 минут база ставит «задержка» товару 3 и «подозрение на потерю» товару 1; один CRITICAL-алерт. Сверяется наименьшая цена конкурента: победителя Buy Box ответ не даёт.",
   "tags": [
     "pipeline",
     "r-121",
@@ -201,13 +201,27 @@
       "expect": {
         "queries": 3,
         "failures": [],
-        "snapshots": [],
+        "windowFailure": null,
+        "snapshots": [
+          {
+            "channelProductRef": "B000008301",
+            "verdict": "ACCEPT"
+          },
+          {
+            "channelProductRef": "B000008302",
+            "verdict": "ACCEPT"
+          },
+          {
+            "channelProductRef": "B000008303",
+            "verdict": "ACCEPT"
+          }
+        ],
         "reconciliation": {
           "matched": 1,
           "diverged": 2,
           "noBaseline": 0,
           "notNewer": 0,
-          "logged": 3
+          "logged": 0
         }
       }
     },
@@ -442,7 +456,7 @@
     },
     {
       "id": "summary-rotation",
-      "note": "getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]",
+      "note": "getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — источник решений [Р-240, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]",
       "request": {
         "method": "POST",
         "path": "/batches/products/pricing/2022-05-01/items/competitiveSummary",
@@ -714,19 +728,19 @@
         "$unordered": [
           {
             "channelProductRef": "B000008301",
-            "verdict": "RECONCILIATION",
+            "verdict": "ACCEPT",
             "delivery": "POLL",
             "source": "AMAZON_COMPETITIVE_SUMMARY"
           },
           {
             "channelProductRef": "B000008302",
-            "verdict": "RECONCILIATION",
+            "verdict": "ACCEPT",
             "delivery": "POLL",
             "source": "AMAZON_COMPETITIVE_SUMMARY"
           },
           {
             "channelProductRef": "B000008303",
-            "verdict": "RECONCILIATION",
+            "verdict": "ACCEPT",
             "delivery": "POLL",
             "source": "AMAZON_COMPETITIVE_SUMMARY"
           },

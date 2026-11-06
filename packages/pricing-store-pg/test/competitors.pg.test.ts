@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { AdapterCallContext, ChannelAdapter, CompetitorOffer, CompetitorSnapshot, FieldWrite } from '@repracer/channel-port';
 import { createPricingPipeline, type MemorySeedScope } from '@repracer/pricing-pipeline';
-import { inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
+import { createPool, inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { approved, contextOf, engineCost, explained } from './drafts.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
@@ -186,13 +186,27 @@ test('step 97 [Р-91, Р-219]: the fulfilment handicap lives with the undercut �
   }, world.userId), /needs its fulfilment handicap/, 'Win the Buy Box without a handicap is refused');
 });
 
-test('step 97 [Р-39, Р-221]: Win the Buy Box needs a named holder — unavailable on Amazon, available on Kaufland and Walmart; Match the Buy Box needs only the price', async () => {
+test('step 97, step 115 [Р-39, Р-221, Р-240]: Win the Buy Box needs a named holder — a source that names none does not give it; on Amazon the summary does; Match the Buy Box needs only the price', async () => {
   const unmet = async (channel: string, params: object) => (await pool.query('SELECT channel_data.strategy_unmet($1, $2) AS u', [channel, JSON.stringify(params)])).rows[0].u;
   const win = { type: 'WIN_BUYBOX', creepUp: false, creepStepBp: 100, atBound: 'CAP' };
-  // Строкой: фактический результат «без защиты» — `{}` (доступна), а не дифф двух объектов
-  assert.equal(JSON.stringify(await unmet('AMAZON', win)),
-    JSON.stringify({ AMAZON_ANY_OFFER_CHANGED: ['BUYBOX_WINNER'], AMAZON_COMPETITIVE_SUMMARY: ['RECONCILIATION_ONLY', 'BUYBOX_PRICE', 'BUYBOX_WINNER'] }),
-    'Win the Buy Box is unavailable where the channel does not name the holder');
+  assert.deepEqual(await unmet('AMAZON', win), {}, 'Win the Buy Box is available on Amazon: the competitive summary names the holder by the majority of views (Р-240)');
+  // Канал без сводки: остаётся только уведомление, а оно держателя не называет (A-29). Откатываемая транзакция суперпользователя: справочник правит только миграция
+  const adminUrl = new URL(process.env.REPRACER_PG_ADMIN_URL!); adminUrl.pathname = `/${db.name}`;
+  const superuser = createPool(adminUrl.toString(), { max: 1, applicationName: 'repracer-step115-source' });
+  const client = await superuser.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`UPDATE platform.competitor_source SET availability = 'UNAVAILABLE' WHERE channel = 'AMAZON' AND source = 'AMAZON_COMPETITIVE_SUMMARY'`);
+    const { rows: [without] } = await client.query('SELECT channel_data.strategy_unmet($1, $2) AS u', ['AMAZON', JSON.stringify(win)]);
+    // Строкой: фактический результат «без защиты» — `{}` (доступна), а не дифф двух объектов
+    assert.equal(JSON.stringify(without.u),
+      JSON.stringify({ AMAZON_ANY_OFFER_CHANGED: ['BUYBOX_WINNER'], AMAZON_COMPETITIVE_SUMMARY: ['AVAILABILITY_UNAVAILABLE'] }),
+      'Win the Buy Box is unavailable where the channel does not name the holder');
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+    await superuser.end();
+  }
   assert.deepEqual(await unmet('KAUFLAND', win), {}, 'Win the Buy Box is available on Kaufland');
   assert.deepEqual(await unmet('WALMART', win), {}, 'Win the Buy Box is available on Walmart');
   assert.deepEqual(await unmet('AMAZON', { type: 'MATCH_BUYBOX', holdWhenWinning: true, atBound: 'CAP' }), {}, 'Match the Buy Box needs only the Buy Box price');

@@ -41,7 +41,7 @@ test('step 56: on PostgreSQL the reconciliation circle takes first what was reco
   await store.markPolled(world.tenantId, account, [q(3)], new Date(now - 86_400_000).toISOString() as never);
   await store.markPolled(world.tenantId, account, [q(5)], new Date(now - 3_600_000).toISOString() as never);
   for (const cycle of [0, 1, 2, 3, 7]) {
-    const { queries, total } = await store.pickReconciliationSample(world.tenantId, account, 3, cycle);
+    const { queries, total } = await store.pickRotationWindow(world.tenantId, account, 3, cycle);
     assert.equal(total, 5);
     assert.deepEqual(queries.map((x) => x.channelProductRef), ['56104', '56103', '56105'], `cycle ${cycle}: never, a day ago, an hour ago — the freshly reconciled wait`);
   }

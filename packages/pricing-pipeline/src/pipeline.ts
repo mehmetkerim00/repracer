@@ -5,6 +5,7 @@ import type {
   AlertSink,
   ChannelAdapter,
   CompetitorQuery,
+  CompetitorReadResult,
   CompetitorSnapshot,
   CompetitorSourceDescriptor,
   FieldWrite,
@@ -169,6 +170,9 @@ export interface PollOptions {
 /** Р-121: итог сверки опроса */
 export interface ReconciliationReport { matched: number; diverged: number; noBaseline: number; notNewer: number; uncovered: number; rejected: number; logged: number; failed: number }
 export type ReconciliationKind = 'MATCH' | 'DIVERGED' | 'NO_BASELINE' | 'NOT_NEWER' | 'UNCOVERED' | 'REJECTED';
+/** Шаг 115 [Р-121]: сколько молчания журнала уведомлений считается «подписки нет»: дольше проверка потери — ложная тревога, а не страховка */
+const NOTIFICATIONS_FLOW_WINDOW_SECONDS = 7 * 86_400;
+
 const RECONCILIATION_KEYS: Record<ReconciliationKind, keyof ReconciliationReport> = {
   MATCH: 'matched', DIVERGED: 'diverged', NO_BASELINE: 'noBaseline', NOT_NEWER: 'notNewer', UNCOVERED: 'uncovered', REJECTED: 'rejected',
 };
@@ -674,7 +678,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
   /**
    * Опрос конкурентов. PUSH_FETCH — чтение по уведомлению без данных [Р-46]. reconcile [Р-121] — опрос сверяется с последним принятым
    * состоянием до его обработки: расхождение — проверка потери уведомления со сроком (вызывающий включает сверку, когда подписка на
-   * уведомления активна; без подписки каждое изменение рынка было бы «потерей»). Снимок источника только для сверки (роль RECONCILIATION)
+   * уведомления активна; без подписки каждое изменение рынка было бы «потерей», шаг 115). Снимок источника только для сверки (роль RECONCILIATION)
    * пишется в журнал снимков и в решение не идёт
    */
   async function pollCompetitors(ctx: AdapterCallContext, queries: readonly CompetitorQuery[], options: PollOptions = {}) {
@@ -827,19 +831,32 @@ export function createPricingPipeline(deps: PipelineDeps) {
       return { candidates: candidates.length, due: due.length, ...polled, processingFailed: polled.processingFailed.length, plan: { coldTierExceedsBudget: plan.coldTierExceedsBudget, demoted: plan.demoted.length } };
     },
 
-    /** Р-121: сверка по кругу (Amazon — квота опроса не позволяет опрашивать все товары): очередное окно товаров аккаунта */
-    async reconcileRotation(ctx: AdapterCallContext, options: { size: number; cycle: number; graceSeconds?: number }) {
+    /**
+     * Шаг 115 [Р-240]: опрос по кругу (Amazon `getCompetitiveSummary` — окно до 20 товаров на запрос раз в 31 с, бюджет пары): очередное окно товаров
+     * аккаунта, самые давние первыми; снимки идут путём решения. `reconcile` [Р-121] — окно ещё и страхует уведомления: вызывающий просит об этом там,
+     * где уведомления приходят (`notificationsFlowing`). Отметка «опрошен»: прочитанный и отказавший поштучно — да (постоянный отказ не занимает окно
+     * каждый раз, ревью шага 55, находка 2); окно, которое канал отклонил целиком и временно (429, сбой), — нет: оно повторяется первым, а не ждёт круга
+     */
+    async pollRotation(ctx: AdapterCallContext, options: { size: number; cycle: number; reconcile: boolean; graceSeconds?: number }) {
       // Находка 9 ревью шага 24: окно — по номеру вызова, который ведёт вызывающий, а не по часам: пропуск вызовов не пропускает товары
-      const { queries, total } = await store.pickReconciliationSample(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
-      if (queries.length === 0) return { snapshots: [], failures: [], reconciliation: emptyReconciliation(), queries: 0, total };
-      const polled = await pollCompetitors(ctx, queries, { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } });
-      /**
-       * Шаг 55 (OQ-241): отмечается каждый товар попытки — и сверенный, и отказавший. Ревью шага 55, находка 2: отказавший, не отмеченный,
-       * навсегда оставался «самым давним», и 20 товаров с постоянным отказом занимали каждое окно — остальные не сверялись бы никогда.
-       * Отказавший повторится в своём круге; отказ окна виден провалом запуска (jobs.ts)
-       */
-      await store.markPolled(ctx.tenantId, ctx.channelAccountId, queries, deps.now());
-      return { ...polled, queries: queries.length, total };
+      const { queries, total } = await store.pickRotationWindow(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
+      if (queries.length === 0) return { snapshots: [] as SnapshotReport[], failures: [] as CompetitorReadResult['failures'], processingFailed: 0, queries: 0, total, windowFailure: null };
+      const polled = await pollCompetitors(ctx, queries, options.reconcile ? { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } } : {});
+      const keyOf = (q: CompetitorQuery) => `${q.marketplace}|${q.channelProductRef}|${q.condition}`;
+      // 429 у строки пакета — тот же отказ квоты, что у всего запроса: не свойство товара
+      const beyondItem = polled.failures.filter((f) => f.error.scope !== 'ITEM' || f.error.code === 'RATE_LIMITED');
+      const again = new Set(beyondItem.filter((f) => f.error.class === 'TRANSIENT').map((f) => keyOf(f.query)));
+      await store.markPolled(ctx.tenantId, ctx.channelAccountId, queries.filter((q) => !again.has(keyOf(q))), deps.now());
+      return { ...polled, processingFailed: polled.processingFailed.length, queries: queries.length, total, windowFailure: beyondItem[0]?.error ?? null };
+    },
+
+    /**
+     * Шаг 115 [Р-121, Р-240]: приходят ли уведомления о предложениях этого аккаунта — ANY_OFFER_CHANGED дошло до журнала сырья за семь суток. Без подписки
+     * каждое движение рынка было бы «потерей»; подписка замолчала — неделю сверка кричит о потере (CRITICAL), и аккаунт становится опрашиваемым
+     */
+    async notificationsFlowing(ctx: AdapterCallContext): Promise<boolean> {
+      const since = new Date(Date.parse(deps.now()) - NOTIFICATIONS_FLOW_WINDOW_SECONDS * 1000).toISOString();
+      return (await store.notificationsFlowing?.(ctx.tenantId, ctx.channelAccountId, since as Instant)) ?? false;
     },
 
     /**

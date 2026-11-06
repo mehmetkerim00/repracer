@@ -145,12 +145,13 @@ test('step 103 (E3) [Р-228]: changing or clearing the default acts on future ne
 });
 
 test('step 103 (E4) [Р-228, Р-39]: a strategy the channel gives no data for cannot become the default — the database refuses with the reason', async () => {
-  const win = await store.saveStrategy(amazon.tenantId, { strategyId: null, name: 'Win the Buy Box', deadbandMinor: 0, assignTo: [],
-    params: { type: 'WIN_BUYBOX', undercutMinor: 1, fulfillmentHandicapMinor: 0, creepUp: false, creepStepBp: 100, atBound: 'CAP' } as never }, actor(amazon));
-  assert.equal(win.status, 'SAVED');
-  const refused = await store.setDefaultStrategy(amazon.tenantId, amazon.ids.dbId(AMAZON), (win as { strategy: { strategyId: string } }).strategy.strategyId, actor(amazon));
+  // Шаг 115 [Р-240]: «Win the Buy Box» на Amazon теперь доступна; недоступное — самая дешёвая по всему рынку: Amazon отдаёт верхние предложения, а не весь рынок
+  const market = await store.saveStrategy(amazon.tenantId, { strategyId: null, name: 'Beat the whole market', deadbandMinor: 0, assignTo: [],
+    params: { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'MARKET', compareLanded: false, atBound: 'CAP' } as never }, actor(amazon));
+  assert.equal(market.status, 'SAVED');
+  const refused = await store.setDefaultStrategy(amazon.tenantId, amazon.ids.dbId(AMAZON), (market as { strategy: { strategyId: string } }).strategy.strategyId, actor(amazon));
   assert.equal(JSON.stringify([refused.status, (refused as { cause?: string }).cause]), JSON.stringify(['INVALID', 'STRATEGY_UNAVAILABLE']), 'refused: the channel gives no data for the strategy');
-  assert.match(JSON.stringify((refused as { unmet?: unknown }).unmet), /BUYBOX_WINNER/, 'the reason names what the channel does not give');
+  assert.match(JSON.stringify((refused as { unmet?: unknown }).unmet), /COMPLETENESS/, 'the reason names what the channel does not give');
   assert.equal((await store.defaultStrategies(amazon.tenantId)).find((d) => d.channelAccountId === amazon.ids.dbId(AMAZON))?.strategyId ?? null, null, 'nothing was saved');
 });
 
@@ -276,9 +277,9 @@ test('step 103 [Р-228, Р-39]: the latest version of the default became unavail
   assert.equal(beat.status, 'SAVED');
   const strategyId = (beat as { strategy: { strategyId: string } }).strategy.strategyId;
   assert.equal((await store.setDefaultStrategy(amazon.tenantId, account, strategyId, actor(amazon))).status, 'SET');
-  // Вторая версия — «Buy Box, только FBA»: на Amazon держатель Buy Box не назван (A-29) — канал этой версии данных не даёт
+  // Вторая версия — самая дешёвая по всему рынку: Amazon отдаёт верхние предложения, а не весь рынок — канал этой версии данных не даёт
   const v2 = await store.saveStrategy(amazon.tenantId, { strategyId, name: 'Beat the lowest', deadbandMinor: 0, assignTo: [],
-    params: { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'VISIBLE_TOP_N', compareLanded: false, atBound: 'CAP', anchor: 'BUYBOX', competeWith: 'CHANNEL' } as never }, actor(amazon));
+    params: { type: 'BEAT_LOWEST', undercutMinor: 1, scope: 'MARKET', compareLanded: false, atBound: 'CAP', anchor: 'LOWEST' } as never }, actor(amazon));
   assert.equal(v2.status, 'SAVED');
   await store.recordDiscoveredOffers(amazon.tenantId, account, [{ marketplace: AMAZON_DE, externalSku: 'SYN-103-AMZ-V2', externalUnitId: null, externalOfferId: null,
     channelProductRef: 'B0SYN1033', gtin: null, condition: 'new', fulfillment: 'MERCHANT' }]);

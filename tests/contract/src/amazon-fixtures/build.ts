@@ -304,7 +304,7 @@ export function convertKauflandScenario(file: string, id: string, title: string)
       steps.push({ ...buyboxProbeAsLowest(step), delivery: delivery(anyOfferChanged(`syn-${body.id_message}`, DE, asin(String(body.payload.id_product)), body.payload.timestamp,
         kauflandOffersToAoc(body.payload.offers ?? [])), step.delivery.claimed) } as Step);
     } else if (step.kind === 'pipelinePoll') {
-      // Опроса у Amazon нет [AMZ_C07]: тот же ответ /buybox приходит уведомлением
+      // Сценарий преобразован из Kaufland: тот же ответ /buybox приходит уведомлением, а опрос сводки — свой сценарий
       const expected = (step.expect as { snapshots?: unknown[] } | undefined)?.snapshots ?? [];
       (step.queries as Array<{ channelProductRef: string }>).forEach((q, i) => {
         const at = kex.findIndex((e) => e.request.path === '/v2/buybox' && (e.request.query as Record<string, string>)?.id_product === q.channelProductRef);
@@ -373,7 +373,7 @@ export function competitiveSummaryExchange(id: string, items: ReadonlyArray<{ as
     })) }] };
   };
   return {
-    id, note: 'getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — сверка потерь ANY_OFFER_CHANGED [Р-121, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]',
+    id, note: 'getCompetitiveSummary: featuredBuyingOptions и lowestPricedOffers New/Consumer — источник решений [Р-240, AMZ_C11], сегменты Buy Box и купоны [Р-234, Р-235]',
     request: { method: 'POST', path: '/batches/products/pricing/2022-05-01/items/competitiveSummary', body: { requests: items.map((i) => ({
       asin: i.asin, marketplaceId: i.marketplace ?? DE, includedData: ['featuredBuyingOptions', 'lowestPricedOffers'], lowestPricedOffersInputs: [{ itemCondition: 'New', offerType: 'Consumer' }],
       method: 'GET', uri: '/products/pricing/2022-05-01/items/competitiveSummary',

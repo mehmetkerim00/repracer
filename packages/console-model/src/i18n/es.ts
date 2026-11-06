@@ -963,7 +963,10 @@ export const es: Messages = {
       /** Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */
       dataSource: {
         notifications: (when: string, parts: string) => `Origen de los datos: avisos de Amazon, el último ${when}; en 24 horas: ${parts}. La comprobación tras cada actualización de precio y la revisión del catálogo siguen funcionando.`,
-        polling: 'Origen de los datos: solo consultas — no nos llegó ningún aviso de Amazon en 24 horas. El estado de las ofertas viene de la comprobación tras cada actualización de precio y de la revisión del catálogo; las ofertas de la competencia para el precio llegan solo con avisos.',
+        polling: 'Origen de los datos: solo consultas — no nos llegó ningún aviso de Amazon en 24 horas y todavía no se ha leído el resumen competitivo. El estado de las ofertas viene de la comprobación tras cada actualización de precio y de la revisión del catálogo.',
+        // Шаг 115 [Р-240]: опрос сводки — источник конкурентов; сколько лет самому давнему чтению
+        polled: (minutes: number) => `Origen de los datos: solo consultas — no nos llegó ningún aviso de Amazon en 24 horas. Las ofertas de la competencia para el precio vienen del resumen competitivo de Amazon, leído por turnos: la lectura más antigua tiene ${minutes} min. El estado de las ofertas viene de la comprobación tras cada actualización de precio y de la revisión del catálogo.`,
+        polledAlongside: (minutes: number) => ` El resumen competitivo también se lee por turnos: la lectura más antigua tiene ${minutes} min.`,
         parts: {
           offers: (n: number) => `${n} ${n === 1 ? 'cambio' : 'cambios'} de la competencia`,
           status: (n: number) => `${n} ${n === 1 ? 'cambio' : 'cambios'} de estado de ofertas`,
@@ -1302,7 +1305,7 @@ export const es: Messages = {
         ANALYTICS_PARTITION_FORCE_DROPPED: { what: 'se eliminó a la fuerza una partición que nunca se exportó: ese historial se perdió', step: 'Anote las particiones indicadas y busque la causa de la exportación fallida: esos días no se pueden restaurar.' },
         COMPETITOR_POLL_BUDGET_EXCEEDED: { what: 'la consulta de la competencia ya no cabe en el presupuesto de solicitudes del canal', step: 'Revise en el evento cuántas ofertas se pasaron al nivel frío y decida sobre el presupuesto o la frecuencia.' },
         COMPETITOR_POLL_FAILURES: { what: 'falla una parte importante de las consultas de la competencia de una cuenta', step: 'Revise el primer código de error del evento: credenciales de la cuenta, accesibilidad del canal o su límite de solicitudes.' },
-        AMAZON_RECONCILIATION_CIRCLE_SLOW: { what: 'el ciclo de conciliación en Amazon tarda más de lo previsto', step: 'Revise cuántas cuentas comparten el límite de solicitudes de la aplicación: el ciclo crece con cada cuenta.' },
+        AMAZON_SUMMARY_ROUND_SLOW: { what: 'la ronda de competidores en Amazon tarda más de una hora', step: 'Los precios siguen al mercado más despacio en esta cuenta: el catálogo es mayor de lo que cubre una solicitud cada 31 segundos en una hora. Compare las ofertas del evento con el límite de solicitudes; un límite mayor lo concede el soporte de Amazon.' },
         SCHEDULER_JOB_FAILING: { what: 'una tarea periódica del planificador falla varias veces seguidas', step: 'Tome el nombre de la tarea y el código de error del evento y revise el registro del proceso del planificador.' },
         SCHEDULER_JOB_LAGGING: { what: 'una tarea periódica va atrasada respecto a su calendario', step: 'Compruebe que el proceso del planificador está en marcha y si alguna tarea retiene su concesión (lease); en la exportación, el atraso significa historial perdido.' },
         SCHEDULER_LEASE_LOST: { what: 'el planificador perdió la concesión (lease) de una tarea mientras se ejecutaba', step: 'Compruebe si hay más de un proceso de planificador en marcha: debe haber exactamente uno.' },
@@ -1404,7 +1407,7 @@ export const es: Messages = {
       gapAbove: (amount: string) => `${amount} por encima del ganador de la Buy Box, con envío`, gapNone: 'Igual o por debajo del precio con envío del ganador',
       // Шаг 109 [Р-234]: купон — рядом с базовой ценой; стратегии считают по базовой
       withCoupon: (price: string) => `(${price} con cupón)`,
-      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) — Buy Box по группам покупателей и купоны, со своим моментом
+      // Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала — Buy Box по группам покупателей и купоны, со своим моментом
       summary: {
         title: (channel: string) => `Resumen de la competencia de ${channel}`, observed: 'A fecha de',
         segmentsTitle: 'Buy Box según las visitas de clientes', viewsOf: (pct: string) => `${pct} de las visitas`,
@@ -1416,7 +1419,7 @@ export const es: Messages = {
         couponNote: 'Los precios se deciden sobre el precio base: el cupón se aplica al pagar y no todos los clientes lo ven.',
         // Шаг 109.1 [Р-71]: суммы предложений не в валюте витрины не печатаются — строка называет валюту, если она одна
         hiddenOffers: (n: number, currency: string | null) => `${n} ${n === 1 ? 'oferta' : 'ofertas'} en ${currency ?? 'otras monedas'} no se ${n === 1 ? 'muestra' : 'muestran'}`,
-        note: (channel: string) => `${channel} indica en este resumen la oferta de la Buy Box para cada grupo de clientes. Solo se lee para comprobar y no mueve precios.`,
+        note: (channel: string) => `${channel} indica en este resumen la oferta de la Buy Box para cada grupo de clientes. El vendedor con más de la mitad de las visitas cuenta como titular de la Buy Box, y los precios se deciden con este resumen.`,
       },
       share: {
         title: 'Participación en la Buy Box', caption: 'Por lecturas de datos de la competencia, no por ventas: cada lectura cuenta hasta la siguiente, como máximo 24 horas.',

@@ -456,9 +456,9 @@ test('шаг 103: демо — стратегия по умолчанию amazon
   assert.equal(amazon.defaultStrategy?.results, 'Assigned to 2 new offers so far');
   assert.equal(ebay.defaultStrategy?.line, 'Default strategy for new offers: None — assign manually', 'no default on ebay.com — the behaviour before the step');
   assert.equal(JSON.stringify([amazon.defaultStrategy?.canEdit, ebay.defaultStrategy?.canEdit]), JSON.stringify([false, false]), 'the guest only reads');
-  // «Win the Buy Box» на amazon.com недоступна (держатель Buy Box не назван, A-29) — в выборе видна с причиной и не выбирается [Р-39]
+  // Шаг 115 (Q11): «Win the Buy Box» на amazon.com доступна: держателя называет сводка большинством просмотров [Р-240]
   const win = amazon.defaultStrategy?.options.find((o) => o.label.startsWith('Win the Buy Box'));
-  assert.equal(JSON.stringify([win?.disabled, /not available on this channel: needs .*Buy Box winner/.test(win?.label ?? '')]), JSON.stringify([true, true]), JSON.stringify(win));
+  assert.equal(JSON.stringify([win?.disabled, /not available on this channel/.test(win?.label ?? '')]), JSON.stringify([false, false]), JSON.stringify(win));
   // Карточка стратегии называет аккаунт, для которого она — умолчание
   const strategies = (await call<{ strategies: Array<{ name: string | null; defaultFor: string | null }> }>('GET', `/api/worlds/${w}/strategies`, guest)).body;
   assert.equal(strategies.strategies.find((x) => x.name === 'Beat the lowest by 1 cent')?.defaultFor, 'Default for new offers on: Amazon · amazon.com');
@@ -547,18 +547,24 @@ test('step 105 (E1, E2, E4) [Р-230]: demo on PostgreSQL — Buy Box columns are
   const groups = new Map<string, string[]>();
   for (const holder of ['SELF', 'OTHER', 'NONE', 'UNKNOWN', 'NO_DATA']) groups.set(holder, (await offers105(token, w, `&bb=1&holder=${holder}`)).map((r) => r.unit.writeScopeId));
   assert.equal([...groups.values()].flat().length, rows.length, 'every offer in exactly one holder group');
-  const amazon = rows.filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind !== 'NO_SNAPSHOT').map((r) => r.unit.writeScopeId);
-  assert.ok(amazon.length > 0 && amazon.every((id) => groups.get('UNKNOWN')!.includes(id) && !groups.get('OTHER')!.includes(id)), 'amazon.com offers are unknown, not another seller');
+  // Шаг 115 [Р-240]: у amazon.com держателя называет сводка большинством просмотров, а уведомление — нет: группа предложения — вид его последнего снимка; неизвестный — не «другой продавец»
+  const amazon = rows.filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind !== 'NO_SNAPSHOT');
+  assert.ok(amazon.length > 0 && amazon.every((r) => groups.get(r.buybox!.holder.kind)!.includes(r.unit.writeScopeId)), 'an amazon.com offer sits in the group of its own holder kind');
+  assert.ok(amazon.some((r) => r.buybox!.holder.kind === 'UNKNOWN') && amazon.some((r) => r.buybox!.holder.kind === 'OTHER' || r.buybox!.holder.kind === 'SELF'),
+    `both kinds of the last snapshot exist in the demo: ${JSON.stringify(amazon.map((r) => r.buybox!.holder.kind))}`);
+  assert.ok(!amazon.some((r) => r.buybox!.holder.kind === 'UNKNOWN' && groups.get('OTHER')!.includes(r.unit.writeScopeId)), 'unknown is not another seller');
 });
 
-test('step 105.1 [Р-230]: demo on PostgreSQL — the amazon.com Buy Box price carries the shipping the channel named (Summary.BuyBoxPrices), not «shipping not named»', async () => {
+test('step 105.1 [Р-230]: demo on PostgreSQL — the amazon.com Buy Box price carries the shipping the channel named (Summary.BuyBoxPrices or the majority offer), not «shipping not named»', async () => {
   const { token, w } = await guest105();
   const c = messagesFor('en').ui.competition;
-  const amazon = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind === 'UNKNOWN');
+  const amazon = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind !== 'NO_SNAPSHOT');
   assert.ok(amazon.length > 0, 'amazon.com offers with a snapshot');
   for (const row of amazon) {
     assert.equal(row.buybox!.priceLanded, true, `${row.unit.label}: the Buy Box price is with shipping`);
     const view = (await call<Competition105>('GET', `/api/worlds/${w}/competition/${row.unit.writeScopeId}?period=7d`, token)).body;
+    // Шаг 115 [Р-240]: держатель назван сводкой — цена в его строке таблицы (колонка выше уже проверена); отдельная строка цены — только у неизвестного держателя
+    if (view.holder!.kind !== 'UNKNOWN') continue;
     assert.ok(view.buyBoxPrice !== null && view.buyBoxPrice !== c.buyBoxPriceNoShipping(row.buybox!.price ?? '') && view.buyBoxPrice.startsWith(c.buyBoxPrice('')),
       `${row.unit.label}: Competition names the Buy Box price with shipping — ${view.buyBoxPrice}`);
   }
@@ -632,16 +638,17 @@ test('step 107 [Р-233, Р-231, Р-232]: demo on PostgreSQL — channel bounds n
   const heldTrace = JSON.stringify((await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${held[0]!.decisionId}`, token)).body);
   assert.match(heldTrace, /is below the channel's own minimum \$16\.00 — the channel would deactivate this offer, so the price was not sent/);
   // Распродажа ниже Min канала — цена уходит, конфликт в квитанции решения режима
-  const cl = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${clearance[0]!.row.unit.writeScopeId}`, token)).body.items[0]!;
-  const clTrace = JSON.stringify((await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${cl.decisionId}`, token)).body);
-  assert.match(clTrace, /Your clearance floor \$10\.00 is below the channel's own minimum/);
+  // Шаг 115 [Р-240]: решений стало больше (и из опроса сводки, «без изменения» в том числе) — ищется решение, которое двинуло цену
+  const clItems = (await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${clearance[0]!.row.unit.writeScopeId}`, token)).body.items;
+  const clTraces = await Promise.all(clItems.slice(0, 50).map(async (d) => JSON.stringify((await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${d.decisionId}`, token)).body)));
+  assert.ok(clTraces.some((t) => /Your clearance floor \$10\.00 is below the channel's own minimum/.test(t)), `no decision of the mode names the conflict among ${clItems.length}`);
   // Р-232: продавцы демо синтетические — ни одной ссылки ни на странице Competition, ни в колонке держателя, ни в квитанции
   for (const r of rows) {
     const view = (await call<{ rows: Array<{ sellerUrl?: string | null }> }>('GET', `/api/worlds/${w}/competition/${r.unit.writeScopeId}?period=7d`, token)).body;
     assert.ok(view.rows.every((x) => !x.sellerUrl), `${r.unit.label}: no seller link in the demo`);
     assert.ok(!(r.buybox as { sellerUrl?: string | null } | null | undefined)?.sellerUrl, `${r.unit.label}: no seller link in the holder column`);
   }
-  assert.ok(!/amazon\.com\/sp\?seller=/.test(clTrace + heldTrace), 'no seller link in the receipts of the demo');
+  assert.ok(!/amazon\.com\/sp\?seller=/.test(clTraces.join('') + heldTrace), 'no seller link in the receipts of the demo');
 });
 
 type Summary109 = { title: string; observed: { at: string }; segments: Array<{ share: string; seller: string; self: boolean; group: string }>; holder: string | null;
@@ -668,7 +675,7 @@ test('step 109 [Р-234, Р-235]: demo on PostgreSQL — amazon.com offers show t
   const { token, w } = await guest105();
   const m = messagesFor('en');
   const c = m.ui.competition;
-  const amazon = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind === 'UNKNOWN');
+  const amazon = (await offers105(token, w, '&bb=1')).filter((r) => r.unit.channel === 'AMAZON' && r.buybox!.holder.kind !== 'NO_SNAPSHOT');
   assert.ok(amazon.length >= 10, `amazon.com offers with a snapshot: ${amazon.length}`);
   const seen = { summaries: 0, majority: 0, none: 0, coupons: 0, shares: 0 };
   for (const first of amazon) {
@@ -679,7 +686,8 @@ test('step 109 [Р-234, Р-235]: demo on PostgreSQL — amazon.com offers show t
       row = (await offers105(token, w, `&bb=1&q=${encodeURIComponent(first.unit.externalUnitId)}`)).find((r) => r.unit.writeScopeId === first.unit.writeScopeId) ?? first;
       view = (await call<Competition105 & { summary: Summary109 | null }>('GET', `/api/worlds/${w}/competition/${first.unit.writeScopeId}?period=7d`, token)).body;
     }
-    assert.equal(view.holder!.kind, 'UNKNOWN', `${row.unit.label}: the notification still does not name the holder (A-29)`);
+    // Шаг 115 [Р-240]: держателя называет сводка большинством просмотров, уведомление — нет (A-29): страница и колонка говорят одно
+    assert.equal(view.holder!.kind, row.buybox!.holder.kind, `${row.unit.label}: the Offers column is the page`);
     assert.deepEqual(usMoneyViolations(view, view.summary), [], `${row.unit.label}: us profile — every amount is in dollars, no euro anywhere on the page`);
     assert.equal(row.buybox!.share, view.share.available ? view.share.value : null, `${row.unit.label}: the Offers column is the page`);
     if (view.share.available) seen.shares += 1;
@@ -697,7 +705,8 @@ test('step 109 [Р-234, Р-235]: demo on PostgreSQL — amazon.com offers show t
   assert.ok(seen.summaries >= 10, `the competitive summary is on the page of the reconciled offers: ${JSON.stringify(seen)}`);
   assert.ok(seen.majority > 0 && seen.none > 0, `a majority holder and «no majority» are both shown: ${JSON.stringify(seen)}`);
   assert.ok(seen.coupons > 0, `competitor coupons are shown: ${JSON.stringify(seen)}`);
-  assert.ok(seen.shares >= 10, `the amazon.com Buy Box share counts the spans of the summaries: ${JSON.stringify(seen)}`);
+  // Шаг 115: модель перестала называть держателя при двух продавцах поровну: без большинства отрезка нет, и доли у такого товара нет [Р-235]
+  assert.ok(seen.shares >= seen.majority && seen.shares > 0, `the amazon.com Buy Box share counts the spans of the summaries: ${JSON.stringify(seen)}`);
   // Положительный контроль правила денег [Р-94]: страница с евро, сумма не в долларах и скрытое предложение — три нарушения, каждое своё
   assert.deepEqual(usMoneyViolations({ note: '€19.65' }, { coupons: [{ price: '$19.65', coupon: '€18.79' }], hidden: '1 offer in EUR is not shown' }),
     ['€ on the page', 'not a dollar amount: €18.79', 'offers outside the storefront currency: 1 offer in EUR is not shown'], 'the money rule finds a euro amount');

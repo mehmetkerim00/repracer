@@ -8,7 +8,7 @@ import type { ReconciliationCompared } from './store.ts';
  *
  * Сверяется то, о чём канал обязан уведомить, и только если это есть в обоих источниках: Buy Box — когда его дают и уведомление, и опрос
  * (Kaufland buy_box_changed и GET /buybox), иначе наименьшая цена конкурента (Amazon: ANY_OFFER_CHANGED — изменения топ-20 предложений,
- * getCompetitiveSummary — наименьшие предложения без победителя Buy Box, AMZ_C11).
+ * getCompetitiveSummary — наименьшие предложения, а цена Buy Box — по большинству просмотров: другое число, чем Summary.BuyBoxPrices, AMZ_C11).
  */
 
 /**
@@ -20,9 +20,12 @@ export const LOSS_GRACE_BASIS = 'ASSUMPTION (OQ-175): notification delay of the 
 
 export interface HeldState { observedAt: Instant; buyboxMinor: number | null; lowestMinor: number | null }
 
-/** Шаг 97: сверяется цена Buy Box — достаточно, что оба источника её отдают; держатель (`hasBuyboxWinner`) сверке не нужен */
+/**
+ * Шаг 97: сверяется цена Buy Box — достаточно, что оба источника её отдают; держатель (`hasBuyboxWinner`) сверке не нужен. Шаг 115 [Р-240]: цена Buy Box
+ * источника по долям просмотров — цена большинства или самой большой группы, а не единая цена канала: сравнение с уведомлением давало бы ложные потери
+ */
 export function comparedValue(push: CompetitorSourceDescriptor | undefined, poll: CompetitorSourceDescriptor | undefined): ReconciliationCompared {
-  return push?.hasBuyboxPrice && poll?.hasBuyboxPrice ? 'BUYBOX' : 'LOWEST_COMPETITOR';
+  return push?.hasBuyboxPrice && poll?.hasBuyboxPrice && poll.holderByViewShare !== true ? 'BUYBOX' : 'LOWEST_COMPETITOR';
 }
 
 /** Те же значения, что у последнего принятого состояния (competitor_state): Buy Box — со своим, наименьшая — без своих предложений */
