@@ -152,6 +152,8 @@ export function shadowSummaryList(summary: ShadowSummary, m: Messages): { rows: 
 
 export interface ShadowChartView {
   title: string;
+  /** Шаг 116.1 (решение владельца): столбики — записанные строки журнала, плитка Decisions — все проверки с повторами [Р-241]; расхождение объяснено словами */
+  note: string;
   /** Шаг 96.1 (решение владельца): последние сутки — сегодняшние, неполные: подпись «Today», подсказка «partial day», тон приглушённый */
   points: Array<{ day: string; label: string; value: number; title: string; partial: boolean }>;
 }
@@ -185,6 +187,7 @@ export function shadowChart(byHour: ShadowPage['decisionsByHour'], until: string
   const nf = new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US');
   return {
     title: m.ui.shadow.chartTitle,
+    note: m.ui.shadow.chartNote(m.ui.app.screens.feed, m.ui.shadow.stats.decisions),
     points: dayKeys.map((k, i) => {
       const value = totals.get(k) ?? 0;
       const partial = i === dayKeys.length - 1 && k === today;

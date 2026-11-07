@@ -66,6 +66,8 @@ function DayChart({ chart }: { chart: ShadowChartView }) {
           {chart.points.map((p, i) => <span key={p.day} className={p.partial ? 'today' : undefined}>{labelled(i) ? p.label : ''}</span>)}
         </div>
       </div>
+      {/* Шаг 116.1: столбики и плитка Decisions считают разное — сказано рядом, а не молча [Р-241] */}
+      <p className="note">{chart.note}</p>
     </figure>
   );
 }

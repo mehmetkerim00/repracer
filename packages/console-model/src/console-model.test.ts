@@ -518,6 +518,20 @@ test('step 73: a raise after a cost update, a step toward the floor and its appr
   assert.equal(describe({ ...approvedStep, params: { ...approvedStep.params, finalMinor: 1600 } }, en).text, 'Price €16.00 approved within €15.24–€30.00.');
 });
 
+/**
+ * Шаг 116.1 (решение владельца по докладу 116): столбики графика считают записанные строки журнала, а плитка Decisions — все проверки,
+ * включая повторы [Р-241]. Цифры либо сходятся, либо объяснены рядом словами: подпись есть на каждом языке и называет оба числа
+ */
+test('step 116.1: the shadow chart says under itself that the bars count written entries and the Decisions tile counts every check', () => {
+  const notes = (['en', 'de', 'es', 'fr'] as const).map((l) => {
+    const m = messagesFor(l);
+    const note = shadowChart([], '2026-10-13T20:00:00Z', 7, m, 'America/Los_Angeles').note;
+    return { l, note, names: [m.ui.shadow.stats.decisions, m.ui.app.screens.feed].every((n) => note.includes(n)) };
+  });
+  assert.deepEqual(notes.map((n) => [n.l, n.names]), [['en', true], ['de', true], ['es', true], ['fr', true]], JSON.stringify(notes));
+  assert.equal(new Set(notes.map((n) => n.note)).size, 4, 'each language has its own sentence');
+});
+
 test('step 82: the shadow chart folds hourly decisions into the seller\'s own days — the same zone as every time on the screen', () => {
   const en = messagesFor('en');
   const until = '2026-10-13T20:00:00Z';

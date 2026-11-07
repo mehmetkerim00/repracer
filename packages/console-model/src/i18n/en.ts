@@ -1068,7 +1068,7 @@ export const en = {
     },
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
-      chartTitle: 'Decisions per day', chartToday: 'Today', chartPartialDay: 'partial day',
+      chartTitle: 'Decisions per day', chartNote: (screen: string, tile: string) => `The bars count the entries written to ${screen}; the ${tile} tile counts every check, repeats included.`, chartToday: 'Today', chartPartialDay: 'partial day',
       /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
       list: {
         period: 'Period', floorHeld: 'Price landed exactly on the floor', floorHeldHint: 'the floor decided it, and without the floor it would have gone lower',

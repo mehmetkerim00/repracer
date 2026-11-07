@@ -1026,7 +1026,7 @@ export const de: Messages = {
     },
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
-      chartTitle: 'Entscheidungen pro Tag', chartToday: 'Heute', chartPartialDay: 'angebrochener Tag',
+      chartTitle: 'Entscheidungen pro Tag', chartNote: (screen: string, tile: string) => `Die Balken zählen die in „${screen}“ geschriebenen Einträge; die Kachel „${tile}“ zählt jede Prüfung, Wiederholungen eingeschlossen.`, chartToday: 'Heute', chartPartialDay: 'angebrochener Tag',
       /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
       list: {
         period: 'Zeitraum', floorHeld: 'Preis landete genau auf der Untergrenze', floorHeldHint: 'sie hat ihn bestimmt, ohne sie wäre er tiefer gegangen',

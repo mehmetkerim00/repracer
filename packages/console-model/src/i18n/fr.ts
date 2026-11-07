@@ -1068,7 +1068,7 @@ export const fr: Messages = {
     },
     shadow: {
       /** Шаг 82: подпись графика в hero тени */
-      chartTitle: 'Décisions par jour', chartToday: 'Aujourd’hui', chartPartialDay: 'journée partielle',
+      chartTitle: 'Décisions par jour', chartNote: (screen: string, tile: string) => `Les barres comptent les entrées écrites dans ${screen} ; la tuile ${tile} compte chaque vérification, répétitions comprises.`, chartToday: 'Aujourd’hui', chartPartialDay: 'journée partielle',
       /** Шаг 84: сводка экрана — списком «показатель — значение», оговорки — сноской под ним (смысл тот же, что у строк summary) */
       list: {
         period: 'Période', floorHeld: 'Prix arrivé exactement au plancher', floorHeldHint: 'le plancher a décidé, et sans lui le prix serait descendu plus bas',
