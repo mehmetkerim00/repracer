@@ -98,6 +98,9 @@ test('step 116 [Р-241]: repeats write no intent, no decision and no floor hold;
   }
   const rows = await rowsOf(shadow, 'ws-1');
   assert.deepEqual(rows.map((r) => [r.outcome, r.no_change_reason, r.repeats_before]), [['NO_CHANGE', 'TARGET_OUTSIDE_BOUNDS_HOLD', 0]], 'one row: the competitor moved, the reason did not');
+  // Счётчик предложения считает оценки, как плитки (красный прогон суток демо: 29 вместо 720); последнее решение — по-прежнему строка
+  const [stats] = await store.scopeDecisionStats(shadow.tenantId, [shadow.ids.dbId('ws-1')]);
+  assert.equal(stats!.decisions, 4, 'one row and three repeats are four evaluations of this offer');
   assert.equal(await count('channel_data.price_intent', shadow, 'ws-1'), 1, 'no intent for a repeat');
   assert.equal(await count('channel_data.floor_hold', shadow, 'ws-1'), 1, 'one hold per state: the floor figure no longer grows with the reading rate');
   const state = await liveOf(shadow, 'ws-1');

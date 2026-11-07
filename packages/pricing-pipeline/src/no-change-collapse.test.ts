@@ -98,6 +98,9 @@ test('step 116 [Р-241]: a repeated reason writes one row and counts; the compet
   assert.deepEqual(h.rows().map((r) => r.reason), ['ALREADY_AT_TARGET', 'TARGET_OUTSIDE_BOUNDS_HOLD'], 'a reason change writes a row at once, a competitor move does not');
   assert.equal(h.rows()[1]!.repeats, 4, 'the new row carries the count of the checks collapsed since the previous one');
   assert.equal((await h.live())!.repeats, 2);
+  // Счётчик предложения считает оценки, как плитки: две строки, 4 повтора в строке и 2 в живой — 8 оценок (красный прогон суток демо: 29 вместо 720)
+  const [stats] = await h.store.scopeDecisionStats('t', ['ws-1']);
+  assert.deepEqual([stats!.latestDecisionId, stats!.decisions], [h.store.decisions.at(-1)!.decisionId, 8], 'the offer counts evaluations; the latest row is still the row');
 });
 
 test('step 116 [Р-241]: the daily pulse writes a row even when nothing changed; a bound change and a price change write at once and reset the state', async () => {

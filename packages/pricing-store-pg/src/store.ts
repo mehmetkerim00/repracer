@@ -3281,7 +3281,9 @@ export class PgPricingStore implements PricingStore {
         `SELECT s.id AS write_scope_id,
                 (SELECT d.price_decision_id FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT 1) AS latest_id,
                 (SELECT d.decided_at FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id ORDER BY d.decided_at DESC, d.price_decision_id DESC LIMIT 1) AS latest_at,
-                (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id)::int AS n
+                -- Шаг 116 [Р-241]: оценки, как плитки: строки, повторы, которые они несут, и повторы открытой строки
+                (SELECT count(*) + coalesce(sum(d.repeats_before), 0) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.write_scope_id = s.id)::int
+                  + coalesce((SELECT st.repeats FROM tenant_data.price_no_change_state st WHERE st.tenant_id = $1 AND st.write_scope_id = s.id), 0) AS n
            FROM unnest($2::uuid[]) AS s(id)`, [tenantId, [...writeScopeIds]]);
       return rows.map((r) => ({ writeScopeId: r.write_scope_id, latestDecisionId: r.latest_id ?? null, latestDecidedAt: r.latest_at ? iso(r.latest_at) : null, decisions: Number(r.n) }));
     });

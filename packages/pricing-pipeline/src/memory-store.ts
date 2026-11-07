@@ -2765,7 +2765,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   async scopeDecisionStats(_tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]> {
     return writeScopeIds.map((writeScopeId) => {
       const own = this.decisions.filter((d) => d.writeScopeId === writeScopeId).sort(InMemoryPricingStore.newestFirst);
-      return { writeScopeId, latestDecisionId: own[0]?.decisionId ?? null, latestDecidedAt: own[0]?.decidedAt ?? null, decisions: own.length };
+      // Шаг 116 [Р-241]: оценки, как плитки: строки, повторы, которые они несут, и повторы открытой строки
+      const evaluations = own.reduce((sum, d) => sum + 1 + (d.repeatsBefore ?? 0), 0) + (this.noChangeLive.get(writeScopeId)?.repeats ?? 0);
+      return { writeScopeId, latestDecisionId: own[0]?.decisionId ?? null, latestDecidedAt: own[0]?.decidedAt ?? null, decisions: evaluations };
     });
   }
 
