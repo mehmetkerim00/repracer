@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0217_verify_schema_invariants_v63.sql';
+const VERIFY = 'migrations/0219_verify_schema_invariants_v64.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -2998,6 +2998,18 @@ export const STEP114_ROWS = [
       m(dropConstraint('listing_status_once_per_notification', 'channel_data.listing_status'), node(R114, L114, 'a second observation of the same notification is refused', '^accepted$')),
       m(dropTrigger('zz_append_only', 'channel_data.listing_status'), smoke('append-only channel_data.listing_status')),
       m(dropTrigger('zz_no_truncate', 'channel_data.listing_status'), smoke('truncate channel_data.listing_status')),
+    ],
+  },
+];
+
+// Шаг 116 [Р-241]: живая строка «без изменения» — данные тенанта: закрытие тенанта её удаляет (правило проверки схемы называет таблицу)
+export const STEP116_ROWS = [
+  {
+    row: 'шаг 116 (Р-241)', critical: false,
+    invariant: 'живая строка «без изменения» удаляется при закрытии тенанта вместе с остальными данными тенанта',
+    mutations: [
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.price_no_change_state', ", ''),
+        verify('tenant_data\\.price_no_change_state: tenant closure does not delete the table')),
     ],
   },
 ];

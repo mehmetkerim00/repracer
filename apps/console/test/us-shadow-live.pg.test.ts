@@ -271,6 +271,9 @@ test('шаг 115.2: стратегия без держателя — причи�
   assert.equal(list.status, 200, JSON.stringify(list.body).slice(0, 300));
   const held = list.body.items.filter((d) => d.reason === 'No single Buy Box holder — kept');
   assert.ok(held.length > 0, `журнал называет причину: ${JSON.stringify(list.body.items.slice(0, 3))}`);
+  // Шаг 116 [Р-241]: опрос и уведомления читают одно предложение часто, а причина одна: строк мало, и верхняя называет, сколько раз проверено то же состояние
+  assert.ok(held.length <= 3, `повтор причины не плодит строк журнала: ${held.length}`);
+  assert.match(held[0]!.checks ?? '', /^Same state on \d+ more checks?, last /, JSON.stringify(held[0]));
   const reasons = new Set<string>();
   for (const item of held.slice(0, 12)) {
     const receipt = await call<DecisionTrace>('квитанция удержания', 'GET', api('decisions', item.decisionId));

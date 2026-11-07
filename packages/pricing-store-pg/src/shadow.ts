@@ -194,7 +194,10 @@ export class PgShadowStore {
            * говорит «выход за границу — отказ, не округление», — и два числа сводки были структурными нулями. Считается
            * то, что видно столбцами: цена пришла РОВНО на пол (или на потолок), то есть границу определила его.
            */
-          `SELECT count(*)::int AS decisions,
+          // Шаг 116 [Р-241]: плитка считает оценки — записанные строки, повторы, которые они несут, и повторы ещё открытых строк. Число на экране не падает от схлопывания
+          `SELECT (count(*) + coalesce(sum(d.repeats_before), 0))::int
+                    + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st
+                        WHERE st.tenant_id = $1 AND st.shadow AND st.last_evaluated_at >= $2 AND st.last_evaluated_at < $3) AS decisions,
                   count(*) FILTER (WHERE d.outcome = 'APPROVED')::int AS changes,
                   count(*) FILTER (WHERE d.final_amount_minor IS NOT NULL AND d.final_amount_minor = d.effective_floor_minor)::int AS floor_held,
                   count(*) FILTER (WHERE d.final_amount_minor IS NOT NULL AND d.final_amount_minor = d.effective_ceiling_minor)::int AS ceiling_held
@@ -281,7 +284,7 @@ export class PgShadowStore {
         tx.query(`SELECT platform.shadow_would_spend_unconfirmed($1, $2::timestamptz, $3::timestamptz) AS n`, [tenantId, since, until]),
         // Шаг 82: те же решения, что у счётчика выше (то же условие и окно), — по часам UTC для графика экрана
         tx.query(
-          `SELECT to_char(date_trunc('hour', d.decided_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, count(*)::int AS decisions
+          `SELECT to_char(date_trunc('hour', d.decided_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, (count(*) + coalesce(sum(d.repeats_before), 0))::int AS decisions
              FROM channel_data.price_decision d
             WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2 AND d.decided_at < $3
             GROUP BY 1 ORDER BY 1`, [tenantId, since, upper]),

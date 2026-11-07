@@ -1470,6 +1470,9 @@ export const en = {
       status: { OK: 'passed', STOP: 'stopped', WARN: 'with remarks', SKIPPED: 'not needed', UNKNOWN: 'no data' },
       marks: { PASS: '✓ passed', FAIL: '✗ failed', SKIPPED: '– skipped', NOT_RUN: '· not checked', INFO: '•' },
       titles: { SNAPSHOT: 'Competitor snapshot', SANITY: 'Input check', ANCHORS: 'Plausibility anchors', STRATEGY: 'Strategy', GATE: 'Price Gate', WRITE: 'Sending to your store', CHANNEL: 'Channel confirmation' },
+      // Шаг 116 [Р-241]: повторы не пишутся строками журнала: строка называет их число
+      checkedSince: (n: number, when: string) => `Same state on ${n} more ${n === 1 ? 'check' : 'checks'}, last ${when}`,
+      checkedBefore: (n: number) => `After ${n} ${n === 1 ? 'check' : 'checks'} with no change of state`,
       noOpNotExplained: 'Not kept for decisions that did not change the price',
       noExplanation: 'No explanation is stored for this decision',
       snapshotNotUsed: 'The strategy does not use competitor data',

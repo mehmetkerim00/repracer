@@ -1415,6 +1415,9 @@ export const de: Messages = {
       status: { OK: 'bestanden', STOP: 'gestoppt', WARN: 'mit Hinweisen', SKIPPED: 'nicht nötig', UNKNOWN: 'keine Daten' },
       marks: { PASS: '✓ bestanden', FAIL: '✗ nicht bestanden', SKIPPED: '– übersprungen', NOT_RUN: '· nicht geprüft', INFO: '•' },
       titles: { SNAPSHOT: 'Wettbewerbsdaten', SANITY: 'Eingangsprüfung', ANCHORS: 'Plausibilitätsanker', STRATEGY: 'Strategie', GATE: 'Price Gate', WRITE: 'Übertragung an Ihren Shop', CHANNEL: 'Bestätigung des Kanals' },
+      // Шаг 116 [Р-241]: повторы не пишутся строками журнала: строка называет их число
+      checkedSince: (n: number, when: string) => `Gleicher Zustand bei ${n} weiteren ${n === 1 ? 'Prüfung' : 'Prüfungen'}, zuletzt ${when}`,
+      checkedBefore: (n: number) => `Nach ${n} ${n === 1 ? 'Prüfung' : 'Prüfungen'} ohne Zustandsänderung`,
       noOpNotExplained: 'Bei Entscheidungen ohne Preisänderung nicht gespeichert',
       noExplanation: 'Zu dieser Entscheidung ist keine Begründung gespeichert',
       snapshotNotUsed: 'Die Strategie verwendet keine Wettbewerbsdaten',

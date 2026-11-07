@@ -135,7 +135,7 @@ test('Р-169: сутки демо в тени — движок работает 
   measured.push({ operation: `demo.advance (${VIRTUAL_HOURS} виртуальных часа в тени)`, seconds, status: 200 });
 
   const { rows: [d] } = await observer.query(
-    `SELECT count(*)::int AS n, count(*) FILTER (WHERE shadow)::int AS shadowed,
+    `SELECT count(*)::int AS n, (count(*) + coalesce(sum(repeats_before), 0))::int + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st WHERE st.tenant_id = $1) AS evaluations, count(*) FILTER (WHERE shadow)::int AS shadowed,
             count(*) FILTER (WHERE outcome <> 'NO_CHANGE')::int AS interventions
        FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
   const { rows: [h] } = await observer.query(
@@ -146,13 +146,13 @@ test('Р-169: сутки демо в тени — движок работает 
   const { rows: failures } = await observer.query(
     `SELECT job_name, error_code, count(*)::int AS n FROM maintenance.scheduled_job_run WHERE outcome = 'FAILED' GROUP BY 1, 2 ORDER BY 1`);
   Object.assign(numbers, {
-    decisions: Number(d!.n), shadowDecisions: Number(d!.shadowed), interventions: Number(d!.interventions),
+    decisions: Number(d!.n), evaluations: Number(d!.evaluations), shadowDecisions: Number(d!.shadowed), interventions: Number(d!.interventions),
     heldWrites: Number(h!.held), appliedWrites: Number(h!.applied), wouldSpendBudget: Number(h!.would_spend),
     channelRequests: Object.fromEntries(demo.live.requests), seconds,
   });
 
-  // Движок РАБОТАЛ: решений столько же, сколько у боевого мира тех же суток
-  assert.ok(Number(d!.n) >= MIN_DECISIONS, `решений за сутки: ${d!.n} (не меньше ${MIN_DECISIONS})`);
+  // Движок РАБОТАЛ: оценок столько же, сколько у боевого мира тех же суток. Шаг 116 [Р-241]: оценки, а не строки журнала
+  assert.ok(Number(d!.evaluations) >= MIN_DECISIONS, `оценок за сутки: ${d!.evaluations} (не меньше ${MIN_DECISIONS})`);
   // И каждое из них помечено тенью базой [Р-171]
   assert.equal(Number(d!.shadowed), Number(d!.n), 'все решения суток помечены тенью');
   // Записи СОЗДАВАЛИСЬ и удерживались: ноль здесь значил бы, что тень проверена пустотой

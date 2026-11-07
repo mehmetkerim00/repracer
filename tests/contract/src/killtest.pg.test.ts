@@ -74,7 +74,9 @@ test('step 71: from a client file to a self-contained English report — numbers
   let recount: Record<string, number>;
   try {
     const [d] = (await pool.query<Record<string, number>>(
-      `SELECT count(*)::int AS decisions, count(*) FILTER (WHERE outcome = 'APPROVED')::int AS changes,
+      // Шаг 116 [Р-241]: оценки — строки, повторы, которые они несут, и повторы открытых строк
+      `SELECT (count(*) + coalesce(sum(repeats_before), 0))::int + (SELECT coalesce(sum(repeats), 0)::int FROM tenant_data.price_no_change_state) AS decisions,
+              count(*) FILTER (WHERE outcome = 'APPROVED')::int AS changes,
               count(*) FILTER (WHERE final_amount_minor = effective_floor_minor)::int AS floor_held, count(*) FILTER (WHERE NOT shadow)::int AS live,
               count(*) FILTER (WHERE outcome = 'REJECTED' AND rejection_reason = 'BELOW_MARGIN_FLOOR')::int AS margin_refused
          FROM channel_data.price_decision`)).rows;

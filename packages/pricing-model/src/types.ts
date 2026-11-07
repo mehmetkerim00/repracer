@@ -270,6 +270,8 @@ export interface GateCheck {
 }
 
 export interface PriceDecisionDraft {
+  /** Шаг 116 [Р-241]: сколько оценок с тем же состоянием схлопнуто после прошлой строки журнала этой единицы */
+  repeatsBefore?: number;
   writeScopeId: string;
   outcome: GateOutcome;
   decisionClass: DecisionClass;

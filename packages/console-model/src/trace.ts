@@ -91,6 +91,8 @@ export interface DecisionListItem {
   dangerous: boolean;
   /** Шаг 100 (E): кто подвинул цену — короткий чип в колонке Reason; полная фраза — подсказкой */
   trigger: { chip: string; full: string } | null;
+  /** Шаг 116 [Р-241]: сколько проверок схлопнуто: после этой строки (последняя строка единицы) или до неё; повторы — не строки журнала */
+  checks: string | null;
 }
 
 const OUTCOME_TONE: Readonly<Record<string, Tone>> = { APPROVED: 'ok', NO_CHANGE: 'off', REJECTED: 'stop', HELD: 'warn' };
@@ -464,6 +466,8 @@ export function decisionItems(world: StandWorld, decisions: readonly ConsoleDeci
       // Находка 15: у NO_OP нет слепка — цена из столбца решения (предложенная цена intent) [Р-80]
       price: m.money(d.finalMinor ?? d.proposedMinor, d.currency), reason: kept ?? describe(reason, m).text, dangerous: isDangerous(d),
       trigger: triggerChip(d.competitorView, d.currency, m),
+      checks: (d.noChangeLive?.repeats ?? 0) > 0 ? m.ui.trace.checkedSince(d.noChangeLive!.repeats, m.when(d.noChangeLive!.lastEvaluatedAt))
+        : (d.repeatsBefore ?? 0) > 0 ? m.ui.trace.checkedBefore(d.repeatsBefore!) : null,
     };
   });
 }

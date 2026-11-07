@@ -36,8 +36,9 @@ import {
   type TriggerType,
   type CompetitorView,
 } from '@repracer/pricing-model';
-import { competeWithOf, runStrategy, strategyAvailability } from '@repracer/strategy-engine';
+import { competeWithOf, notEvaluatedIntent, runStrategy, strategyAvailability, type EngineInput } from '@repracer/strategy-engine';
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
+import { noChangeStateOf, repeatsNoChange } from './no-change.ts';
 import { planPollingTiers } from './polling.ts';
 import { PIPELINE_WRITE_FIELD, type ClearanceEnded, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
 import { listingNotBuyableAlerts } from './listing-status.ts';
@@ -107,6 +108,8 @@ export interface ScopeReport {
   queue?: DispatchStep[];
   /** Сколько раз оценка повторена из-за смены контекста решения */
   boundsRetries?: number;
+  /** Шаг 116 [Р-241]: состояние единицы то же, что у прошлой строки журнала: строки нет, счётчик живой строки вырос */
+  noChangeRepeated?: boolean;
   /** Р-212 (шаг 74): решение — первая ступень лестницы к полу; после фиксации — уведомление владельцу */
   ladderStart?: {
     writeScopeId: string; offer: string; marketplace: string; currentMinor: number; floorMinor: number; steps: number; stepLimitBp: number;
@@ -210,6 +213,8 @@ type Effect =
 interface ScopeEvaluation {
   report: ScopeReport;
   toCommit: DecisionToCommit | null;
+  /** Шаг 116 [Р-241]: оценка повторила последнюю строку журнала единицы: строки нет, растёт счётчик живой строки */
+  repeat?: { writeScopeId: string; at: Instant };
   invoked: number;
 }
 
@@ -239,6 +244,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
     now: Instant, effects: Effect[], stages: StageRecord[],
     source: { snapshotRef: SnapshotRef | null; sanity: SanitySummary | null; view?: CompetitorView | null },
     raise: { after: FloorRaiseAfter | null } = { after: null },
+    purpose: 'COMMIT' | 'PREVIEW' = 'COMMIT',
   ): ScopeEvaluation {
     const { scope, bounds } = sc;
     const report: ScopeReport = { writeScopeId: scope.writeScopeId, stages };
@@ -265,7 +271,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
     // Шаг 102 [Р-227]: режим распродажи — пол распродажи заменяет весь пол; безубыточность — только для квитанции («−$6.12 за штуку»)
     const clearance = sc.clearance ?? null;
     const breakEven = clearance ? resolveMarginFloor(sc.cost, 0, scope.currency, sc.costUnavailableCause ?? null) : null;
-    const result = runStrategy({
+    const engineInput: EngineInput = {
       writeScope: { writeScopeId: scope.writeScopeId, currency: scope.currency, basis: scope.basis },
       strategy: scope.strategy,
       snapshot,
@@ -289,12 +295,16 @@ export function createPricingPipeline(deps: PipelineDeps) {
       ...(scope.shadowLastProposedMinor === null || scope.shadowLastProposedMinor === undefined ? {} : { shadowLastProposedMinor: scope.shadowLastProposedMinor }),
       now,
       trigger,
-    });
-    if (result.kind === 'NOT_EVALUATED') {
+    };
+    const result = runStrategy(engineInput);
+    const notEvaluated = result.kind === 'NOT_EVALUATED';
+    if (notEvaluated) {
       stages.push({ stage: 'STRATEGY', outcome: 'NOT_EVALUATED', reason: result.reason });
-      return { report, toCommit: null, invoked: 1 };
+      // Предпросмотр показывает «не рассчитано» как есть. Неверные границы — своё состояние с алертом, а журнал — про решения о цене (решение владельца, Р-241)
+      if (purpose === 'PREVIEW' || result.reason.code === 'BOUNDS_INVALID') return { report, toCommit: null, invoked: 1 };
     }
-    const intent = result.intent;
+    // Шаг 116 [Р-241]: «не рассчитано» — решение «без изменения» со своей причиной, чтобы продавец видел, почему цена стоит
+    const intent = notEvaluated ? notEvaluatedIntent(engineInput, result.reason) : result.intent;
     const decision = decide({
       intent,
       scope: {
@@ -311,6 +321,9 @@ export function createPricingPipeline(deps: PipelineDeps) {
     });
     // Шаг 102 [Р-227]: решение называет строку включения — база сверяет её (своя единица, действует) и держит пол решения по ней
     decision.clearanceChangeId = clearance ? clearance.changeId : null;
+    // Под остановкой «не рассчитано» строки не пишет: у остановки свой экран, а отказ Gate на каждое чтение ушёл бы в вечное ядро
+    if (notEvaluated && decision.outcome !== 'NO_CHANGE') return { report, toCommit: null, invoked: 1 };
+    decision.repeatsBefore = scope.noChange?.repeats ?? 0;
     // Р-74: у решения NO_OP слепка и ссылки на снимок нет — только код причины. Остальные решения — слепок в том же
     // решении и той же транзакции фиксации [Р-68]; повторяющиеся части — ссылками на справочники [Р-75]
     const noChange = decision.decisionClass === 'NO_OP';
@@ -331,10 +344,19 @@ export function createPricingPipeline(deps: PipelineDeps) {
       decision.gateProfile = built.gateProfile;
       decision.sanityRuleset = built.sanityRuleset;
     }
-    stages.push({ stage: 'STRATEGY', outcome: intent.intentClass, reason: intent.reason });
+    if (!notEvaluated) stages.push({ stage: 'STRATEGY', outcome: intent.intentClass, reason: intent.reason });
     stages.push({ stage: 'GATE', outcome: decision.outcome, reason: decision.reason });
     report.intent = intent;
     report.decision = decision;
+    /**
+     * Шаг 116 [Р-241]: то же состояние, что у последней строки журнала, и суточный пульс не наступил — строки нет, намерения нет, удержания пола нет, алерта нет: растёт
+     * счётчик живой строки. Запрос на переоценку отвечает строкой всегда: иначе его спрашивали бы снова. Цена конкурента в состояние не входит, иначе схлопывание мертво
+     */
+    const noChangeState = noChange ? noChangeStateOf(intent, decision) : null;
+    if (noChangeState !== null && purpose === 'COMMIT' && raise.after === null && repeatsNoChange(scope.noChange, noChangeState, now)) {
+      report.noChangeRepeated = true;
+      return { report, toCommit: null, repeat: { writeScopeId: scope.writeScopeId, at: now }, invoked: 1 };
+    }
     /**
      * Р-212: первая ступень лестницы (ступеней за сутки не было) — уведомление владельцу «подъём к полу X → Y, ~N ступеней»; поднимается
      * после фиксации и только если запись не удержана тенью: в тени цена на витрине не движется
@@ -361,7 +383,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
     // Шаг 97 [Р-218]: картина рынка — там же, где ссылка на снимок: цена из данных конкурентов и решение не «без изменения» (0187).
     // Шаг 101 [Р-226]: картина общая для товара, фильтр «Compete with» — у стратегии предложения: исключённые строки помечены, счёт — по снимку
     const view = usesSnapshot && snapshot ? withCompetitorFilter(source.view ?? null, snapshot.offers, competeWithOf(scope.strategy.params)) : null;
-    return { report, toCommit: { context: sc, intent, decision, snapshotRef: usesSnapshot ? source.snapshotRef : null, competitorView: view }, invoked: 1 };
+    return { report, toCommit: { context: sc, intent, decision, snapshotRef: usesSnapshot ? source.snapshotRef : null, competitorView: view, noChangeState }, invoked: 1 };
   }
 
   /** Отправка записей, уже переведённых в отправку транзакцией фиксации; итог — третья транзакция */
@@ -645,6 +667,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
         scopeReports.push(evaluation.report);
         report.engineInvocations += evaluation.invoked;
         if (evaluation.toCommit) commit.decisions.push(evaluation.toCommit);
+        if (evaluation.repeat) (commit.repeats ??= []).push(evaluation.repeat);
       }
       return { commit, effects, reports: scopeReports };
     });
@@ -939,7 +962,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       if (!loaded) return null;
       const at = loaded.snapshot ? new Date(Date.parse(loaded.snapshot.observedAt) + 1_000).toISOString() : deps.now();
       const context: ScopeEvaluationContext = { ...loaded.context, scope: { ...loaded.context.scope, pricingMode: 'ENGINE', strategy } };
-      const evaluation = evaluateScope(context, loaded.snapshot, { type: 'MANUAL' }, at, [], [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null });
+      const evaluation = evaluateScope(context, loaded.snapshot, { type: 'MANUAL' }, at, [], [], { snapshotRef: loaded.snapshotRef, sanity: loaded.snapshotRef?.sanity ?? null }, { after: null }, 'PREVIEW');
       return {
         writeScopeId,
         evaluatedAt: at,
@@ -1072,7 +1095,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
           { after: options.raiseAfter ?? null });
         report = evaluation.report;
         const key = { channelAccountId: scope.channelAccountId, marketplace: scope.marketplace, channelProductRef: scope.channelProductRef, condition: scope.condition };
-        return { commit: { key, now, decisions: evaluation.toCommit ? [evaluation.toCommit] : [] }, effects, reports: [report] };
+        return { commit: { key, now, decisions: evaluation.toCommit ? [evaluation.toCommit] : [], ...(evaluation.repeat ? { repeats: [evaluation.repeat] } : {}) }, effects, reports: [report] };
       });
       // Пересчёт без уведомления: повтора уведомления здесь не бывает
       if (!outcome || outcome === 'DUPLICATE_NOTIFICATION') return report;

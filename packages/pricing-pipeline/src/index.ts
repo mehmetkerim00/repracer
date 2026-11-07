@@ -74,6 +74,7 @@ export type {
   ReconciliationCompared,
   SnapshotDelivery,
 } from './store.ts';
+export { NO_CHANGE_PULSE_SECONDS, noChangeStateOf, repeatsNoChange, type NoChangeLive } from './no-change.ts';
 export { DEFAULT_MEMBERS, InMemoryPricingStore, seedSkuOf, standUserOf, type MemorySeed, type MemorySeedScope, type SeedBound } from './memory-store.ts';
 export {
   DEFAULT_TIERS,

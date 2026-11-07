@@ -438,12 +438,13 @@ test('Р-151: два виртуальных часа демо — первые �
   const runs = await observer.query(
     `SELECT job_name, count(*)::int AS runs, count(*) FILTER (WHERE outcome = 'FAILED')::int AS failed, coalesce(sum(items), 0)::int AS items
        FROM maintenance.scheduled_job_run GROUP BY 1 ORDER BY 1`);
-  const decided = await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
+  const decided = await observer.query(`SELECT count(*)::int AS n, (count(*) + coalesce(sum(repeats_before), 0))::int + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st WHERE st.tenant_id = $1) AS evaluations FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
   const written = await observer.query(
     `SELECT final_status, count(*)::int AS n FROM tenant_data.channel_write_history WHERE tenant_id = $1 GROUP BY 1 ORDER BY 1`, [demo.live.seeded.tenantId]);
   console.log(JSON.stringify({ virtualHours: 2, jobRuns: runs.rows, channelRequests: [...demo.live.requests], decisionsInDb: decided.rows[0], writes: written.rows, decisionsOnScreen: list.body.page.total }, null, 1));
   assert.ok(items.length > 0, 'за два виртуальных часа движок принял хотя бы одно решение');
-  assert.ok(Number(decided.rows[0]!.n) >= 2000, `решений за два часа на 150 предложениях: ${decided.rows[0]!.n}`);
+  // Шаг 116 [Р-241]: нагрузка — оценки; журнал считает строки, и экран — те же строки
+  assert.ok(Number(decided.rows[0]!.evaluations) >= 2000, `оценок за два часа на 150 предложениях: ${decided.rows[0]!.evaluations}`);
   assert.equal(list.body.page.total, Number(decided.rows[0]!.n), 'экран считает те же решения, что лежат в базе');
   // «Применено» — это подтверждение канала обратным чтением, а не отправленный запрос
   const applied = Number(written.rows.find((r) => r.final_status === 'APPLIED')?.n ?? 0);

@@ -1,3 +1,4 @@
+import type { NoChangeLive } from './no-change.ts';
 import type { CompetitorView, FloorRaiseReason, OmnibusPriorPrice, PreviousOffers } from '@repracer/pricing-model';
 import type { CreepState } from '@repracer/strategy-engine';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
@@ -61,6 +62,8 @@ export interface PriceScopeContext {
    * не бывает. В тени она не двигается никогда, и без этого поля движок предлагал бы одно и то же на каждом опросе.
    */
   shadowLastProposedMinor?: number | null;
+  /** Шаг 116 [Р-241]: живая строка единицы — состояние последней строки журнала и счётчик повторов после неё; смена режима аккаунта её забывает */
+  noChange?: NoChangeLive | null;
   /**
    * Р-212 (шаг 74): время последней БОЕВОЙ ступени лестницы к полу за сутки (решение с `ladder_from_minor`, не в тени) — от него
    * считается пауза до следующей
@@ -420,6 +423,8 @@ export interface DecisionToCommit {
   /** Решение со слепком объяснения (decision.explanation) [Р-68] */
   decision: PriceDecisionDraft;
   snapshotRef: SnapshotRef | null;
+  /** Шаг 116 [Р-241]: состояние единицы у решения «без изменения»; NULL — цена изменилась или отказ: следующее «без изменения» пишется */
+  noChangeState?: string | null;
   /** Шаг 97 [Р-218]: картина рынка и «кто подвинул» — только у цены из данных конкурентов и решения не «без изменения» (0187) */
   competitorView?: CompetitorView | null;
 }
@@ -429,6 +434,8 @@ export interface EvaluationCommit {
   now: Instant;
   snapshot?: SnapshotOutcome;
   decisions: DecisionToCommit[];
+  /** Шаг 116 [Р-241]: оценки, повторившие последнюю строку журнала: строк нет, растёт счётчик живой строки */
+  repeats?: Array<{ writeScopeId: string; at: Instant }>;
   /**
    * OQ-171 (шаг 24): уведомление канала, из которого снимок, — в журнал обработанных в той же транзакции. Уже записано — ничего не
    * фиксируется, итог DUPLICATE_NOTIFICATION (повтор доставки, в том числе одновременной)
@@ -1290,6 +1297,8 @@ export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationInten
   snapshotRef: SnapshotRef | null;
   /** Шаг 97 [Р-218]: картина рынка в момент решения; живёт с решением 30 суток, у старых решений и прочих — null */
   competitorView?: CompetitorView | null;
+  /** Шаг 116 [Р-241]: у последней строки единицы — сколько раз с тех пор проверено то же состояние и когда в последний раз */
+  noChangeLive?: { repeats: number; lastEvaluatedAt: Instant } | null;
 }
 
 /** Остановки и системные остановки в журнале аудита [Р-76]; с шага 88 [Р-213] — и смены ролей участников */

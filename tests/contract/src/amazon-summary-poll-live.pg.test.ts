@@ -114,6 +114,20 @@ test('step 115 [Р-240]: the summary decides — snapshots are accepted on the d
   assert.equal(world.port.stats.patchCalls, 0, 'shadow: nothing reached the channel');
 });
 
+/**
+ * Шаг 116 [Р-241]: журнал о решениях, а не о чтениях. Конкурент двигает цену каждые 15 минут, опрос читает каждое предложение чаще: у большинства чтений состояние
+ * то же. Каждая оценка учтена — строкой, повтором, который строка несёт, или повтором открытой строки; плитка поэтому не падает, а журнал не тонет
+ */
+test('step 116 [Р-241]: every accepted reading is counted, and repeated no-change readings write no rows', async () => {
+  const { rows: [read] } = await observer.query(`SELECT count(*)::int AS accepted FROM channel_data.competitor_snapshot_log WHERE sanity_verdict = 'ACCEPT'`);
+  const { rows: [d] } = await observer.query(`SELECT count(*)::int AS rows, count(*) FILTER (WHERE outcome = 'NO_CHANGE')::int AS no_change, coalesce(sum(repeats_before), 0)::int AS carried FROM channel_data.price_decision`);
+  const { rows: [open] } = await observer.query(`SELECT coalesce(sum(repeats), 0)::int AS repeats FROM tenant_data.price_no_change_state`);
+  console.log(JSON.stringify({ step116: { accepted: read.accepted, rows: d.rows, noChange: d.no_change, carried: d.carried, open: open.repeats } }));
+  assert.equal(d.rows + d.carried + open.repeats, read.accepted, 'no evaluation is lost from the count');
+  assert.ok(d.carried + open.repeats > 0, 'some readings repeated their state');
+  assert.ok(d.no_change < read.accepted / 2, `the journal holds decisions, not readings: ${d.no_change} no-change rows for ${read.accepted} readings`);
+});
+
 test('step 115 (Q11): Win the Buy Box decides on Amazon where the views name a holder and holds where nobody has the majority; the share is counted', async () => {
   const decisions = async (idx: number[]) => (await observer.query(
     `SELECT count(*) FILTER (WHERE d.intent_class = 'CHANGED')::int AS proposed, count(*) FILTER (WHERE d.no_change_reason = 'BUYBOX_HOLDER_REQUIRED')::int AS holder_required, count(*)::int AS n

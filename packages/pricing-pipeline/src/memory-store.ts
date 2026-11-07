@@ -93,6 +93,7 @@ import type {
   StoredSnapshotRef,
 } from './store.ts';
 import { PIPELINE_WRITE_FIELD } from './store.ts';
+import type { NoChangeLive } from './no-change.ts';
 
 /**
  * Хранилище в памяти для стенда: один тенант. Повторяет инварианты БД, важные для пути решения
@@ -341,6 +342,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly strategyMeta = new Map<string, ConsoleStrategyVersionRow>();
   readonly rejectedSnapshots: Array<RejectedSnapshotRecord & { key: ProductKey; rejectedSnapshotId: string }> = [];
   readonly intents: Array<PriceIntentDraft & { intentId: string }> = [];
+  private readonly noChangeLive = new Map<string, NoChangeLive>();
   readonly decisions: ConsoleDecisionRow[] = [];
   readonly writes: WriteRow[] = [];
   /** Шаг 24 (OQ-161): индексы записей по единице и по идентификатору — записи только добавляются, не удаляются */
@@ -437,6 +439,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       ...this.lastLadderStep(row),
       // как PostgreSQL (`withCreep`): состояние подъёма — только у стратегии с подъёмом
       creep: row.strategy?.params.type === 'WIN_BUYBOX' && row.strategy.params.creepUp ? this.creepState(row) : null,
+      // Шаг 116 [Р-241]: как `tenant_data.price_no_change_state`; признака тени у стенда в памяти нет
+      noChange: this.noChangeLive.get(row.writeScopeId) ?? null,
       productTitle: row.title ?? null, productSku: seedSkuOf(row),
     };
   }
@@ -994,6 +998,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
         // Как триггер price_decision_intent_columns (0049): столбцы intent — в решении, слепок их не повторяет [Р-80]
         strategyId: d.intent.strategyId, strategyVersion: d.intent.strategyVersion, ruleCode: d.intent.ruleCode, trigger: d.intent.trigger.type, proposedMinor: d.intent.proposedMinor,
       });
+      this.noChangeLive.set(row.writeScopeId, { state: d.noChangeState ?? null, decidedAt: d.decision.decidedAt, repeats: 0, lastEvaluatedAt: input.now });
       if (d.decision.outcome !== 'APPROVED' || d.decision.finalMinor === null) {
         committed.push({ writeScopeId: row.writeScopeId, intentId, decisionId, write: null, pendingWriteId: null });
         continue;
@@ -1017,6 +1022,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       }
       this.markDispatched(write, input.now);
       committed.push({ writeScopeId: row.writeScopeId, intentId, decisionId, pendingWriteId: null, write: this.toFieldWrite(write) });
+    }
+    for (const r of input.repeats ?? []) {
+      const live = this.noChangeLive.get(r.writeScopeId);
+      if (!live) continue;
+      live.repeats += 1;
+      live.lastEvaluatedAt = r.at;
+      const row = this.decisions.findLast((d) => d.writeScopeId === r.writeScopeId);
+      if (row) row.noChangeLive = { repeats: live.repeats, lastEvaluatedAt: r.at };
     }
     if (input.notification) this.inboundNotifications.set(`${this.channel}|${input.notification.notificationId}`, { ...input.notification });
     return { status: 'COMMITTED', rejectedSnapshotId, divergenceCaseId, decisions: committed };

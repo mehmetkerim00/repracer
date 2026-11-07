@@ -46,7 +46,7 @@ before(async () => {
   admin = db.pool('svc_admin', 2);
   world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin,
     fixtureTenantId: '10000000-0000-4000-8000-000000000102', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
-    seed: { scopes: [scope(1, FIXED), scope(2, BEAT, { guardrails: { maxStepChangeBp: 1000 }, currentPriceMinor: 1050 }), scope(3, FIXED), scope(4, FIXED)] } });
+    seed: { scopes: [scope(1, FIXED), scope(2, BEAT, { guardrails: { maxStepChangeBp: 1000 }, currentPriceMinor: 1050 }), scope(3, FIXED), scope(4, FIXED), scope(7, BEAT, { currentPriceMinor: 1500 })] } });
   shadow = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin, writeMode: 'SHADOW',
     fixtureTenantId: '10000000-0000-4000-8000-000000000112', fixtureChannelAccountId: SHADOW_ACCOUNT, marketplaces: ['de'], clock: now(),
     seed: { scopes: [scope(5, BEAT, {}, SHADOW_ACCOUNT), scope(6, BEAT, {}, SHADOW_ACCOUNT)] } });
@@ -149,7 +149,7 @@ const market = (n: number, competitor: number, self: number): CompetitorSnapshot
 const ctxOf = (w: SeededPricingWorld, account: string): AdapterCallContext => ({ tenantId: w.tenantId as never, channelAccountId: w.ids.dbId(account) as never,
   correlationId: 'step102', deadline: new Date(Date.now() + 60_000).toISOString() as never });
 const decisionsOf = (w: SeededPricingWorld, ws: string) => inTenant(pool, w.tenantId, async (tx) => (await tx.query(
-  `SELECT d.outcome, d.final_amount_minor::int AS final, d.clearance_change_id, i.rationale -> 'reason' ->> 'code' AS reason_code, i.rationale -> 'explanation' AS chain
+  `SELECT d.outcome, d.rejection_reason, d.final_amount_minor::int AS final, d.clearance_change_id, i.rationale -> 'reason' ->> 'code' AS reason_code, i.rationale -> 'explanation' AS chain
      FROM channel_data.price_decision d JOIN channel_data.price_intent i ON i.tenant_id = d.tenant_id AND i.price_intent_id = d.price_intent_id AND i.created_at = d.intent_created_at
     WHERE d.tenant_id = $1 AND d.write_scope_id = $2 ORDER BY d.decided_at, d.price_decision_id`, [w.tenantId, w.ids.dbId(ws)])).rows);
 
@@ -174,6 +174,31 @@ test('step 102 (D3) [Р-208, Р-227]: after clearance is switched off the first 
   assert.equal(first.reason_code, 'RAISED_TOWARD_FLOOR', 'the first recompute after switching off starts the climb');
   assert.equal(first.final, 1100, 'one step of 10 % — not a jump past the step limit, and not lower');
   assert.equal(first.clearance_change_id, null);
+});
+
+/**
+ * Шаг 116 (решение владельца по проверке распродажи, требование 7): распродажа снимает обычный пол, но не экстренную остановку. Остановка человеком держит и цену
+ * режима: решение удержано своей причиной, записи нет. После снятия остановки цена идёт к полу распродажи, ниже него — нет. Проверка покрытия: защита существовала
+ * и до теста, поэтому красное сначала заменено мутацией Gate (без проверки остановки тест краснеет)
+ */
+test('step 116 (clearance requirement 7) [Р-227, Р-69]: an emergency stop holds a clearance price too; after the resume the price goes to the clearance floor and no lower', async () => {
+  const p = createPricingPipeline({ store, adapter, alerts: { raise: async () => undefined }, logger: { log: () => undefined }, now: () => now() as never });
+  const ws = world.ids.dbId('ws-7');
+  assert.equal((await store.enableClearance(world.tenantId, { writeScopeId: ws, floorMinor: 1000, currency: 'EUR', endsAt: null, note: 'Clearing old stock', acknowledged: true }, actor(world, true))).status, 'ENABLED');
+  const stopped = await store.stopPricing(world.tenantId, { scope: 'TENANT', channelAccountId: null, marketplace: null, stoppedAt: now() as never, stoppedByMembershipId: world.ownerMembershipId, stoppedByUserId: world.userId, note: 'Synthetic stop during clearance' });
+  assert.ok(stopped.status === 'STOPPED', JSON.stringify(stopped));
+  const writes = async () => Number((await inTenant(admin, world.tenantId, (tx) => tx.query('SELECT count(*) AS n FROM tenant_data.channel_write WHERE tenant_id = $1 AND write_scope_id = $2', [world.tenantId, ws]))).rows[0].n);
+  const before = await writes();
+  await p.processSnapshot(ctxOf(world, ACCOUNT), market(7, 900, 1500));
+  const held = (await decisionsOf(world, 'ws-7')).at(-1);
+  // Р-94: причина, а не факт отказа: без проверки Gate запись всё равно не уйдёт (страж базы), но решения со своей причиной в журнале не будет
+  assert.deepEqual([held?.outcome, held?.rejection_reason], ['HELD', 'PRICING_STOPPED'], 'the stop holds a clearance price with its own reason');
+  assert.equal(await writes(), before, 'no write while the store is stopped, clearance or not');
+  assert.equal((await store.releaseStop(world.tenantId, stopped.stop.stopId, { membershipId: world.ownerMembershipId, userId: world.userId, mfa: true, note: 'Synthetic resume', at: now() as never })).status, 'RELEASED');
+  await p.processSnapshot(ctxOf(world, ACCOUNT), market(7, 900, 1500));
+  const sent = (await decisionsOf(world, 'ws-7')).at(-1)!;
+  assert.deepEqual([sent.outcome, sent.final], ['APPROVED', 1000], 'capped at the clearance floor, not at the competitor price of 9.00');
+  await store.disableClearance(world.tenantId, { writeScopeId: ws, note: null }, actor(world, false));
 });
 
 test('step 102 (D5) [Р-117, Р-227]: holds of the clearance floor are marked and never counted as «your floor saved you»', async () => {

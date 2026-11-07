@@ -110,11 +110,13 @@ test('Р-154: сутки демо под планировщиком — объё
   await demo.advance(VIRTUAL_HOURS);
   const seconds = Math.round((Date.now() - started) / 100) / 10;
   measured.push({ operation: `demo.advance (${VIRTUAL_HOURS} виртуальных часа планировщиком)`, seconds, bytes: 0, status: 200 });
-  const { rows: [d] } = await observer.query(`SELECT count(*)::int AS n, count(*) FILTER (WHERE outcome <> 'NO_CHANGE')::int AS interventions FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
+  const { rows: [d] } = await observer.query(`SELECT count(*)::int AS n, (count(*) + coalesce(sum(repeats_before), 0))::int + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st WHERE st.tenant_id = $1) AS evaluations, count(*) FILTER (WHERE outcome <> 'NO_CHANGE')::int AS interventions FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId]);
   const { rows: [w] } = await observer.query(`SELECT count(*)::int AS n FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND final_status = 'APPLIED'`, [demo.live.seeded.tenantId]);
   const { rows: failures } = await observer.query(`SELECT job_name, error_code, count(*)::int AS n FROM maintenance.scheduled_job_run WHERE outcome = 'FAILED' GROUP BY 1, 2 ORDER BY 1`);
-  console.log(JSON.stringify({ decisions: d!.n, interventions: d!.interventions, applied: w!.n, failures, seconds }));
-  assert.ok(Number(d!.n) >= MIN_DECISIONS, `за сутки решений: ${d!.n} (ожидалось не меньше ${MIN_DECISIONS} — иначе нагрузка не та, что у живого тенанта)`);
+  console.log(JSON.stringify({ decisions: d!.n, evaluations: d!.evaluations, interventions: d!.interventions, applied: w!.n, failures, seconds }));
+  // Шаг 116 [Р-241]: нагрузка — оценки, а не строки журнала: повтор причины строки не пишет
+  assert.ok(Number(d!.evaluations) >= MIN_DECISIONS, `за сутки оценок: ${d!.evaluations} (ожидалось не меньше ${MIN_DECISIONS} — иначе нагрузка не та, что у живого тенанта)`);
+  assert.ok(Number(d!.n) < Number(d!.evaluations) / 2, `журнал о решениях, а не о чтениях: ${d!.n} строк на ${d!.evaluations} оценок`);
   assert.ok(Number(w!.n) >= 1000, `записей цены, подтверждённых каналом: ${w!.n}`);
   // Выгрузка суток проваливается по ОДНОЙ названной причине — ClickHouse в демо нет (проверяется в CI отдельно); любая другая
   // причина или любая другая работа — провал прогона [находка 19 ревью шага 35: исключение без утверждения о его причине]
@@ -172,7 +174,8 @@ test('Р-154, Р-136: после суток каждый экран отвеча
   // Страницы — настоящие: итог со всех суток, показано не больше страницы, страница за концом подтянута к последней
   const first = results['decisions (первая страница)'] as { items: unknown[]; page: { total: number; to: number } };
   const last = results['decisions (страница за концом списка)'] as { items: unknown[]; page: { total: number; to: number; hasNext: boolean } };
-  assert.ok(first.page.total >= MIN_DECISIONS && first.items.length <= 50, `страница решений: ${first.items.length} из ${first.page.total}`);
+  const [journal] = (await observer.query(`SELECT count(*)::int AS n FROM channel_data.price_decision WHERE tenant_id = $1`, [demo.live.seeded.tenantId])).rows;
+  assert.ok(first.page.total === Number(journal.n) && first.page.total > 50 && first.items.length <= 50, `страница решений: ${first.items.length} из ${first.page.total}, в базе ${journal.n}`);
   assert.deepEqual([last.page.total, last.page.to, last.page.hasNext], [first.page.total, first.page.total, false], 'страница за концом — последняя');
   // Одно решение с объяснением — по идентификатору, не поиском по всем
   const withPrice = (first.items as Array<{ decisionId: string; tone: string }>).find((x) => x.tone !== 'off') ?? (first.items as Array<{ decisionId: string }>)[0]!;

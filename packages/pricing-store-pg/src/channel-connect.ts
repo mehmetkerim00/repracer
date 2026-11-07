@@ -257,10 +257,15 @@ export class PgChannelConnectStore {
                   (SELECT count(*)::int FROM tenant_data.offer_mapping om
                     WHERE om.tenant_id = ca.tenant_id AND om.channel_account_id = ca.channel_account_id AND om.status <> 'ENDED'
                       AND om.price_write_scope_id IS NULL) AS unmanaged,
-                  (SELECT count(*)::int FROM channel_data.price_decision d
+                  -- Шаг 116 [Р-241]: оценки, а не строки журнала: записанное, повторы, которые оно несёт, и повторы открытых строк
+                  (SELECT (count(*) + coalesce(sum(d.repeats_before), 0))::int FROM channel_data.price_decision d
                      JOIN tenant_data.write_scope ws ON ws.tenant_id = d.tenant_id AND ws.write_scope_id = d.write_scope_id
                     WHERE d.tenant_id = ca.tenant_id AND ws.channel_account_id = ca.channel_account_id
-                      AND d.shadow AND d.decided_at >= now() - interval '1 day') AS shadow_decisions,
+                      AND d.shadow AND d.decided_at >= now() - interval '1 day')
+                    + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st
+                         JOIN tenant_data.write_scope ws ON ws.tenant_id = st.tenant_id AND ws.write_scope_id = st.write_scope_id
+                        WHERE st.tenant_id = ca.tenant_id AND ws.channel_account_id = ca.channel_account_id
+                          AND st.shadow AND st.last_evaluated_at >= now() - interval '1 day') AS shadow_decisions,
                   -- Шаг 60 [Р-202]: внешние правки аккаунта за сутки (индекс external_edit_account_recent_idx, 0158); административная роль
                   -- видит журнал правок политикой роли пути решения, в которую входит
                   (SELECT count(*)::int FROM channel_data.external_edit e

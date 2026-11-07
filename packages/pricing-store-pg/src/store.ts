@@ -185,6 +185,26 @@ async function withChannelBounds(tx: Tx, tenantId: string, contexts: ScopeEvalua
   }
 }
 
+/**
+ * Шаг 116 [Р-241]: живая строка единицы — отдельным простым запросом, как подъём и рамки канала: подзапрос в общем запросе контекста стоил бы планирования на каждую оценку
+ * (шаг 97.1). Строка записана в другом режиме аккаунта — состояние забыто, счётчик остаётся: решение в новом режиме не прячется за строкой прежнего
+ */
+async function withNoChange(tx: Tx, tenantId: string, contexts: ScopeEvaluationContext[]): Promise<void> {
+  if (contexts.length === 0) return;
+  const { rows } = await tx.query(
+    `SELECT st.write_scope_id, CASE WHEN st.shadow = (ca.write_mode = 'SHADOW') THEN st.state END AS state, st.decided_at, st.repeats, st.last_evaluated_at
+       FROM tenant_data.price_no_change_state st
+       JOIN tenant_data.write_scope s ON s.tenant_id = st.tenant_id AND s.write_scope_id = st.write_scope_id
+       JOIN tenant_data.channel_account ca ON ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id
+      WHERE st.tenant_id = $1 AND st.write_scope_id = ANY ($2::uuid[])`,
+    [tenantId, contexts.map((c) => c.scope.writeScopeId)]);
+  const byScope = new Map(rows.map((r) => [r.write_scope_id as string, r]));
+  for (const c of contexts) {
+    const r = byScope.get(c.scope.writeScopeId);
+    c.scope.noChange = r ? { state: r.state ?? null, decidedAt: iso(r.decided_at), repeats: Number(r.repeats), lastEvaluatedAt: iso(r.last_evaluated_at) } : null;
+  }
+}
+
 async function withCreep(tx: Tx, tenantId: string, now: Instant, contexts: ScopeEvaluationContext[]): Promise<void> {
   // Состояние подъёма нужно только стратегии с подъёмом: шаг назад и пауза бывают только после ступени подъёма
   const win = contexts.filter((c) => c.scope.strategy?.params.type === 'WIN_BUYBOX' && c.scope.strategy.params.creepUp);
@@ -312,9 +332,10 @@ const INTENT_COLUMNS = `price_intent_id, created_at, write_scope_id, pricing_str
 /** Шаг 97 [Р-220]: горизонт отрезка держателя Buy Box — дыра между снимками длиннее — «нет данных»; самый редкий ярус опроса — сутки (Р-47) */
 export const BUYBOX_SPAN_HORIZON_HOURS = 24;
 
-const DECISION_COLUMNS = `d.*, ref.competitor_snapshot_id, ref.source AS ref_source, ref.observed_at AS ref_observed_at`;
+const DECISION_COLUMNS = `d.*, nc.repeats AS live_repeats, nc.last_evaluated_at AS live_checked_at, ref.competitor_snapshot_id, ref.source AS ref_source, ref.observed_at AS ref_observed_at`;
 const DECISION_FROM = `FROM channel_data.price_decision d
-  LEFT JOIN channel_data.price_decision_snapshot_ref ref ON ref.tenant_id = d.tenant_id AND ref.price_decision_id = d.price_decision_id`;
+  LEFT JOIN channel_data.price_decision_snapshot_ref ref ON ref.tenant_id = d.tenant_id AND ref.price_decision_id = d.price_decision_id
+  LEFT JOIN tenant_data.price_no_change_state nc ON nc.tenant_id = d.tenant_id AND nc.write_scope_id = d.write_scope_id AND nc.state IS NOT NULL AND nc.decided_at = d.decided_at`;
 const WRITE_HOT_COLUMNS = `w.channel_write_id, w.write_scope_id, w.price_decision_id, w.amount_minor, w.currency, w.price_basis, w.version, w.status,
   w.attempt_count, w.created_at, w.dispatched_at, w.accepted_at, w.next_attempt_at, w.last_error_code, w.end_reason, w.end_params,
   w.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived, w.confirmed_by_own_record`;
@@ -343,6 +364,9 @@ function decisionRow(r: Row): ConsoleDecisionRow {
     reason: { code: r.rejection_reason ?? (r.outcome === 'APPROVED' ? 'APPROVED' : 'NO_CHANGE'), params: r.reason_params },
     checks: r.checks, alert: null, decidedAt: iso(r.decided_at), fx: r.fx, boundDeviationBp: r.bound_deviation_bp ?? null, explanation: r.explanation,
     noChangeReason: r.no_change_reason ?? null, gateProfile: r.gate_profile ?? null, sanityRuleset: r.sanity_ruleset ?? null,
+    // Шаг 116 [Р-241]: повторы до этой строки и, у последней строки единицы, повторы после неё
+    repeatsBefore: Number(r.repeats_before ?? 0),
+    noChangeLive: r.live_repeats === null || r.live_repeats === undefined ? null : { repeats: Number(r.live_repeats), lastEvaluatedAt: iso(r.live_checked_at) },
     strategyId: r.pricing_strategy_id ?? null, strategyVersion: r.pricing_strategy_version ?? null, ruleCode: r.rule_code, trigger: r.trigger_type,
     proposedMinor: r.proposed_amount_minor,
     snapshotRef: r.competitor_snapshot_id ? { competitorSnapshotId: r.competitor_snapshot_id, source: r.ref_source, observedAt: iso(r.ref_observed_at) } : null,
@@ -1010,6 +1034,7 @@ export class PgPricingStore implements PricingStore {
       const scopes = (r.scopes as Row[]).map((j) => toScopeContext(j, now));
       await withCreep(tx, tenantId, now, scopes);
       await withChannelBounds(tx, tenantId, scopes);
+      await withNoChange(tx, tenantId, scopes);
       const primary = scopes.find((s) => s.scope.pricingMode === 'ENGINE') ?? scopes[0] ?? null;
       const storefront = r.storefront as Row | null;
       const last = r.last_accepted as Row | null;
@@ -1051,6 +1076,7 @@ export class PgPricingStore implements PricingStore {
       const context = toScopeContext(r.scope, now);
       await withCreep(tx, tenantId, now, [context]);
       await withChannelBounds(tx, tenantId, [context]);
+      await withNoChange(tx, tenantId, [context]);
       const s = context.scope;
       const snapshot = r.state ? toSnapshot({ channelAccountId: s.channelAccountId, marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }, r.state) : null;
       const snapshotRef: StoredSnapshotRef | null = r.state?.competitorSnapshotId
@@ -1099,6 +1125,12 @@ export class PgPricingStore implements PricingStore {
         for (const d of input.decisions) {
           current = d;
           decisions.push(await this.writeDecision(tx, tenantId, d, input.now));
+        }
+        // Шаг 116 [Р-241]: оценка повторила последнюю строку журнала — растёт счётчик живой строки, журнал молчит
+        for (const r of input.repeats ?? []) {
+          await tx.query(
+            `UPDATE tenant_data.price_no_change_state SET repeats = repeats + 1, last_evaluated_at = greatest(last_evaluated_at, $3::timestamptz)
+              WHERE tenant_id = $1 AND write_scope_id = $2`, [tenantId, r.writeScopeId, r.at]);
         }
         return { status: 'COMMITTED', rejectedSnapshotId, divergenceCaseId, decisions };
       } catch (error) {
@@ -1270,8 +1302,8 @@ export class PgPricingStore implements PricingStore {
          (tenant_id, intent_created_at, price_intent_id, write_scope_id, decided_at, outcome, final_amount_minor, currency, price_basis,
           effective_floor_minor, effective_ceiling_minor, min_price_ids, max_price_ids, guardrail_ids, cost_profile_id, fee_inputs, violations,
           rejection_reason, reason_params, checks, fx, explanation, bound_deviation_bp, no_change_reason, sanity_ruleset, gate_profile, ladder_from_minor, competitor_view,
-          clearance_change_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+          clearance_change_id, repeats_before)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid[], $13::uuid[], $14::uuid[], $15, $16, $17::text[], $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
        RETURNING price_decision_id`,
       [tenantId, intent.createdAt, intentId, scope.writeScopeId, decision.decidedAt, decision.outcome, decision.finalMinor, decision.currency, decision.basis,
        decision.effectiveFloorMinor, decision.effectiveCeilingMinor, decision.minPriceIds, decision.maxPriceIds, decision.guardrailIds,
@@ -1288,9 +1320,20 @@ export class PgPricingStore implements PricingStore {
        // Шаг 97 [Р-218]: картина рынка — данные канала, живёт с решением 30 суток; форму и место (только цена из данных конкурентов) держит база (0187)
        d.competitorView ? JSON.stringify(d.competitorView) : null,
        // Шаг 102 [Р-227]: строка включения режима распродажи — пол решения база сверяет с действующим полом распродажи (0197)
-       decision.clearanceChangeId ?? null],
+       decision.clearanceChangeId ?? null,
+       // Шаг 116 [Р-241]: сколько оценок схлопнуто после прошлой строки единицы
+       decision.repeatsBefore ?? 0],
     );
     const decisionId: string = decisionRow!.price_decision_id;
+    // Шаг 116 [Р-241]: живая строка — состояние этой строки журнала, счётчик заново, режим аккаунта на сейчас
+    await tx.query(
+      `INSERT INTO tenant_data.price_no_change_state (tenant_id, write_scope_id, state, decided_at, repeats, last_evaluated_at, shadow)
+       SELECT $1, $2, $3, $4, 0, $5, ca.write_mode = 'SHADOW'
+         FROM tenant_data.write_scope s JOIN tenant_data.channel_account ca ON ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id
+        WHERE s.tenant_id = $1 AND s.write_scope_id = $2
+       ON CONFLICT (tenant_id, write_scope_id) DO UPDATE SET state = EXCLUDED.state, decided_at = EXCLUDED.decided_at, repeats = 0,
+         last_evaluated_at = EXCLUDED.last_evaluated_at, shadow = EXCLUDED.shadow`,
+      [tenantId, scope.writeScopeId, d.noChangeState ?? null, decision.decidedAt, now]);
     // Ссылка на полный снимок — данные канала, 18 месяцев [Р-38, Р-68]; та же транзакция
     if (d.snapshotRef) {
       await tx.query(
@@ -3459,7 +3502,8 @@ export class PgPricingStore implements PricingStore {
     return inTenant(this.admin('worldCounters'), tenantId, async (tx) => {
       const { rows: [r] } = await tx.query(
         `SELECT (SELECT count(*) FROM tenant_data.write_scope s WHERE s.tenant_id = $1 AND s.field = 'PRICE' AND s.status <> 'RETIRED')::int AS scopes,
-                (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.decided_at > $2::timestamptz - interval '1 day')::int AS decisions_day,
+                (SELECT count(*) + coalesce(sum(d.repeats_before), 0) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.decided_at > $2::timestamptz - interval '1 day')::int
+                  + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st WHERE st.tenant_id = $1 AND st.last_evaluated_at > $2::timestamptz - interval '1 day') AS decisions_day,
                 (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = $1 AND d.outcome <> 'NO_CHANGE' AND d.decided_at > $2::timestamptz - interval '7 days')::int AS interventions_week,
                 (SELECT count(*) FROM tenant_data.price_stop p WHERE p.tenant_id = $1 AND p.released_at IS NULL)::int AS stops,
                 (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = $1 AND h.released_at IS NULL)::int AS halts,
@@ -3486,7 +3530,8 @@ export class PgPricingStore implements PricingStore {
     const statements = tenantIds.map((t) => `SELECT set_config('app.tenant_id', '${t}', true);
       SELECT '${t}'::uuid AS tenant_id,
              (SELECT count(*) FROM tenant_data.write_scope s WHERE s.tenant_id = '${t}' AND s.field = 'PRICE' AND s.status <> 'RETIRED')::int AS scopes,
-             (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = '${t}' AND d.decided_at > '${iso}'::timestamptz - interval '1 day')::int AS decisions_day,
+             (SELECT count(*) + coalesce(sum(d.repeats_before), 0) FROM channel_data.price_decision d WHERE d.tenant_id = '${t}' AND d.decided_at > '${iso}'::timestamptz - interval '1 day')::int
+               + (SELECT coalesce(sum(st.repeats), 0)::int FROM tenant_data.price_no_change_state st WHERE st.tenant_id = '${t}' AND st.last_evaluated_at > '${iso}'::timestamptz - interval '1 day') AS decisions_day,
              (SELECT count(*) FROM channel_data.price_decision d WHERE d.tenant_id = '${t}' AND d.outcome <> 'NO_CHANGE' AND d.decided_at > '${iso}'::timestamptz - interval '7 days')::int AS interventions_week,
              (SELECT count(*) FROM tenant_data.price_stop p WHERE p.tenant_id = '${t}' AND p.released_at IS NULL)::int AS stops,
              (SELECT count(*) FROM channel_data.pricing_halt h WHERE h.tenant_id = '${t}' AND h.released_at IS NULL)::int AS halts,
@@ -3706,6 +3751,8 @@ export class PgPricingStore implements PricingStore {
            LEFT JOIN LATERAL (SELECT d.decided_at, d.price_decision_id, d.outcome, d.no_change_reason FROM channel_data.price_decision d
                                WHERE d.tenant_id = s.tenant_id AND d.write_scope_id = s.write_scope_id
                                ORDER BY d.decided_at DESC LIMIT 1) last ON true
+           -- Шаг 116 [Р-241]: повтор строки не пишет: таймер подъёма считает от последней ПРОВЕРКИ, а не от последней строки журнала
+           LEFT JOIN tenant_data.price_no_change_state checked ON checked.tenant_id = s.tenant_id AND checked.write_scope_id = s.write_scope_id
           WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status = 'ACTIVE'
             AND (
             /**
@@ -3713,7 +3760,7 @@ export class PgPricingStore implements PricingStore {
              * принятому снимку и решения не было дольше периода планового пересчёта. Без таймера ступень ждала бы нового снимка
              */
             (ps.type = 'WIN_BUYBOX' AND coalesce((ps.params ->> 'creepUp')::boolean, false)
-             AND (last.decided_at IS NULL OR last.decided_at <= $3::timestamptz - make_interval(secs => $5))
+             AND (last.decided_at IS NULL OR greatest(last.decided_at, checked.last_evaluated_at) <= $3::timestamptz - make_interval(secs => $5))
              /**
               * Ревью шага 97, находка (в1): только когда ступень возможна — иначе решение «без изменения» раз в период без конца. Аккаунт в
               * бою (в тени предложение удерживается и повторяется, как у лестницы); последнее решение — изменение цены или ожидание темпа и

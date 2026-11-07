@@ -768,33 +768,43 @@ export function runStrategy(input: EngineInput): EngineResult {
   }
 
   function intent(intentClass: 'CHANGED' | 'NO_OP', proposedMinor: number, main: Reason, chain: Reason[], reference: number | null, ruleCode: string = params.type): EngineResult {
-    const ttl = input.intentTtlSeconds ?? 600;
-    return {
-      kind: 'INTENT',
-      intent: {
-        writeScopeId: writeScope.writeScopeId,
-        strategyId: strategy.strategyId,
-        strategyVersion: strategy.version,
-        trigger: input.trigger,
-        ruleCode,
-        intentClass,
-        proposedMinor,
-        currentMinor: current,
-        referenceMinor: reference,
-        currency: writeScope.currency,
-        basis: writeScope.basis,
-        reason: main,
-        // Шаг 102 [Р-227]: каждое решение в режиме распродажи открывается им — квитанция не прячет режим никогда
-        explanation: clearance ? [clearanceReason!, ...(clearanceConflict ? [clearanceConflict] : []), ...chain] : chain,
-        inputs: {
-          ...(snapshot?.sourceEventId ? { snapshotSourceEventId: snapshot.sourceEventId } : {}),
-          ...(snapshot ? { snapshotObservedAt: snapshot.observedAt, snapshotSource: snapshot.source } : {}),
-          ...(input.cost ? { costProfileId: input.cost.costProfileId } : {}),
-          boundsAtStrategy: { minMinor: bounds.minMinor, maxMinor: bounds.maxMinor },
-        },
-        createdAt: now,
-        expiresAt: new Date(Date.parse(now) + ttl * 1000).toISOString(),
-      },
-    };
+    // Шаг 102 [Р-227]: каждое решение в режиме распродажи открывается им — квитанция не прячет режим никогда
+    return { kind: 'INTENT', intent: buildIntent(input, intentClass, proposedMinor, main, clearance ? [clearanceReason!, ...(clearanceConflict ? [clearanceConflict] : []), ...chain] : chain, reference, ruleCode) };
   }
+}
+
+function buildIntent(input: EngineInput, intentClass: 'CHANGED' | 'NO_OP', proposedMinor: number, main: Reason, explanation: Reason[], reference: number | null, ruleCode: string): PriceIntentDraft {
+  const { strategy, snapshot, writeScope, bounds, currentPriceMinor, now } = input;
+  const ttl = input.intentTtlSeconds ?? 600;
+  return {
+    writeScopeId: writeScope.writeScopeId,
+    strategyId: strategy.strategyId,
+    strategyVersion: strategy.version,
+    trigger: input.trigger,
+    ruleCode,
+    intentClass,
+    proposedMinor,
+    currentMinor: currentPriceMinor,
+    referenceMinor: reference,
+    currency: writeScope.currency,
+    basis: writeScope.basis,
+    reason: main,
+    explanation,
+    inputs: {
+      ...(snapshot?.sourceEventId ? { snapshotSourceEventId: snapshot.sourceEventId } : {}),
+      ...(snapshot ? { snapshotObservedAt: snapshot.observedAt, snapshotSource: snapshot.source } : {}),
+      ...(input.cost ? { costProfileId: input.cost.costProfileId } : {}),
+      boundsAtStrategy: { minMinor: bounds.minMinor, maxMinor: bounds.maxMinor },
+    },
+    createdAt: now,
+    expiresAt: new Date(Date.parse(now) + ttl * 1000).toISOString(),
+  };
+}
+
+/**
+ * Шаг 116 [Р-241]: стратегия не рассчитала цену — это решение «без изменения» с причиной, которую продавец видит в журнале. Цена удержания — нынешняя; цены на витрине
+ * ещё нет — нижняя граница, как у прочих удержаний. Движок по-прежнему отвечает NOT_EVALUATED: предпросмотр показывает именно это, а строку решает путь решения
+ */
+export function notEvaluatedIntent(input: EngineInput, reason: Reason): PriceIntentDraft {
+  return buildIntent(input, 'NO_OP', input.currentPriceMinor ?? input.bounds.minMinor, reason, [reason], null, input.strategy.params.type);
 }
