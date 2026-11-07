@@ -41,7 +41,7 @@ after(async () => { await db?.drop(); });
 test('step 117 (P0-16): on PostgreSQL the summary window reads offers priced from competitors first — an hour old beats six hours old', async () => {
   const account = world.ids.dbId(ACCOUNT);
   const q = (n: number) => ({ marketplace: 'de', channelProductRef: `11710${n}`, condition: 'new' as const });
-  const now = Date.parse('2026-11-07T12:00:00.000Z');
+  const now = Date.parse('2026-09-29T12:00:00.000Z');
   const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString() as never;
   await store.markPolled(world.tenantId, account, [q(1)], ago(60));
   await store.markPolled(world.tenantId, account, [q(2)], ago(360));
@@ -57,7 +57,7 @@ test('step 117 (P0-16): on PostgreSQL the summary window reads offers priced fro
 
 test('step 117 (P0-16): never read comes first, competitive before the rest; the rest is never starved — the two rounds are the formula of the paragraph', () => {
   const q = (n: number) => ({ marketplace: 'de', channelProductRef: `r${n}`, condition: 'new' as const });
-  const now = Date.parse('2026-11-07T12:00:00.000Z');
+  const now = Date.parse('2026-09-29T12:00:00.000Z');
   const window = prioritizedWindow([
     { query: q(1), lastSeenMs: now - 60_000, competitive: true }, { query: q(2), lastSeenMs: null, competitive: false }, { query: q(3), lastSeenMs: null, competitive: true },
   ], 3, 0);

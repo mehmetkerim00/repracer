@@ -979,7 +979,8 @@ test('шаг 116: дата внутри окна секций шаблона в 
   assert.deepEqual(inWindow("let nowMs = Date.parse('2026-11-07T10:00:00.000Z'); query('SELECT maintenance.ensure_partitions($1)')", at), []);
 
   const rootPath = fileURLToPath(root);
-  const files = execFileSync('git', ['ls-files', '*.pg.test.ts'], { cwd: rootPath, encoding: 'utf8' }).split('\n').filter(Boolean);
+  // Шаг 117: и ещё не закоммиченные — правило ловит дату в день написания, а новый тест до коммита в индексе git не значится (первый прогон CI шага 117)
+  const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '*.pg.test.ts'], { cwd: rootPath, encoding: 'utf8' }).split('\n').filter(Boolean);
   const findings = files.flatMap((file) => inWindow(read(file), Date.now()).map((date) => `${file}: ${date}`));
   assert.deepEqual(findings, [], 'дата теста живёт в окне секций шаблона: через два дня тест покраснеет');
 });
