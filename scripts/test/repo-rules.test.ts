@@ -955,3 +955,32 @@ test('шаг 106: быстрая область делится на шарды �
   assert.deepEqual(matrix, Array.from({ length: FAST_SHARDS }, (_, i) => i + 1), 'матрица задания fast — шарды 1…FAST_SHARDS');
   assert.ok(ci.includes(`--scope=fast --ci --shard=\${{ matrix.shard }}/${FAST_SHARDS}`), 'задание fast передаёт свой шард test-all');
 });
+
+/**
+ * Шаг 116: тест шага 114 жил в литерале 2026-11-05 и писал в суточные секции. Секции шаблона идут от вчерашнего дня до +3 суток от дня подготовки базы, поэтому в день
+ * написания всё зелёное, а с третьего дня красная сборка на любой ветке и ночью на main. Литерал внутри этого окна держится на дне прогона, и видно это только здесь:
+ * старый литерал без своих секций краснеет сразу и сам. Такой файл называет `ensure_partitions`, либо берёт дату вне окна.
+ */
+test('шаг 116: дата внутри окна секций шаблона в тесте на PostgreSQL — только со своими секциями', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const DAY_MS = 86_400_000;
+  const inWindow = (text: string, nowMs: number) => {
+    if (text.includes('ensure_partitions')) return [];
+    const today = Math.floor(nowMs / DAY_MS);
+    return [...text.matchAll(/'(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}/g)].map((m) => m[1]!)
+      .filter((date) => { const day = Date.parse(`${date}T00:00:00Z`) / DAY_MS - today; return day >= -1 && day <= 3; });
+  };
+  // Зубы [Р-94]: граница окна с обеих сторон и файл со своими секциями
+  const at = Date.parse('2026-11-07T00:20:00Z');
+  assert.deepEqual(inWindow("let nowMs = Date.parse('2026-11-06T10:00:00.000Z');", at), ['2026-11-06']);
+  assert.deepEqual(inWindow("clock: '2026-11-10T10:00:00.000Z'", at), ['2026-11-10']);
+  assert.deepEqual(inWindow("let nowMs = Date.parse('2026-11-05T10:00:00.000Z');", at), []);
+  assert.deepEqual(inWindow("clock: '2026-11-11T10:00:00.000Z'", at), []);
+  assert.deepEqual(inWindow("let nowMs = Date.parse('2026-11-07T10:00:00.000Z'); query('SELECT maintenance.ensure_partitions($1)')", at), []);
+
+  const rootPath = fileURLToPath(root);
+  const files = execFileSync('git', ['ls-files', '*.pg.test.ts'], { cwd: rootPath, encoding: 'utf8' }).split('\n').filter(Boolean);
+  const findings = files.flatMap((file) => inWindow(read(file), Date.now()).map((date) => `${file}: ${date}`));
+  assert.deepEqual(findings, [], 'дата теста живёт в окне секций шаблона: через два дня тест покраснеет');
+});
+

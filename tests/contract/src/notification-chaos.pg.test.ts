@@ -46,6 +46,9 @@ const scope = (n: number): MemorySeedScope => ({
 
 before(async () => {
   db = await createIsolatedDatabase('chaos114');
+  // Шаг 116: часы теста — литерал, а секции шаблона идут от вчерашнего дня: без своих секций тест краснел с третьего дня после написания
+  // (быстрый прогон 42316914198, 2026-11-07). Секции создаёт функция планировщика — тем же способом, что в работе
+  await db.pool('svc_scheduler', 1).query('SELECT maintenance.ensure_partitions($1)', [new Date(nowMs).toISOString()]);
   app = db.pool('svc_app', 4);
   inbound = db.pool('svc_inbound', 2);
   world = await seedPricingWorld(app, {
