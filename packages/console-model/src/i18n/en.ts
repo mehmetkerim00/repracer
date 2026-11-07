@@ -630,6 +630,13 @@ export const en = {
       halted: 'Halted', haltedDetail: (when: string) => `Competitor-derived prices are halted on this storefront since ${when}`,
       haltedButWorks: 'The storefront is halted for competitor-derived prices, this strategy does not use them', on: 'On', onDetail: 'The price is calculated automatically',
       distrusted: 'Held: channel distrusted', distrustedDetail: (when: string) => `The channel does not apply our prices as sent — all prices of this storefront are held since ${when} until a person releases it`,
+      offBy: (who: string, when: string) => `Turned off by ${who}, ${when}`, offByNote: (who: string, when: string, note: string) => `Turned off by ${who}, ${when}. Note: ${note}`,
+      disable: {
+        button: 'Turn off', title: (unit: string) => `Turn off repricing: ${unit}?`, done: (unit: string) => `Repricing turned off: ${unit}`, doneBadge: 'Off',
+        body: 'We stop calculating this offer. Its current price stays in the channel, and prices still waiting to be sent are not sent. You can turn it back on with Enable at any time.',
+        note: 'Note (optional)', noteHint: 'Why — your team sees it next to the status.', confirm: 'Turn off', cancel: 'Cancel', close: 'Close',
+        notOn: 'Repricing is not on for this offer — there is nothing to turn off.', noteTooLong: (max: number) => `The note is longer than ${max} characters.`,
+      },
     },
     channelNotes: {
       automatedPricing: 'Channel repricer active',
@@ -1367,6 +1374,7 @@ export const en = {
       },
       filters: {
         storefront: 'Storefront', allStorefronts: 'All storefronts', holder: 'Buy Box', anyHolder: 'Any',
+        pricing: 'Repricing', anyPricing: 'Any', pricingValues: { ON: 'On', OFF: 'Off' },
         holders: { SELF: 'You', OTHER: 'Another seller', NONE: 'No one', UNKNOWN: 'Holder unknown', NO_DATA: 'No competitor data' },
         search: 'Search', searchPlaceholder: 'SKU, EAN or name',
         matched: (n: number, total: number) => `${n} of ${total} offers match the filter`,

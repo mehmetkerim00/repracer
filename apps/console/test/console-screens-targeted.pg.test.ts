@@ -126,7 +126,7 @@ test('step 67 (OQ-248): every screen built from the units it names and the datab
  * отрезкам каждой единицы. Равенство двух страниц на всех мирах стенда — это равенство SQL и правила экрана; сравнение не пусто: встречены
  * названный и неизвестный держатель, разрыв и доля
  */
-test('step 105 (A) [Р-230]: Offers with the Buy Box columns — every holder filter, storefront, search and sort of the database equals the screen rule on every stand world', { timeout: 30 * 60_000 }, async () => {
+test('step 105 (A) [Р-230], step 118: Offers with the Buy Box columns — every holder and repricing filter, storefront, search and sort of the database equals the screen rule on every stand world', { timeout: 30 * 60_000 }, async () => {
   const r = await targeted({ method: 'POST', url: '/api/stand-issuer/token', body: { role: 'OWNER' } });
   const auth = { authorization: `Bearer ${(r.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
   const compare = async (url: string) => {
@@ -138,7 +138,7 @@ test('step 105 (A) [Р-230]: Offers with the Buy Box columns — every holder fi
   };
   // Неизвестного держателя (Amazon, A-29) в мирах стенда на PostgreSQL нет — снимков Amazon у них нет; его группу и порядок базы на
   // PostgreSQL сверяет прогон демо США (`demo-us-live.pg.test.ts`, step 105 (A)), где amazon.com есть
-  const seen = { worlds: 0, named: 0, gap: 0, share: 0, filtered: 0, storefronts: 0 };
+  const seen = { worlds: 0, named: 0, gap: 0, share: 0, filtered: 0, storefronts: 0, pricing: 0 };
   for (const live of worlds) {
     if (!live.store.consoleCatalogFacts) continue;
     const api = (path: string) => `/api/worlds/${encodeURIComponent(live.id)}/${path}`;
@@ -160,6 +160,12 @@ test('step 105 (A) [Р-230]: Offers with the Buy Box columns — every holder fi
         // Страница сортировки — та же выборка базы, что и порядок целиком: вторая страница по три
         await compare(api(`products?offset=3&limit=3&bb=1&sort=${key}&dir=${dir}`));
       }
+    }
+    // Шаг 118: фильтр «Repricing» — режим единицы; базе и правилу экрана — одно правило (`PRICING_MODE_OF_FILTER`)
+    for (const pricing of ['ON', 'OFF']) {
+      const page = await compare(api(`products?offset=0&limit=200&bb=1&pricing=${pricing}`));
+      if (page.page.total > 0 && page.page.total < all.page.total) seen.pricing += 1;
+      await compare(api(`products?offset=0&limit=7&pricing=${pricing}&holder=OTHER&sort=gap&dir=asc`));
     }
     for (const sf of all.filters.storefronts) { await compare(api(`products?offset=0&limit=200&bb=1&storefront=${encodeURIComponent(sf.value)}`)); seen.storefronts += 1; }
     const word = all.rows[0]!.unit.label.split(/[ ,·]/).find((x) => x.length > 2) ?? '';

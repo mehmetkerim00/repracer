@@ -370,6 +370,33 @@ test('Р-131, G: without the declared cost the screen shows a requirement, not a
   assert.equal((await call(viewer, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).status, 403);
 });
 
+/**
+ * Шаг 118 без базы: хранилище в памяти ведёт журнал, как 0222 — выключает человек сессии, записка по желанию; статус называет, кто выключил;
+ * фильтр «Repricing» и окно — те же, что на PostgreSQL. Без права включения — 403, выключить невключённое — 409 словами
+ */
+test('step 118 (memory): turning automatic pricing off for one offer — the status names who, the filter finds it, the dialog says what happens', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const on = await get<ProductListView>(owner, `${api(id, 'products')}?pricing=ON`);
+  const target = on.rows.find((r) => r.canDisable)!;
+  assert.ok(target, `an offer that is on: ${on.rows.map((r) => r.enabled.label).join(', ')}`);
+  const stranger = await login('INVENTORY_MANAGER');
+  assert.equal((await call(stranger, 'POST', api(id, 'scopes', target.unit.writeScopeId, 'disable'), {})).status, 403, 'without the right to enable there is no turning off');
+  const tooLong = await call(owner, 'POST', api(id, 'scopes', target.unit.writeScopeId, 'disable'), { note: 'x'.repeat(501) });
+  assert.deepEqual([tooLong.status, (tooLong.body as { error: { code: string } }).error.code], [400, 'NOTE_TOO_LONG']);
+  assert.equal((await call(owner, 'POST', api(id, 'scopes', target.unit.writeScopeId, 'disable'), { note: 'Hold for the photo shoot' })).status, 200);
+  const again = await call(owner, 'POST', api(id, 'scopes', target.unit.writeScopeId, 'disable'), {});
+  assert.deepEqual([again.status, (again.body as { error: { message: string } }).error.message], [409, 'Repricing is not on for this offer — there is nothing to turn off.']);
+  const off = await get<ProductListView>(owner, `${api(id, 'products')}?pricing=OFF`);
+  const row = off.rows.find((r) => r.unit.writeScopeId === target.unit.writeScopeId)!;
+  assert.deepEqual([row.enabled.label, row.canDisable, off.filters.pricing], ['Off', false, 'OFF']);
+  assert.match(row.enabled.short ?? '', /^Turned off by Owner, /, 'without a name in memory — the role of the member');
+  assert.match(row.enabled.detail, /Note: Hold for the photo shoot$/);
+  assert.equal(off.rows.every((r) => r.enabled.label === 'Off'), true, '«Repricing: Off» lists only offers that are off');
+  const dialog = await html('/src/screens/Products.tsx', 'DisableView', { unit: target.unit.label, done: false, busy: false, error: null, onConfirm: () => {}, onClose: () => {} }, 'en');
+  for (const text of ['Turn off repricing: ', 'Its current price stays in the channel', 'Note (optional)', 'Turn off']) assert.ok(dialog.includes(text), `${text}: ${dialog}`);
+});
+
 test('Р-134, Р-135 (шаг 28), шаг 99 [Р-224]: импорт себестоимости — примерка до применения, ошибки по строкам, файл с ошибкой не применяется', async () => {
   const id = 'kaufland/pipeline/happy-path';
   const owner = await login('OWNER', 'de');

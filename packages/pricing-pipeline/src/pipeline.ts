@@ -40,7 +40,7 @@ import { competeWithOf, notEvaluatedIntent, runStrategy, strategyAvailability, t
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { noChangeStateOf, repeatsNoChange } from './no-change.ts';
 import { planPollingTiers } from './polling.ts';
-import { PIPELINE_WRITE_FIELD, type ClearanceEnded, type FloorRaiseAfter, type FloorRaiseCandidate } from './store.ts';
+import { PIPELINE_WRITE_FIELD, type ClearanceEnded, type FloorRaiseAfter, type FloorRaiseCandidate, type PriceScopeContext } from './store.ts';
 import { listingNotBuyableAlerts } from './listing-status.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
@@ -1142,6 +1142,22 @@ export function createPricingPipeline(deps: PipelineDeps) {
         return { enabled: false, problems: [problem], warnings };
       }
       return { enabled: true, problems: [], warnings };
+    },
+
+    /**
+     * Шаг 118: выключение автоцены одного предложения — «вот этот SKU не трогай». Без второго фактора: забор не двигается (Р-225); записка — по
+     * желанию. Выключить можно только включённое: режим OFF, строка журнала и аудит (кто и когда) — одной транзакцией хранилища. Записи, ещё не
+     * ушедшие в канал, завершит страж отправки (режим не ENGINE); выключенное предложение движок не оценивает вовсе
+     */
+    async disableRepricing(ctx: AdapterCallContext, writeScopeId: string, options: { userId?: string; note?: string | null } = {}): Promise<{ disabled: boolean; mode: PriceScopeContext['pricingMode'] | null }> {
+      const loaded = await store.loadScopeContext(ctx.tenantId, writeScopeId, deps.now());
+      if (!loaded) return { disabled: false, mode: null };
+      const mode = loaded.context.scope.pricingMode;
+      if (mode !== 'ENGINE') return { disabled: false, mode };
+      const note = options.note?.trim() ? options.note.trim() : null;
+      await store.setPricingMode(ctx.tenantId, writeScopeId, 'OFF', options.userId, note);
+      await emit(ctx, [{ kind: 'log', level: 'INFO', code: 'REPRICING_DISABLED', message: 'REPRICING_DISABLED', details: { writeScopeId } }]);
+      return { disabled: true, mode: 'OFF' };
     },
 
     /** Kill switch [Р-69, Р-70]: все изменения цен; права и заметку проверяют хранилище и БД */

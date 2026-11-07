@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0221_verify_schema_invariants_v65.sql';
+const VERIFY = 'migrations/0223_verify_schema_invariants_v66.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -3033,3 +3033,45 @@ export const STEP117_ROWS = [
   },
 ];
 
+
+// Шаг 118 (0222): выключение автоцены одного предложения — журнал держит база, у каждой формы и ветки — своя проверка с причиной [Р-94, Р-99]
+const R118 = T('offer-pricing-switch-step118.pg.test.ts');
+const G118 = 'step 118: the database keeps the journal honest';
+const W118 = 'step 118: turning off with a write in flight is accepted';
+export const STEP118_ROWS = [
+  {
+    row: 'шаг 118 (выключение автоцены)', critical: false,
+    invariant: 'выключает и включает автоцену человек от своего имени; выключить можно только включённое, включить — только выключенное; действие известно, записка — по желанию и не пустая; журнал только на добавление, в аудите, уходит с тенантом; выключить можно и с записью в полёте, а цена выключенного предложения в канал не уходит; Р-12 держит переходы Smart Pricing',
+    mutations: [
+      // Без проверки «членство — того человека» несуществующее членство держит внешний ключ — другой причиной
+      m(replaceInFunction('tenant_data.offer_pricing_switch_guard()', 'IF person IS NULL OR person IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+        node(R118, G118, 'turned off in the name of another membership', 'foreign key')),
+      m(replaceInFunction('tenant_data.offer_pricing_switch_guard()', "IF NEW.action = 'OFF' AND mode IS DISTINCT FROM 'ENGINE' THEN", 'IF false THEN'),
+        node(R118, G118, 'turning off an offer that is off is refused', '^accepted$')),
+      m(replaceInFunction('tenant_data.offer_pricing_switch_guard()', "IF NEW.action = 'ON' AND mode IS DISTINCT FROM 'OFF' THEN", 'IF false THEN'),
+        node(R118, G118, 'turning on an offer that is on is refused', '^accepted$')),
+      m(dropConstraint('offer_pricing_switch_action_known', 'tenant_data.offer_pricing_switch'), node(R118, G118, 'an unknown action is refused', '^accepted$')),
+      m(dropConstraint('offer_pricing_switch_note_form', 'tenant_data.offer_pricing_switch'),
+        node(R118, G118, ['an empty note is refused', 'a note longer than 500 characters is refused'], '^accepted$')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.offer_pricing_switch'),
+        verify('tenant_data\\.offer_pricing_switch: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.offer_pricing_switch'),
+        verify('tenant_data\\.offer_pricing_switch: administrative INSERT is not written to the audit log')),
+      m(dropTrigger('zz_append_only', 'tenant_data.offer_pricing_switch'), smoke('append-only tenant_data.offer_pricing_switch')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.offer_pricing_switch'), smoke('truncate tenant_data.offer_pricing_switch')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.offer_pricing_switch', ", ''),
+        verify('tenant_data\\.offer_pricing_switch: tenant closure does not delete the table')),
+      // Р-12 остаётся для Smart Pricing Kaufland: снятое исключение целиком — переход в Smart Pricing при записи в полёте проходит
+      m(replaceInFunction('tenant_data.write_scope_mode_switch_guard()',
+        "AND NOT (OLD.pricing_mode IN ('ENGINE', 'OFF') AND NEW.pricing_mode IN ('ENGINE', 'OFF')) AND (", 'AND false AND ('),
+        smoke('pricing_mode switch to Smart Pricing with an in-flight write (Р-12)')),
+      // Исключение снято — «не трогай» снова ждёт очереди
+      m(replaceInFunction('tenant_data.write_scope_mode_switch_guard()',
+        "AND NOT (OLD.pricing_mode IN ('ENGINE', 'OFF') AND NEW.pricing_mode IN ('ENGINE', 'OFF')) AND (", 'AND ('),
+        node(R118, W118, 'turning off with a write in flight is accepted', 'unfinished writes')),
+      // До шага ветка была почти недостижима (Р-12 не давал сменить режим при записях в очереди); теперь она держит «цена выключенного не уходит»
+      m(replaceInFunction('tenant_data.channel_write_before_update()', "IF (NEW.field = 'PRICE' AND s.pricing_mode <> 'ENGINE')", 'IF (false)'),
+        node(R118, W118, { re: 'the write of a turned-off offer reached the channel: .*' }, '^true$')),
+    ],
+  },
+];

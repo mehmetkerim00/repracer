@@ -89,7 +89,8 @@ export {
 } from './polling.ts';
 export { EXPLANATION_RULESETS } from './dictionary.ts';
 export { listingNotBuyableAlerts, listingStatusStep, type LatestListingState, type LatestPart } from './listing-status.ts';
-export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, MemberRoleChangeResult, DiscoveryStop, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, BuyboxHolderObservation, CompetitionData, CompetitionDataRow, OfferHolderFilter, OfferPageFilter, OfferSortKey } from './store.ts';
+export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, MemberRoleChangeResult, DiscoveryStop, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, BuyboxHolderObservation, CompetitionData, CompetitionDataRow, OfferHolderFilter, OfferPageFilter, OfferSortKey, OfferPricingFilterValue } from './store.ts';
+export { OFFER_PRICING_FILTERS, PRICING_MODE_OF_FILTER } from './store.ts';
 export { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, prioritizedWindow, reconcile, restSlots, rotation, snapshotDigest, stalestFirst, SUMMARY_POLL_OTHER_WEIGHT, summaryRounds, type HeldState, type ReconciliationOutcome } from './reconciliation.ts';
 export { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, READ_ONLY_JOB_KINDS } from './store.ts';
 // Шаг 99 [Р-225]: доступность стратегии каналу [Р-39] — та же проверка, что у назначения и предпросмотра, для импорта стратегий
@@ -99,7 +100,7 @@ export { IMPORT_KINDS, XLSX_CONTENT_TYPE } from './store.ts';
 // Шаг 102 [Р-227]: «вернётся к полу примерно за N шагов» — та же арифметика, что у лестницы движка [Р-208]
 export { ladderSteps } from '@repracer/strategy-engine';
 export type { ClearanceRef, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceInvalidCause, ClearanceChangeRow, ClearanceState, ClearanceEnded } from './store.ts';
-export type { DefaultRuleReason, StrategyAssignmentRef, DefaultStrategyRow, DefaultStrategyResult } from './store.ts';
+export type { DefaultRuleReason, StrategyAssignmentRef, DefaultStrategyRow, DefaultStrategyResult, PricingSwitchRef } from './store.ts';
 export type { ImportKind, ImportRunOutcome, ImportRunInput, ImportRunRow, BoundsImportRowInput, BoundsImportResult, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult } from './store.ts';
 // Шаг 34 [Р-149, Р-150]: онбординг и честное состояние канала
 export type { OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, OnboardingStep, OnboardingPath, ChannelAccountRow, ChannelAccessBlocker, ChannelAuthStatus } from './store.ts';

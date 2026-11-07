@@ -2162,7 +2162,7 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
     if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
     await go('products');
     const p = m.ui.products;
-    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
+    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
     // Колонки Buy Box выключены по умолчанию и есть в выборе Columns
     const shown = await b.evaluate<string[]>(headers);
     assert.ok(![p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare].some((c) => shown.includes(c)), `${m.locale}: Buy Box columns are off by default — ${shown.join(' | ')}`);
@@ -2191,10 +2191,10 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
   await b.evaluate(`(document.querySelectorAll('table.products thead th[aria-sort] button')[1].click(), true)`);
   await waitFor(b, `${sortState}[1] === 'descending'`, 'price sorted descending');
   // Фильтр держателя «нет данных конкурентов» — строка «N of M offers match the filter»
-  await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')][1];
+  await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')].find((x) => [...x.options].some((o) => o.value === 'NO_DATA'));
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'NO_DATA'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await waitFor(b, `/ offers match the filter$/.test(document.querySelector('.section-sub')?.textContent ?? '')`, 'the page says how many offers match');
-  await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')][1];
+  await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')].find((x) => [...x.options].some((o) => o.value === 'NO_DATA'));
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ''); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await settled(b, 'filter cleared');
   for (const scheme of ['light', 'dark'] as const) {

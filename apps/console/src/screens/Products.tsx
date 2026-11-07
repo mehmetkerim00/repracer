@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
-import type { EnableResult } from '../api-types.ts';
+import { LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
+import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName, ColorVariant } from '../components.tsx';
 import { CheckField, Field, FormActions } from '../forms.tsx';
@@ -18,8 +18,8 @@ const SORT_OF: Record<(typeof BUYBOX_COLUMNS)[number], OfferSortKeyValue> = { bb
 const VIEW_KEY = 'repracer.products.view';
 
 /** Шаг 105: фильтр строки и сортировка экрана Offers — то, что уходит в адрес экрана и в обе выгрузки */
-export interface OfferUiQuery { storefront: string; holder: string; q: string; sort: OfferSort | null }
-export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', holder: '', q: '', sort: null };
+export interface OfferUiQuery { storefront: string; pricing: string; holder: string; q: string; sort: OfferSort | null }
+export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', holder: '', q: '', sort: null };
 /** Включена ли хоть одна колонка Buy Box — по выбору зрителя в браузере (до первого ответа экрана) */
 export function storedBuyboxColumns(): boolean {
   try {
@@ -30,7 +30,7 @@ export function storedBuyboxColumns(): boolean {
 }
 /** Адрес экрана и запрос выгрузки: пустые поля не передаются */
 export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string> {
-  return exportQuery(null, { storefront: q.storefront, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
+  return exportQuery(null, { storefront: q.storefront, pricing: q.pricing, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
 }
 /**
  * «Следующая проверка» у всех предложений сейчас одна и та же («нет данных») — по умолчанию скрыта; «Канал сообщает» — когда есть что
@@ -53,8 +53,8 @@ function readView(view: ProductListView): { columns: Record<OptionalColumn, bool
 }
 
 /** Экран A: действующий пол — главная цифра, min_price — его составляющая (шаг 12, F) */
-export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_OFFER_QUERY, onOfferQuery, onBuyboxColumns }: {
-  view: ProductListView; onEnable?: (row: ProductRow) => void; query?: ListQuery; onQuery?: (q: ListQuery) => void;
+export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQuery = NO_OFFER_QUERY, onOfferQuery, onBuyboxColumns }: {
+  view: ProductListView; onEnable?: (row: ProductRow) => void; onDisable?: (row: ProductRow) => void; query?: ListQuery; onQuery?: (q: ListQuery) => void;
   /** Шаг 105: фильтр и сортировка — у экрана; без обработчика (тесты экранов) — без ряда фильтров */
   offerQuery?: OfferUiQuery; onOfferQuery?: (q: OfferUiQuery) => void; onBuyboxColumns?: (on: boolean) => void;
 }) {
@@ -75,7 +75,7 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
   };
   const col = shown.columns;
   const bbOn = BUYBOX_COLUMNS.some((k) => col[k]);
-  const filtered = offerQuery.storefront !== '' || offerQuery.holder !== '' || offerQuery.q !== '';
+  const filtered = offerQuery.storefront !== '' || offerQuery.pricing !== '' || offerQuery.holder !== '' || offerQuery.q !== '';
   /** Заголовок колонки Buy Box — кнопка сортировки по всему каталогу: первое нажатие — по возрастанию, второе — по убыванию */
   const sortHead = (k: (typeof BUYBOX_COLUMNS)[number], numeric: boolean) => {
     const key = SORT_OF[k];
@@ -116,6 +116,13 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
               <select value={offerQuery.storefront} onChange={(e) => onOfferQuery({ ...offerQuery, storefront: e.currentTarget.value })}>
                 <option value="">{f.allStorefronts}</option>
                 {view.filters.storefronts.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 118: автоцена включена или выключена — по всему каталогу, как остальные фильтры */}
+            <Field label={f.pricing}>
+              <select value={offerQuery.pricing} onChange={(e) => onOfferQuery({ ...offerQuery, pricing: e.currentTarget.value })}>
+                <option value="">{f.anyPricing}</option>
+                {OFFER_PRICING_FILTERS.map((v) => <option key={v} value={v}>{f.pricingValues[v]}</option>)}
               </select>
             </Field>
             <Field label={f.holder}>
@@ -212,6 +219,8 @@ export function ProductsView({ view, onEnable, query, onQuery, offerQuery = NO_O
                   {/* Шаг 97 [E]: страница конкурентов предложения — ссылкой из строки, не пунктом меню */}
                   <a className="secondary-link" href={href(view.worldId, 'competition', r.unit.writeScopeId)}>{m.ui.competition.link}</a>
                   {r.canEnable && onEnable ? <button type="button" onClick={() => onEnable(r)}>{p.enable}</button> : null}
+                  {/* Шаг 118: «этот SKU не трогай» — выключение автоцены одного предложения, обратно — «Enable» */}
+                  {r.canDisable && onDisable ? <button type="button" onClick={() => onDisable(r)}>{m.ui.enabled.disable.button}</button> : null}
                 </td>
               </tr>
             ))}
@@ -263,6 +272,32 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
   );
 }
 
+/**
+ * Шаг 118: выключение автоцены одного предложения — без второго фактора (забор не двигается, Р-225), записка по желанию. Окно говорит, что будет
+ * с ценой и с записями в очереди, и закрывается итогом; ошибка — словами сервера
+ */
+export function DisableView(props: { unit: string; done: boolean; busy: boolean; error: string | null; onConfirm: (note: string) => void; onClose: () => void }) {
+  const m = useMessages();
+  const d = m.ui.enabled.disable;
+  const [note, setNote] = useState('');
+  return (
+    <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="disable-title">
+      <h3 id="disable-title">{props.done ? d.done(props.unit) : d.title(props.unit)}{props.done ? <> <Badge tone="off">{d.doneBadge}</Badge></> : null}</h3>
+      {props.error ? <ErrorBox message={props.error} /> : null}
+      {props.done ? null : <>
+        <p>{d.body}</p>
+        <Field label={d.note} caption={d.noteHint}>
+          <textarea value={note} maxLength={PRICING_SWITCH_NOTE_MAX} rows={2} onChange={(e) => setNote(e.currentTarget.value)} />
+        </Field>
+      </>}
+      <FormActions dialog>
+        <button type="button" onClick={props.onClose} disabled={props.busy}>{props.done ? d.close : d.cancel}</button>
+        {props.done ? null : <button type="button" className="primary" disabled={props.busy} onClick={() => props.onConfirm(note)}>{d.confirm}</button>}
+      </FormActions>
+    </div>
+  );
+}
+
 /** Шаг 112 [Р-238]: вторая строка предложения на Offers — цвет товара, идентификатор товара в канале и состояние, если оно не «новое» */
 function ProductRef({ unit }: { unit: ProductRow['unit'] }) {
   const p = useMessages().ui.products;
@@ -307,12 +342,31 @@ export function ProductsScreen({ worldId }: { worldId: string }) {
     }
   };
   const close = () => { setRow(null); setResult(null); setError(null); };
+  // Шаг 118: выключение автоцены — своё окно; после итога экран перечитывается
+  const [off, setOff] = useState<{ row: ProductRow; done: boolean } | null>(null);
+  const disable = async (target: ProductRow, note: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await requestJson<DisableResult>(worldPath(worldId, 'scopes', target.unit.writeScopeId, 'disable'),
+        { method: 'POST', body: { note: note.trim() === '' ? null : note.trim() } satisfies DisableRequest, locale: m.locale });
+      setOff({ row: target, done: true });
+      retry();
+    } catch (e) {
+      setError(errorText(e, m));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const closeOff = () => { setOff(null); setError(null); };
 
   return (
     <>
       {row ? <EnableResultView unit={row.unit.label} worldId={worldId} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close} /> : null}
+      {off ? <DisableView unit={off.row.unit.label} done={off.done} busy={busy} error={error} onConfirm={(note) => void disable(off.row, note)} onClose={closeOff} /> : null}
       <Load shape="table" resource={resource} retry={retry}>
         {(view) => <ProductsView view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }}
+          onDisable={(r) => { setRow(null); setError(null); setOff({ row: r, done: false }); }}
           offerQuery={offerQuery} onOfferQuery={(q) => { setOfferQuery(q); setQuery({ ...query, offset: 0 }); }} onBuyboxColumns={setBb} />}
       </Load>
     </>

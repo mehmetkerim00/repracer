@@ -4,7 +4,7 @@ import { channelBoundsPill, channelPricingBlocks } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
-import type { ConsoleCatalogPage, ScopeDecisionStats } from '@repracer/pricing-pipeline';
+import type { ConsoleCatalogPage, OfferPricingFilterValue, ScopeDecisionStats } from '@repracer/pricing-pipeline';
 import { storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferSort } from './offer-buybox.ts';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
@@ -39,6 +39,8 @@ export interface ProductRow {
   decisions: number | null;
   /** Можно ли включить репрайсинг (режим OFF и роль с правом включения) */
   canEnable: boolean;
+  /** Шаг 118: можно ли выключить автоцену — движок включён и роль с тем же правом (владелец и менеджер) */
+  canDisable: boolean;
   /** Шаг 23: что канал делает с оффером сам — правило автоматического ценообразования [Р-120], выбытие из Featured Offer (PRICING_HEALTH) */
   channelNotes: ChannelNote[];
   /** Шаг 102 [Р-227]: пилюля «Clearance» — у предложения включён режим распродажи (пол ниже безубыточности намеренно) */
@@ -56,6 +58,8 @@ export interface ProductRow {
 /** Шаг 105 [Р-230]: фильтр строки Offers — витрина, держатель Buy Box, поиск; без фильтра — весь каталог */
 export interface OfferFilter {
   storefront: string | null;
+  /** Шаг 118: автоцена включена или выключена; null — все */
+  pricing: OfferPricingFilterValue | null;
   holder: OfferHolderFilterValue | null;
   q: string;
 }
@@ -148,9 +152,19 @@ export function boundText(b: BoundResolution, currency: string, m: Messages): st
 
 const ACTIVE_WRITE = new Set(['PENDING', 'DISPATCHED', 'FAILED', 'ACCEPTED', 'BLOCKED']);
 
-export function enabledCell(scope: ConsoleScope, m: Messages): StatusCell {
+export function enabledCell(scope: ConsoleScope, m: Messages, world?: StandWorld): StatusCell {
   const e = m.ui.enabled;
-  if (scope.pricingMode === 'OFF') return { tone: 'off', label: e.off, detail: e.offDetail };
+  if (scope.pricingMode === 'OFF') {
+    // Шаг 118: выключил человек — кто и когда видно под пилюлей, записка — в подсказке
+    const sw = scope.pricingSwitch;
+    if (sw?.action === 'OFF') {
+      const role = world?.state.members.find((x) => x.membershipId === sw.membershipId)?.role;
+      const who = sw.byName ?? (sw.byEmail ? world?.people?.[sw.byEmail] ?? sw.byEmail : role ? m.values[role as keyof typeof m.values] ?? role : m.ui.common.noValue);
+      const short = e.offBy(who, m.when(sw.at));
+      return { tone: 'off', label: e.off, short, detail: sw.note ? e.offByNote(who, m.when(sw.at), sw.note) : short };
+    }
+    return { tone: 'off', label: e.off, detail: e.offDetail };
+  }
   if (scope.pricingMode === 'KAUFLAND_SMART_PRICING') return { tone: 'off', label: e.smart, detail: e.smartDetail };
   // Р-69: остановка человеком — все цены, включая фиксированные и маржинальные
   if (scope.priceStop) return { tone: 'stop', label: e.stopped, detail: e.stoppedDetail(m.values[scope.priceStop.scope], m.when(scope.priceStop.stoppedAt)) };
@@ -310,7 +324,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       minPrice: boundText(scope.bounds.min, scope.currency, m),
       maxPrice: boundText(scope.bounds.max, scope.currency, m),
       strategy: strategyLabel(scope.strategy, scope.currency, m),
-      enabled: enabledCell(scope, m),
+      enabled: enabledCell(scope, m, world),
       applying: applyingCell(scope, state.writes, m),
       lastChange: lastChangeCell(scope, state.writes, m),
       nextCheck: { tone: 'unknown', label: m.ui.nextCheck.label, detail: m.ui.nextCheck.detail },
@@ -318,6 +332,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       decisions: stat ? stat.decisions : null,
       // Р-120 (ревью шага 23, находка 1): у предложения ценообразование канала — включение отклонит база, кнопки нет
       canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH'),
+      // Шаг 118: выключить можно всегда, когда движок включён — ценообразование канала выключению не мешает (как база, Р-120)
+      canDisable: scope.pricingMode === 'ENGINE' && can(world.viewer.role, 'ENABLE_REPRICING'),
       channelNotes: channelNotes(world, scope, m),
       clearance: scope.clearance ? p.clearancePill : null,
       frozen: floor.aboveCeiling ? p.floorAboveCeiling : null,
@@ -343,8 +359,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
   };
 }
 
-export const NO_FILTER: OfferFilter = { storefront: null, holder: null, q: '' };
-export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.holder !== null || f.q !== '';
+export const NO_FILTER: OfferFilter = { storefront: null, pricing: null, holder: null, q: '' };
+export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.pricing !== null || f.holder !== null || f.q !== '';
 
 /** Итоги каталога целиком — правило экрана Offers без базы; на PostgreSQL их считает база (`consoleCatalogPage`) */
 export function catalogTotals(world: StandWorld, m: Messages): { total: number; enabled: number; applying: number; stopped: number; off: number } {

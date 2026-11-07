@@ -222,6 +222,16 @@ test('Р-160: гость не может НИЧЕГО изменить — от�
   assert.equal(mode.status, 403, mode.text);
   assert.equal(mode.body.error.code, 'FORBIDDEN', `переключение режима гостем: ${mode.text.slice(0, 200)}`);
 
+  // Шаг 118: выключение автоцены одного предложения — право ENABLE_REPRICING, которого у гостя нет; кнопки у гостя нет, маршрут — 403
+  const offers = await walk<ProductListView>('products (предложение для выключения автоцены)', 'GET', `/api/worlds/${w}/products?offset=0&limit=5`, { token: guest });
+  const engineRow = offers.body.rows.find((r) => r.enabled.tone === 'ok');
+  assert.ok(engineRow, `у демо есть предложение с включённой автоценой: ${offers.text.slice(0, 200)}`);
+  assert.equal(engineRow.canDisable, false, 'гостю кнопка «Turn off» не предлагается');
+  const off = await walk<{ error: { code: string } }>('scopes/disable (выключить автоцену)', 'POST', `/api/worlds/${w}/scopes/${encodeURIComponent(engineRow.unit.writeScopeId)}/disable`,
+    { token: guest, body: { note: 'Gast versucht auszuschalten' } });
+  assert.equal(off.status, 403, off.text);
+  assert.equal(off.body.error.code, 'FORBIDDEN', `выключение автоцены гостем: ${off.text.slice(0, 200)}`);
+
   /**
    * Выгрузка доказательной истории — задание, которое «ничего не меняет», и право на него есть у ЛЮБОГО наблюдателя
    * [Р-143]. Гостю его не даёт база (0124): иначе публичная кнопка запускала бы 27 МБ работы исполнителя на каждого

@@ -52,8 +52,8 @@ import type {
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxHolderObservation, BuyboxSpanRow, CompetitionData, CompetitionDataRow, OfferPageFilter,
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
-  DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason } from '@repracer/pricing-pipeline';
-import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, prioritizedWindow } from '@repracer/pricing-pipeline';
+  DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason, PricingSwitchRef } from '@repracer/pricing-pipeline';
+import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 import { IMPORT_RUN_COLUMNS, importRunRow, insertImportRun } from './import-runs.ts';
@@ -686,6 +686,20 @@ async function clearanceChanges(tx: Tx, tenantId: string, by: { writeScopeId?: s
     endsAt: r.ends_at ? iso(r.ends_at) : null, note: r.note ?? null, membershipId: r.created_by_membership_id ?? null,
     byName: r.by_name ?? null, byEmail: r.by_email ?? null, at: iso(r.created_at),
   }));
+}
+
+/** Шаг 118 (0222): последняя строка журнала выключения и включения автоцены каждой единицы — с именем человека */
+async function pricingSwitchRefs(tx: Tx, tenantId: string, writeScopeIds: readonly string[]): Promise<Map<string, PricingSwitchRef>> {
+  if (writeScopeIds.length === 0) return new Map();
+  const { rows } = await tx.query(
+    `SELECT DISTINCT ON (j.write_scope_id) j.write_scope_id, j.action, j.note, j.created_at, j.created_by_membership_id, u.display_name, u.email
+       FROM tenant_data.offer_pricing_switch j
+       LEFT JOIN tenant_data.membership mb ON mb.tenant_id = j.tenant_id AND mb.membership_id = j.created_by_membership_id
+       LEFT JOIN platform.app_user u ON u.user_id = mb.user_id
+      WHERE j.tenant_id = $1 AND j.write_scope_id = ANY($2::uuid[])
+      ORDER BY j.write_scope_id, j.seq DESC`, [tenantId, [...writeScopeIds]]);
+  return new Map(rows.map((r) => [String(r.write_scope_id), { action: r.action as 'OFF' | 'ON', note: r.note ?? null, at: iso(r.created_at),
+    membershipId: String(r.created_by_membership_id), byName: r.display_name ?? null, byEmail: r.email ?? null }]));
 }
 
 /**
@@ -1450,17 +1464,36 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string): Promise<void> {
-    await inTenant(this.admin('setPricingMode'), tenantId, (tx) => tx.query(
+  async setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string, note?: string | null): Promise<void> {
+    await inTenant(this.admin('setPricingMode'), tenantId, async (tx) => {
+      /**
+       * Шаг 118 (0222): переход между ENGINE и OFF — строкой журнала той же транзакцией (кто, когда, записка); выключить можно только включённое,
+       * включить — только выключенное: это проверяет страж журнала. Членство — человека сессии
+       */
+      const { rows: [cur] } = await tx.query(`SELECT pricing_mode FROM tenant_data.write_scope WHERE tenant_id = $1 AND write_scope_id = $2`, [tenantId, writeScopeId]);
+      const from = cur?.pricing_mode as string | undefined;
+      // Включение пишется строкой, только если автоцену выключали журналом: первое включение (онбординг, массовое) — общим аудитом смены режима
+      const lastOff = mode === 'ENGINE' && from === 'OFF' && (await tx.query(
+        `SELECT action FROM tenant_data.offer_pricing_switch WHERE tenant_id = $1 AND write_scope_id = $2 ORDER BY seq DESC LIMIT 1`, [tenantId, writeScopeId])).rows[0]?.action === 'OFF';
+      if (from !== undefined && ((from === 'ENGINE' && mode === 'OFF') || lastOff)) {
+        const journal = await tx.query(
+          `INSERT INTO tenant_data.offer_pricing_switch (tenant_id, write_scope_id, action, note, created_by_membership_id)
+           SELECT $1, $2, $3, $4, m.membership_id FROM tenant_data.membership m
+            WHERE m.tenant_id = $1 AND m.user_id = security.current_user_id() AND m.status = 'ACTIVE'`,
+          [tenantId, writeScopeId, mode === 'OFF' ? 'OFF' : 'ON', note ?? null]);
+        // Без членства человека сессии строки журнала нет — и смены режима тоже: «кто» обязателен
+        if (journal.rowCount !== 1) throw new Error(`write_scope ${writeScopeId}: the session user has no active membership; pricing_mode is not changed`);
+      }
+      return tx.query(
       `UPDATE tenant_data.write_scope
           SET pricing_mode = $3::text,
               -- Р-77: стратегия остаётся при выключении; только Smart Pricing Kaufland её не имеет [Р-12]
               pricing_strategy_id = CASE WHEN $3::text <> 'KAUFLAND_SMART_PRICING' THEN pricing_strategy_id END,
               pricing_strategy_version = CASE WHEN $3::text <> 'KAUFLAND_SMART_PRICING' THEN pricing_strategy_version END
         WHERE tenant_id = $1 AND write_scope_id = $2`,
-      [tenantId, writeScopeId, mode],
-      // Р-97: без пользователя сессии база смену режима не принимает
-    ), userId);
+      [tenantId, writeScopeId, mode]);
+    // Р-97: без пользователя сессии база смену режима не принимает
+    }, userId);
   }
 
   // --- правка границ и стратегий из консоли (шаг 21) --------------------------------
@@ -2740,6 +2773,9 @@ export class PgPricingStore implements PricingStore {
       // единицы (контекст читает и путь решения: колонка в нём стоила бы планирования каждой оценке, урок шага 97.1)
       const assignments = await assignmentRefs(tx, tenantId, scopes.map((sc) => sc.writeScopeId));
       for (const sc of scopes) sc.assignment = assignments.get(sc.writeScopeId) ?? null;
+      // Шаг 118 (0222): последняя строка журнала автоцены показанных единиц — «Turned off by …» в статусе Offers
+      const switches = await pricingSwitchRefs(tx, tenantId, scopes.map((sc) => sc.writeScopeId));
+      for (const sc of scopes) sc.pricingSwitch = switches.get(sc.writeScopeId) ?? null;
       // Р-154: только записи в полёте — одна на единицу; завершённые читаются лентой страницами
       const writes = (await q(`SELECT ${WRITE_HOT_COLUMNS} FROM tenant_data.channel_write w
                                  LEFT JOIN channel_data.price_decision d ON d.tenant_id = w.tenant_id AND d.price_decision_id = w.price_decision_id
@@ -2933,6 +2969,8 @@ export class PgPricingStore implements PricingStore {
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
     const where: string[] = [];
     if (f.storefront) where.push(`m.channel_account_id = ${p(f.storefront.channelAccountId)}::uuid AND m.marketplace = ${p(f.storefront.marketplace)}`);
+    // Шаг 118: автоцена включена или выключена — режим единицы
+    if (f.pricing) where.push(`s.pricing_mode = ${p(PRICING_MODE_OF_FILTER[f.pricing])}`);
     const search = f.search && f.search.q !== '' ? f.search : null;
     const label = search
       ? `, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref, coalesce(p.gtin, '') AS gtin, coalesce(p.title, p.sku) AS product,

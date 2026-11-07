@@ -862,8 +862,11 @@ export interface PricingStore {
 
   resolveBounds(tenantId: string, writeScopeId: string): Promise<BoundsRead>;
   /** Включение режима ENGINE; реализация обязана отказать без обеих границ (как триггер 0030) */
-  /** Р-97: смена режима — действие человека; userId — пользователь сессии административного сервиса */
-  setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string): Promise<void>;
+  /**
+   * Р-97: смена режима — действие человека; userId — пользователь сессии административного сервиса. Шаг 118: переход между ENGINE и OFF пишет строку журнала
+   * выключения автоцены (0222) с необязательной запиской — той же транзакцией
+   */
+  setPricingMode(tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string, note?: string | null): Promise<void>;
   /** Шаг 21: PREVIEW — те же проверки и действующие границы после правки без сохранения; APPLY — всё или ничего */
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   /** Р-134, Р-135: массовый импорт себестоимости — предпросмотр без записи, применение целиком и со вторым фактором */
@@ -1290,6 +1293,18 @@ export interface ConsoleScopeRow {
   maxStepChangeBp?: number | null;
   /** Шаг 103 [Р-228]: откуда нынешняя стратегия — «assigned by default rule» на карточке стратегии; «not assigned: …» с причиной */
   assignment?: StrategyAssignmentRef | null;
+  /** Шаг 118: последняя строка журнала выключения и включения автоцены — «Turned off by …» в статусе Offers */
+  pricingSwitch?: PricingSwitchRef | null;
+}
+
+/** Шаг 118 (0222): кто и когда выключил или включил автоцену предложения, записка — по желанию */
+export interface PricingSwitchRef {
+  action: 'OFF' | 'ON';
+  note: string | null;
+  at: Instant;
+  membershipId: string;
+  byName: string | null;
+  byEmail: string | null;
 }
 
 export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationIntentColumns {
@@ -1527,6 +1542,8 @@ export type OfferSortKey = 'holder' | 'price' | 'gap' | 'share';
  */
 export interface OfferPageFilter {
   storefront?: { channelAccountId: string; marketplace: string };
+  /** Шаг 118: автоцена включена (ENGINE) или выключена (OFF); Smart Pricing Kaufland — ни то, ни другое */
+  pricing?: OfferPricingFilterValue;
   holder?: OfferHolderFilter;
   /** Поиск — по подписи экрана, SKU, ключу канала и EAN, как у поиска предложения (`consoleCatalogFacts.search`) */
   search?: { q: string; labelTemplate: string; marketplaceWords: Readonly<Record<string, string>>; channelNames: Readonly<Record<string, string>>; unknownChannel: string };
@@ -1537,6 +1554,12 @@ export interface OfferPageFilter {
   /** Посчитать строки выгрузки конкурентов (потолок 50 000 — до создания задания) */
   countCompetitorRows?: boolean;
 }
+
+/** Шаг 118: фильтр Offers по автоцене — включена или выключена */
+export const OFFER_PRICING_FILTERS = ['ON', 'OFF'] as const;
+export type OfferPricingFilterValue = (typeof OFFER_PRICING_FILTERS)[number];
+/** Режим единицы, которому отвечает значение фильтра — одно правило у базы и экрана */
+export const PRICING_MODE_OF_FILTER: Readonly<Record<OfferPricingFilterValue, 'ENGINE' | 'OFF'>> = { ON: 'ENGINE', OFF: 'OFF' };
 
 /** Шаг 105 [Р-230]: снимок и отрезки держателя единицы — то, из чего страница Competition и колонки Offers считают Buy Box */
 export interface CompetitionData {

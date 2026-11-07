@@ -510,6 +510,8 @@ SELECT pg_temp.expect_fail('truncate tenant_data.clearance_change', $q$ TRUNCATE
 -- Шаг 103 [Р-228]: журналы умолчания и назначений — то, к чему прослеживается каждое автоназначение; TRUNCATE их не берёт
 SELECT pg_temp.expect_fail('truncate tenant_data.default_strategy_change', $q$ TRUNCATE tenant_data.default_strategy_change $q$,
   'TRUNCATE of tenant_data.default_strategy_change is forbidden');
+SELECT pg_temp.expect_fail('truncate tenant_data.offer_pricing_switch', $q$ TRUNCATE tenant_data.offer_pricing_switch $q$,
+  'TRUNCATE of tenant_data.offer_pricing_switch is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.strategy_assignment', $q$ TRUNCATE tenant_data.strategy_assignment $q$,
   'TRUNCATE of tenant_data.strategy_assignment is forbidden');
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
@@ -789,6 +791,13 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-0000000
 INSERT INTO tenant_data.default_strategy_change (tenant_id, channel_account_id, pricing_strategy_id, created_by_membership_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001',
         'a2000000-0000-0000-0000-00000000000a');
+
+-- Шаг 118: строка журнала автоцены — владелец от своего имени выключил (или включил обратно) автоцену одного предложения, с запиской
+INSERT INTO tenant_data.offer_pricing_switch (tenant_id, write_scope_id, action, note, created_by_membership_id)
+SELECT s.tenant_id, s.write_scope_id, CASE s.pricing_mode WHEN 'ENGINE' THEN 'OFF' ELSE 'ON' END, 'Smoke world: hold this offer', 'a2000000-0000-0000-0000-00000000000a'
+  FROM tenant_data.write_scope s
+ WHERE s.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND s.field = 'PRICE' AND s.pricing_mode IN ('ENGINE', 'OFF')
+ ORDER BY s.write_scope_id LIMIT 1;
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

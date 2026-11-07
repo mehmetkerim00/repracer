@@ -6,7 +6,7 @@ import { prioritizedWindow } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
-import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
+import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type DiscoveryCatalogNote, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
@@ -1618,14 +1618,31 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     return { bounds: this.boundsOf(row), version: this.contextVersion(row) };
   }
 
-  async setPricingMode(_tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], _userId?: string): Promise<void> {
+  /** Шаг 118 (0222): журнал выключения и включения автоцены — только на добавление */
+  private readonly pricingSwitchLog: Array<{ writeScopeId: string; seq: number; action: 'OFF' | 'ON'; note: string | null; at: Instant; membershipId: string }> = [];
+
+  private pricingSwitchOf(writeScopeId: string): PricingSwitchRef | null {
+    const last = this.pricingSwitchLog.filter((j) => j.writeScopeId === writeScopeId).sort((a, b) => b.seq - a.seq)[0];
+    return last ? { action: last.action, note: last.note, at: last.at, membershipId: last.membershipId, byName: null, byEmail: null } : null;
+  }
+
+  async setPricingMode(_tenantId: string, writeScopeId: string, mode: PriceScopeContext['pricingMode'], userId?: string, note?: string | null): Promise<void> {
     const row = this.scope(writeScopeId);
+    // Шаг 118: переход между ENGINE и OFF — строкой журнала, как tenant_data.offer_pricing_switch (0222): членство человека сессии, записка по желанию
+    // Включение — строкой, только если автоцену выключали журналом (как хранилище PostgreSQL); первое включение пишет общий аудит
+    const journaled = (row.pricingMode === 'ENGINE' && mode === 'OFF') || (row.pricingMode === 'OFF' && mode === 'ENGINE' && this.pricingSwitchOf(writeScopeId)?.action === 'OFF');
+    const person = journaled ? this.members.find((m) => m.userId === userId && m.status === 'ACTIVE') : undefined;
+    if (journaled && !person) throw new Error(`membership of the session user ${userId ?? 'none'} is not the membership of the session user`);
+    if (note !== undefined && note !== null && (note.trim() === '' || note.length > 500)) throw new Error('offer_pricing_switch_note_form: a note is 1–500 characters');
     if (mode === 'ENGINE') this.assertBounds(row);
     // Как CHECK write_scope_engine_has_strategy (0045): движок без стратегии не включается [Р-77]
     if (mode === 'ENGINE' && !row.strategy) throw new Error(`write scope ${writeScopeId} has no strategy; ENGINE cannot be enabled (Р-77)`);
     // Как write_scope_strategy_guard (0082): включение ENGINE при ценообразовании канала — отказ; выключение — всегда [Р-120]
     const block = mode === 'ENGINE' && row.pricingMode !== 'ENGINE' ? this.channelPricingBlock(row) : null;
     if (block) throw new Error(`write_scope ${writeScopeId} has channel-owned pricing (${block}): a strategy cannot be assigned (Р-120)`);
+    if (journaled) {
+      this.pricingSwitchLog.push({ writeScopeId, seq: this.pricingSwitchLog.length + 1, action: mode === 'OFF' ? 'OFF' : 'ON', note: note ?? null, at: systemClock.now(), membershipId: person!.membershipId });
+    }
     row.pricingMode = mode;
   }
 
@@ -2631,6 +2648,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
           // Шаг 99: себестоимость продавца и маржа по уровням — в памяти уровень один, предложения
           declaredCost: s.cost ? { costProfileId: s.cost.costProfileId, currency: s.cost.currency, unitCostMinor: s.cost.unitCostMinor } : null,
           clearance: this.activeClearance(s.writeScopeId, systemClock.now()), maxStepChangeBp: s.guardrails?.maxStepChangeBp ?? null,
+          pricingSwitch: this.pricingSwitchOf(s.writeScopeId),
           ownMinMarginBp: s.guardrails?.minMarginBp ?? null, widerMinMarginBp: null,
           ...(s.sellerFee ? { feeEstimates: [{ source: 'SELLER_DECLARED', feeRateBp: s.sellerFee.feeRateBp, fixedFeeMinor: s.sellerFee.fixedFeeMinor, scheduleVersion: null }] } : {}),
           channelHalt: halt ? InMemoryPricingStore.haltRef(halt) : null, priceStop: stop ? InMemoryPricingStore.stopRef(stop) : null,

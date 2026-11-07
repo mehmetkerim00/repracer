@@ -604,6 +604,13 @@ export const de: Messages = {
       halted: 'Angehalten', haltedDetail: (when: string) => `Preise aus Wettbewerbsdaten sind auf dieser Storefront seit ${when} angehalten`,
       haltedButWorks: 'Die Storefront ist für Preise aus Wettbewerbsdaten angehalten, diese Strategie verwendet sie nicht', on: 'An', onDetail: 'Der Preis wird automatisch berechnet',
       distrusted: 'Gehalten: Kanal misstraut', distrustedDetail: (when: string) => `Der Kanal übernimmt unsere Preise nicht wie gesendet — alle Preise dieser Storefront sind seit ${when} gehalten, bis eine Person es aufhebt`,
+      offBy: (who: string, when: string) => `Ausgeschaltet von ${who}, ${when}`, offByNote: (who: string, when: string, note: string) => `Ausgeschaltet von ${who}, ${when}. Notiz: ${note}`,
+      disable: {
+        button: 'Ausschalten', title: (unit: string) => `Repricing ausschalten: ${unit}?`, done: (unit: string) => `Repricing ausgeschaltet: ${unit}`, doneBadge: 'Aus',
+        body: 'Wir berechnen dieses Angebot nicht mehr. Sein aktueller Preis bleibt im Kanal, und Preise, die noch auf das Senden warten, werden nicht gesendet. Mit „Aktivieren“ schalten Sie es jederzeit wieder ein.',
+        note: 'Notiz (optional)', noteHint: 'Warum — Ihr Team sieht es neben dem Status.', confirm: 'Ausschalten', cancel: 'Abbrechen', close: 'Schließen',
+        notOn: 'Repricing ist für dieses Angebot nicht eingeschaltet — es gibt nichts auszuschalten.', noteTooLong: (max: number) => `Die Notiz ist länger als ${max} Zeichen.`,
+      },
     },
     channelNotes: {
       automatedPricing: 'Kanal-Repricer aktiv',
@@ -1313,6 +1320,7 @@ export const de: Messages = {
       },
       filters: {
         storefront: 'Storefront', allStorefronts: 'Alle Storefronts', holder: 'Buy Box', anyHolder: 'Alle',
+        pricing: 'Repricing', anyPricing: 'Alle', pricingValues: { ON: 'An', OFF: 'Aus' },
         holders: { SELF: 'Sie', OTHER: 'Anderer Verkäufer', NONE: 'Niemand', UNKNOWN: 'Inhaber unbekannt', NO_DATA: 'Keine Wettbewerbsdaten' },
         search: 'Suche', searchPlaceholder: 'SKU, EAN oder Name',
         matched: (n: number, total: number) => `${n} von ${total} Angeboten passen zum Filter`,

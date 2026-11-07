@@ -1029,8 +1029,18 @@ BEGIN;
 SELECT set_config('app.tenant_id', :tA, true), set_config('app.user_id', :uA, true) \gset
 SELECT pg_temp.ok('dispatch v2', $q$
   UPDATE tenant_data.channel_write SET status = 'DISPATCHED', attempt_count = 1 WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000002' $q$);
-SELECT pg_temp.expect_fail('pricing_mode switch with in-flight write (Р-12)', $q$
-  UPDATE tenant_data.write_scope SET pricing_mode = 'OFF' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'has unfinished writes; pricing_mode cannot change');
+-- Р-12: со Smart Pricing Kaufland режим не меняется, пока запись в полёте (опт-ин тенанта — только здесь, точка сохранения его снимает)
+SAVEPOINT r12;
+UPDATE tenant_data.tenant SET kaufland_smart_pricing_opt_in_at = now(), kaufland_smart_pricing_opt_in_by = :uA WHERE tenant_id = :tA;
+SELECT pg_temp.expect_fail('pricing_mode switch to Smart Pricing with an in-flight write (Р-12)', $q$
+  UPDATE tenant_data.write_scope SET pricing_mode = 'KAUFLAND_SMART_PRICING', pricing_strategy_id = NULL, pricing_strategy_version = NULL
+   WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$, 'has unfinished writes; pricing_mode cannot change');
+ROLLBACK TO SAVEPOINT r12;
+-- Шаг 118: автоцена выключается и при записи в полёте — ушедшая запись доходит до своего итога, новая не уйдёт (страж отправки)
+SAVEPOINT s118;
+SELECT pg_temp.ok('automatic pricing is turned off with a write in flight (step 118)', $q$
+  UPDATE tenant_data.write_scope SET pricing_mode = 'OFF' WHERE write_scope_id = 'a6000000-0000-0000-0000-000000000001' $q$);
+ROLLBACK TO SAVEPOINT s118;
 SELECT pg_temp.ok('accept v2', $q$
   UPDATE tenant_data.channel_write SET status = 'ACCEPTED' WHERE channel_write_id = 'a9000000-0000-0000-0000-000000000002' $q$);
 DO $$ BEGIN

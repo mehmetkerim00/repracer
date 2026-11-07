@@ -9,7 +9,7 @@ import {
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
-  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
 } from '@repracer/console-model';
 import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
@@ -25,7 +25,7 @@ import { activeStrategyChoices, connectableInMarket, connectionsView, type Defau
 import type { ChannelConnectService } from './connect.ts';
 import { descriptorOf, strategyAvailableOn } from './channel-descriptors.ts';
 import {
-  NOTE_MAX, NOTE_MIN, type BoundsIndexItem, type BoundsIndexView, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
+  NOTE_MAX, NOTE_MIN, PRICING_SWITCH_NOTE_MAX, type BoundsIndexItem, type BoundsIndexView, type DisableResult, type EnableResult, type NoteRequest, type SessionView, type StopRequest, type StrategySaveResponse, type WorldSummary,
 } from '../src/api-types.ts';
 
 /**
@@ -790,16 +790,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const parseOfferQuery = (params: URLSearchParams): (OfferQuery & { storefrontValue: string | null; bb: boolean }) | null => {
       const storefront = params.get('storefront') ?? '';
       const holder = params.get('holder');
+      // Шаг 118: автоцена включена или выключена
+      const pricing = params.get('pricing');
       const q = (params.get('q') ?? '').trim();
       const sort = params.get('sort');
       const dir = params.get('dir');
       const bb = params.get('bb');
-      if (q.length > 100 || (holder !== null && !(OFFER_HOLDER_FILTERS as readonly string[]).includes(holder)) || (sort !== null && !(OFFER_SORT_KEYS as readonly string[]).includes(sort))
+      if (q.length > 100 || (holder !== null && !(OFFER_HOLDER_FILTERS as readonly string[]).includes(holder)) || (pricing !== null && !(OFFER_PRICING_FILTERS as readonly string[]).includes(pricing)) || (sort !== null && !(OFFER_SORT_KEYS as readonly string[]).includes(sort))
         || (dir !== null && dir !== 'asc' && dir !== 'desc') || (bb !== null && bb !== '1')) return null;
       const [acc, mk] = storefront.split('|');
       const sf = storefront === '' ? null : acc && mk && live.accounts.some((a) => a.channelAccountId === acc && a.marketplaces.includes(mk)) ? { channelAccountId: acc, marketplace: mk } : undefined;
       if (sf === undefined) return null;
-      return { storefront: sf, storefrontValue: sf ? storefront : null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
+      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
         sort: sort ? { key: sort as NonNullable<OfferQuery['sort']>['key'], dir: (dir ?? 'asc') as 'asc' | 'desc' } : null, bb: bb === '1' };
     };
     const offerDeps = () => ({ store: live.store, tenantId: live.tenantId, now: live.clock.iso(), useDatabase: targeted !== null, world: () => load(null), m,
@@ -961,7 +963,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const oq = parseOfferQuery(url.searchParams);
           if (!query || !oq) return fail(400, 'BAD_PAGE', s.badRequest);
           // Шаг 105 [Р-230]: фильтр строки и сортировка по колонке Buy Box — выборкой по всему каталогу (база или правило экрана)
-          const filter = { storefront: oq.storefrontValue, holder: oq.holder, q: oq.q };
+          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, holder: oq.holder, q: oq.q };
           const deps = offerDeps();
           const catalog = filterActive(filter) || oq.sort ? await selectOffers(deps, oq, query) : await catalogPageFor(query);
           const world = await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog });
@@ -1164,7 +1166,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
       || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
       || (screen === 'bounds' && param === 'apply') || screen === 'imports' || screen === 'exports';
-    const oneUnit = (screen === 'scopes' && param !== null && parts[5] === 'enable') || (screen === 'bounds' && param !== null && parts[5] === 'clearance') ? [param]
+    const oneUnit = (screen === 'scopes' && param !== null && (parts[5] === 'enable' || parts[5] === 'disable')) || (screen === 'bounds' && param !== null && parts[5] === 'clearance') ? [param]
       : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId] : null;
     const world = stopRoute ? await load([], { facts: await facts({ stopImpact: true }) })
       : tenantOnlyRoute ? await load([])
@@ -1251,7 +1253,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const { storefrontValue: _sv, bb, ...query } = oq;
           return {
             query: { offers: { query, accounts: accountCompetitors(), shareRange: { since: range.since, until: range.until }, buybox: exportScreen === 'offers' && bb } },
-            filters: { storefront: sf, buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
+            filters: { storefront: sf, repricing: oq.pricing ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
               ...(exportScreen === 'offers' ? { buy_box_columns: bb ? 'on' : '' } : {}) },
             period: null, periodPart: day(now),
           };
@@ -1889,6 +1891,20 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return ok({
         enabled: result.enabled, problems: result.problems.map((p) => describe(p, m)), warnings: result.warnings.map((w) => describe(w, m)),
       } satisfies EnableResult);
+    }
+    /**
+     * Шаг 118: выключение автоцены одного предложения — тем же правом, что включение (владелец и менеджер), без второго фактора (Р-225); записка — по
+     * желанию. Выключить можно только включённое: иначе 409 с тем, в каком режиме предложение
+     */
+    if (screen === 'scopes' && param !== null && parts[5] === 'disable') {
+      const scope = world.state.scopes.find((x) => x.writeScopeId === param);
+      if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+      if (!can(viewer.role, 'ENABLE_REPRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      const note = typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
+      if (note !== null && note.length > PRICING_SWITCH_NOTE_MAX) return fail(400, 'NOTE_TOO_LONG', m.ui.enabled.disable.noteTooLong(PRICING_SWITCH_NOTE_MAX));
+      const result = await live.pipeline.disableRepricing(ctx(scope.channelAccountId), scope.writeScopeId, { userId: principal.userId, note });
+      if (!result.disabled) return fail(409, 'NOT_ENABLED', m.ui.enabled.disable.notOn);
+      return ok({ disabled: true } satisfies DisableResult);
     }
     return fail(404, 'NOT_FOUND', s.notFound);
   };

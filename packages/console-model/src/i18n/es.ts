@@ -630,6 +630,13 @@ export const es: Messages = {
       halted: 'Suspendido', haltedDetail: (when: string) => `Los precios basados en la competencia están suspendidos en este sitio desde ${when}`,
       haltedButWorks: 'El sitio está suspendido para precios basados en la competencia; esta estrategia no los usa', on: 'Activado', onDetail: 'El precio se calcula automáticamente',
       distrusted: 'Retenido: canal no confiable', distrustedDetail: (when: string) => `El canal no aplica nuestros precios tal como los enviamos: todos los precios de este sitio están retenidos desde ${when} hasta que una persona levante la retención`,
+      offBy: (who: string, when: string) => `Desactivado por ${who}, ${when}`, offByNote: (who: string, when: string, note: string) => `Desactivado por ${who}, ${when}. Nota: ${note}`,
+      disable: {
+        button: 'Desactivar', title: (unit: string) => `¿Desactivar los precios automáticos: ${unit}?`, done: (unit: string) => `Precios automáticos desactivados: ${unit}`, doneBadge: 'Desactivado',
+        body: 'Dejamos de calcular esta oferta. Su precio actual se queda en el canal, y los precios que aún esperan ser enviados no se envían. Puede volver a activarla con Activar en cualquier momento.',
+        note: 'Nota (opcional)', noteHint: 'Por qué: su equipo lo ve junto al estado.', confirm: 'Desactivar', cancel: 'Cancelar', close: 'Cerrar',
+        notOn: 'Los precios automáticos no están activados para esta oferta: no hay nada que desactivar.', noteTooLong: (max: number) => `La nota tiene más de ${max} caracteres.`,
+      },
     },
     channelNotes: {
       automatedPricing: 'Precios automáticos del canal activos',
@@ -1367,6 +1374,7 @@ export const es: Messages = {
       },
       filters: {
         storefront: 'Sitio', allStorefronts: 'Todos los sitios', holder: 'Buy Box', anyHolder: 'Cualquiera',
+        pricing: 'Precios automáticos', anyPricing: 'Cualquiera', pricingValues: { ON: 'Activados', OFF: 'Desactivados' },
         holders: { SELF: 'Usted', OTHER: 'Otro vendedor', NONE: 'Nadie', UNKNOWN: 'Titular desconocido', NO_DATA: 'Sin datos de la competencia' },
         search: 'Buscar', searchPlaceholder: 'SKU, EAN o nombre',
         matched: (n: number, total: number) => `${n} de ${total} ofertas coinciden con el filtro`,

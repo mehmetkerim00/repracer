@@ -630,6 +630,13 @@ export const fr: Messages = {
       halted: 'Suspendu', haltedDetail: (when: string) => `Les prix basés sur la concurrence sont suspendus sur ce site depuis ${when}`,
       haltedButWorks: 'Le site est suspendu pour les prix basés sur la concurrence ; cette stratégie ne les utilise pas', on: 'Activé', onDetail: 'Le prix est calculé automatiquement',
       distrusted: 'Bloqué : défiance envers le canal', distrustedDetail: (when: string) => `Le canal n’applique pas nos prix tels qu’envoyés — tous les prix de ce site sont bloqués depuis ${when}, jusqu’à ce qu’une personne lève le blocage`,
+      offBy: (who: string, when: string) => `Désactivé par ${who}, ${when}`, offByNote: (who: string, when: string, note: string) => `Désactivé par ${who}, ${when}. Note : ${note}`,
+      disable: {
+        button: 'Désactiver', title: (unit: string) => `Désactiver la tarification automatique : ${unit} ?`, done: (unit: string) => `Tarification automatique désactivée : ${unit}`, doneBadge: 'Désactivé',
+        body: 'Nous cessons de calculer cette offre. Son prix actuel reste sur le canal, et les prix qui attendent encore d’être envoyés ne sont pas envoyés. Vous pouvez la réactiver à tout moment avec Activer.',
+        note: 'Note (facultative)', noteHint: 'Pourquoi — votre équipe le voit à côté du statut.', confirm: 'Désactiver', cancel: 'Annuler', close: 'Fermer',
+        notOn: 'La tarification automatique n’est pas activée pour cette offre — il n’y a rien à désactiver.', noteTooLong: (max: number) => `La note dépasse ${max} caractères.`,
+      },
     },
     channelNotes: {
       automatedPricing: 'Tarification automatique du canal active',
@@ -1367,6 +1374,7 @@ export const fr: Messages = {
       },
       filters: {
         storefront: 'Site', allStorefronts: 'Tous les sites', holder: 'Buy Box', anyHolder: 'Tous',
+        pricing: 'Tarification automatique', anyPricing: 'Toutes', pricingValues: { ON: 'Activée', OFF: 'Désactivée' },
         holders: { SELF: 'Vous', OTHER: 'Un autre vendeur', NONE: 'Personne', UNKNOWN: 'Détenteur inconnu', NO_DATA: 'Pas de données de la concurrence' },
         search: 'Rechercher', searchPlaceholder: 'SKU, EAN ou nom',
         matched: (n: number, total: number) => `${n} offres sur ${total} correspondent au filtre`,

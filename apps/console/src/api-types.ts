@@ -100,6 +100,15 @@ export interface EnableResult {
   warnings: HumanReason[];
 }
 
+/** Шаг 118: выключение автоцены одного предложения — записка по желанию, не длиннее, чем принимает база (0222) */
+export const PRICING_SWITCH_NOTE_MAX = 500;
+export interface DisableRequest {
+  note?: string | null;
+}
+export interface DisableResult {
+  disabled: true;
+}
+
 /** Шаг 21: сохранение стратегии — только с токеном показанного превью */
 export interface StrategySaveRequest {
   draft: unknown;

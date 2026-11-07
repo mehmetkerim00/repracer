@@ -44,6 +44,8 @@ export { BUYBOX_SHARE_HORIZON_MS, BUYBOX_SHARE_KEEP_DAYS, buyboxDiagnosis, buybo
 // Шаг 105 [Р-230]: сводка Buy Box на Offers
 export { buyboxCells, matchesHolder, OFFER_HOLDER_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, offerBuyboxCells, offerHolderKind, offerSortValue, signedMoney, sortOffers, storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferHolderKind, type OfferSort, type OfferSortKeyValue } from './offer-buybox.ts';
 export { catalogTotals, filterActive, NO_FILTER, offerMatchesSearch, type OfferFilter } from './products.ts';
+// Шаг 118: фильтр Offers по автоцене — значения из хранилища (одно правило у базы и экрана)
+export { OFFER_PRICING_FILTERS, type OfferPricingFilterValue } from '@repracer/pricing-pipeline/store';
 // Шаг 104 [Р-229]: выгрузка экранов в файл
 export {
   amountText, AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, auditExportRows, changePercent, dateInZone, decisionExportRows, EXPORT_ABOUT_SHEET, EXPORT_FORMATS, EXPORT_HEADERS, EXPORT_MAX_ROWS,
