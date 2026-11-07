@@ -83,6 +83,8 @@ export interface ConnectionRow {
    */
   discoveryCircleStartedAt: Instant | null;
   discoveryCircleCompletedAt: Instant | null;
+  /** Шаг 117 (P0-16, 0220): откуда последний круг взял каталог каждой витрины — отчёт или поиск — и может ли он быть неполным */
+  catalogSources: Array<{ marketplace: string; source: 'REPORT' | 'SEARCH'; listed: number | null; fallbackReason: string | null; mayBeIncomplete: boolean; observedAt: Instant }>;
   /**
    * Шаг 60 [Р-202]: обновляет ли другой инструмент остатки или цены в этом канале — ответ владельца (NULL — не отвечено);
    * автора и время ставит база
@@ -271,9 +273,13 @@ export class PgChannelConnectStore {
                   (SELECT count(*)::int FROM channel_data.external_edit e
                     WHERE e.tenant_id = ca.tenant_id AND e.channel_account_id = ca.channel_account_id AND e.recorded_at >= now() - interval '1 day') AS external_edits,
                   ca.other_tools, ca.other_tools_answered_at, ca.quantity_writes_confirmed,
-                  cr.obtained_at, cr.verified_at, cr.check_failures, dc.circle_started_at, dc.last_circle_completed_at
+                  cr.obtained_at, cr.verified_at, cr.check_failures, dc.circle_started_at, dc.last_circle_completed_at, cs.sources AS catalog_sources
              FROM tenant_data.channel_account ca
              LEFT JOIN LATERAL tenant_data.discovery_circle_state(ca.tenant_id, ca.channel_account_id) dc ON true
+             -- Шаг 117 (0220): источник каталога витрин — функцией узкой роли обнаружения (прав на таблицу у административной роли нет)
+             LEFT JOIN LATERAL (SELECT json_agg(json_build_object('marketplace', s.marketplace, 'source', s.source, 'listed', s.listed, 'fallbackReason', s.fallback_reason,
+                                                                  'mayBeIncomplete', s.may_be_incomplete, 'observedAt', s.observed_at) ORDER BY s.marketplace) AS sources
+                                  FROM tenant_data.discovery_catalog_sources(ca.tenant_id, ca.channel_account_id) s) cs ON true
              LEFT JOIN tenant_data.channel_credential cr
                ON cr.tenant_id = ca.tenant_id AND cr.channel_account_id = ca.channel_account_id AND cr.superseded_at IS NULL
             WHERE ca.tenant_id = $1 AND ca.disconnected_at IS NULL
@@ -296,6 +302,7 @@ export class PgChannelConnectStore {
           credentialCheckFailures: Number(r.check_failures ?? 0), oauth: r.obtained_at !== null,
           discoveryCircleStartedAt: r.circle_started_at ? iso(r.circle_started_at) : null,
           discoveryCircleCompletedAt: r.last_circle_completed_at ? iso(r.last_circle_completed_at) : null,
+          catalogSources: ((r.catalog_sources as ConnectionRow['catalogSources'] | null) ?? []).map((c) => ({ ...c, observedAt: iso(c.observedAt) })),
           otherTools: (r.other_tools as ConnectionRow['otherTools']) ?? null,
           otherToolsAnsweredAt: r.other_tools_answered_at ? iso(r.other_tools_answered_at) : null,
           quantityWritesConfirmed: r.quantity_writes_confirmed === true,

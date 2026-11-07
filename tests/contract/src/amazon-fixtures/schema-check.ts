@@ -93,9 +93,17 @@ export interface ApiOperation {
 }
 
 /** Все операции моделей снимка: метод, шаблон пути и схемы ответов по коду */
+/**
+ * Шаг 117: модели, которых нет в последнем снимке, — из последнего снимка, где они есть: Reports 2021-06-30 — только в 2026-09-16 (отчёт листингов, P0-16)
+ */
+export const OLDER_API_MODELS: ReadonlyArray<{ dir: URL; api: string }> = [
+  { dir: new URL('../../../../vendor/amazon/sp-api-models/2026-09-16/models/', import.meta.url), api: 'reports-api-model' },
+];
+
 export function loadApiOperations(dir: URL = API_MODELS_SNAPSHOT): ApiOperation[] {
   const ops: ApiOperation[] = [];
-  for (const api of readdirSync(dir).sort()) {
+  const sources = [...readdirSync(dir).sort().map((api) => ({ dir, api })), ...(dir === API_MODELS_SNAPSHOT ? OLDER_API_MODELS : [])];
+  for (const { dir, api } of sources) {
     for (const file of readdirSync(new URL(`${api}/`, dir)).filter((f) => f.endsWith('.json')).sort()) {
       const model = JSON.parse(readFileSync(new URL(`${api}/${file}`, dir), 'utf8')) as Schema & { paths?: Record<string, Record<string, Schema>> };
       for (const [path, item] of Object.entries(model.paths ?? {})) {
@@ -178,8 +186,11 @@ export function apiModelErrors(model: Schema, schema: Schema, value: unknown): s
 }
 
 /** Обмены фикстуры с запросом к SP-API (не к LWA) и ответом: что спросили и что «ответил канал» */
+/** Шаг 117: скачивание документа отчёта — подписанный адрес хранилища (путь `/documents/…` хоста документов), не операция SP-API: тело — файл, не JSON */
+const REPORT_DOCUMENT_DOWNLOAD = /^\/documents\/[^/]+$/;
+
 export function apiExchanges(fixture: unknown): Array<{ id: string; method: string; path: string; status: number; body: unknown }> {
   const exchanges = ((fixture as { exchanges?: unknown[] }).exchanges ?? []) as Array<{ id?: string; request?: { method?: string; path?: string }; response?: { status?: number; body?: unknown } }>;
-  return exchanges.flatMap((e) => (e.request?.path && e.request.path !== '/auth/o2/token' && e.response && typeof e.response.status === 'number'
+  return exchanges.flatMap((e) => (e.request?.path && e.request.path !== '/auth/o2/token' && !REPORT_DOCUMENT_DOWNLOAD.test(e.request.path) && e.response && typeof e.response.status === 'number'
     ? [{ id: e.id ?? '?', method: e.request.method ?? 'GET', path: e.request.path, status: e.response.status, body: e.response.body }] : []));
 }

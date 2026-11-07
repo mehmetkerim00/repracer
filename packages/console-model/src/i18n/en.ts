@@ -1013,6 +1013,12 @@ export const en = {
         running: (h: number, hadCircle: boolean, ebay: boolean) => `Catalog discovery: the current circle has been running ${h < 1 ? 'less than an hour' : `${h} h`}${hadCircle ? '' : ' (the first one)'} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about two circles and a day; the hours are named once a circle closes.`,
         completed: (h: number, at: string, boundH: number, ebay: boolean) => `Catalog discovery: the last full circle took ${h < 1 ? 'less than an hour' : `${h} h`}, closed ${at} — an offer only a full circle sees${ebay ? ' (older eBay listings)' : ''} appears within about ${boundH} h (two circles and a day), if the next circle is not longer than the last one.`,
       },
+      // Шаг 117 (P0-16): источник каталога витрины — отчёт Amazon или поиск; поиск, упёршийся в предел, говорит это словами
+      catalog: {
+        incompletePill: 'may be incomplete',
+        report: (store: string, n: number, when: string) => `${store}: the catalog comes from Amazon's catalog report — ${n} offers, read ${when}.`,
+        search: (store: string, n: number | null, when: string, incomplete: boolean) => `${store}: Amazon did not give us its catalog report, so the catalog was read by search, ${when}${n === null ? '' : `; Amazon counts ${n} offers`}${incomplete ? ' — search stops at 1,000 offers, so the catalog may be visible only in part' : ''}.`,
+      },
       authorization: {
         revoked: 'Access was withdrawn in the channel: connect again to continue.',
         external: 'Access is configured by the platform, not through this screen.',
@@ -1308,7 +1314,8 @@ export const en = {
         ANALYTICS_PARTITION_FORCE_DROPPED: { what: 'a partition that was never exported was force-dropped — that history is lost', step: 'Write down the named partitions and find the cause of the failed export: those days cannot be restored.' },
         COMPETITOR_POLL_BUDGET_EXCEEDED: { what: 'competitor polling no longer fits into the request budget of the channel', step: 'Check in the event how many offers were demoted to the cold tier, and decide about the budget or the cadence.' },
         COMPETITOR_POLL_FAILURES: { what: 'a large share of the competitor queries of one account fails', step: 'Check the first error code from the event: credentials of the account, reachability of the channel, or its rate limit.' },
-        AMAZON_SUMMARY_ROUND_SLOW: { what: 'the competitor round at Amazon takes longer than an hour', step: 'Prices follow the market more slowly on this account: the catalog is larger than one request every 31 seconds covers in an hour. Compare the offers in the event with the request limit; a higher limit comes from Amazon support.' },
+        AMAZON_SUMMARY_ROUND_SLOW: { what: 'the round of Amazon offers priced from competitors takes longer than an hour', step: 'Offers priced from competitors follow the market more slowly on this account: there are more of them than one request every 31 seconds covers in an hour (offers without such a price are read less often by design). Compare the offers in the event with the request limit; a higher limit comes from Amazon support.' },
+        AMAZON_CATALOG_MAY_BE_INCOMPLETE: { what: 'the Amazon catalog of this storefront may be visible only in part', step: 'Amazon did not give us its catalog report, so we read the catalog by search, and search stops at 1,000 offers: offers beyond them are not in your catalog yet. We ask for the report again on every catalog circle; nothing is needed from you.' },
         SCHEDULER_JOB_FAILING: { what: 'a periodic job of the scheduler fails several times in a row', step: 'Take the job name and the error code from the event and check the log of the scheduler process.' },
         SCHEDULER_JOB_LAGGING: { what: 'a periodic job is running behind its schedule', step: 'Check that the scheduler process is running and whether a job is holding its lease; for the export, lag means lost history.' },
         SCHEDULER_LEASE_LOST: { what: 'the scheduler lost the lease of a job while it was running', step: 'Check whether more than one scheduler process is running: exactly one is intended.' },

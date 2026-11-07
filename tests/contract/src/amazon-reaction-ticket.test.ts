@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { summaryRounds } from '@repracer/pricing-pipeline';
 import { DEFAULT_JOB_CONFIG } from '@repracer/scheduler';
 import { returnTicketFindings, type ReturnTicket } from './return-ticket.ts';
 
@@ -8,19 +9,26 @@ import { returnTicketFindings, type ReturnTicket } from './return-ticket.ts';
  * Шаг 115.1 (решение владельца по докладу 115): на опросе [Р-240] цель Р-8 (p95 < 60 с на Amazon) не выполняется. Для пилота это временное
  * исключение, и разрыв записан явно: абзац в трёх документах и обратный билет в docs/deferred.md. Запись Р-8 не меняется: цель остаётся целью.
  * Цифры абзаца считаются из настоящего темпа работы `amazon-summary-poll`: другой темп — красная сборка, пока абзац не поправят. Когда уведомления
- * части Б дойдут и реакция будет замерена, AMAZON_REACTION_SECONDS станет целью: билет и абзац больше не нужны
+ * части Б дойдут и реакция будет замерена, AMAZON_REACTION_SECONDS станет целью: билет и абзац больше не нужны.
+ *
+ * Шаг 117 (P0-16, решение владельца 2026-11-07): каталог обнаруживается отчётом, предела в 1 000 SKU больше нет — и исключение сформулировано заново. Часы
+ * допустимы только для предложений, которым данные конкурента не нужны; метрика — круг КОНКУРЕНТНОЙ части; абзац называет обе цифры — круг конкурентной
+ * части и полный круг — по формуле окна опроса (`summaryRounds`). Предел реакции — порог WARNING конкурентного круга: дольше — стоп-доклад
  */
-const { amazonBatch, amazonCallSeconds } = DEFAULT_JOB_CONFIG;
-const roundSeconds = (offers: number) => Math.ceil(offers / amazonBatch) * amazonCallSeconds;
-const roundMinutes = (offers: number) => Math.round(roundSeconds(offers) / 60);
+const { amazonBatch, amazonCallSeconds, amazonRoundWarnMinutes } = DEFAULT_JOB_CONFIG;
+const rounds = (competitive: number, other: number) => summaryRounds({ competitive, other, batch: amazonBatch, intervalSeconds: amazonCallSeconds });
+const minutes = (seconds: number) => Math.round(seconds / 60);
 
 const AMAZON_REACTION_TARGET_SECONDS = 60;
-/** Поиск Amazon отдаёт не больше 1000 SKU (A-31): длиннее круг сейчас не бывает */
-const AMAZON_REACTION_SECONDS = roundSeconds(1000);
+/** Цель пилота — конкурентная часть в пределах часа (порог AMAZON_SUMMARY_ROUND_SLOW); сильно больше — стоп-доклад владельцу */
+const AMAZON_REACTION_SECONDS = amazonRoundWarnMinutes * 60;
 
 const PROMISE = 'вернуть цель p95<60с после части Б';
 const TICKET: ReturnTicket = { limit: AMAZON_REACTION_SECONDS, target: AMAZON_REACTION_TARGET_SECONDS, topic: 'Р-8/Amazon', promise: PROMISE };
-const GAP = `реакция на движение конкурента на Amazon — в пределах круга опроса (~${roundMinutes(120)} мин на 120 предложений, ~${roundMinutes(1000)} мин на 1000); цель Р-8 возвращается с уведомлениями части Б`;
+const GAP = `реакция на движение конкурента на Amazon — в пределах круга конкурентной части опроса: предложения, чью цену решает конкурент, читаются первыми, остальным — малая доля каждого окна `
+  + `(~${minutes(rounds(1000, 0).competitiveSeconds)} мин на 1000 таких, ~${minutes(rounds(1000, 9000).competitiveSeconds)} мин, если рядом ещё 9000 остальных); `
+  + `часы — только у предложений, которым данные конкурента не нужны (полный круг такого каталога — ~${Math.round(rounds(1000, 9000).fullSeconds / 3600)} ч); `
+  + `цель пилота — конкурентная часть в пределах ~${amazonRoundWarnMinutes} мин, сильно больше — стоп-доклад; цель Р-8 возвращается с уведомлениями части Б`;
 
 const read = (path: string) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
 

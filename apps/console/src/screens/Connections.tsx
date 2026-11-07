@@ -81,6 +81,8 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
                   {a.channelLimitText ? <p className="note">{a.channelLimitText}</p> : null}
                   <p className="note">{a.authorizationText}</p>
                   {a.discoveryText ? <p className="note">{a.discoveryText}</p> : null}
+                  {/* Шаг 117 (P0-16): откуда каталог витрины — отчёт или поиск; неполный каталог — пилюлей внимания рядом со словами */}
+                  {a.catalogTexts.map((c) => <p className="note" key={c.text}>{c.incomplete ? <><Badge tone="warn">{m.ui.connections.catalog.incompletePill}</Badge> </> : null}{c.text}</p>)}
                   {/* Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */}
                   {a.dataSourceText ? <p className="note">{a.dataSourceText}</p> : null}
                   {a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}

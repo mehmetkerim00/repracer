@@ -27,7 +27,8 @@ after(async () => { for (const p of [pool, scanPool, fxLoaderPool, adminPool, pr
 
 const DE = 'A1PA6795UKMFR9';
 const model: AmazonChannelModelSpec = {
-  seed: 53, sellerId: SELLER, region: 'EU',
+  // Шаг 117: отчёт листингов готов сразу — шаг стенда живёт 60 с, ожидание отчёта (A-38) проверяет свой прогон (amazon-report-discovery.pg.test.ts)
+  seed: 53, sellerId: SELLER, region: 'EU', params: { reportProcessing: { ms: 0, outcome: 'DONE' } },
   offers: [
     { sku: 'SYN-FBM-5301', asin: 'B0SYN53001', marketplaces: [DE], priceMinor: 1999, quantity: 4 },
     { sku: 'SYN-FBA-5302', asin: 'B0SYN53002', marketplaces: [DE], priceMinor: 2499, quantity: 12, fulfillmentCode: 'SYN_AMAZON_NETWORK_CODE' },

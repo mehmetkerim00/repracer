@@ -1013,6 +1013,12 @@ export const fr: Messages = {
         running: (h: number, hadCircle: boolean, ebay: boolean) => `Découverte du catalogue : le cycle en cours tourne depuis ${h < 1 ? 'moins d’une heure' : `${h} h`}${hadCircle ? '' : ' (le premier)'} — une offre que seul un cycle complet voit${ebay ? ' (anciennes annonces eBay)' : ''} apparaît en environ deux cycles et un jour ; la durée en heures s’affiche une fois un cycle terminé.`,
         completed: (h: number, at: string, boundH: number, ebay: boolean) => `Découverte du catalogue : le dernier cycle complet a duré ${h < 1 ? 'moins d’une heure' : `${h} h`}, terminé le ${at} — une offre que seul un cycle complet voit${ebay ? ' (anciennes annonces eBay)' : ''} apparaît en environ ${boundH} h (deux cycles et un jour), si le prochain cycle n’est pas plus long que le dernier.`,
       },
+      // Шаг 117 (P0-16): источник каталога витрины — отчёт Amazon или поиск; поиск, упёршийся в предел, говорит это словами
+      catalog: {
+        incompletePill: 'peut-être incomplet',
+        report: (store: string, n: number, when: string) => `${store} : le catalogue vient du rapport de catalogue d’Amazon — ${n} offres, lu ${when}.`,
+        search: (store: string, n: number | null, when: string, incomplete: boolean) => `${store} : Amazon ne nous a pas fourni son rapport de catalogue, le catalogue a donc été lu par la recherche, ${when}${n === null ? '' : ` ; Amazon compte ${n} offres`}${incomplete ? ' — la recherche s’arrête à 1,000 offres, le catalogue n’est donc peut-être visible qu’en partie' : ''}.`,
+      },
       authorization: {
         revoked: 'L’accès a été retiré sur le canal : reconnectez le compte pour continuer.',
         external: 'L’accès est configuré par la plateforme, pas depuis cet écran.',
@@ -1308,7 +1314,8 @@ export const fr: Messages = {
         ANALYTICS_PARTITION_FORCE_DROPPED: { what: 'une partition jamais exportée a été supprimée de force — cet historique est perdu', step: 'Notez les partitions indiquées et trouvez la cause de l’échec de l’export : ces jours ne peuvent pas être restaurés.' },
         COMPETITOR_POLL_BUDGET_EXCEEDED: { what: 'l’interrogation des concurrents ne tient plus dans le budget de requêtes du canal', step: 'Vérifiez dans l’événement combien d’offres ont été rétrogradées au niveau froid, et décidez du budget ou de la cadence.' },
         COMPETITOR_POLL_FAILURES: { what: 'une grande part des requêtes sur la concurrence d’un compte échoue', step: 'Vérifiez le premier code d’erreur de l’événement : identifiants du compte, joignabilité du canal ou sa limite de débit.' },
-        AMAZON_SUMMARY_ROUND_SLOW: { what: 'le tour des concurrents chez Amazon prend plus d’une heure', step: 'Les prix suivent le marché plus lentement sur ce compte : le catalogue dépasse ce que couvre une requête toutes les 31 secondes en une heure. Comparez les offres de l’événement à la limite de requêtes ; une limite plus élevée s’obtient auprès du support Amazon.' },
+        AMAZON_SUMMARY_ROUND_SLOW: { what: 'le tour des offres Amazon au prix fixé selon la concurrence prend plus d’une heure', step: 'Les offres au prix fixé selon la concurrence suivent le marché plus lentement sur ce compte : elles dépassent ce que couvre une requête toutes les 31 secondes en une heure (les offres sans ce prix sont lues moins souvent, à dessein). Comparez les offres de l’événement à la limite de requêtes ; une limite plus élevée s’obtient auprès du support Amazon.' },
+        AMAZON_CATALOG_MAY_BE_INCOMPLETE: { what: 'le catalogue Amazon de ce site n’est peut-être visible qu’en partie', step: 'Amazon ne nous a pas fourni son rapport de catalogue : nous lisons donc le catalogue par la recherche, qui s’arrête à 1,000 offres ; les offres au-delà ne sont pas encore dans votre catalogue. Nous redemandons le rapport à chaque tour du catalogue ; vous n’avez rien à faire.' },
         SCHEDULER_JOB_FAILING: { what: 'une tâche périodique du planificateur échoue plusieurs fois de suite', step: 'Relevez le nom de la tâche et le code d’erreur dans l’événement et consultez le journal du processus planificateur.' },
         SCHEDULER_JOB_LAGGING: { what: 'une tâche périodique est en retard sur son calendrier', step: 'Vérifiez que le processus planificateur tourne et si une tâche détient son bail ; pour l’export, un retard signifie un historique perdu.' },
         SCHEDULER_LEASE_LOST: { what: 'le planificateur a perdu le bail d’une tâche pendant son exécution', step: 'Vérifiez si plusieurs processus planificateurs tournent : un seul est prévu.' },

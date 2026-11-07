@@ -221,15 +221,96 @@
       }
     },
     {
-      "id": "search",
-      "note": "searchListingsItems с attributes: привязка к правилу ценообразования и границы канала видны до назначения стратегии [Р-120]",
+      "id": "search-create",
+      "note": "createReport GET_MERCHANT_LISTINGS_ALL_DATA: одна витрина, заголовки en_US",
+      "request": {
+        "method": "POST",
+        "path": "/reports/2021-06-30/reports",
+        "body": {
+          "reportType": "GET_MERCHANT_LISTINGS_ALL_DATA",
+          "marketplaceIds": [
+            "A1PA6795UKMFR9"
+          ],
+          "reportOptions": {
+            "preferredReportDocumentLocale": "en_US"
+          }
+        }
+      },
+      "response": {
+        "status": 202,
+        "body": {
+          "reportId": "syn-report-search"
+        }
+      }
+    },
+    {
+      "id": "search-done",
+      "note": "getReport: Report без обёртки (модель снимка), DONE и reportDocumentId",
+      "request": {
+        "method": "GET",
+        "path": "/reports/2021-06-30/reports/syn-report-search"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "reportId": "syn-report-search",
+          "reportType": "GET_MERCHANT_LISTINGS_ALL_DATA",
+          "marketplaceIds": [
+            "A1PA6795UKMFR9"
+          ],
+          "createdTime": "2026-09-14T09:58:00.000Z",
+          "processingStatus": "DONE",
+          "processingStartTime": "2026-09-14T09:58:00.000Z",
+          "processingEndTime": "2026-09-14T09:59:00.000Z",
+          "reportDocumentId": "amzn1.spdoc.1.4.eu.syn-search"
+        }
+      }
+    },
+    {
+      "id": "search-document",
+      "note": "getReportDocument: подписанный адрес на 5 минут, без сжатия",
+      "request": {
+        "method": "GET",
+        "path": "/reports/2021-06-30/documents/amzn1.spdoc.1.4.eu.syn-search"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "reportDocumentId": "amzn1.spdoc.1.4.eu.syn-search",
+          "url": "https://syn-report-documents.invalid/documents/amzn1.spdoc.1.4.eu.syn-search?X-Amz-Signature=syn"
+        }
+      }
+    },
+    {
+      "id": "search-download",
+      "note": "Документ по подписанному адресу хранилища: не SP-API, токена нет; UTF-8 с BOM, табуляция",
+      "request": {
+        "method": "GET",
+        "path": "/documents/amzn1.spdoc.1.4.eu.syn-search",
+        "query": {
+          "X-Amz-Signature": "syn"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/plain;charset=UTF-8"
+        },
+        "body": "﻿item-name\titem-description\tlisting-id\tseller-sku\tprice\tquantity\topen-date\timage-url\titem-is-marketplace\tproduct-id-type\tzshop-shipping-fee\titem-note\titem-condition\tzshop-category1\tzshop-browse-path\tzshop-storefront-feature\tasin1\tasin2\tasin3\twill-ship-internationally\texpedited-shipping\tzshop-boldface\tproduct-id\tbid-for-featured-placement\tadd-delete\tpending-quantity\tfulfillment-channel\tmerchant-shipping-group\tstatus\r\nSynthetic product SYN-SKU-FBM-7101\t\t\tSYN-SKU-FBM-7101\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\r\nSynthetic product SYN-SKU-FBA-7102\t\t\tSYN-SKU-FBA-7102\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\r\nSynthetic product SYN-SKU-NON-7103\t\t\tSYN-SKU-NON-7103\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\r\n"
+      }
+    },
+    {
+      "id": "search-details",
+      "note": "searchListingsItems по SKU отчёта (identifiers, до 20): тот же разбор, что у поиска по витрине",
       "request": {
         "method": "GET",
         "path": "/listings/2021-08-01/items/A1SYNSELLER0001",
         "query": {
           "marketplaceIds": "A1PA6795UKMFR9",
           "includedData": "summaries,attributes,offers,fulfillmentAvailability",
-          "pageSize": "20"
+          "pageSize": "20",
+          "identifiers": "SYN-SKU-FBM-7101,SYN-SKU-FBA-7102,SYN-SKU-NON-7103",
+          "identifiersType": "SKU"
         }
       },
       "response": {

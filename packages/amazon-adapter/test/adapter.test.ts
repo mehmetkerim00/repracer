@@ -71,6 +71,8 @@ test('step 69 (OQ-249): discovery takes the product title from itemName of the m
   const fetchFn = (async (input: string | URL | Request) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     if (url.pathname === '/auth/o2/token') return new Response(JSON.stringify({ access_token: 'syn-lwa-access-token', expires_in: 3600 }), { status: 200 });
+    // Шаг 117: тема теста — разбор поиска; отчёт листингов отвечает не по модели, и обнаружение тем же вызовом идёт поиском по витрине
+    if (url.pathname === '/reports/2021-06-30/reports') return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     calls.push(url.pathname);
     assert.equal(url.pathname, '/listings/2021-08-01/items/SYN_SELLER');
     assert.ok(url.searchParams.getAll('includedData').join(',').includes('summaries'), 'the summaries set is already requested by discovery');
@@ -206,7 +208,9 @@ test('step 70 (Р-205): a response about another SKU is refused with RESPONSE_MI
 
   // Обнаружение: предмет без sku и сводка Канады пропускаются поштучно с журналом; остальное страницы — в каталоге
   logs.length = 0;
-  replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 3, items: [item('SYN-1', [US]), item('SYN-2', [US, CA]), item(undefined, [US])] } }];
+  // Шаг 117: отчёт листингов отвечает не по модели — обнаружение тем же вызовом идёт поиском по витрине (тема теста — разбор поиска)
+  const noReport = { path: /^\/reports\/2021-06-30\/reports$/, method: 'POST', body: {} };
+  replies = [noReport, { path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 3, items: [item('SYN-1', [US]), item('SYN-2', [US, CA]), item(undefined, [US])] } }];
   const page = await adapter.discoverOffers(ctx, { limit: 20 });
   assert.deepEqual(page.items.map((i) => `${i.identity.externalSku}@${i.identity.marketplace}`), [`SYN-1@${US}`, `SYN-2@${US}`]);
   assert.ok(logs.includes('AMZ_C15_RESPONSE_IDENTITY:DISCOVERY:'), `skipped entries are named in the log: ${logs.join(', ')}`);
@@ -216,7 +220,7 @@ test('step 70 (Р-205): a response about another SKU is refused with RESPONSE_MI
   const fbaReply = (granularityId: string) => ({ path: /^\/fba\/inventory\/v1\/summaries$/, body: { payload: { granularity: { granularityType: 'Marketplace', granularityId },
     inventorySummaries: [{ sellerSku: 'SYN-FBA-70', inventoryDetails: { fulfillableQuantity: 9 } }] } } });
   for (const [granularityId, quantity] of [[CA, undefined], [US, 9]] as const) {
-    replies = [{ path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 1, items: [fbaItem] } }, fbaReply(granularityId)];
+    replies = [noReport, { path: /^\/listings\/2021-08-01\/items\/SYN_SELLER$/, body: { numberOfResults: 1, items: [fbaItem] } }, fbaReply(granularityId)];
     const fbaPage = await adapter.discoverOffers(ctx, { limit: 20 });
     assert.equal(fbaPage.items[0]!.fulfillment, 'CHANNEL');
     assert.equal(fbaPage.items[0]!.currentQuantity, quantity, `FBA summaries of ${granularityId}`);

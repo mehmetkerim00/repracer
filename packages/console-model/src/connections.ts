@@ -41,6 +41,8 @@ export interface ConnectionAccountView {
   authorizationText: string;
   /** Шаг 56 (Р-198): сколько длится круг обхода каталога — столько же ждёт новый листинг, который видит только полный обход */
   discoveryText: string | null;
+  /** Шаг 117 (P0-16): источник каталога витрины — отчёт или поиск; поиск, упёршийся в предел, — «каталог может быть виден не полностью» словами */
+  catalogTexts: Array<{ text: string; incomplete: boolean }>;
   offers: number;
   /** Из них — вести нельзя: нет единицы записи цены (у eBay — немигрированные листинги и аукционы) */
   unmanagedOffers: number;
@@ -313,8 +315,14 @@ export function connectionsView(
       // Граница Р-198 (шаг 57): два круга и сутки паузы до нового круга плюс час захода работы — округлено вверх до часа
       : completed !== null && completed >= started ? t.discovery.completed(hours(started, completed), m.when(a.discoveryCircleCompletedAt!), Math.ceil(2 * hours(started, completed) + 25), a.channel === 'EBAY')
         : t.discovery.running(hours(started, nowMs), completed !== null, a.channel === 'EBAY');
+    const catalogTexts = (a.catalogSources ?? []).map((c) => {
+      const store = storefrontName(a.channel, c.marketplace, m);
+      const when = m.when(c.observedAt);
+      return { incomplete: c.mayBeIncomplete,
+        text: c.source === 'REPORT' ? t.catalog.report(store, c.listed ?? 0, when) : t.catalog.search(store, c.listed, when, c.mayBeIncomplete) };
+    });
     return {
-      discoveryText,
+      discoveryText, catalogTexts,
       channelAccountId: a.channelAccountId, channel: a.channel,
       // Шаг 64 (проход консоли): имя канала и витрины словами — «eBay · … · ebay.com», а не коды EBAY и EBAY_US
       label: `${(m.values as Record<string, string | undefined>)[a.channel] ?? a.channel} · ${a.externalAccountId} · ${a.marketplaces.map((id) => storefrontName(a.channel, id, m)).join(', ')}`, marketplaces: [...a.marketplaces],

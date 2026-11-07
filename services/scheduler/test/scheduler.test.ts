@@ -173,10 +173,21 @@ test('step 115 [Р-240]: a refused request fails the run by its own code — the
   await assert.rejects(run(), /^Error: RATE_LIMITED: /);
 });
 
-test('step 115 [Р-240]: a round longer than an hour names itself; 1 000 offers are about 26 minutes and raise nothing', async () => {
-  const round = async (total: number) => (await (await summaryPollJob({ notificationsFlowing: async () => false, pollRotation: async () => window({ total }) })).run()).alerts;
-  assert.equal(await round(1000), undefined);
-  assert.deepEqual((await round(2400))?.map((a) => [a.code, a.severity, a.details]), [['AMAZON_SUMMARY_ROUND_SLOW', 'WARNING', { offers: 2400, roundMinutes: 62 }]]);
+/**
+ * Шаг 117 (P0-16, решение владельца 2026-11-07): порог — на круге КОНКУРЕНТНОЙ части. Часы допустимы только предложениям, которым данные конкурента не нужны;
+ * каталог в 10 000 предложений, где конкурентных 1 000, — конкурентный круг около 35 минут, предупреждения нет. Конкурентная часть дольше часа — WARNING
+ * с обеими цифрами
+ */
+test('step 115, 117 [Р-240]: the round of the competitive part longer than an hour names itself with both figures; hours of the rest raise nothing', async () => {
+  const round = async (total: number, competitive: number) =>
+    (await (await summaryPollJob({ notificationsFlowing: async () => false, pollRotation: async () => window({ total, competitive }) })).run()).alerts;
+  assert.equal(await round(1000, 1000), undefined, '1 000 competitive offers: about 26 minutes');
+  assert.equal(await round(10_000, 1000), undefined, '1 000 competitive of 10 000: about 35 minutes for them, the rest reads in hours');
+  assert.equal(await round(10_000, 0), undefined, 'no offer is priced from competitors: nothing waits on the round');
+  assert.deepEqual((await round(2400, 2400))?.map((a) => [a.code, a.severity, a.details]),
+    [['AMAZON_SUMMARY_ROUND_SLOW', 'WARNING', { competitiveOffers: 2400, otherOffers: 0, competitiveRoundMinutes: 62, fullRoundMinutes: 62 }]]);
+  assert.deepEqual((await round(10_000, 2500))?.map((a) => [a.code, a.details]),
+    [['AMAZON_SUMMARY_ROUND_SLOW', { competitiveOffers: 2500, otherOffers: 7500, competitiveRoundMinutes: 72, fullRoundMinutes: 1938 }]]);
 });
 
 test('Р-124: neither channel snapshot has a price history operation — the descriptors say so and completeness counts from connection', () => {

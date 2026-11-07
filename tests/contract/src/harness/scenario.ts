@@ -301,7 +301,8 @@ export function validateScenario(s: Scenario): string[] {
     if (exchangeIds.has(ex.id)) problems.push(`duplicate exchange id ${ex.id}`);
     exchangeIds.add(ex.id);
     const pathOk = s.channel === 'AMAZON'
-      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$|orders\/2026-01-01\/orders$|fba\/inventory\/v1\/summaries$)/.test(ex.request?.path ?? '')
+      // Шаг 117: Reports 2021-06-30 и скачивание документа по подписанному адресу хранилища (`/documents/…` хоста документов)
+      ? /^\/(listings\/2021-08-01\/items\/|auth\/o2\/token$|batches\/products\/pricing\/2022-05-01\/items\/competitiveSummary$|orders\/2026-01-01\/orders$|fba\/inventory\/v1\/summaries$|reports\/2021-06-30\/(reports|reports\/[^/]+|documents\/[^/]+)$|documents\/[^/]+$)/.test(ex.request?.path ?? '')
       : s.channel === 'EBAY'
         ? /^\/(sell\/inventory\/v1\/|sell\/fulfillment\/v1\/order$|sell\/account\/v1\/payment_policy\/[\w-]+$|buy\/browse\/v1\/item\/v1\|\d+\|0$|identity\/v1\/oauth2\/token$|ws\/api\.dll$)/.test(ex.request?.path ?? '')
         : Boolean(ex.request?.path?.startsWith('/v2/'));

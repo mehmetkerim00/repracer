@@ -1013,6 +1013,12 @@ export const es: Messages = {
         running: (h: number, hadCircle: boolean, ebay: boolean) => `Descubrimiento del catálogo: el ciclo actual lleva ${h < 1 ? 'menos de una hora' : `${h} h`}${hadCircle ? '' : ' (es el primero)'}; una oferta que solo ve un ciclo completo${ebay ? ' (anuncios de eBay antiguos)' : ''} aparece en unos dos ciclos y un día; las horas se indican cuando se cierra un ciclo.`,
         completed: (h: number, at: string, boundH: number, ebay: boolean) => `Descubrimiento del catálogo: el último ciclo completo tardó ${h < 1 ? 'menos de una hora' : `${h} h`} y terminó ${at}; una oferta que solo ve un ciclo completo${ebay ? ' (anuncios de eBay antiguos)' : ''} aparece en unas ${boundH} h (dos ciclos y un día), si el próximo ciclo no dura más que el último.`,
       },
+      // Шаг 117 (P0-16): источник каталога витрины — отчёт Amazon или поиск; поиск, упёршийся в предел, говорит это словами
+      catalog: {
+        incompletePill: 'puede estar incompleto',
+        report: (store: string, n: number, when: string) => `${store}: el catálogo viene del informe de catálogo de Amazon — ${n} ofertas, leído ${when}.`,
+        search: (store: string, n: number | null, when: string, incomplete: boolean) => `${store}: Amazon no nos dio su informe de catálogo, así que el catálogo se leyó por búsqueda, ${when}${n === null ? '' : `; Amazon cuenta ${n} ofertas`}${incomplete ? ' — la búsqueda se detiene en 1,000 ofertas, así que el catálogo puede verse solo en parte' : ''}.`,
+      },
       authorization: {
         revoked: 'El acceso se retiró en el canal: vuelva a conectar para continuar.',
         external: 'El acceso lo configura la plataforma, no esta pantalla.',
@@ -1308,7 +1314,8 @@ export const es: Messages = {
         ANALYTICS_PARTITION_FORCE_DROPPED: { what: 'se eliminó a la fuerza una partición que nunca se exportó: ese historial se perdió', step: 'Anote las particiones indicadas y busque la causa de la exportación fallida: esos días no se pueden restaurar.' },
         COMPETITOR_POLL_BUDGET_EXCEEDED: { what: 'la consulta de la competencia ya no cabe en el presupuesto de solicitudes del canal', step: 'Revise en el evento cuántas ofertas se pasaron al nivel frío y decida sobre el presupuesto o la frecuencia.' },
         COMPETITOR_POLL_FAILURES: { what: 'falla una parte importante de las consultas de la competencia de una cuenta', step: 'Revise el primer código de error del evento: credenciales de la cuenta, accesibilidad del canal o su límite de solicitudes.' },
-        AMAZON_SUMMARY_ROUND_SLOW: { what: 'la ronda de competidores en Amazon tarda más de una hora', step: 'Los precios siguen al mercado más despacio en esta cuenta: el catálogo es mayor de lo que cubre una solicitud cada 31 segundos en una hora. Compare las ofertas del evento con el límite de solicitudes; un límite mayor lo concede el soporte de Amazon.' },
+        AMAZON_SUMMARY_ROUND_SLOW: { what: 'la ronda de ofertas de Amazon con precio según la competencia tarda más de una hora', step: 'Las ofertas con precio según la competencia siguen al mercado más despacio en esta cuenta: son más de las que cubre una solicitud cada 31 segundos en una hora (las ofertas sin ese precio se leen menos a menudo a propósito). Compare las ofertas del evento con el límite de solicitudes; un límite mayor lo concede el soporte de Amazon.' },
+        AMAZON_CATALOG_MAY_BE_INCOMPLETE: { what: 'el catálogo de Amazon de este sitio puede verse solo en parte', step: 'Amazon no nos dio su informe de catálogo, así que leemos el catálogo por búsqueda, y la búsqueda se detiene en 1,000 ofertas: las ofertas más allá aún no están en su catálogo. Pedimos el informe de nuevo en cada ronda de catálogo; no necesita hacer nada.' },
         SCHEDULER_JOB_FAILING: { what: 'una tarea periódica del planificador falla varias veces seguidas', step: 'Tome el nombre de la tarea y el código de error del evento y revise el registro del proceso del planificador.' },
         SCHEDULER_JOB_LAGGING: { what: 'una tarea periódica va atrasada respecto a su calendario', step: 'Compruebe que el proceso del planificador está en marcha y si alguna tarea retiene su concesión (lease); en la exportación, el atraso significa historial perdido.' },
         SCHEDULER_LEASE_LOST: { what: 'el planificador perdió la concesión (lease) de una tarea mientras se ejecutaba', step: 'Compruebe si hay más de un proceso de planificador en marcha: debe haber exactamente uno.' },

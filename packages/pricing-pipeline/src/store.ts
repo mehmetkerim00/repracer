@@ -3,7 +3,7 @@ import type { CompetitorView, FloorRaiseReason, OmnibusPriorPrice, PreviousOffer
 import type { CreepState } from '@repracer/strategy-engine';
 import type { DecisionExplanation, DistrustRef, ExplanationIntentColumns, SanitySummary, FxFailureCause, FxQuote, HaltRef, HaltReasonCode, MemberRole, PriceIntentDraft as IntentDraft, StopRef, StopScope } from '@repracer/pricing-model';
 import type { ExplanationRuleset, StopScope as AuditStopScope } from '@repracer/pricing-model';
-import type { ChannelBoundValues, CompetitorQuery, CompetitorSnapshot, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, ListingStatusObservation, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
+import type { ChannelBoundValues, CompetitorQuery, CompetitorSnapshot, DiscoveryCatalogNote, FieldWrite, Instant, Money, OfferIdentity, PriceBasis, ListingStatusObservation, PricingHealthObservation, WriteOutcome, WriteRetryRule } from '@repracer/channel-port';
 import type { MoveRecord, SanityContext } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type {
@@ -955,9 +955,10 @@ export interface PricingStore {
   reviewNotificationLoss(tenantId: string, channelAccountId: string, at: Instant): Promise<NotificationLossVerdict[]>;
   /**
    * Р-121: сверка по кругу — size товаров аккаунта, окно по номеру вызова cycle; все товары покрываются за ceil(n / size) вызовов подряд.
-   * total — число товаров круга (время полного круга, OQ-176)
+   * total — число товаров круга (время полного круга, OQ-176). Шаг 117: первыми — товары, чью цену решает конкурент (`competitive` — их число), остальным —
+   * своя доля мест окна (`prioritizedWindow`)
    */
-  pickRotationWindow(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }>;
+  pickRotationWindow(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number; competitive: number }>;
   /**
    * Р-47, Р-126 (шаг 25): товары аккаунта для ярусного опроса планировщика — время последнего опроса (не последнего состояния: его
    * обновляют уведомления) и оценка волатильности: изменений цены конкурентов за 48 часов × 15 (движения хранятся 2 суток, Р-42); движение
@@ -1029,6 +1030,8 @@ export interface PricingStore {
    * 'RESET' — третий такой отказ подряд, круг сброшен к началу (ревью шага 56, находка 6)
    */
   saveDiscoveryCircle?(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; startedAt: Instant; at: Instant; noProgress: boolean }): Promise<'SAVED' | 'RESET'>;
+  /** Шаг 117 (P0-16): источник каталога витрины за круг — отчёт или поиск и может ли каталог быть неполным (экран Channels) */
+  recordDiscoveryCatalog?(tenantId: string, channelAccountId: string, note: DiscoveryCatalogNote & { observedAt: Instant }): Promise<void>;
   /** Шаг 55 (OQ-240): один вызов из суточной квоты канала на приложение, размазанной по суткам; false — отложить вызов */
   reserveAppCall?(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */

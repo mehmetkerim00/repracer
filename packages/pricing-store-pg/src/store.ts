@@ -8,7 +8,7 @@ import {
   type ConsoleListingStatusRow, type ListingStatusRecord, type NotificationSourceFacts, type RawInboundNotificationEntry,
 } from '@repracer/pricing-pipeline';
 import { insertListingStatus, insertRawNotification } from './inbound.ts';
-import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, offerIdentityOf, type CompetitorOffer, type CompetitorQuery, type CompetitorSnapshot, type FieldWrite, type Instant, type ListingStatusObservation, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
+import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, offerIdentityOf, type CompetitorOffer, type CompetitorQuery, type CompetitorSnapshot, type DiscoveryCatalogNote, type FieldWrite, type Instant, type ListingStatusObservation, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange } from '@repracer/input-sanity';
 import type { GuardrailSet } from '@repracer/price-gate';
 import type { OmnibusPriorPrice } from '@repracer/pricing-model';
@@ -53,7 +53,7 @@ import type {
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason } from '@repracer/pricing-pipeline';
-import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, stalestFirst } from '@repracer/pricing-pipeline';
+import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, prioritizedWindow } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 import { IMPORT_RUN_COLUMNS, importRunRow, insertImportRun } from './import-runs.ts';
@@ -2278,6 +2278,12 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
+  /** Шаг 117 (0220): источник каталога витрины — функцией узкой роли обнаружения; форму строки держит база */
+  async recordDiscoveryCatalog(tenantId: string, channelAccountId: string, note: DiscoveryCatalogNote & { observedAt: Instant }): Promise<void> {
+    await this.tx(tenantId, (tx) => tx.query('SELECT tenant_data.record_discovery_catalog($1, $2, $3, $4, $5, $6, $7, $8)',
+      [tenantId, channelAccountId, note.marketplace, note.source, note.listed, note.fallbackReason, note.mayBeIncomplete, note.observedAt]));
+  }
+
   /** Шаг 55 (0148, OQ-240): вызов из суточной квоты приложения — счётчик общий для всех процессов, поэтому в базе */
   async reserveAppCall(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean> {
     const { rows: [r] } = await this.pool.query('SELECT platform.reserve_channel_app_call($1, $2, $3, $4) AS granted', [channel, quota, dayLimit, at]);
@@ -3673,28 +3679,36 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async pickRotationWindow(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
+  async pickRotationWindow(tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number; competitive: number }> {
     return this.tx(tenantId, async (tx) => {
       /**
        * Офферы аккаунта с товаром канала. Шаг 55 (OQ-241): первыми — те, чья ПОСЛЕДНЯЯ СВЕРКА давнее (`competitor_poll_state`, её ставит
        * сама сверка; никогда не сверенные — первыми, отказавшие остаются давними). Не давность уведомления: оффер с частыми уведомлениями
        * тогда не сверялся бы часами (живой прогон планировщика: 228 минут), а круг — страховка как раз от потерянных уведомлений.
-       * При равной давности — окно круга, как в памяти (`stalestFirst`)
+       * При равной давности — окно круга, как в памяти (`prioritizedWindow`, шаг 117)
+       */
+      /**
+       * Шаг 117 (P0-16): товар конкурентный, если хоть одно его предложение ведёт движок стратегией из данных конкурентов (тот же признак, что у выборки снятия
+       * остановки, шаг 26); окно — `prioritizedWindow`, одинаково в памяти и на PostgreSQL
        */
       const { rows } = await tx.query(
-        `SELECT DISTINCT ON (m.marketplace, m.channel_product_ref, m.condition) m.marketplace, m.channel_product_ref, m.condition,
-                ps.last_polled_at AS last_seen
+        `SELECT m.marketplace, m.channel_product_ref, m.condition, max(ps.last_polled_at) AS last_seen,
+                coalesce(bool_or(s.pricing_mode = 'ENGINE' AND st.type = ANY ($3::text[])), false) AS competitive
            FROM tenant_data.offer_mapping m
            LEFT JOIN channel_data.competitor_poll_state ps ON ps.tenant_id = m.tenant_id AND ps.channel_account_id = m.channel_account_id
                 -- Ревью шага 55, находка 1: отметку ставит markPolled условием порта (нижний регистр), предложение хранит его верхним
                 AND ps.marketplace = m.marketplace AND ps.channel_product_ref = m.channel_product_ref AND ps.condition = lower(m.condition)
+           LEFT JOIN tenant_data.write_scope s ON s.tenant_id = m.tenant_id AND s.write_scope_id = m.price_write_scope_id
+           LEFT JOIN tenant_data.pricing_strategy st
+             ON st.tenant_id = s.tenant_id AND st.pricing_strategy_id = s.pricing_strategy_id AND st.version = s.pricing_strategy_version
           WHERE m.tenant_id = $1 AND m.channel_account_id = $2 AND m.status <> 'ENDED' AND m.channel_product_ref IS NOT NULL
-          ORDER BY m.marketplace, m.channel_product_ref, m.condition, last_seen DESC NULLS LAST`, [tenantId, channelAccountId]);
+          GROUP BY m.marketplace, m.channel_product_ref, m.condition`, [tenantId, channelAccountId, COMPETITOR_RULES]);
       const items = rows.map((r) => ({
         query: { marketplace: r.marketplace, channelProductRef: r.channel_product_ref, condition: portCondition(r.condition) },
         lastSeenMs: r.last_seen ? Date.parse(r.last_seen instanceof Date ? r.last_seen.toISOString() : String(r.last_seen)) : null,
+        competitive: r.competitive === true,
       }));
-      return { queries: stalestFirst(items, size, cycle), total: items.length };
+      return { queries: prioritizedWindow(items, size, cycle), total: items.length, competitive: items.filter((x) => x.competitive).length };
     });
   }
 

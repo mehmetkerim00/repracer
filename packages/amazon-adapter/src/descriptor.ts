@@ -30,6 +30,11 @@ export const AMAZON_RATE_LIMITS = {
   // перепродажа). Держится только лимит пары; превышение лимита приложения канал покажет ответом 429
   searchOrders: { pair: { ratePerSecond: 0.0056, burst: 20 }, application: null },
   getInventorySummaries: { pair: { ratePerSecond: 2, burst: 2 }, application: null },
+  // Шаг 117, снимок 2026-09-16 (Usage Plan в описании операций Reports 2021-06-30): createReport 0.0167 rps, burst 15; getReport 2 rps, burst 15;
+  // getReportDocument 0.0167 rps, burst 15. Лимит приложения моделью не описан — как у операций выше, держится только лимит пары
+  createReport: { pair: { ratePerSecond: 0.0167, burst: 15 }, application: null },
+  getReport: { pair: { ratePerSecond: 2, burst: 15 }, application: null },
+  getReportDocument: { pair: { ratePerSecond: 0.0167, burst: 15 }, application: null },
 } as const;
 export type AmazonOperation = keyof typeof AMAZON_RATE_LIMITS;
 

@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib';
 import type { ChannelBehaviour, ChannelReply, ObservedRequest } from '../harness/channel.ts';
 import { defaultAmazonParams, type AmazonModelParams } from './params.ts';
 import { SeededRandom } from './random.ts';
@@ -17,6 +18,9 @@ import { SeededRandom } from './random.ts';
  * - getInventorySummaries (FBA Inventory v1): granularityType=Marketplace, одна витрина, sellerSkus ≤ 50; только SKU сети Amazon;
  * - getCompetitiveSummary (Product Pricing 2022-05-01, шаг 115): пакет до 20 запросов, предложения New/Consumer и предложения в Buy Box по сегментам — форма настоящего ответа
  *   песочницы (docs/evidence/step108-sp-api-recon-exchanges.json); лимит приложения не документирован — параметр A-15;
+ * - отчёт GET_MERCHANT_LISTINGS_ALL_DATA (Reports 2021-06-30, снимок 2026-09-16; шаг 117): createReport — одна витрина (первая из marketplaceIds, страница
+ *   отчёта), getReport — IN_QUEUE → IN_PROGRESS → исход через reportProcessing (A-38), getReportDocument — подписанный адрес на ДРУГОМ хосте, живёт 5 минут;
+ *   документ — колонки страницы отчёта, табуляция, UTF-8 с BOM (A-36), данные на момент запроса отчёта; searchListingsItems по `identifiers` (SKU, до 20);
  * - лимиты запросов — token bucket по таблице Usage Plan каждой операции снимка; превышение — 429 (ответ из перечня ответов операции).
  * Коды ошибок SP-API в моделях не перечислены — тела ошибок модели синтетические (код с приставкой SYN_). Все данные синтетические.
  */
@@ -103,7 +107,21 @@ const USAGE_PLAN: Readonly<Record<string, { rate: number; burst: number }>> = {
   searchOrders: { rate: 0.0056, burst: 20 },
   getInventorySummaries: { rate: 2, burst: 2 },
   getCompetitiveSummary: { rate: 0.033, burst: 1 },
+  // Шаг 117: Reports 2021-06-30 (Usage Plan в описании операций снимка 2026-09-16)
+  createReport: { rate: 0.0167, burst: 15 },
+  getReport: { rate: 2, burst: 15 },
+  getReportDocument: { rate: 0.0167, burst: 15 },
 };
+
+/** Шаг 117: хост подписанных адресов документов отчётов — не SP-API; запрос к нему не несёт токена (стенд проверяет) */
+export const REPORT_DOCUMENT_ORIGIN = 'https://syn-report-documents.invalid';
+/** Колонки GET_MERCHANT_LISTINGS_ALL_DATA — страница report-type-values-inventory (vendor/amazon/reports/2026-11-07), в её порядке */
+export const MERCHANT_LISTINGS_COLUMNS = [
+  'item-name', 'item-description', 'listing-id', 'seller-sku', 'price', 'quantity', 'open-date', 'image-url', 'item-is-marketplace', 'product-id-type',
+  'zshop-shipping-fee', 'item-note', 'item-condition', 'zshop-category1', 'zshop-browse-path', 'zshop-storefront-feature', 'asin1', 'asin2', 'asin3',
+  'will-ship-internationally', 'expedited-shipping', 'zshop-boldface', 'product-id', 'bid-for-featured-placement', 'add-delete', 'pending-quantity',
+  'fulfillment-channel', 'merchant-shipping-group', 'status',
+] as const;
 
 const CURRENCY: Readonly<Record<string, { currency: string; region: 'EU' | 'NA' }>> = {
   A1PA6795UKMFR9: { currency: 'EUR', region: 'EU' }, ATVPDKIKX0DER: { currency: 'USD', region: 'NA' },
@@ -157,6 +175,9 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
   private submissions = 0;
   /** Страницы searchOrders: токен → запрос и смещение (токен модели — синтетический и предсказуемый) */
   private readonly orderPages = new Map<string, { q: Record<string, string>; start: number }>();
+  /** Шаг 117: отчёты листингов — витрина, время запроса и SKU на момент запроса; документ — байты и время выдачи подписанного адреса */
+  private readonly reports = new Map<string, { marketplace: string; createdMs: number; rows: string[][] }>();
+  private readonly documents = new Map<string, { reportId: string; issuedMs: number | null }>();
   private nowMs: number;
 
   constructor(spec: AmazonChannelModelSpec, startIso: string, accessToken: string) {
@@ -245,12 +266,17 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
     const operation = path === '/auth/o2/token' ? 'lwaToken'
       : listing ? (listing[2] ? (method === 'PATCH' ? 'patchListingsItem' : 'getListingsItem') : 'searchListingsItems')
         : path === '/orders/2026-01-01/orders' ? 'searchOrders' : path === '/fba/inventory/v1/summaries' ? 'getInventorySummaries'
-          : path === '/batches/products/pricing/2022-05-01/items/competitiveSummary' ? 'getCompetitiveSummary' : `${method} ${path}`;
+          : path === '/batches/products/pricing/2022-05-01/items/competitiveSummary' ? 'getCompetitiveSummary'
+            : path === '/reports/2021-06-30/reports' && method === 'POST' ? 'createReport'
+              : /^\/reports\/2021-06-30\/reports\/[^/]+$/.test(path) && method === 'GET' ? 'getReport'
+                : /^\/reports\/2021-06-30\/documents\/[^/]+$/.test(path) && method === 'GET' ? 'getReportDocument'
+                  : request.rawUrl.startsWith(`${REPORT_DOCUMENT_ORIGIN}/`) ? 'downloadReportDocument' : `${method} ${path}`;
     this.stats.requests[operation] = (this.stats.requests[operation] ?? 0) + 1;
     const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
       ({ exchangeId: `sim:${operation}`, reply: { kind: 'response' as const, status, headers: { 'content-type': 'application/json', ...headers }, body } });
 
     if (operation === 'lwaToken') return json(200, { access_token: this.accessToken, token_type: 'bearer', expires_in: 3600 });
+    if (operation === 'downloadReportDocument') return this.downloadDocument(request);
     const plan = USAGE_PLAN[operation];
     if (!plan) return { violation: `${method} ${path}: the Amazon model has no such operation` };
     /**
@@ -287,7 +313,14 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
       if (marketplaces.length === 0) return json(400, synError('INVALID_INPUT', 'marketplaceIds is required'));
       const included = listOf(request.query.includedData);
       if (operation === 'searchListingsItems') {
-        const skus = [...new Set([...this.offers.values()].filter((o) => marketplaces.includes(o.marketplace)).map((o) => o.sku))].sort();
+        /**
+         * Шаг 117: `identifiers` — до 20 (модель), обязателен вместе с `identifiersType`; модель знает тип SKU. Поиск по SKU возвращает только эти SKU
+         */
+        const identifiers = listOf(request.query.identifiers);
+        if ((identifiers.length > 0) !== (request.query.identifiersType !== undefined)) return json(400, synError('INVALID_INPUT', 'identifiers and identifiersType go together'));
+        if (identifiers.length > 20) return json(400, synError('INVALID_INPUT', 'identifiers: at most 20'));
+        if (identifiers.length > 0 && request.query.identifiersType !== 'SKU') return json(400, synError('INVALID_INPUT', 'this model searches identifiers by SKU only'));
+        const skus = [...new Set([...this.offers.values()].filter((o) => marketplaces.includes(o.marketplace) && (identifiers.length === 0 || identifiers.includes(o.sku))).map((o) => o.sku))].sort();
         // Шаг 52: страница может быть короче pageSize, а первая — пустой с токеном (параметр paging)
         const size = Math.min(Math.max(1, Math.min(20, Number(request.query.pageSize ?? 10))), this.params.paging.pageSizeCap ?? 20);
         if (!request.query.pageToken && this.params.paging.emptyPageFirst) return json(200, { numberOfResults: skus.length, pagination: { nextToken: 'syn-page-0' }, items: [] }, limitHeader);
@@ -309,7 +342,74 @@ export class SimulatedAmazonChannel implements ChannelBehaviour {
       return this.patch(request, sku, list, marketplaces, json, limitHeader);
     }
     if (operation === 'searchOrders') return this.searchOrders(request, json, limitHeader);
+    if (operation === 'createReport') return this.createReport(request, json, limitHeader);
+    if (operation === 'getReport') return this.getReport(decodeURIComponent(path.split('/').pop()!), json, limitHeader);
+    if (operation === 'getReportDocument') return this.getReportDocument(decodeURIComponent(path.split('/').pop()!), json, limitHeader);
     return this.inventorySummaries(request, json, limitHeader);
+  }
+
+  /** Шаг 117: createReport — тело CreateReportSpecification (reportType, marketplaceIds обязательны); у отчёта листингов принимается только первая витрина */
+  private createReport(request: ObservedRequest, json: (status: number, body: unknown, headers?: Record<string, string>) => { exchangeId: string; reply: ChannelReply },
+    headers: Record<string, string>) {
+    const body = request.body as { reportType?: unknown; marketplaceIds?: unknown; reportOptions?: Record<string, unknown> } | null;
+    const marketplaces = Array.isArray(body?.marketplaceIds) ? body!.marketplaceIds.filter((m): m is string => typeof m === 'string') : [];
+    if (typeof body?.reportType !== 'string' || marketplaces.length === 0) return json(400, synError('INVALID_INPUT', 'reportType and marketplaceIds are required'));
+    if (body.reportType !== 'GET_MERCHANT_LISTINGS_ALL_DATA') return json(400, synError('INVALID_INPUT', `report type ${body.reportType} is not in this model`));
+    if (marketplaces.some((m) => MARKETPLACE_REGION[m] !== this.spec.region)) return json(400, synError('INVALID_INPUT', 'a marketplace of another region'));
+    if (this.params.reportAccess === 'DENIED') {
+      return json(403, { errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.', details: 'The application has no role for this report type.' }] });
+    }
+    const marketplace = marketplaces[0]!;
+    const reportId = `syn-report-${this.reports.size + 1}`;
+    const english = this.params.reportHeaderLocale === 'en_US';
+    const rows = [[...MERCHANT_LISTINGS_COLUMNS].map((c) => (english ? c : `syn-localized-${c}`))];
+    for (const o of [...this.offers.values()].filter((x) => x.marketplace === marketplace).sort((a, b) => (a.sku < b.sku ? -1 : 1))) {
+      const cell: Record<string, string> = {
+        'item-name': o.title ?? '', 'listing-id': `SYNLID${o.asin}`, 'seller-sku': o.sku, price: String(major(o.priceMinor)), quantity: String(o.quantity),
+        'open-date': new Date(this.startMs - 86_400_000).toISOString(), 'item-is-marketplace': 'y', 'item-condition': 'syn-condition', asin1: o.asin,
+        'product-id': o.asin, 'fulfillment-channel': o.fulfillmentCode ?? '', status: 'syn-status',
+      };
+      rows.push(MERCHANT_LISTINGS_COLUMNS.map((c) => cell[c] ?? ''));
+    }
+    this.reports.set(reportId, { marketplace, createdMs: this.nowMs, rows });
+    return json(202, { reportId }, headers);
+  }
+
+  private getReport(reportId: string, json: (status: number, body: unknown, headers?: Record<string, string>) => { exchangeId: string; reply: ChannelReply },
+    headers: Record<string, string>) {
+    const r = this.reports.get(reportId);
+    if (!r) return json(404, synError('NOT_FOUND', 'report not found'));
+    const { ms, outcome } = this.params.reportProcessing;
+    const age = this.nowMs - r.createdMs;
+    const status = outcome === 'STUCK' || age < ms ? (age < ms / 2 || outcome === 'STUCK' ? 'IN_QUEUE' : 'IN_PROGRESS') : outcome;
+    const documentId = `amzn1.spdoc.1.4.na.syn-${reportId}`;
+    if (status === 'DONE' && !this.documents.has(documentId)) this.documents.set(documentId, { reportId, issuedMs: null });
+    const report = {
+      reportId, reportType: 'GET_MERCHANT_LISTINGS_ALL_DATA', marketplaceIds: [r.marketplace], createdTime: new Date(r.createdMs).toISOString(), processingStatus: status,
+      ...(status === 'DONE' ? { processingStartTime: new Date(r.createdMs).toISOString(), processingEndTime: new Date(r.createdMs + ms).toISOString(), reportDocumentId: documentId } : {}),
+    };
+    return json(200, this.params.reportEnvelope === 'PAYLOAD' ? { payload: report } : report, headers);
+  }
+
+  private getReportDocument(documentId: string, json: (status: number, body: unknown, headers?: Record<string, string>) => { exchangeId: string; reply: ChannelReply },
+    headers: Record<string, string>) {
+    const d = this.documents.get(documentId);
+    if (!d) return json(404, synError('NOT_FOUND', 'report document not found'));
+    d.issuedMs = this.nowMs;
+    return json(200, { reportDocumentId: documentId, url: `${REPORT_DOCUMENT_ORIGIN}/documents/${encodeURIComponent(documentId)}?X-Amz-Signature=syn-${this.nowMs}`,
+      ...(this.params.reportDocument.compression === 'GZIP' ? { compressionAlgorithm: 'GZIP' } : {}) }, headers);
+  }
+
+  /** Подписанный адрес документа: 5 минут после выдачи (модель снимка, ReportDocument.url), затем 403 хранилища */
+  private downloadDocument(request: ObservedRequest): { exchangeId: string; reply: ChannelReply } {
+    const id = decodeURIComponent(request.path.split('/').pop() ?? '');
+    const d = this.documents.get(id);
+    const reply = (status: number, body: unknown, contentType: string) => ({ exchangeId: 'sim:downloadReportDocument', reply: { kind: 'response' as const, status, headers: { 'content-type': contentType }, body } });
+    if (!d || d.issuedMs === null || this.nowMs - d.issuedMs > 5 * 60_000) return reply(403, 'AccessDenied (model): the presigned URL is unknown or expired', 'text/plain');
+    const { compression, charset, bom } = this.params.reportDocument;
+    const text = `${bom ? '\uFEFF' : ''}${this.reports.get(d.reportId)!.rows.map((r) => r.join('\t')).join('\r\n')}\r\n`;
+    const bytes = Buffer.from(text, 'utf8');
+    return reply(200, new Uint8Array(compression === 'GZIP' ? gzipSync(bytes) : bytes), `text/plain${charset ? `;charset=${charset}` : ''}`);
   }
 
   private patch(request: ObservedRequest, sku: string, list: readonly OfferState[], marketplaces: readonly string[],

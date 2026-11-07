@@ -84,4 +84,45 @@ export function stalestFirst(items: ReadonlyArray<{ query: CompetitorQuery; last
     .map((it) => it.query);
 }
 
+/**
+ * Шаг 117 (P0-16, решение владельца 2026-11-07): в круге опроса сводки первыми читаются предложения, чью цену решает конкурент (движок включён, стратегия из
+ * данных конкурентов); выключенные и с фиксированной ценой — по остатку. В каждом окне из `size` мест остальным отведено `restSlots` — их доля с весом
+ * 1/`SUMMARY_POLL_OTHER_WEIGHT`, но не меньше одного места (иначе они не читались бы вовсе, и обещание «часы» было бы неправдой); остальные места —
+ * конкурентным; свободные места одной группы отдаются другой. Внутри группы — самые давние первыми (`stalestFirst`). Доля, а не давность с весом: живой
+ * прогон шага показал, что давность с весом после старта собирает остальные в одну волну, и в первом цикле они ждут дольше полного круга
+ */
+export const SUMMARY_POLL_OTHER_WEIGHT = 24;
+
+export function restSlots(competitive: number, other: number, size: number): number {
+  if (competitive === 0) return size;
+  if (other === 0) return 0;
+  return Math.min(size - 1, Math.max(1, Math.round((size * other) / (SUMMARY_POLL_OTHER_WEIGHT * competitive + other))));
+}
+
+export function prioritizedWindow(items: ReadonlyArray<{ query: CompetitorQuery; lastSeenMs: number | null; competitive: boolean }>, size: number, cycle: number): CompetitorQuery[] {
+  if (items.length === 0 || size <= 0) return [];
+  const competitive = items.filter((it) => it.competitive);
+  const other = items.filter((it) => !it.competitive);
+  const slots = restSlots(competitive.length, other.length, size);
+  const rest = stalestFirst(other, slots, cycle);
+  const first = stalestFirst(competitive, size - rest.length, cycle);
+  const spare = size - rest.length - first.length;
+  const more = spare > 0 ? stalestFirst(other, rest.length + spare, cycle).slice(rest.length) : [];
+  return [...first, ...rest, ...more];
+}
+
+/**
+ * Шаг 117: две цифры круга [Р-8, Р-240] — верхние границы при ровном темпе без отказов. Конкурентный круг — сколько ждёт движения рынка предложение, чью цену
+ * решает конкурент: ⌈C / (окно − r)⌉ окон; полный — за сколько прочитано всё: ⌈R / r⌉ окон (r — `restSlots`). Окно — `batch` предложений раз в `intervalSeconds`
+ */
+export function summaryRounds(input: { competitive: number; other: number; batch: number; intervalSeconds: number }): { competitiveSeconds: number; fullSeconds: number } {
+  const { competitive: c, other: o, batch, intervalSeconds } = input;
+  const r = restSlots(c, o, batch);
+  const competitiveSeconds = c > 0 ? Math.ceil(c / (batch - r)) * intervalSeconds : 0;
+  return {
+    competitiveSeconds,
+    fullSeconds: c > 0 && o > 0 ? Math.max(competitiveSeconds, Math.ceil(o / r) * intervalSeconds) : Math.ceil((c + o) / batch) * intervalSeconds,
+  };
+}
+
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

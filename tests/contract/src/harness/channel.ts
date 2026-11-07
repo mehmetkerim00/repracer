@@ -126,6 +126,15 @@ export function amazonRequestChecker(world: World, clock: VirtualClock, forbidde
       return v;
     }
     const h = request.headers;
+    /**
+     * Шаг 117: документ отчёта — подписанный адрес хранилища, а не SP-API: токен продавца туда не уходит никогда (адрес живёт вне нашего контроля,
+     * и токен в его журнале — утечка). Подпись — в самом адресе
+     */
+    if (request.rawUrl.startsWith('https://syn-report-documents.invalid/')) {
+      if (h['x-amz-access-token'] || h.authorization) v.push(`${where}: the report document URL is presigned — no access token and no authorization`);
+      if (request.method !== 'GET') v.push(`${where}: a report document is downloaded with GET`);
+      return v;
+    }
     if (h['x-amz-access-token'] !== world.credentials.accessToken) v.push(`${where}: x-amz-access-token is not the token issued by LWA`);
     const expectedDate = new Date(clock.nowMs()).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     if (h['x-amz-date'] !== expectedDate) v.push(`${where}: x-amz-date ${h['x-amz-date']} != virtual clock ${expectedDate}`);
@@ -269,9 +278,11 @@ export function channelFetch(
       });
     }
     const noBody = reply.status === 204 || reply.body === undefined;
-    // Ответ XML (Trading API eBay) отдаётся строкой как есть, остальное — JSON
-    const xml = typeof reply.body === 'string' && (reply.headers['content-type'] ?? '').includes('xml');
-    return new Response(noBody ? null : xml ? reply.body as string : JSON.stringify(reply.body), {
+    // Ответ XML (Trading API eBay) и текст (документ отчёта Amazon, шаг 117) отдаются строкой как есть, байты — как есть, остальное — JSON
+    const contentType = reply.headers['content-type'] ?? '';
+    const asIs = typeof reply.body === 'string' && (contentType.includes('xml') || contentType.startsWith('text/'));
+    const bytes = reply.body instanceof Uint8Array;
+    return new Response(noBody ? null : bytes ? reply.body as Uint8Array<ArrayBuffer> : asIs ? reply.body as string : JSON.stringify(reply.body), {
       status: reply.status,
       headers: { 'content-type': 'application/json', ...reply.headers },
     });

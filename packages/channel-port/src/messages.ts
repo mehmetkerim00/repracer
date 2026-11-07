@@ -5,6 +5,7 @@ import type {
   Instant,
   Money,
   OfferIdentity,
+  Page,
   ScopeField,
   TenantId,
   WriteField,
@@ -268,6 +269,31 @@ export interface CompetitorReadResult {
  * цена записи (A-30). null у стороны — рамки этой стороны нет. Поля нет у наблюдения — значения не прочитаны
  */
 export interface ChannelBoundValues { minMinor: number | null; maxMinor: number | null; currency: string }
+
+/**
+ * Шаг 117 (P0-16 аудита, A-31): почему отчёт каталога не годился и круг идёт поиском
+ */
+export type DiscoveryFallbackReason = 'REPORT_REFUSED' | 'REPORT_CANCELLED' | 'REPORT_FATAL' | 'REPORT_TIMEOUT' | 'REPORT_MISMATCH'
+  | 'REPORT_DOCUMENT' | 'REPORT_ENCODING' | 'REPORT_HEADER';
+
+/** Шаг 117: откуда круг обнаружения взял каталог витрины и может ли он быть неполным (поиск упёрся в предел или не назвал числа) */
+export interface DiscoveryCatalogNote {
+  marketplace: string;
+  source: 'REPORT' | 'SEARCH';
+  /** Сколько предложений назвал источник: SKU отчёта или numberOfResults поиска; null — не назвал */
+  listed: number | null;
+  fallbackReason: DiscoveryFallbackReason | null;
+  mayBeIncomplete: boolean;
+}
+
+/**
+ * Шаг 117: страница обхода. `notBefore` — канал готовит следующую страницу (отчёт в обработке): ядро ждёт до этого момента в пределах срока захода или
+ * кончает заход, сохранив курсор. `catalogs` — источник каталога витрины, на первой странице витрины (у пустой витрины — вместе с первой страницей следующей)
+ */
+export interface DiscoveryPage extends Page<DiscoveredOffer> {
+  notBefore?: Instant;
+  catalogs?: DiscoveryCatalogNote[];
+}
 
 export interface DiscoveredOffer {
   identity: OfferIdentity;

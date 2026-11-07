@@ -5,5 +5,6 @@ export { AMAZON_DESCRIPTOR, AMAZON_MARKETPLACES, AMAZON_RATE_LIMITS, SOURCE_ANY_
 export { patchBody } from './dispatch.ts';
 export { ChannelCallError } from './errors.ts';
 export { decimalToMinor, minorToDecimal } from './mapping.ts';
+export { decodeDiscoveryCursor, decodeReportDocument, encodeDiscoveryCursor, parseListingsReport, REPORT_DOCUMENTED_COLUMNS, REPORT_POLL_MS, REPORT_WAIT_LIMIT_MS, SEARCH_TOTAL_MAX } from './discovery.ts';
 export { OPERATION_PATCH } from './planning.ts';
 export type { AmazonAdapterOptions } from './session.ts';

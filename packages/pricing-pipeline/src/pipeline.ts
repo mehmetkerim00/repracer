@@ -862,15 +862,15 @@ export function createPricingPipeline(deps: PipelineDeps) {
      */
     async pollRotation(ctx: AdapterCallContext, options: { size: number; cycle: number; reconcile: boolean; graceSeconds?: number }) {
       // Находка 9 ревью шага 24: окно — по номеру вызова, который ведёт вызывающий, а не по часам: пропуск вызовов не пропускает товары
-      const { queries, total } = await store.pickRotationWindow(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
-      if (queries.length === 0) return { snapshots: [] as SnapshotReport[], failures: [] as CompetitorReadResult['failures'], processingFailed: 0, queries: 0, total, windowFailure: null };
+      const { queries, total, competitive } = await store.pickRotationWindow(ctx.tenantId, ctx.channelAccountId, options.size, options.cycle);
+      if (queries.length === 0) return { snapshots: [] as SnapshotReport[], failures: [] as CompetitorReadResult['failures'], processingFailed: 0, queries: 0, total, competitive, windowFailure: null };
       const polled = await pollCompetitors(ctx, queries, options.reconcile ? { reconcile: { ...(options.graceSeconds ? { graceSeconds: options.graceSeconds } : {}) } } : {});
       const keyOf = (q: CompetitorQuery) => `${q.marketplace}|${q.channelProductRef}|${q.condition}`;
       // 429 у строки пакета — тот же отказ квоты, что у всего запроса: не свойство товара
       const beyondItem = polled.failures.filter((f) => f.error.scope !== 'ITEM' || f.error.code === 'RATE_LIMITED');
       const again = new Set(beyondItem.filter((f) => f.error.class === 'TRANSIENT').map((f) => keyOf(f.query)));
       await store.markPolled(ctx.tenantId, ctx.channelAccountId, queries.filter((q) => !again.has(keyOf(q))), deps.now());
-      return { ...polled, processingFailed: polled.processingFailed.length, queries: queries.length, total, windowFailure: beyondItem[0]?.error ?? null };
+      return { ...polled, processingFailed: polled.processingFailed.length, queries: queries.length, total, competitive, windowFailure: beyondItem[0]?.error ?? null };
     },
 
     /**
@@ -1237,6 +1237,17 @@ export function createPricingPipeline(deps: PipelineDeps) {
         const result = await waitingForBudget(ctx, () => adapter.discoverOffers(ctx, { limit: options.pageLimit ?? 20, ...(cursor ? { cursor } : {}) }));
         longestPageMs = Math.max(longestPageMs, Date.parse(deps.now()) - pageStartedMs);
         offers += result.items.length;
+        /**
+         * Шаг 117 (P0-16): откуда круг взял каталог витрины — экран Channels; поиск, упёршийся в предел, — WARNING словами: каталог может быть виден
+         * не полностью. Одна запись на витрину за круг (адаптер называет источник на первой странице витрины)
+         */
+        for (const note of result.catalogs ?? []) {
+          await store.recordDiscoveryCatalog?.(ctx.tenantId, ctx.channelAccountId, { ...note, observedAt: deps.now() });
+          if (note.mayBeIncomplete) {
+            await emit(ctx, [{ kind: 'alert', code: 'AMAZON_CATALOG_MAY_BE_INCOMPLETE', severity: 'WARNING',
+              details: { marketplace: note.marketplace, found: note.listed, reason: note.fallbackReason } }]);
+          }
+        }
         const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]
           : []));
@@ -1273,6 +1284,17 @@ export function createPricingPipeline(deps: PipelineDeps) {
           if (o.automatedPricing || o.channelBounds) withChannelPricing.push({ marketplace: o.marketplace, externalSku: o.externalSku, automatedPricing: o.automatedPricing, channelBounds: o.channelBounds });
         }
         if (!result.nextCursor) { cursor = undefined; stop = 'COMPLETED'; break; }
+        /**
+         * Шаг 117: канал готовит следующую страницу (отчёт в обработке) — тот же курсор, не петля. Ждём до `notBefore`, если после этого заход успеет
+         * страницу; иначе заход кончается с курсором, и следующий продолжит с этого же места
+         */
+        if (result.notBefore) {
+          cursor = result.nextCursor;
+          const waitMs = Math.max(0, Date.parse(result.notBefore) - Date.parse(deps.now()));
+          if (Date.parse(ctx.deadline) - Date.parse(deps.now()) - waitMs < Math.max(margin, 2 * longestPageMs)) { stop = 'DEADLINE'; break; }
+          if (waitMs > 0) await sleep(waitMs);
+          continue;
+        }
         if (seen.has(result.nextCursor) || result.nextCursor === cursor) {
           // Петля курсора канала: круг считается закрытым (следующий заход начнёт с начала), прочитанное записано
           await emit(ctx, [{ kind: 'alert', code: 'CHANNEL_PAGE_CURSOR_REPEATED', severity: 'WARNING', details: { stage: 'DISCOVERY', pages: page + 1 } }]);

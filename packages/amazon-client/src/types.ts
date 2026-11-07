@@ -58,6 +58,21 @@ export interface ListingsItem {
 export interface ItemSearchResults { numberOfResults: number; pagination?: { nextToken?: string }; items: ListingsItem[] }
 
 /**
+ * Шаг 117: Reports API v2021-06-30 — вручную по снимку моделей (vendor/amazon/sp-api-models/2026-09-16/models/reports-api-model/reports_2021-06-30.json,
+ * SHA-256 в SHA256SUMS). CreateReportResponse.required — reportId; Report.required — processingStatus, reportId, reportType, createdTime;
+ * ReportDocument.required — reportDocumentId, url. Ответ getReport — `Report` без обёртки (модель); пример страницы — в `payload` (A-35)
+ */
+export interface CreateReportSpecification { reportType: string; marketplaceIds: string[]; reportOptions?: Record<string, string> }
+export interface CreateReportResponse { reportId: string }
+export type ReportProcessingStatus = 'CANCELLED' | 'DONE' | 'FATAL' | 'IN_PROGRESS' | 'IN_QUEUE';
+export interface Report {
+  reportId: string; reportType: string; createdTime: string; processingStatus: ReportProcessingStatus;
+  marketplaceIds?: string[]; dataStartTime?: string; dataEndTime?: string; reportScheduleId?: string; processingStartTime?: string; processingEndTime?: string;
+  reportDocumentId?: string;
+}
+export interface ReportDocument { reportDocumentId: string; url: string; compressionAlgorithm?: 'GZIP' }
+
+/**
  * Product Pricing API v2022-05-01, getCompetitiveSummary — вручную по снимку моделей
  * (vendor/amazon/sp-api-models/2026-09-16/models/product-pricing-api-model/productPricing_2022-05-01.json, SHA-256 в SHA256SUMS).
  * Перенесены поля, которые использует сверка [Р-121]; суммы — MoneyType.amount (number в примере модели).

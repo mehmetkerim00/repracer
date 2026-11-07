@@ -140,6 +140,41 @@ export function searchListingsExchange(id: string, items: ReadonlyArray<{ sku: s
   };
 }
 
+/**
+ * Шаг 117 (P0-16): обнаружение отчётом листингов — запрос отчёта, готовность, документ, скачивание по подписанному адресу (хост хранилища, без токена)
+ * и подробности поиском по SKU. Тела — по модели Reports 2021-06-30 (снимок 2026-09-16) и Listings Items (2026-10-29); документ — колонки страницы отчёта,
+ * табуляция, UTF-8 с BOM. Значения колонок, кроме SKU, адаптер не читает — синтетические
+ */
+export const REPORT_DOCUMENT_URL_ORIGIN = 'https://syn-report-documents.invalid';
+const REPORT_COLUMNS = ['item-name', 'item-description', 'listing-id', 'seller-sku', 'price', 'quantity', 'open-date', 'image-url', 'item-is-marketplace', 'product-id-type',
+  'zshop-shipping-fee', 'item-note', 'item-condition', 'zshop-category1', 'zshop-browse-path', 'zshop-storefront-feature', 'asin1', 'asin2', 'asin3',
+  'will-ship-internationally', 'expedited-shipping', 'zshop-boldface', 'product-id', 'bid-for-featured-placement', 'add-delete', 'pending-quantity',
+  'fulfillment-channel', 'merchant-shipping-group', 'status'];
+export function listingsReportExchanges(id: string, items: Parameters<typeof searchListingsExchange>[1], marketplace = DE): Exchange[] {
+  const reportId = `syn-report-${id}`;
+  const documentId = `amzn1.spdoc.1.4.eu.syn-${id}`;
+  const rows = items.map((i) => REPORT_COLUMNS.map((c) => (c === 'seller-sku' ? i.sku : c === 'item-name' ? `Synthetic product ${i.sku}` : '')).join('\t'));
+  const search = searchListingsExchange(`${id}-details`, items);
+  return [
+    { id: `${id}-create`, note: 'createReport GET_MERCHANT_LISTINGS_ALL_DATA: одна витрина, заголовки en_US',
+      request: { method: 'POST', path: '/reports/2021-06-30/reports',
+        body: { reportType: 'GET_MERCHANT_LISTINGS_ALL_DATA', marketplaceIds: [marketplace], reportOptions: { preferredReportDocumentLocale: 'en_US' } } },
+      response: { status: 202, body: { reportId } } },
+    { id: `${id}-done`, note: 'getReport: Report без обёртки (модель снимка), DONE и reportDocumentId',
+      request: { method: 'GET', path: `/reports/2021-06-30/reports/${reportId}` },
+      response: { status: 200, body: { reportId, reportType: 'GET_MERCHANT_LISTINGS_ALL_DATA', marketplaceIds: [marketplace], createdTime: '2026-09-14T09:58:00.000Z',
+        processingStatus: 'DONE', processingStartTime: '2026-09-14T09:58:00.000Z', processingEndTime: '2026-09-14T09:59:00.000Z', reportDocumentId: documentId } } },
+    { id: `${id}-document`, note: 'getReportDocument: подписанный адрес на 5 минут, без сжатия',
+      request: { method: 'GET', path: `/reports/2021-06-30/documents/${encodeURIComponent(documentId)}` },
+      response: { status: 200, body: { reportDocumentId: documentId, url: `${REPORT_DOCUMENT_URL_ORIGIN}/documents/${encodeURIComponent(documentId)}?X-Amz-Signature=syn` } } },
+    { id: `${id}-download`, note: 'Документ по подписанному адресу хранилища: не SP-API, токена нет; UTF-8 с BOM, табуляция',
+      request: { method: 'GET', path: `/documents/${encodeURIComponent(documentId)}`, query: { 'X-Amz-Signature': 'syn' } },
+      response: { status: 200, headers: { 'content-type': 'text/plain;charset=UTF-8' }, body: `\uFEFF${[REPORT_COLUMNS.join('\t'), ...rows].join('\r\n')}\r\n` } },
+    { ...search, note: 'searchListingsItems по SKU отчёта (identifiers, до 20): тот же разбор, что у поиска по витрине',
+      request: { ...search.request, query: { ...search.request.query, marketplaceIds: marketplace, pageSize: '20', identifiers: items.map((i) => i.sku).join(','), identifiersType: 'SKU' } } },
+  ];
+}
+
 export function readBackExchange(id: string, skuValue: string, offers: readonly OfferState[], fulfillment?: ReadonlyArray<{ fulfillmentChannelCode: string; quantity?: number }>): Exchange {
   return {
     id,

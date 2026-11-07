@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0219_verify_schema_invariants_v64.sql';
+const VERIFY = 'migrations/0221_verify_schema_invariants_v65.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -3013,3 +3013,23 @@ export const STEP116_ROWS = [
     ],
   },
 ];
+
+// Шаг 117 (P0-16, 0220): источник каталога витрины — форма строки держится базой, у каждой формы — своя проверка с причиной [Р-94, Р-99]
+const R117 = T('discovery-catalog-step117.pg.test.ts');
+const J117 = 'step 117: the database keeps the form of the catalog source';
+export const STEP117_ROWS = [
+  {
+    row: 'шаг 117 (источник каталога)', critical: false,
+    invariant: 'источник каталога витрины: у отчёта нет причины отказа и неполноты и есть число, у поиска — причина из списка; число не отрицательное; витрина — идентификатором канала; закрытие тенанта удаляет строки',
+    mutations: [
+      m(dropConstraint('discovery_catalog_source_shape', 'tenant_data.discovery_catalog_source'),
+        node(R117, J117, ['a report with a fallback reason is refused', 'a report that may be incomplete is refused', 'a report without a count is refused',
+          'a search without a reason is refused', 'a search with an unknown reason is refused', 'an unknown source is refused'], '^accepted$')),
+      m(dropConstraint('discovery_catalog_source_listed', 'tenant_data.discovery_catalog_source'), node(R117, J117, 'a negative count is refused', '^accepted$')),
+      m(dropConstraint('discovery_catalog_source_marketplace_form', 'tenant_data.discovery_catalog_source'), node(R117, J117, 'a storefront outside the form is refused', '^accepted$')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.discovery_catalog_source', ", ''),
+        verify('tenant_data\\.discovery_catalog_source: tenant closure does not delete the table')),
+    ],
+  },
+];
+

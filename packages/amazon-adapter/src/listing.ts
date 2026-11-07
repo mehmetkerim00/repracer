@@ -7,35 +7,39 @@ import { ChannelCallError, channelError, classifyFailure } from './errors.ts';
 import { channelOwnedPricing, decimalToMinor, fulfillmentOf, merchantQuantity, offerTitle, purchasePrice } from './mapping.ts';
 import { acquire, deadlinePassed, nowMs, observeRateLimit, openSession, type AmazonAdapterOptions, type Session } from './session.ts';
 
-/** Офферы аккаунта: searchListingsItems по витринам региона аккаунта, курсор — pageToken ответа */
-export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: AdapterCallContext, page: PageRequest): Promise<Page<DiscoveredOffer>> {
-  const opened = await openSession(options, ctx);
-  if (!opened.ok) throw new ChannelCallError(opened.error);
-  const { session } = opened;
-  const late = deadlinePassed(options, ctx);
-  if (late) throw new ChannelCallError(late);
-  const marketplaces = session.account.marketplaces.filter((m) => (AMAZON_MARKETPLACES as Record<string, { region: string }>)[m]?.region === session.region);
-  if (marketplaces.length === 0) return { items: [] };
+/**
+ * Шаг 117: одна страница searchListingsItems — по витринам (`pageToken` — курсор канала) или по SKU (`identifiers`, до 20, тип SKU; отчёт листингов назвал SKU,
+ * подробности — этим же запросом и этим же разбором). Записи обнаружения одинаковы на обоих путях: наборы summaries, attributes (Р-120), offers,
+ * fulfillmentAvailability
+ */
+export async function searchListingsPage(options: AmazonAdapterOptions, ctx: AdapterCallContext, session: Session, request: {
+  marketplaces: readonly string[]; pageSize: number; pageToken?: string | null; skus?: readonly string[];
+}): Promise<{ items: DiscoveredOffer[]; nextToken: string | null; numberOfResults: number | null; returnedSkus: Set<string> }> {
   const budget = acquire(options, ctx, session, 'searchListingsItems');
   if (budget) throw new ChannelCallError(budget);
   const result = await session.client.request<ItemSearchResults>('GET', `/listings/2021-08-01/items/${encodeURIComponent(session.sellerId)}`, {
     // Р-120: attributes — чтобы продавец видел правило автоматического ценообразования до назначения стратегии
-    query: { marketplaceIds: marketplaces, includedData: ['summaries', 'attributes', 'offers', 'fulfillmentAvailability'], pageSize: Math.max(1, Math.min(page.limit, SEARCH_PAGE_MAX)),
-      ...(page.cursor ? { pageToken: page.cursor } : {}) },
+    query: { marketplaceIds: request.marketplaces, includedData: ['summaries', 'attributes', 'offers', 'fulfillmentAvailability'],
+      pageSize: Math.max(1, Math.min(request.pageSize, SEARCH_PAGE_MAX)),
+      ...(request.skus ? { identifiers: request.skus, identifiersType: 'SKU' } : {}),
+      ...(request.pageToken ? { pageToken: request.pageToken } : {}) },
   });
   if (!result.ok) throw new ChannelCallError(classifyFailure(result, 'BATCH', nowMs(options)));
   observeRateLimit(options, ctx, session, 'searchListingsItems', result.headers);
+  const marketplaces = request.marketplaces;
   /**
    * Шаг 70 [Р-205, AMZ_C15]: предмет без sku и сводки витрин вне запроса в каталог не попадают — каталог не получит предложения витрины,
    * которой у аккаунта нет. Ревью шага 70, находка 3: пропускаются поштучно с журналом, а не страницей целиком — отказ страницы на одном
-   * предмете остановил бы обход навсегда (первая страница — каталога нет вовсе, N-я — круг не закрывается)
+   * предмете остановил бы обход навсегда (первая страница — каталога нет вовсе, N-я — круг не закрывается). Шаг 117: у поиска по SKU предмет
+   * с SKU вне запроса — тоже чужой ответ, пропускается так же
    */
-  const skipped = { noSku: 0, foreignSummaries: 0 };
+  const skipped = { noSku: 0, foreignSummaries: 0, foreignSku: 0 };
   const foreignSeen = new Set<string>();
+  const asked = request.skus ? new Set(request.skus) : null;
   const pageItems = (result.data.items ?? []).filter((item) => {
-    if (typeof item.sku === 'string' && item.sku !== '') return true;
-    skipped.noSku += 1;
-    return false;
+    if (typeof item.sku !== 'string' || item.sku === '') { skipped.noSku += 1; return false; }
+    if (asked && !asked.has(item.sku)) { skipped.foreignSku += 1; return false; }
+    return true;
   });
   const items: DiscoveredOffer[] = [];
   // Шаг 51 [AMZ_C13]: FBA — по коду сети исполнения; SKU сети Amazon по витринам — для чтения количества FBA
@@ -83,12 +87,12 @@ export async function discoverOffersAmazon(options: AmazonAdapterOptions, ctx: A
     logConservative(options.deps.logger, ctx, 'AMZ_C13_FBA_BY_CHANNEL_CODE', {
       fba: [...fbaByMarketplace.values()].reduce((a, b) => a + b.length, 0), unknown: unknownFulfillment, fbaQuantitiesRead: fba.size });
   }
-  if (skipped.noSku > 0 || skipped.foreignSummaries > 0) {
+  if (skipped.noSku > 0 || skipped.foreignSummaries > 0 || skipped.foreignSku > 0) {
     logConservative(options.deps.logger, ctx, 'AMZ_C15_RESPONSE_IDENTITY', { stage: 'DISCOVERY', itemsWithoutSku: skipped.noSku, foreignSummaries: skipped.foreignSummaries,
-      storefronts: [...foreignSeen].sort().join(',') });
+      foreignSkus: skipped.foreignSku, storefronts: [...foreignSeen].sort().join(',') });
   }
-  const next = result.data.pagination?.nextToken;
-  return { items, ...(next ? { nextCursor: next } : {}) };
+  const numberOfResults = typeof result.data.numberOfResults === 'number' && Number.isSafeInteger(result.data.numberOfResults) ? result.data.numberOfResults : null;
+  return { items, nextToken: result.data.pagination?.nextToken ?? null, numberOfResults, returnedSkus: new Set(pageItems.map((i) => i.sku)) };
 }
 
 /**

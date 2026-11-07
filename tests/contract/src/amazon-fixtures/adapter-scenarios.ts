@@ -1,6 +1,6 @@
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { accepted, amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, fbaSummariesExchange, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, searchListingsExchange, searchOrdersExchange, SELLER, tokenExchange, US } from './build.ts';
+import { accepted, amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, fbaSummariesExchange, patchPriceExchange, preReadExchange, pricingHealthNotification, listingsReportExchanges, readBackExchange, searchListingsExchange, searchOrdersExchange, SELLER, tokenExchange, US } from './build.ts';
 
 /** Сценарии адаптера Amazon: обязательные сценарии Kaufland в смысле Amazon и асинхронное применение (шаг 22). Данные синтетические */
 
@@ -354,7 +354,7 @@ export function buildAdapterScenarios(): Array<{ file: string; scenario: Scenari
     ],
     [
       tokenExchange(),
-      searchListingsExchange('search', [
+      ...listingsReportExchanges('search', [
         { sku: FBM, offers: [{ priceMinor: 1850, quantity: 5 }], fulfillment: [{ fulfillmentChannelCode: 'DEFAULT', quantity: 5 }] },
         { sku: FBA, offers: [{ priceMinor: 1950 }], fulfillment: AFN_CODE },
         { sku: NONE, offers: [{ priceMinor: 2050 }] },

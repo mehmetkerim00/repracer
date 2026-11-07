@@ -2,14 +2,14 @@ import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/chan
 import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { listingStatusStep, type LatestListingState } from './listing-status.ts';
-import { stalestFirst } from './reconciliation.ts';
+import { prioritizedWindow } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
-import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
+import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type DiscoveryCatalogNote, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
 import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, strategyAvailability, type CreepState } from '@repracer/strategy-engine';
@@ -1277,6 +1277,15 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly discoveryCircle = new Map<string, { cursor: string | null; stop: DiscoveryStop; at: Instant; startedAt: Instant | null; completedAt: Instant | null; failures: number }>();
   readonly appQuota = new Map<string, number>();
 
+  /** Шаг 117: источник каталога витрины — как 0220: строка на аккаунт и витрину, последняя запись круга */
+  readonly discoveryCatalogs = new Map<string, DiscoveryCatalogNote & { observedAt: Instant }>();
+  async recordDiscoveryCatalog(_tenantId: string, channelAccountId: string, note: DiscoveryCatalogNote & { observedAt: Instant }): Promise<void> {
+    if (note.source === 'REPORT' ? note.fallbackReason !== null || note.mayBeIncomplete || note.listed === null : note.fallbackReason === null) {
+      throw new Error('discovery catalog source: a report has no fallback and is complete; a search names why the report was not used (0220)');
+    }
+    this.discoveryCatalogs.set(`${channelAccountId}|${note.marketplace}`, { ...note });
+  }
+
   async discoveryCircleCursor(_tenantId: string, channelAccountId: string): Promise<string | null> {
     return this.discoveryCircle.get(channelAccountId)?.cursor ?? null;
   }
@@ -2443,18 +2452,22 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     for (const q of queries) this.pollState.set(`${channelAccountId}|${productKey(q)}`, at);
   }
 
-  async pickRotationWindow(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number }> {
-    const refs = new Map<string, CompetitorQuery>();
+  async pickRotationWindow(_tenantId: string, channelAccountId: string, size: number, cycle: number): Promise<{ queries: CompetitorQuery[]; total: number; competitive: number }> {
+    const refs = new Map<string, { query: CompetitorQuery; competitive: boolean }>();
     for (const s of this.scopes.values()) {
       if (s.channelAccountId !== channelAccountId || !s.channelProductRef) continue;
-      refs.set(productKey(s), { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition });
+      // Шаг 117: товар конкурентный, если хоть одно его предложение ведёт движок стратегией из данных конкурентов — как в PostgreSQL
+      const competitive = s.pricingMode === 'ENGINE' && s.strategy !== null && COMPETITOR_STRATEGIES.has(s.strategy.params.type);
+      const key = productKey(s);
+      refs.set(key, { query: { marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }, competitive: competitive || (refs.get(key)?.competitive ?? false) });
     }
     // Шаг 55 (OQ-241): давность — последней СВЕРКИ, как в PostgreSQL
     const seen = (q: CompetitorQuery): number | null => {
-      const at = this.pollState.get(`${channelAccountId}|${productKey(q as never)}`);
-      return at ? Date.parse(at) : null;
+      const t = this.pollState.get(`${channelAccountId}|${productKey(q as never)}`);
+      return t ? Date.parse(t) : null;
     };
-    return { queries: stalestFirst([...refs.values()].map((q) => ({ query: q, lastSeenMs: seen(q) })), size, cycle), total: refs.size };
+    const items = [...refs.values()].map((r) => ({ query: r.query, lastSeenMs: seen(r.query), competitive: r.competitive }));
+    return { queries: prioritizedWindow(items, size, cycle), total: refs.size, competitive: items.filter((x) => x.competitive).length };
   }
 
   async pickReviewSample(_tenantId: string, halt: HaltInfo, size: number): Promise<CompetitorQuery[]> {

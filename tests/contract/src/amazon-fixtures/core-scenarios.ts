@@ -1,7 +1,7 @@
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import type { Exchange, Scenario, Step } from '../harness/scenario.ts';
 import { SCENARIO_FORMAT } from '../harness/scenario.ts';
-import { amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, readBackExchange, searchListingsExchange, sku, tokenExchange } from './build.ts';
+import { amazonWorld, anyOfferChanged, competitiveSummaryExchange, DE, delivery, patchPriceExchange, preReadExchange, pricingHealthNotification, listingsReportExchanges, readBackExchange, searchListingsExchange, sku, tokenExchange } from './build.ts';
 
 /**
  * Сценарии ядра с адаптером Amazon (шаг 22): Р-115 — правило автоматического ценообразования канала блокирует единицу записи и
@@ -134,7 +134,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
     ] } } as Step],
     [
       tokenExchange(),
-      searchListingsExchange('search-account-offers', [
+      ...listingsReportExchanges('search-account-offers', [
         { sku: sku(8301), offers: [{ priceMinor: 1850, rulePlan: true }] },
         { sku: sku(8302), offers: [{ priceMinor: 2000, bounds: true }] },
         { sku: sku(8303), offers: [{ priceMinor: 2100 }] },
@@ -216,7 +216,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
       preReadExchange('pre-read-8501', sku(8501), [{ priceMinor: 1850 }]),
       patchPriceExchange('patch-8501-1999', sku(8501), [{ minor: 1999 }]),
       readBackExchange('readback-8501-net-treated', sku(8501), [{ priceMinor: 1999, purchaseMinor: 2379 }]),
-      searchListingsExchange('search-account-offers', [
+      ...listingsReportExchanges('search-account-offers', [
         { sku: sku(8501), offers: [{ priceMinor: 1999 }] },
         { sku: sku(8502), offers: [{ priceMinor: 2000, rulePlan: true }] },
         { sku: sku(8503), offers: [{ priceMinor: 2200 }] },

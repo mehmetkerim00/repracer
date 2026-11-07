@@ -156,6 +156,19 @@ export interface AmazonModelParams {
    * Не документирован; вариант показывает, как мешающий лимит выглядит для опроса: 429 при темпе пары
    */
   summaryApplicationRps: number | null;
+  /**
+   * Шаг 117 (P0-16): отчёт GET_MERCHANT_LISTINGS_ALL_DATA (снимок 2026-09-16 и страницы vendor/amazon/reports/2026-11-07). A-40: роль приложения для отчёта
+   * (Inventory and Order Tracking или Pricing) — без неё createReport отказывает
+   */
+  reportAccess: 'GRANTED' | 'DENIED';
+  /** A-35: ответ getReport — `Report` без обёртки (модель снимка) или в `payload` (пример страницы verify-that-report-processing-is-complete) */
+  reportEnvelope: 'MODEL' | 'PAYLOAD';
+  /** A-38: сколько отчёт готовится и чем кончается; STUCK — не кончается никогда, CANCELLED — «нет данных» (страница) */
+  reportProcessing: { ms: number; outcome: 'DONE' | 'CANCELLED' | 'FATAL' | 'STUCK' };
+  /** A-36: документ отчёта — сжатие (compressionAlgorithm), кодировка в content-type и метка BOM (страница отчёта: UTF-8 BOM) */
+  reportDocument: { compression: 'NONE' | 'GZIP'; charset: string | null; bom: boolean };
+  /** A-37: заголовки колонок — en_US, как просит адаптер, или другой язык из кэша отчётов («may return headers in a different locale») */
+  reportHeaderLocale: 'en_US' | 'OTHER';
 }
 
 export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: ParameterSpec<AmazonModelParams[K]> } = {
@@ -184,6 +197,18 @@ export const AMAZON_PARAMETERS: { readonly [K in keyof AmazonModelParams]: Param
   fbaDefaultWrite: { question: 'A-21', status: 'OPEN', meaning: 'запись DEFAULT по SKU сети Amazon', default: 'NOT_APPLIED', alternatives: ['NOT_APPLIED', 'SWITCHES_TO_MERCHANT'] },
   summaryApplicationRps: { question: 'A-15', status: 'OPEN', meaning: 'лимит приложения на getCompetitiveSummary, запросов в секунду', default: null, alternatives: [null, 0.01] },
   partialShipmentReported: { question: 'A-22', status: 'OPEN', meaning: 'quantityFulfilled у строк частично отгруженного заказа', default: true, alternatives: [true, false] },
+  reportAccess: { question: 'A-40', status: 'OPEN', meaning: 'createReport отчёта листингов: роль приложения есть или нет', default: 'GRANTED', alternatives: ['GRANTED', 'DENIED'] },
+  reportEnvelope: { question: 'A-35', status: 'OPEN', meaning: 'getReport — Report без обёртки (модель) или в payload (пример страницы)', default: 'MODEL', alternatives: ['MODEL', 'PAYLOAD'] },
+  reportProcessing: {
+    question: 'A-38', status: 'OPEN', meaning: 'время подготовки отчёта листингов и его исход', default: { ms: 120_000, outcome: 'DONE' },
+    alternatives: [{ ms: 120_000, outcome: 'DONE' }, { ms: 1_800_000, outcome: 'DONE' }, { ms: 0, outcome: 'CANCELLED' }, { ms: 60_000, outcome: 'FATAL' }, { ms: 0, outcome: 'STUCK' }],
+  },
+  reportDocument: {
+    question: 'A-36', status: 'OPEN', meaning: 'сжатие, кодировка и BOM документа отчёта', default: { compression: 'NONE', charset: 'UTF-8', bom: true },
+    alternatives: [{ compression: 'NONE', charset: 'UTF-8', bom: true }, { compression: 'GZIP', charset: 'UTF-8', bom: true }, { compression: 'NONE', charset: null, bom: false },
+      { compression: 'NONE', charset: 'Cp1252', bom: false }],
+  },
+  reportHeaderLocale: { question: 'A-37', status: 'OPEN', meaning: 'язык заголовков колонок отчёта', default: 'en_US', alternatives: ['en_US', 'OTHER'] },
 };
 
 export function defaultAmazonParams(): AmazonModelParams {

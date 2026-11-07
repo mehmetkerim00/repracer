@@ -5,7 +5,7 @@ import type {
   CompetitorReadResult,
   ConfirmationRequest,
   ConfirmationResult,
-  DiscoveredOffer,
+  DiscoveryPage,
   DispatchBatch,
   DispatchPlan,
   DispatchResult,
@@ -133,7 +133,7 @@ export interface ChannelAdapter {
   readCompetitors(ctx: AdapterCallContext, queries: readonly CompetitorQuery[]): Promise<CompetitorReadResult>;
 
   /** Постранично перечислить офферы аккаунта — для сопоставления с товарами и сверки */
-  discoverOffers(ctx: AdapterCallContext, page: PageRequest): Promise<Page<DiscoveredOffer>>;
+  discoverOffers(ctx: AdapterCallContext, page: PageRequest): Promise<DiscoveryPage>;
 
   /**
    * Шаг 55 (OQ-240): квота на ПРИЛОЖЕНИЕ, которую расходует страница обхода с этим курсором (`undefined` — первая страница), или null —

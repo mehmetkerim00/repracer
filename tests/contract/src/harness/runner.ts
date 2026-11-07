@@ -391,7 +391,8 @@ export async function runScenario(
       adapterFor: () => adapter, alerts: deps.alerts, now: () => clock.iso(),
     });
     pipeline = createPricingPipeline({
-      store: store.store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), dispatcher, ...(sanity ? { sanityConfig: sanity } : {}),
+      // Шаг 117: паузы пути решения — виртуальные, как у адаптера (ожидание отчёта Amazon, ожидание бюджета канала)
+      store: store.store, adapter, alerts: deps.alerts, logger: deps.logger, now: () => clock.iso(), sleep: clock.sleep, dispatcher, ...(sanity ? { sanityConfig: sanity } : {}),
     });
   }
   try {

@@ -1,6 +1,6 @@
 import type { DailyExportReport, DayRange, ExportGroup } from '@repracer/analytics-export';
 import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, type AdapterCallContext, type ChannelAccountId, type ChannelDescriptor, type Instant, type TenantId } from '@repracer/channel-port';
-import { DEFAULT_LOSS_GRACE_SECONDS, type PricingPipeline } from '@repracer/pricing-pipeline';
+import { DEFAULT_LOSS_GRACE_SECONDS, summaryRounds, type PricingPipeline } from '@repracer/pricing-pipeline';
 import { JobHoldsWindowError, type JobSource, type JobSpec } from './scheduler.ts';
 
 type JobAlert = { code: string; severity: 'WARNING' | 'CRITICAL'; details: Record<string, string | number | boolean | null> };
@@ -387,11 +387,17 @@ export function jobSource(deps: JobDeps): JobSource {
               // Окно, отклонённое целиком, — провал запуска: пауза растёт, номер окна не сдвигается, окно повторяется первым. Отказ по одному товару — не провал: остальной каталог идёт в своём темпе
               if (r.windowFailure) throw new Error(`${r.windowFailure.code}: competitive summary window ${runIndex} read ${r.snapshots.length} of ${r.queries}`);
               const failed = r.failures.length + r.processingFailed;
-              const roundMinutes = Math.round((Math.ceil(r.total / cfg.amazonBatch) * interval) / 60);
+              /**
+               * Шаг 117 (P0-16, решение владельца 2026-11-07): порог — на круге конкурентной части. Часы допустимы только предложениям, которым данные
+               * конкурента не нужны; цель пилота — конкурентная часть в пределах часа, сильно больше — стоп-доклад. В событии — обе цифры
+               */
+              const rounds = summaryRounds({ competitive: r.competitive, other: r.total - r.competitive, batch: cfg.amazonBatch, intervalSeconds: interval });
+              const competitiveRoundMinutes = Math.round(rounds.competitiveSeconds / 60);
               const alerts: JobAlert[] = [
                 ...(r.queries > 0 && failed / r.queries > failuresShareAlert ? [{ code: 'COMPETITOR_POLL_FAILURES', severity: 'WARNING' as const, details: {
                   due: r.queries, channelFailures: r.failures.length, processingFailures: r.processingFailed, firstError: r.failures[0]?.error.code ?? 'PROCESSING' } }] : []),
-                ...(roundMinutes > cfg.amazonRoundWarnMinutes ? [{ code: 'AMAZON_SUMMARY_ROUND_SLOW', severity: 'WARNING' as const, details: { offers: r.total, roundMinutes } }] : []),
+                ...(competitiveRoundMinutes > cfg.amazonRoundWarnMinutes ? [{ code: 'AMAZON_SUMMARY_ROUND_SLOW', severity: 'WARNING' as const, details: {
+                  competitiveOffers: r.competitive, otherOffers: r.total - r.competitive, competitiveRoundMinutes, fullRoundMinutes: Math.round(rounds.fullSeconds / 60) } }] : []),
               ];
               return { items: r.queries - failed, ...(alerts.length ? { alerts } : {}) };
             },

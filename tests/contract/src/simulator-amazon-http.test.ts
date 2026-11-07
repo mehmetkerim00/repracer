@@ -60,7 +60,8 @@ const offers = [
 // 1. Обнаружение и FBA — только чтение [Р-6, AMZ_C13, AMZ_C14]
 SCENARIOS.push(scenario('amazon-sim/fba-read-only', 'Модель SP-API: FBM и FBA при обнаружении, количество FBA читается, запись количества FBA не уходит',
   'Сеть исполнения — fulfillmentAvailability: DEFAULT — FBM; код сети Amazon — FBA (количество из getInventorySummaries, только показ); кодов нет — CHANNEL без количества. Запись количества по SKU сети Amazon останавливается чтением перед записью — PATCH до модели не доходит (у модели счётчик таких записей — 0).',
-  world({ seed: 1, offers }),
+  // Шаг 117: отчёт готов сразу — первая страница отчёта приходит тем же вызовом (запрос, готовность, документ, поиск по SKU)
+  world({ seed: 1, offers, params: { reportProcessing: { ms: 0, outcome: 'DONE' } } }),
   [
     call('discover', 'discoverOffers', [{ limit: 20 }], { items: [
       { identity: { externalSku: FBA }, fulfillment: 'CHANNEL', currentQuantity: 12 },
@@ -140,6 +141,51 @@ SCENARIOS.push(scenario('amazon-sim/orders-usage-plan', 'Модель SP-API: Us
   ],
   { noAlerts: true, channel: { stats: { rateLimited: 0, requests: { searchOrders: 20 } } } }));
 
+/**
+ * Шаг 117 (P0-16 аудита, A-31) [Р-113]: обнаружение отчётом листингов через путь решения — запрос отчёта, ожидание (паузы виртуальные), документ, поиск по SKU.
+ * У каждого открытого вопроса отчёта — вариант: что бы ни ответил канал, каталог витрины в итоге целый (отчётом или резервным поиском), а источник назван
+ */
+const reportOffers = Array.from({ length: 60 }, (_, i) => ({ sku: `SYN-SKU-RPT-${String(i).padStart(3, '0')}`, asin: `B0SYNR${String(i).padStart(4, '0')}`, marketplaces: [DE],
+  priceMinor: 1000 + i, quantity: 2 }));
+const byReport = { createReport: 1, getReportDocument: 1, downloadReportDocument: 1, searchListingsItems: 3 };
+const bySearch = (extra: Record<string, unknown>) => ({ getReportDocument: { $absent: true }, downloadReportDocument: { $absent: true }, searchListingsItems: 3, ...extra });
+SCENARIOS.push(scenario('amazon-sim/discovery-listings-report', 'Модель SP-API: каталог — отчёт GET_MERCHANT_LISTINGS_ALL_DATA, подробности поиском по SKU; отчёт не годится — резервный поиск',
+  'Путь решения обходит каталог: createReport (одна витрина, заголовки en_US), getReport до DONE (паузы — по notBefore страницы), getReportDocument, документ по подписанному адресу без токена, searchListingsItems по 20 SKU. Любой отказ отчёта — поиск по витрине тем же разбором; каталог 60 предложений целый в каждом варианте.',
+  world({ seed: 117, offers: reportOffers }, { pricing: { scopes: [] } } as never),
+  [{ id: 'discover', kind: 'pipelineDiscoverOffers', ctx: { deadlineInMs: 3 * 3_600_000 }, expect: { offers: 60, stop: 'COMPLETED' } } as Step],
+  { noAlerts: true, channel: { stats: { rateLimited: 0, requests: byReport } } },
+  [
+    { id: 'a35-report-in-payload', question: 'A-35', params: { reportEnvelope: 'PAYLOAD' },
+      finding: 'ответ getReport в обёртке payload (пример страницы) — не Report модели: отчёт не используется, каталог — поиском по витрине',
+      expect: { noAlerts: true, channel: { stats: { requests: bySearch({ getReport: 1 }) } } } },
+    { id: 'a36-gzip', question: 'A-36', params: { reportDocument: { compression: 'GZIP', charset: 'UTF-8', bom: true } },
+      finding: 'документ сжат GZIP (compressionAlgorithm) — распаковывается с пределом размера, каталог из отчёта',
+      expect: { noAlerts: true, channel: { stats: { requests: byReport } } } },
+    { id: 'a36-no-charset-no-bom', question: 'A-36', params: { reportDocument: { compression: 'NONE', charset: null, bom: false } },
+      finding: 'без charset и без BOM — разбирается как UTF-8 (строгий разбор), каталог из отчёта',
+      expect: { noAlerts: true, channel: { stats: { requests: byReport } } } },
+    { id: 'a36-cp1252', question: 'A-36', params: { reportDocument: { compression: 'NONE', charset: 'Cp1252', bom: false } },
+      finding: 'кодировка не UTF-8 — отчёт не разбирается наугад: каталог поиском по витрине',
+      expect: { noAlerts: true, channel: { stats: { requests: { ...bySearch({}), getReportDocument: 1, downloadReportDocument: 1 } } } } },
+    { id: 'a37-headers-in-another-locale', question: 'A-37', params: { reportHeaderLocale: 'OTHER' },
+      finding: 'заголовки не en_US (кэш отчётов) — колонки seller-sku нет: отчёт не используется, каталог поиском по витрине',
+      expect: { noAlerts: true, channel: { stats: { requests: { ...bySearch({}), getReportDocument: 1, downloadReportDocument: 1 } } } } },
+    { id: 'a38-cancelled', question: 'A-38', params: { reportProcessing: { ms: 0, outcome: 'CANCELLED' } },
+      finding: 'CANCELLED («нет данных» по странице) — поиск подтверждает, пуст ли каталог',
+      expect: { noAlerts: true, channel: { stats: { requests: bySearch({}) } } } },
+    { id: 'a38-fatal', question: 'A-38', params: { reportProcessing: { ms: 60_000, outcome: 'FATAL' } },
+      finding: 'FATAL — каталог поиском по витрине', expect: { noAlerts: true, channel: { stats: { requests: bySearch({}) } } } },
+    { id: 'a38-stuck', question: 'A-38', params: { reportProcessing: { ms: 0, outcome: 'STUCK' } },
+      finding: 'отчёт не готов два часа — недоступен: каталог поиском по витрине; вопросы о нём — не чаще раза в 30 секунд',
+      expect: { noAlerts: true, channel: { stats: { requests: bySearch({ getReport: { $lte: 245 } }) } } } },
+    { id: 'a38-slow', question: 'A-38', params: { reportProcessing: { ms: 1_800_000, outcome: 'DONE' } },
+      finding: 'отчёт готовится полчаса — обход ждёт его в пределах срока захода, каталог из отчёта',
+      expect: { noAlerts: true, channel: { stats: { rateLimited: 0, requests: byReport } } } },
+    { id: 'a40-no-role', question: 'A-40', params: { reportAccess: 'DENIED' },
+      finding: 'у приложения нет роли отчёта — createReport 403: каталог поиском по витрине',
+      expect: { noAlerts: true, channel: { stats: { requests: bySearch({ getReport: { $absent: true } }) } } } },
+  ]));
+
 // ------------------------------------------------------------------------------------------------ прогоны
 
 test('Amazon HTTP model scenarios are valid scenarios of the stand', () => {
@@ -172,12 +218,12 @@ test('A-20 negative control: the model really sends buyer data in the variant �
 
 test('every open Amazon question of the HTTP model is exercised by a variant and exists in channel-capabilities.md', () => {
   const capabilities = readFileSync(fileURLToPath(new URL('../../../docs/channel-capabilities.md', import.meta.url)), 'utf8');
-  for (const q of ['A-01', 'A-06', 'A-20', 'A-21', 'A-22', 'A-23']) assert.ok(capabilities.includes(`| ${q} |`), `${q} is not a question in channel-capabilities.md`);
+  for (const q of ['A-01', 'A-06', 'A-20', 'A-21', 'A-22', 'A-23', 'A-35', 'A-36', 'A-37', 'A-38', 'A-39', 'A-40']) assert.ok(capabilities.includes(`| ${q} |`), `${q} is not a question in channel-capabilities.md`);
   const exercised = new Set(SCENARIOS.flatMap((s) => (s.variants ?? []).map((v) => v.question)));
   // Шаг 52 (ревью шага 51, находка 12): вариант есть у каждого открытого вопроса модели; A-23 — только лимит бюджета адаптера (тест бюджета ниже)
   const asked = new Set(Object.values(AMAZON_PARAMETERS).map((p) => p.question).filter((q): q is string => q !== null));
-  for (const q of ['A-01', 'A-06', 'A-20', 'A-21', 'A-22']) assert.ok(exercised.has(q), `${q} has no variant`);
-  for (const q of ['A-20', 'A-21', 'A-22']) assert.ok(asked.has(q), `${q} is not a parameter of the model`);
+  for (const q of ['A-01', 'A-06', 'A-20', 'A-21', 'A-22', 'A-35', 'A-36', 'A-37', 'A-38', 'A-40']) assert.ok(exercised.has(q), `${q} has no variant`);
+  for (const q of ['A-20', 'A-21', 'A-22', 'A-35', 'A-36', 'A-37', 'A-38', 'A-40']) assert.ok(asked.has(q), `${q} is not a parameter of the model`);
   assert.equal(AMAZON_PARAMETERS.ordersBuyerWithoutDataset.question, 'A-20');
 });
 
@@ -208,8 +254,10 @@ test('step 52: short pages and an empty page with a token — discovery and orde
   const many = Array.from({ length: 7 }, (_, i) => ({ sku: `SYN-SKU-PG-${i}`, asin: `B0SYNPG00${i}`, marketplaces: [DE], priceMinor: 1000 + i, quantity: 1 }));
   const orders: SimAmazonOrderSpec[] = Array.from({ length: 5 }, (_, i) => ({ orderId: `901-00002${i}0-0000001`, marketplace: DE, fulfilledBy: 'MERCHANT' as const, status: 'UNSHIPPED' as const,
     createdOffsetMs: -3_600_000, updatedOffsetMs: -3_600_000 + i, items: [{ orderItemId: `syn-pg-oi-${i}`, sku: many[i]!.sku, quantity: 1 }] }));
-  for (const paging of [{ pageSizeCap: null, emptyPageFirst: false }, { pageSizeCap: 2, emptyPageFirst: true }]) {
-    const w = world({ seed: 52, offers: many, orders, params: { paging } });
+  // Шаг 117: короткие страницы и пустая страница с токеном — и у поиска по SKU отчёта (продолжение по токену внутри порции), и у резервного поиска по витрине
+  for (const [paging, reportAccess] of [[{ pageSizeCap: null, emptyPageFirst: false }, 'GRANTED'], [{ pageSizeCap: 2, emptyPageFirst: true }, 'GRANTED'],
+    [{ pageSizeCap: 2, emptyPageFirst: true }, 'DENIED']] as const) {
+    const w = world({ seed: 52, offers: many, orders, params: { paging, reportAccess, reportProcessing: { ms: 0, outcome: 'DONE' } } });
     const clock = new VirtualClock(w.clock);
     const violations: string[] = [];
     const model = new SimulatedAmazonChannel(w.channelModel as AmazonChannelModelSpec, w.clock, ACCESS_TOKEN);
@@ -226,7 +274,7 @@ test('step 52: short pages and an empty page with a token — discovery and orde
       cursor = p.nextCursor;
       clock.advance(1_000);
     }
-    assert.deepEqual(skus.sort(), many.map((o) => o.sku).sort(), `${JSON.stringify(paging)}: every offer once`);
+    assert.deepEqual(skus.sort(), many.map((o) => o.sku).sort(), `${JSON.stringify(paging)} ${reportAccess}: every offer once`);
     assert.ok(pages < 20, 'discovery ended');
     const lines: string[] = [];
     cursor = undefined;
@@ -279,7 +327,8 @@ test('step 106 (A-31): the search model pages through at most 1000 SKUs and stil
   const { SimulatedAmazonChannel } = await import('./simulator/amazon-channel.ts');
   const { neverWrittenAttributes } = await import('@repracer/channel-port');
   const many = Array.from({ length: 1200 }, (_, i) => ({ sku: `SYN-SKU-CAP-${String(i).padStart(4, '0')}`, asin: `B0SYNC${String(i).padStart(4, '0')}`, marketplaces: [DE], priceMinor: 1000 + i, quantity: 1 }));
-  const w = world({ seed: 106, offers: many });
+  // Шаг 117: предел поиска — свойство РЕЗЕРВА: отчёт недоступен, и поиск честно называет каталог неполным
+  const w = world({ seed: 106, offers: many, params: { reportAccess: 'DENIED' } });
   const clock = new VirtualClock(w.clock);
   const violations: string[] = [];
   const model = new SimulatedAmazonChannel(w.channelModel as AmazonChannelModelSpec, w.clock, ACCESS_TOKEN);
@@ -287,17 +336,20 @@ test('step 106 (A-31): the search model pages through at most 1000 SKUs and stil
     fetch: channelFetch(model, amazonRequestChecker(w, clock, neverWrittenAttributes('AMAZON')), clock, violations, []) });
   const ctx = { tenantId: w.tenantId, channelAccountId: w.channelAccountId, correlationId: 'step106-cap', deadline: new Date(clock.nowMs() + 3_600_000).toISOString() } as never;
   const skus: string[] = [];
+  const catalogs: unknown[] = [];
   let cursor: string | undefined;
   let pages = 0;
   for (; pages < 200; pages++) {
     const p = await adapter.discoverOffers(ctx, { limit: 20, ...(cursor ? { cursor } : {}) });
     skus.push(...p.items.map((o) => o.identity.externalSku!));
+    catalogs.push(...(p.catalogs ?? []));
     if (!p.nextCursor) break;
     cursor = p.nextCursor;
     clock.advance(1_000);
   }
   assert.ok(pages < 200, 'discovery ended');
   assert.equal(JSON.stringify([skus.length, new Set(skus).size]), JSON.stringify([1000, 1000]), 'the search gives the first 1000 SKUs once, not all 1200');
+  assert.deepEqual(catalogs, [{ marketplace: DE, source: 'SEARCH', listed: 1200, fallbackReason: 'REPORT_REFUSED', mayBeIncomplete: true }], 'the search names the catalog as possibly incomplete');
   assert.deepEqual(violations, []);
   // Последняя страница внутри предела — без токена; найдено по-прежнему 1200
   const last = model.reply({ method: 'GET', rawUrl: '', path: `/listings/2021-08-01/items/${SELLER}`,

@@ -2,7 +2,8 @@ import type { AdapterDependencies, ChannelAdapter } from '@repracer/channel-port
 import { AMAZON_DESCRIPTOR } from './descriptor.ts';
 import { dispatchAmazon } from './dispatch.ts';
 import { handleInboundAmazon } from './inbound.ts';
-import { discoverOffersAmazon, readCompetitorsAmazon, readOrderLinesAmazon } from './listing.ts';
+import { discoverOffersAmazon } from './discovery.ts';
+import { readCompetitorsAmazon, readOrderLinesAmazon } from './listing.ts';
 import { planAmazonDispatch } from './planning.ts';
 import { confirmAmazon, readBackAmazon } from './readback.ts';
 import { openSession, type AmazonAdapterOptions } from './session.ts';

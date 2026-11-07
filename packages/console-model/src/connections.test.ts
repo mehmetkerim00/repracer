@@ -15,7 +15,7 @@ const row = (over: Partial<ConnectionRow>): ConnectionRow => ({
   channelAccountId: 'acc-1', channel: 'AMAZON', region: 'EU', marketplaces: ['A1PA6795UKMFR9'], externalAccountId: 'A3SYN',
   authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: NOW as never, offers: 0, unmanagedOffers: 0, shadowDecisions24h: 0,
   credentialObtainedAt: NOW as never, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: true,
-  discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null,
+  discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null, catalogSources: [],
   otherTools: null, otherToolsAnsweredAt: null, quantityWritesConfirmed: false, externalEdits24h: 0, ...over,
 });
 const pending = (over: Partial<PendingRequestRow>): PendingRequestRow => ({
@@ -164,6 +164,29 @@ test('step 56–57 (Р-198): the connection says how long the discovery circle r
   // Шаг 58 (ревью шага 56, находка 9): «старые листинги eBay» — только у аккаунта eBay
   assert.doesNotMatch(view({ discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /eBay/, 'an Amazon account is not told about eBay listings');
   assert.match(view({ channel: 'EBAY', discoveryCircleStartedAt: '2026-09-29T06:00:00.000Z' as never }) ?? '', /older eBay listings/);
+});
+
+/**
+ * Шаг 117 (P0-16, A-31): Channels говорит, откуда каталог витрины. Отчёт — сколько предложений и когда; поиск — что отчёта не было, и если поиск упёрся в
+ * предел, — что каталог может быть виден не полностью, пилюлей и словами. На каждом языке; витрина — словами, а не кодом
+ */
+test('step 117 (P0-16): Channels names the catalog source of each storefront — the report, or search that may see only part of the catalog', () => {
+  const at = '2026-11-07T10:00:00.000Z' as never;
+  const sources: ConnectionRow['catalogSources'] = [
+    { marketplace: 'A1PA6795UKMFR9', source: 'REPORT', listed: 2500, fallbackReason: null, mayBeIncomplete: false, observedAt: at },
+    { marketplace: 'ATVPDKIKX0DER', source: 'SEARCH', listed: 2500, fallbackReason: 'REPORT_REFUSED', mayBeIncomplete: true, observedAt: at },
+  ];
+  for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(locale);
+    const [a] = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ marketplaces: ['A1PA6795UKMFR9', 'ATVPDKIKX0DER'], catalogSources: sources })], pending: [] }, [], m).accounts;
+    const texts = a!.catalogTexts;
+    assert.deepEqual(texts.map((t) => t.incomplete), [false, true], locale);
+    assert.ok(texts[0]!.text.startsWith('amazon.de') && texts[0]!.text.includes('2500') && texts[1]!.text.startsWith('amazon.com'), `${locale}: storefronts by name, the number: ${JSON.stringify(texts)}`);
+    assert.ok(!JSON.stringify(texts).includes('ATVPDKIKX0DER') && !JSON.stringify(texts).includes('REPORT_REFUSED'), `${locale}: no codes on the screen`);
+  }
+  const en = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ catalogSources: sources.slice(1) })], pending: [] }, [], messagesFor('en')).accounts[0]!;
+  assert.match(en.catalogTexts[0]!.text, /read by search.*Amazon counts 2500 offers — search stops at 1,000 offers, so the catalog may be visible only in part\.$/);
+  assert.deepEqual(connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({})], pending: [] }, [], messagesFor('en')).accounts[0]!.catalogTexts, [], 'no circle yet — nothing to say');
 });
 
 test('шаг 60 [Р-202]: вопрос о других инструментах, запись количества по подтверждению владельца и внешние правки — словами на обоих языках', () => {

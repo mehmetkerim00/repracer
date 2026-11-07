@@ -227,7 +227,7 @@ before(async () => {
       accounts: [{
         channelAccountId: smokeAccount.channelAccountId, channel: smokeAccount.channel, region: null, marketplaces: [...smokeAccount.marketplaces], externalAccountId: 'syn-smoke-account',
         authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'SHADOW', connectedAt: w0.clock.iso() as never, offers: 200, unmanagedOffers: 0, shadowDecisions24h: 3070,
-        credentialObtainedAt: null, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: false, discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null,
+        credentialObtainedAt: null, credentialVerifiedAt: null, credentialCheckFailures: 0, oauth: false, discoveryCircleStartedAt: null, discoveryCircleCompletedAt: null, catalogSources: [],
         otherTools: 'NONE', otherToolsAnsweredAt: w0.clock.iso() as never, quantityWritesConfirmed: true, externalEdits24h: 0,
       }],
       pending: [],
