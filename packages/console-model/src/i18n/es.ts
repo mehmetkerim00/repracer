@@ -38,7 +38,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Suspensión levantada automáticamente', HALT_REVIEW_FAILED: 'Suspensión prolongada', HALT_MANUALLY_RELEASED: 'Suspensión levantada manualmente',
   MARGIN_WITHOUT_COST: 'Margen sin costo', STRATEGY_MISSING: 'Sin estrategia', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Reemplazado por un precio más reciente', WRITE_RETRIES_EXHAUSTED: 'Reintentos agotados',
   WRITE_PRICING_MODE_CHANGED: 'Modo de precios cambiado', WRITE_EDIT_BUDGET_EXHAUSTED: 'Presupuesto de ediciones agotado', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Esperando la actualización anterior',
-  WRITE_RETRY_SCHEDULED: 'Reintento programado', WRITE_OUTCOME_RECONCILED: 'Resultado verificado', WRITE_SCOPE_BLOCKED: 'Oferta bloqueada', WRITE_BUDGET_DAY_UNCONFIRMED: 'Día del sitio sin confirmar', QUANTITY_WRITES_REVOKED: 'Actualizaciones de inventario revocadas', WRITE_HELD_IN_SHADOW: 'Retenido por el modo sombra',
+  WRITE_RETRY_SCHEDULED: 'Reintento programado', WRITE_OUTCOME_RECONCILED: 'Resultado verificado', WRITE_SCOPE_BLOCKED: 'Oferta bloqueada', WRITE_BUDGET_DAY_UNCONFIRMED: 'Día del sitio sin confirmar', QUANTITY_WRITES_REVOKED: 'Actualizaciones de inventario revocadas', WRITE_HELD_IN_SHADOW: 'Retenido por el modo sombra', WRITE_LIVE_WRITES_FORBIDDEN: 'Envíos reales desactivados en este entorno',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Base de precio incorrecta — canal no confiable',
   CHANNEL_DISTRUSTED: 'Canal no confiable — todos los precios retenidos',
 };
@@ -228,6 +228,8 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `No enviado: el presupuesto diario de ediciones está agotado${f.has('used') && f.has('limit') ? ` (${f.count('used')} de ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` para ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; se renovará: ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `No enviado: esta cuenta del canal está en modo sombra, así que no se envía nada a su tienda. El motor sigue calculando precios; para enviarlos, active el envío de precios en la pantalla Modo sombra.`,
+  // Шаг 119 (P0-09): QA — база закрыта для боевых записей
+  WRITE_LIVE_WRITES_FORBIDDEN: () => `No enviado: este entorno nunca envía nada a un canal; los envíos reales están desactivados en su base de datos. La decisión se conserva; nada llegó a la tienda.`,
   QUANTITY_WRITES_REVOKED: (f) => `No enviado: se revocaron las actualizaciones de inventario de la cuenta del canal ${f.raw('channelAccountId')}, así que no se envía inventario a su tienda. La sincronización de inventario se vuelve a activar solo con una nueva confirmación de que ninguna otra herramienta gestiona el inventario allí.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `No enviado: el reintento necesita el presupuesto de ediciones del día en curso, pero el límite del día del sitio ${f.raw('marketplace')} no está confirmado. Esta actualización se descartó; podrá haber una nueva decisión de precio cuando se confirme la zona horaria del sitio.`,
   CHANNEL_DISTRUSTED: (f) => `Todos los precios retenidos (${f.value('stage')}): no confiamos en cómo el canal aplica nuestros precios${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` desde ${f.when('detectedAt')}`)}. Un precio fijo o basado en margen seguiría el mismo camino defectuoso. Solo una persona puede levantar esta retención.`,
@@ -1123,6 +1125,8 @@ export const es: Messages = {
         liveClosed: (storefront: string, property: string, where: string) => `No se puede activar el envío de precios a ${storefront}: falta confirmar un dato de este sitio: ${property.toLowerCase()}. ${where} Mientras tanto, el modo sombra sigue funcionando: verá lo que haría el motor y no se enviará nada a su tienda.`,
         liveClosedUnknown: 'No se puede activar el envío de precios: no podemos confirmar lo que necesitamos saber sobre los sitios de esta cuenta; puede que uno de ellos aún no sea un sitio compatible. Mientras tanto, el modo sombra sigue funcionando.',
         modeMismatch: 'La cuenta ya está en ese modo: alguien la cambió mientras esta pantalla estaba abierta.',
+        /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
+        liveWritesForbidden: 'Aquí no se puede activar el envío de precios: este entorno nunca envía nada a un canal; los envíos reales están desactivados en su base de datos. Los espacios de trabajo de demostración son la excepción. El modo sombra sigue funcionando.',
       },
       noAccounts: 'Todavía no hay ninguna cuenta del canal conectada. Cada cuenta nueva empieza aquí, en modo sombra: verá lo que haría el motor antes de enviar nada a su tienda.',
       noAccess: {

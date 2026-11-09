@@ -1392,7 +1392,24 @@ export class PgPricingStore implements PricingStore {
       );
       await tx.query('RELEASE SAVEPOINT claim_write');
     } catch (error) {
-      const e = error as { code?: string; constraint?: string };
+      const e = error as { code?: string; constraint?: string; message?: string };
+      /**
+       * Шаг 119 (P0-09): база закрыта для боевых записей (QA), тенант не демо. Решение остаётся, запись завершается своей причиной —
+       * так же, как диспетчер (write-queue.ts); иначе на закрытой базе откатывалось бы каждое решение боевого аккаунта
+       */
+      const guarded = /live writes are forbidden on this database: channel account (\S+) of a non-demo tenant sends nothing/.exec(e.message ?? '');
+      if (guarded) {
+        await tx.query('ROLLBACK TO SAVEPOINT claim_write');
+        const params = { channelAccountId: guarded[1]! };
+        await tx.query(
+          `UPDATE tenant_data.channel_write SET status = 'DISCARDED_STALE', end_reason = 'WRITE_LIVE_WRITES_FORBIDDEN', end_params = $3::jsonb
+            WHERE tenant_id = $1 AND channel_write_id = $2`,
+          [tenantId, writeRow!.channel_write_id, JSON.stringify(params)]);
+        return {
+          writeScopeId: scope.writeScopeId, intentId, decisionId, write: null, pendingWriteId: null,
+          endedUnsent: { channelWriteId: writeRow!.channel_write_id, status: 'DISCARDED_STALE', reason: { code: 'WRITE_LIVE_WRITES_FORBIDDEN', params } },
+        };
+      }
       if (e.code !== '23514' || !(e.constraint ?? '').startsWith('edit_budget')) throw error;
       await tx.query('ROLLBACK TO SAVEPOINT claim_write');
       const { rows: [ended] } = await tx.query(

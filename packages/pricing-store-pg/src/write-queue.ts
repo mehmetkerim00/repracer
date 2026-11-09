@@ -90,6 +90,12 @@ function dispatchRefusal(error: unknown, write: Row): { status: 'DISCARDED_STALE
    */
   m = /quantity writes of channel account (\S+) are not confirmed by the owner: no quantity is sent/.exec(message);
   if (m) return { status: 'DISCARDED_STALE', reason: { code: 'QUANTITY_WRITES_REVOKED', params: { channelAccountId: m[1]! } } };
+  /**
+   * Шаг 119 (P0-09): база закрыта для боевых записей (QA), а аккаунт тенанта не демо боевой — копия боевой базы или бой, включённый до
+   * стража. Запись завершается своей причиной; без этой строки обход диспетчера падал бы на каждом круге (находка 7 шага 15)
+   */
+  m = /live writes are forbidden on this database: channel account (\S+) of a non-demo tenant sends nothing/.exec(message);
+  if (m) return { status: 'DISCARDED_STALE', reason: { code: 'WRITE_LIVE_WRITES_FORBIDDEN', params: { channelAccountId: m[1]! } } };
   // Р-83 (0051): пол вычислен заново — min_price и пол маржи; пол не вычисляется — отдельное сообщение (не <NULL> в числе)
   m = /value (\d+) is below effective price floor (\d+) \(min_price (\d+), margin floor (\d+|none), min margin (\d+|none) bp\)/.exec(message);
   if (m) {

@@ -37,7 +37,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Halt released automatically', HALT_REVIEW_FAILED: 'Halt extended', HALT_MANUALLY_RELEASED: 'Halt released manually',
   MARGIN_WITHOUT_COST: 'Margin without cost', STRATEGY_MISSING: 'No strategy', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Replaced by a newer price', WRITE_RETRIES_EXHAUSTED: 'Retries exhausted',
   WRITE_PRICING_MODE_CHANGED: 'Pricing mode changed', WRITE_EDIT_BUDGET_EXHAUSTED: 'Edit budget used up', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Waiting for the previous update',
-  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed', QUANTITY_WRITES_REVOKED: 'Stock updates revoked', WRITE_HELD_IN_SHADOW: 'Held by shadow mode',
+  WRITE_RETRY_SCHEDULED: 'Retry scheduled', WRITE_OUTCOME_RECONCILED: 'Outcome reconciled', WRITE_SCOPE_BLOCKED: 'Offer blocked', WRITE_BUDGET_DAY_UNCONFIRMED: 'Storefront day not confirmed', QUANTITY_WRITES_REVOKED: 'Stock updates revoked', WRITE_HELD_IN_SHADOW: 'Held by shadow mode', WRITE_LIVE_WRITES_FORBIDDEN: 'Live writes off on this database',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Wrong price basis — channel distrusted',
   CHANNEL_DISTRUSTED: 'Channel distrusted — all prices held',
 };
@@ -228,6 +228,8 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Not sent: the daily edit budget is used up${f.has('used') && f.has('limit') ? ` (${f.count('used')} of ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` for ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; it renews at ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Not sent: this channel account is in shadow mode, so nothing is sent to your store. The engine keeps computing prices; to send them, start sending prices on the Shadow mode screen.`,
+  // Шаг 119 (P0-09): QA — база закрыта для боевых записей
+  WRITE_LIVE_WRITES_FORBIDDEN: () => `Not sent: this environment never sends anything to a channel — live writes are switched off on its database. The decision is kept; nothing reached the store.`,
   QUANTITY_WRITES_REVOKED: (f) => `Not sent: stock updates for the channel account ${f.raw('channelAccountId')} were revoked, so no stock is sent to your store. Stock sync switches on again only after a new confirmation that no other tool manages stock there.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Not sent: the retry needs the edit budget of the current day, but the day boundary of storefront ${f.raw('marketplace')} is not confirmed. This update was dropped; a new price decision is possible once the storefront time zone is confirmed.`,
   CHANNEL_DISTRUSTED: (f) => `All prices held (${f.value('stage')}): we do not trust how the channel applies our prices${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` since ${f.when('detectedAt')}`)}. A fixed or margin price would take the same broken path. Only a person can release this.`,
@@ -1123,6 +1125,8 @@ export const en = {
         liveClosed: (storefront: string, property: string, where: string) => `Sending prices to ${storefront} cannot be switched on: the ${property.toLowerCase()} of this storefront is not confirmed yet. ${where} Until then the shadow keeps working — you keep seeing what the engine would do, and nothing is sent to your store.`,
         liveClosedUnknown: 'Sending prices cannot be switched on: we cannot confirm what we need to know about the storefronts of this account — one of them may not be a storefront we support yet. The shadow keeps working meanwhile.',
         modeMismatch: 'The account is already in that mode — someone switched it while this screen was open.',
+        /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
+        liveWritesForbidden: 'Sending prices cannot be switched on here: this environment never sends anything to a channel — live writes are switched off on its database. Demo workspaces are the exception. The shadow keeps working.',
       },
       noAccounts: 'No channel account is connected yet. Every new channel account starts here, in shadow mode: you see what the engine would do before anything is sent to your store.', 
       noAccess: {

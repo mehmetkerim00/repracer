@@ -410,7 +410,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
         report.stages.push({ stage: 'DISPATCH_PLAN', outcome: 'HELD_IN_SHADOW', reason: { code: 'WRITE_HELD_IN_SHADOW', params: {} } });
         return;
       }
-      // Р-19, Р-163: бюджет правок в базе исчерпан при создании записи — решение сохранено, запись завершена без отправки (как диспетчер)
+      // Р-19, Р-163: бюджет правок в базе исчерпан при создании записи — решение сохранено, запись завершена без отправки (как диспетчер).
+      // Шаг 119 (P0-09): так же — база закрыта для боевых записей (QA): причина своя, алерт тот же «не отправлено»
       if (committed.endedUnsent) {
         const ended = committed.endedUnsent;
         report.channelWriteId = ended.channelWriteId;

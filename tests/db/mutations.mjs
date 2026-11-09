@@ -19,7 +19,7 @@ const replaceInFunction = (fn, from, to) => ({ fn, from, to });
 /** Мутация и её собственные проверки */
 const m = (apply, ...own) => ({ apply, own });
 
-const VERIFY = 'migrations/0223_verify_schema_invariants_v66.sql';
+const VERIFY = 'migrations/0225_verify_schema_invariants_v67.sql';
 const T = (file) => `packages/pricing-store-pg/test/${file}`;
 const smoke = (label, reached) => (reached ? { smoke: label, reached } : { smoke: label });
 // Шаг 19, ревью шага 19 (находка 1): у проверки теста — точная метка утверждения (строка или { re } для метки с подстановкой; группа
@@ -3072,6 +3072,39 @@ export const STEP118_ROWS = [
       // До шага ветка была почти недостижима (Р-12 не давал сменить режим при записях в очереди); теперь она держит «цена выключенного не уходит»
       m(replaceInFunction('tenant_data.channel_write_before_update()', "IF (NEW.field = 'PRICE' AND s.pricing_mode <> 'ENGINE')", 'IF (false)'),
         node(R118, W118, { re: 'the write of a turned-off offer reached the channel: .*' }, '^true$')),
+    ],
+  },
+];
+
+
+// Шаг 119 (P0-09, 0224): база, где боевые записи запрещены (QA). Правило — одной функцией у трёх входов (рождение аккаунта, перевод в бой,
+// каждая отправка); у каждого входа и у каждой части правила — своя проверка смоука с причиной [Р-94, Р-99]. Критично: QA с настоящим
+// Amazon не должен изменить настоящую цену ни одним путём
+const SW = 'switching a non-demo account to LIVE on a database with live writes forbidden (P0-09)';
+const DW = 'dispatching a write of a non-demo LIVE account on a database with live writes forbidden (P0-09)';
+export const STEP119_ROWS = [
+  {
+    row: 'шаг 119 (QA: боевые записи запрещены)', critical: true,
+    invariant: 'на базе с настройкой repracer.live_writes (кроме allowed) аккаунт тенанта не демо не переводится в бой, не рождается боевым и не отправляет ни одной записи; настройку видит только уровень базы, сессия её не снимает; демо-тенант — исключение',
+    mutations: [
+      // Перевод в бой: без проверки в начале ветки «в бой» владелец со вторым фактором и подтверждением переводит аккаунт
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF security.live_writes_refused(NEW.tenant_id) THEN', 'IF false THEN'), smoke(SW)),
+      m(dropTrigger('a0_channel_account_born_live_guard', 'tenant_data.channel_account'),
+        smoke('a non-demo channel account born LIVE on a database with live writes forbidden (P0-09)')),
+      // Отправка: аккаунт был боевым до того, как базу закрыли, — без стража перед отправкой запись уходит в канал
+      m(dropTrigger('be_channel_write_live_writes_guard', 'tenant_data.channel_write'), smoke(DW)),
+      // Правило целиком выключено — отказывает каждый вход; своя проверка — отправка
+      m(replaceInFunction('security.live_writes_refused(uuid)', 'SELECT security.live_writes_forbidden()', 'SELECT false'), smoke(DW)),
+      // Демо-тенант больше не исключение: боевой путь симулятора на QA закрылся бы вместе с клиентским
+      m(replaceInFunction('security.live_writes_refused(uuid)', 'AND NOT EXISTS (SELECT 1 FROM tenant_data.tenant t WHERE t.tenant_id = p_tenant_id AND t.demo)', ''),
+        smoke('a demo channel account switches to LIVE on a database with live writes forbidden (P0-09)')),
+      // Настройка читается сессией: `SET repracer.live_writes = 'allowed'` в любом соединении снимал бы страж
+      m(replaceInFunction('security.live_writes_forbidden()', 'SELECT coalesce(bool_or(',
+        "SELECT current_setting('repracer.live_writes', true) IS DISTINCT FROM 'allowed' AND coalesce(bool_or("),
+        smoke('a session SET does not lift the database guard (P0-09)')),
+      // Разрешающее значение по умолчанию: опечатка открыла бы базу, а не закрыла (fail-closed)
+      m(replaceInFunction('security.live_writes_forbidden()', "cfg <> 'repracer.live_writes=allowed'", "cfg = 'repracer.live_writes=forbidden'"),
+        smoke('an unknown value of the database setting forbids live writes too (P0-09, fail-closed)')),
     ],
   },
 ];

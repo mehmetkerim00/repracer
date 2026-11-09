@@ -221,6 +221,8 @@ export const DISPATCH_REASON_CODES = [
   'WRITE_HELD_IN_SHADOW',
   // Р-202 (шаг 61): владелец отозвал подтверждение записи количества — неотправленная версия снята, повтор не идёт
   'QUANTITY_WRITES_REVOKED',
+  // P0-09 (шаг 119): база закрыта для боевых записей (QA), тенант не демо — запись в канал не уходит
+  'WRITE_LIVE_WRITES_FORBIDDEN',
 ] as const;
 export type DispatchReasonCode = (typeof DISPATCH_REASON_CODES)[number];
 
@@ -240,6 +242,7 @@ export const WRITE_END_REASON_CODES = [
   'WRITE_BUDGET_DAY_UNCONFIRMED',
   'WRITE_HELD_IN_SHADOW',
   'QUANTITY_WRITES_REVOKED',
+  'WRITE_LIVE_WRITES_FORBIDDEN',
 ] as const satisfies readonly AnyReasonCode[];
 export type WriteEndReasonCode = (typeof WRITE_END_REASON_CODES)[number];
 
@@ -642,6 +645,8 @@ export const REASON_PARAMS: Readonly<Record<AnyReasonCode, ParamSchema>> = {
   WRITE_HELD_IN_SHADOW: { channelAccountId: id('TENANT'), wouldSpendBudget: p('bool', 'TENANT', O), blockedUnit: p('bool', 'TENANT', O) },
   // Шаг 61 [Р-202]: база кладёт аккаунт и строку журнала отзыва; распознанный отказ повтора — только аккаунт
   QUANTITY_WRITES_REVOKED: { channelAccountId: id('TENANT'), confirmationId: id('TENANT', O) },
+  // P0-09 (шаг 119): отказ стража отправки называет аккаунт; база кладёт его же, когда запись завершает путь решения
+  WRITE_LIVE_WRITES_FORBIDDEN: { channelAccountId: id('TENANT') },
   // Р-116: отправленная цена — наша, применённая — прочитана из канала
   CHANNEL_PRICE_BASIS_MISMATCH: {
     basisError: oneOf(BASIS_MISMATCH_DIRECTIONS, 'TENANT'), vatRateBp: bp('TENANT'), sentMinor: money('TENANT'), observedMinor: money('CHANNEL'),

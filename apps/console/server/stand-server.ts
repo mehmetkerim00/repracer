@@ -1391,6 +1391,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (outcome.status === 'NOT_OWNER') return fail(403, 'FORBIDDEN', toMode === 'SHADOW' ? e.noShadowRight : e.notOwner);
       if (outcome.status === 'CONFIRMATION_MISMATCH') return fail(400, 'CONFIRMATION_MISMATCH', e.confirmation);
       if (outcome.status === 'MODE_MISMATCH') return fail(409, 'MODE_MISMATCH', e.modeMismatch);
+      // Шаг 119 (P0-09): эта среда не пишет в каналы ничего (база закрыта для боевых записей); тень работает
+      if (outcome.status === 'LIVE_WRITES_FORBIDDEN') return fail(409, 'LIVE_WRITES_FORBIDDEN', e.liveWritesForbidden);
       /**
        * Р-172: бой закрыт неизвестным свойством витрины — отказ называет витрину и свойство ЧЕЛОВЕЧЕСКИМ языком [Р-72].
        * База отдаёт код свойства (`DAY_BOUNDARY`), и переводит его словарь: продавцу нужна «граница суток», а не имя столбца.

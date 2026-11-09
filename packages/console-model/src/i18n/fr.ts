@@ -38,7 +38,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Suspension levée automatiquement', HALT_REVIEW_FAILED: 'Suspension prolongée', HALT_MANUALLY_RELEASED: 'Suspension levée manuellement',
   MARGIN_WITHOUT_COST: 'Marge sans coût', STRATEGY_MISSING: 'Aucune stratégie', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Remplacé par un prix plus récent', WRITE_RETRIES_EXHAUSTED: 'Tentatives épuisées',
   WRITE_PRICING_MODE_CHANGED: 'Mode de tarification modifié', WRITE_EDIT_BUDGET_EXHAUSTED: 'Budget de modifications épuisé', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'En attente de la mise à jour précédente',
-  WRITE_RETRY_SCHEDULED: 'Nouvelle tentative prévue', WRITE_OUTCOME_RECONCILED: 'Résultat vérifié', WRITE_SCOPE_BLOCKED: 'Offre bloquée', WRITE_BUDGET_DAY_UNCONFIRMED: 'Journée du site non confirmée', QUANTITY_WRITES_REVOKED: 'Mises à jour du stock révoquées', WRITE_HELD_IN_SHADOW: 'Retenu par le mode fantôme',
+  WRITE_RETRY_SCHEDULED: 'Nouvelle tentative prévue', WRITE_OUTCOME_RECONCILED: 'Résultat vérifié', WRITE_SCOPE_BLOCKED: 'Offre bloquée', WRITE_BUDGET_DAY_UNCONFIRMED: 'Journée du site non confirmée', QUANTITY_WRITES_REVOKED: 'Mises à jour du stock révoquées', WRITE_HELD_IN_SHADOW: 'Retenu par le mode fantôme', WRITE_LIVE_WRITES_FORBIDDEN: 'Envois réels désactivés dans cet environnement',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Mauvaise base de prix — défiance envers le canal',
   CHANNEL_DISTRUSTED: 'Défiance envers le canal — tous les prix bloqués',
 };
@@ -228,6 +228,8 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Non envoyé : le budget quotidien de modifications est épuisé${f.has('used') && f.has('limit') ? ` (${f.count('used')} sur ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` pour le ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => ` ; il se renouvelle à ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Non envoyé : ce compte du canal est en mode fantôme, rien n’est donc envoyé à votre boutique. Le moteur continue de calculer les prix ; pour les envoyer, commencez à envoyer les prix depuis l’écran Mode fantôme.`,
+  // Шаг 119 (P0-09): QA — база закрыта для боевых записей
+  WRITE_LIVE_WRITES_FORBIDDEN: () => `Non envoyé : cet environnement n’envoie jamais rien à un canal — les envois réels sont désactivés dans sa base de données. La décision est conservée ; rien n’est arrivé à la boutique.`,
   QUANTITY_WRITES_REVOKED: (f) => `Non envoyé : les mises à jour du stock pour le compte du canal ${f.raw('channelAccountId')} ont été révoquées ; aucun stock n’est donc envoyé à votre boutique. La synchronisation du stock ne se réactive qu’après une nouvelle confirmation qu’aucun autre outil ne gère le stock sur ce canal.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Non envoyé : la nouvelle tentative a besoin du budget de modifications du jour en cours, mais la limite de journée du site ${f.raw('marketplace')} n’est pas confirmée. Cette mise à jour a été abandonnée ; une nouvelle décision de prix sera possible une fois le fuseau horaire du site confirmé.`,
   CHANNEL_DISTRUSTED: (f) => `Tous les prix bloqués (${f.value('stage')}) : nous ne faisons pas confiance à la façon dont le canal applique nos prix${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` depuis ${f.when('detectedAt')}`)}. Un prix fixe ou à marge prendrait le même chemin défaillant. Seule une personne peut lever ce blocage.`,
@@ -1123,6 +1125,8 @@ export const fr: Messages = {
         liveClosed: (storefront: string, property: string, where: string) => `L’envoi des prix vers ${storefront} ne peut pas être activé : un point n’est pas encore confirmé pour ce site — ${property.toLowerCase()}. ${where} D’ici là, le mode fantôme continue de fonctionner — vous voyez toujours ce que ferait le moteur, et rien n’est envoyé à votre boutique.`,
         liveClosedUnknown: 'L’envoi des prix ne peut pas être activé : nous ne pouvons pas confirmer ce que nous devons savoir sur les sites de ce compte — l’un d’eux n’est peut-être pas encore un site que nous prenons en charge. Le mode fantôme continue de fonctionner en attendant.',
         modeMismatch: 'Le compte est déjà dans ce mode — quelqu’un l’a changé pendant que cet écran était ouvert.',
+        /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
+        liveWritesForbidden: 'L’envoi des prix ne peut pas être activé ici : cet environnement n’envoie jamais rien à un canal — les envois réels sont désactivés dans sa base de données. Les espaces de travail de démonstration font exception. Le mode fantôme continue de fonctionner.',
       },
       noAccounts: 'Aucun compte du canal n’est encore connecté. Chaque nouveau compte du canal commence ici, en mode fantôme : vous voyez ce que ferait le moteur avant que quoi que ce soit ne soit envoyé à votre boutique.',
       noAccess: {

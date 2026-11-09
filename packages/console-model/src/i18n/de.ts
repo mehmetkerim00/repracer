@@ -38,7 +38,7 @@ const titles: Record<AnyReasonCode, string> = {
   HALT_AUTO_RELEASED: 'Anhalten automatisch aufgehoben', HALT_REVIEW_FAILED: 'Anhalten verlängert', HALT_MANUALLY_RELEASED: 'Anhalten manuell aufgehoben',
   MARGIN_WITHOUT_COST: 'Marge ohne Stückkosten', STRATEGY_MISSING: 'Keine Strategie', WRITE_SUPERSEDED_BY_NEWER_VERSION: 'Durch neueren Preis ersetzt', WRITE_RETRIES_EXHAUSTED: 'Wiederholungen ausgeschöpft',
   WRITE_PRICING_MODE_CHANGED: 'Preismodus geändert', WRITE_EDIT_BUDGET_EXHAUSTED: 'Änderungsbudget aufgebraucht', WRITE_QUEUED_BEHIND_IN_FLIGHT: 'Wartet auf vorherige Übertragung',
-  WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert', WRITE_BUDGET_DAY_UNCONFIRMED: 'Tagesgrenze der Storefront unbestätigt', QUANTITY_WRITES_REVOKED: 'Bestandsaktualisierungen widerrufen', WRITE_HELD_IN_SHADOW: 'Vom Schattenmodus zurückgehalten',
+  WRITE_RETRY_SCHEDULED: 'Wiederholung geplant', WRITE_OUTCOME_RECONCILED: 'Ergebnis abgeglichen', WRITE_SCOPE_BLOCKED: 'Angebot blockiert', WRITE_BUDGET_DAY_UNCONFIRMED: 'Tagesgrenze der Storefront unbestätigt', QUANTITY_WRITES_REVOKED: 'Bestandsaktualisierungen widerrufen', WRITE_HELD_IN_SHADOW: 'Vom Schattenmodus zurückgehalten', WRITE_LIVE_WRITES_FORBIDDEN: 'Senden in dieser Umgebung abgeschaltet',
   CHANNEL_PRICE_BASIS_MISMATCH: 'Falsche Preisbasis — Kanal nicht vertrauenswürdig',
   CHANNEL_DISTRUSTED: 'Kanal nicht vertrauenswürdig — alle Preise angehalten',
 };
@@ -227,6 +227,8 @@ const reasons: Record<AnyReasonCode, Template> = {
   WRITE_EDIT_BUDGET_EXHAUSTED: (f) => `Nicht gesendet: das tägliche Änderungsbudget ist aufgebraucht${f.has('used') && f.has('limit') ? ` (${f.count('used')} von ${f.count('limit')})` : ''}${opt(f, 'budgetDay', () => ` für ${f.date('budgetDay')}`)}${opt(f, 'timeZone', () => ` (${f.raw('timeZone')})`)}${opt(f, 'resetsAt', () => `; es erneuert sich ${f.when('resetsAt')}`)}.`,
   // Р-169 (шаг 41): аккаунт ушёл в тень, пока запись была в полёте — повтор в канал не идёт
   WRITE_HELD_IN_SHADOW: (f) => `Nicht gesendet: dieses Kanalkonto ist im Schattenmodus, es wird nichts an Ihren Shop gesendet. Die Preisautomatik rechnet weiter; damit die Preise gesendet werden, schalten Sie auf der Seite „Schattenmodus“ das Senden der Preise ein.`,
+  // Шаг 119 (P0-09): QA — база закрыта для боевых записей
+  WRITE_LIVE_WRITES_FORBIDDEN: () => `Nicht gesendet: diese Umgebung sendet nie etwas an einen Kanal — Live-Schreibvorgänge sind in ihrer Datenbank abgeschaltet. Die Entscheidung bleibt erhalten; im Shop ist nichts angekommen.`,
   QUANTITY_WRITES_REVOKED: (f) => `Nicht gesendet: Bestandsaktualisierungen für das Kanalkonto ${f.raw('channelAccountId')} wurden widerrufen, es wird kein Bestand an Ihren Shop gesendet. Die Bestandssynchronisation lässt sich erst nach einer neuen Bestätigung wieder einschalten, dass kein anderes Werkzeug dort Bestände pflegt.`,
   WRITE_BUDGET_DAY_UNCONFIRMED: (f) => `Nicht gesendet: die Wiederholung braucht das Änderungsbudget des aktuellen Tages, aber die Tagesgrenze der Storefront ${f.raw('marketplace')} ist nicht bestätigt. Die Übertragung wurde beendet; eine neue Preisentscheidung ist möglich, sobald die Zeitzone der Storefront bestätigt ist.`,
   CHANNEL_DISTRUSTED: (f) => `Alle Preise angehalten (${f.value('stage')}): wir vertrauen nicht, wie der Kanal unsere Preise anwendet${opt(f, 'distrustReason', () => ` — ${f.value('distrustReason')}`)}${opt(f, 'detectedAt', () => ` seit ${f.when('detectedAt')}`)}. Ein Fest- oder Margenpreis nähme denselben fehlerhaften Weg. Nur eine Person kann das aufheben.`,
@@ -1077,6 +1079,8 @@ export const de: Messages = {
         liveClosed: (storefront: string, property: string, where: string) => `Das Senden der Preise an ${storefront} lässt sich nicht einschalten: „${property}“ ist für diese Storefront noch nicht bestätigt. ${where} Bis dahin läuft der Schattenmodus weiter — Sie sehen, was die Automatik täte, und nichts wird an Ihren Shop gesendet.`,
         liveClosedUnknown: 'Das Senden der Preise lässt sich nicht einschalten: was wir über die Storefronts dieses Kontos wissen müssen, können wir nicht bestätigen — eine davon wird vielleicht noch nicht unterstützt. Der Schattenmodus läuft so lange weiter.',
         modeMismatch: 'Das Konto ist schon in diesem Modus — jemand hat es umgeschaltet, während dieser Bildschirm offen war.',
+        /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
+        liveWritesForbidden: 'Das Senden der Preise lässt sich hier nicht einschalten: diese Umgebung sendet nie etwas an einen Kanal — Live-Schreibvorgänge sind in ihrer Datenbank abgeschaltet. Ausgenommen sind Demo-Arbeitsbereiche. Der Schattenmodus arbeitet weiter.',
       },
       noAccounts: 'Noch ist kein Kanalkonto verbunden. Jedes neue Kanalkonto beginnt hier, im Schattenmodus: Sie sehen, was die Preisautomatik tun würde, bevor etwas an Ihren Shop gesendet wird.', 
       noAccess: {

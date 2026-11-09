@@ -460,8 +460,9 @@ export interface CommittedDecision {
    * Шаг 47 [Р-19, Р-163]: запись создана, но база не дала списать попытку правки — бюджет объекта канала за сутки витрины исчерпан
    * (edit_budget, у eBay — листинг). Решение и запись сохранены, запись завершена BUDGET_EXHAUSTED с причиной; в канал она не уйдёт.
    * До шага 47 отказ бюджета в транзакции фиксации откатывал решение целиком (PRICING_COMMIT_FAILED) — решение терялось.
+   * Шаг 119 (P0-09): так же — запись на базе, закрытой для боевых записей (QA): DISCARDED_STALE с причиной WRITE_LIVE_WRITES_FORBIDDEN.
    */
-  endedUnsent?: { channelWriteId: string; status: 'BUDGET_EXHAUSTED'; reason: { code: string; params: Record<string, string | number | boolean | null> } };
+  endedUnsent?: { channelWriteId: string; status: 'BUDGET_EXHAUSTED' | 'DISCARDED_STALE'; reason: { code: string; params: Record<string, string | number | boolean | null> } };
 }
 
 export type EvaluationCommitResult =

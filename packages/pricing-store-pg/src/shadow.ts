@@ -141,6 +141,8 @@ export type ShadowModeResult =
    * (находка 10 ревью шага 42).
    */
   | { status: 'PROPERTY_INVISIBLE'; detail: string }
+  /** Шаг 119 (P0-09): база закрыта для боевых записей (QA), тенант не демо — в бой не переводится ни один его аккаунт */
+  | { status: 'LIVE_WRITES_FORBIDDEN' }
   | { status: 'FORBIDDEN' };
 
 const num = (v: unknown): number => Number(v ?? 0);
@@ -354,6 +356,8 @@ export class PgShadowStore {
       }, change.userId, { mfa: change.mfa });
     } catch (error) {
       const message = (error as { message?: string }).message ?? '';
+      // Шаг 119 (P0-09): закрытая база отказывает раньше роли и второго фактора — и распознаётся раньше общего «нет прав»
+      if (/live writes are forbidden on this database/.test(message)) return { status: 'LIVE_WRITES_FORBIDDEN' };
       if (/requires a second factor/.test(message)) return { status: 'MFA_REQUIRED' };
       /**
        * Находка 5 ревью шага 41: у отказа «в тень переводит владелец ИЛИ администратор» текст другой, и он не
