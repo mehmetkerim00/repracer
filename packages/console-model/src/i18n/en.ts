@@ -1260,6 +1260,17 @@ export const en = {
           step: 'Nothing to do: the price climbs back to the floor within your step limit. If the sale must go on, enable clearance again on the floor page of the offer.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${Number(d.steps) > 0 ? `the price returns to the floor ${n.money(Number(d.floorMinor), String(d.currency))} in about ${Number(d.steps)} ${Number(d.steps) === 1 ? 'step' : 'steps'} (~${Number(d.minutes)} minutes).` : 'the price is already at or above the floor.'}`,
         },
+        // Шаг 120 (P1-04): оценка комиссии кончается — за 14 суток предупреждение, в момент истечения — цены замерзают
+        FEE_ESTIMATE_EXPIRING: {
+          what: 'the fee estimate of some offers ends soon — after that their prices stop changing',
+          step: 'Before the date, import your unit cost file again with the fee_percent and fixed_fee columns (Costs & floors): a new estimate lasts 90 days.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offer' : 'offers'}; the first one ends in ${Number(d.days)} ${Number(d.days) === 1 ? 'day' : 'days'}: ${String(d.offer)}.`,
+        },
+        FEE_ESTIMATE_EXPIRED: {
+          what: 'the fee estimate of some offers has ended — their prices no longer change',
+          step: 'Import your unit cost file again with the fee_percent and fixed_fee columns (Costs & floors). Until then each price stays where it is.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offer' : 'offers'}, for example ${String(d.offer)}.`,
+        },
         PRICE_WRITE_NOT_SENT: { what: 'a price change was not sent to the channel', step: 'Open the price feed in the console and check the offers of this channel.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'stock updates of an offer are blocked: the channel refused a stock update and the offer waits for a person', step: 'Open the Inventory screen in the console, check the offer and the answer of the channel, then release the block.' },
         QUANTITY_WRITE_NOT_SENT: { what: 'a stock update was not sent to the channel, so the channel may show a stock we did not intend', step: 'Open the Inventory screen in the console and check this offer: the reason is shown next to the update. If stock updates were revoked on purpose, nothing else is needed.' },

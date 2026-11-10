@@ -1208,6 +1208,17 @@ export const de: Messages = {
           step: 'Nichts zu tun: Der Preis steigt innerhalb Ihres Schrittlimits zurück zur Untergrenze. Soll der Abverkauf weitergehen, schalten Sie ihn auf der Seite der Untergrenze wieder ein.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${Number(d.steps) > 0 ? `der Preis kehrt in etwa ${Number(d.steps)} ${Number(d.steps) === 1 ? 'Schritt' : 'Schritten'} (~${Number(d.minutes)} Minuten) zur Untergrenze ${n.money(Number(d.floorMinor), String(d.currency))} zurück.` : 'der Preis liegt bereits auf oder über der Untergrenze.'}`,
         },
+        // Шаг 120 (P1-04): оценка комиссии кончается — за 14 суток предупреждение, в момент истечения — цены замерзают
+        FEE_ESTIMATE_EXPIRING: {
+          what: 'Die Gebührenschätzung einiger Angebote endet bald — danach ändern sich ihre Preise nicht mehr',
+          step: 'Laden Sie vor dem Datum Ihre Stückkosten-Datei erneut mit den Spalten fee_percent und fixed_fee hoch (Kosten & Untergrenzen): Eine neue Schätzung gilt 90 Tage.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'Angebot' : 'Angebote'}; das erste endet in ${Number(d.days)} ${Number(d.days) === 1 ? 'Tag' : 'Tagen'}: ${String(d.offer)}.`,
+        },
+        FEE_ESTIMATE_EXPIRED: {
+          what: 'Die Gebührenschätzung einiger Angebote ist abgelaufen — ihre Preise ändern sich nicht mehr',
+          step: 'Laden Sie Ihre Stückkosten-Datei erneut mit den Spalten fee_percent und fixed_fee hoch (Kosten & Untergrenzen). Bis dahin bleibt jeder Preis, wo er ist.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'Angebot' : 'Angebote'}, zum Beispiel ${String(d.offer)}.`,
+        },
         PRICE_WRITE_NOT_SENT: { what: 'Eine Preisänderung wurde nicht an den Kanal gesendet', step: 'Öffnen Sie die Preisänderungen in der Konsole und prüfen Sie die Angebote dieses Kanals.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'Bestandsänderungen eines Angebots sind blockiert: der Kanal hat eine Bestandsänderung abgelehnt, das Angebot wartet auf eine Person', step: 'Öffnen Sie in der Konsole die Seite „Lagerbestand“, prüfen Sie das Angebot und die Antwort des Kanals und heben Sie die Blockade auf.' },
         QUANTITY_WRITE_NOT_SENT: { what: 'Eine Bestandsänderung wurde nicht an den Kanal gesendet, der Kanal zeigt womöglich einen nicht beabsichtigten Bestand', step: 'Öffnen Sie in der Konsole die Seite „Lagerbestand“ und prüfen Sie dieses Angebot: der Grund steht bei der Änderung. Wurden Bestandsaktualisierungen bewusst widerrufen, ist nichts weiter zu tun.' },

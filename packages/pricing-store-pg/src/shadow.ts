@@ -114,6 +114,11 @@ export interface ShadowPage {
    * (тот же пояс, что у всех времён экрана, K4); часы, а не сутки, — чтобы граница суток не зависела от пояса сеанса базы
    */
   decisionsByHour: Array<{ hour: Instant; decisions: number }>;
+  /**
+   * Шаг 120 (отложенное шага 119, P0-09): база закрыта для боевых записей (QA), а тенант не демо — бой не включится ни у одного аккаунта.
+   * Экран говорит это до попытки. Знает только база: у миров без неё поля нет — значит, не закрыто
+   */
+  liveWritesRefused?: boolean;
 }
 
 export interface ShadowModeChange {
@@ -188,7 +193,7 @@ export class PgShadowStore {
      */
     const upper = query.until ?? 'infinity';
     return inTenant(this.pools.adminPool, tenantId, async (tx) => {
-      const [decisions, held, list, accounts, savings, properties, digests, unconfirmed, byHour] = await Promise.all([
+      const [decisions, held, list, accounts, savings, properties, digests, unconfirmed, byHour, guard] = await Promise.all([
         // Решения тени: считает база, и только по окну отчёта [Р-154]
         tx.query(
           /**
@@ -290,6 +295,8 @@ export class PgShadowStore {
              FROM channel_data.price_decision d
             WHERE d.tenant_id = $1 AND d.shadow AND d.decided_at >= $2 AND d.decided_at < $3
             GROUP BY 1 ORDER BY 1`, [tenantId, since, upper]),
+        // Шаг 120 (P0-09): то же правило, что у стражей перевода в бой и отправки (0224), — одной функцией базы
+        tx.query(`SELECT security.live_writes_refused($1) AS refused`, [tenantId]),
       ]);
       const d = decisions.rows[0] ?? {};
       const h = held.rows[0] ?? {};
@@ -329,6 +336,7 @@ export class PgShadowStore {
           deliveredAt: (r.delivered_at as Instant | null) ?? null, deliveryKind: (r.delivery_kind as string | null) ?? null,
         })),
         decisionsByHour: byHour.rows.map((r) => ({ hour: r.hour as Instant, decisions: num(r.decisions) })),
+        liveWritesRefused: guard.rows[0]?.refused === true,
       };
     });
   }

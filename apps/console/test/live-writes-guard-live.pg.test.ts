@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { PriceFeedView } from '@repracer/console-model';
+import type { PriceFeedView, ShadowView } from '@repracer/console-model';
 import type { StandToken } from '../src/api-types.ts';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { demoWorld, nextNineUtc, DEMO_OFFERS, type DemoWorld } from '@repracer/contract-tests/live';
@@ -156,6 +156,15 @@ test('P0-09: the owner goes back to shadow, and the switch back to LIVE is refus
   const shadow = await call<{ mode: string }>('POST', api('shadow', 'mode'), { channelAccountId: accountId, toMode: 'SHADOW' });
   assert.equal(shadow.status, 200, `going back to shadow on a guarded database: ${JSON.stringify(shadow.body)}`);
 
+  /**
+   * Шаг 120 (отложенное шага 119): экран тени говорит, что бой закрыт, ДО попытки — и поля перевода в бой у аккаунта нет. Иначе
+   * тестировщик набирает имя аккаунта, получает 409 и решает, что сломано
+   */
+  const screen = await call<ShadowView>('GET', `${api('shadow')}?offset=0&limit=10`);
+  assert.equal(screen.status, 200, JSON.stringify(screen.body));
+  assert.match(screen.body.liveBlockedText ?? '', PHRASE, `the shadow screen says before any attempt that live writes are off: ${screen.body.liveBlockedText}`);
+  assert.equal(screen.body.accounts.find((a) => a.channelAccountId === accountId)?.canGoLive, false, 'no switch to LIVE is offered on a guarded database');
+
   const [acc] = await db.rows<{ external_account_id: string }>(`SELECT external_account_id FROM tenant_data.channel_account WHERE channel_account_id = $1`, [accountId]);
   const live = await call<{ error: { code: string; message: string } }>('POST', api('shadow', 'mode'),
     { channelAccountId: accountId, toMode: 'LIVE', typedConfirmation: acc!.external_account_id });
@@ -165,6 +174,9 @@ test('P0-09: the owner goes back to shadow, and the switch back to LIVE is refus
 
   // Контроль [Р-94]: тот же человек, тот же аккаунт и то же подтверждение — без настройки базы бой включается
   await liveWrites(null);
+  const open = await call<ShadowView>('GET', `${api('shadow')}?offset=0&limit=10`);
+  assert.equal(PHRASE.test(open.body.liveBlockedText ?? ''), false, `control: without the guard the screen does not say it: ${open.body.liveBlockedText}`);
+  assert.equal(open.body.accounts.find((a) => a.channelAccountId === accountId)?.canGoLive, true, 'control: without the guard the switch is offered');
   const control = await call<{ mode: string }>('POST', api('shadow', 'mode'), { channelAccountId: accountId, toMode: 'LIVE', typedConfirmation: acc!.external_account_id });
   assert.deepEqual([control.status, control.body.mode], [200, 'LIVE'], `control: the same switch without the guard: ${JSON.stringify(control.body)}`);
 });

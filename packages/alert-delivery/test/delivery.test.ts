@@ -291,6 +291,29 @@ test('step 74: the ladder start names the offer, the price, the floor and the st
 });
 
 /**
+ * Шаг 120 (P1-04): оценка комиссии живёт 90 суток, без неё цена замерзает. Письмо называет, сколько предложений, первое по сроку и сколько
+ * дней осталось — и что сделать: снова загрузить файл себестоимости с колонками комиссии. На четырёх языках
+ */
+test('step 120 (P1-04): the fee estimate letters name the offers, the nearest one and the days left — in four languages', async () => {
+  const { alertDetail, immediateMessage } = await import('../src/index.ts');
+  const { messagesFor } = await import('@repracer/console-model');
+  const row = (code: string, details: Record<string, unknown>): AlertRow => ({
+    tenantId: 't-1', alertId: `f-${code}`, code, severity: code === 'FEE_ESTIMATE_EXPIRED' ? 'CRITICAL' : 'WARNING', channelAccountId: null,
+    channel: 'KAUFLAND', marketplaces: ['de'], details, raisedAt: '2026-11-10T10:00:00.000Z', deliveryAttempts: 0,
+  });
+  const soon = row('FEE_ESTIMATE_EXPIRING', { offers: 2, days: 3, offer: 'SYN-SKU-6', marketplace: 'de', writeScopeId: 'ws-6', validUntil: '2026-11-13T10:00:00.000Z' });
+  const ended = row('FEE_ESTIMATE_EXPIRED', { offers: 1, days: 0, offer: 'SYN-SKU-3', marketplace: 'de', writeScopeId: 'ws-3', validUntil: '2026-11-10T09:00:00.000Z' });
+  const en = messagesFor('en');
+  assert.equal(alertDetail(soon, en), '2 offers; the first one ends in 3 days: SYN-SKU-6 · kaufland.de.');
+  assert.equal(alertDetail(ended, en), '1 offer, for example SYN-SKU-3 · kaufland.de.');
+  assert.match(immediateMessage(soon, 'Synthetic seller', 'owner@example.invalid', en).text, /ends soon[\s\S]*fee_percent and fixed_fee/);
+  assert.match(immediateMessage(ended, 'Synthetic seller', 'owner@example.invalid', en).text, /no longer change[\s\S]*SYN-SKU-3/);
+  assert.match(alertDetail(soon, messagesFor('de'))!, /^2 Angebote; das erste endet in 3 Tagen: SYN-SKU-6 · kaufland\.de\.$/);
+  assert.match(alertDetail(soon, messagesFor('es'))!, /^2 ofertas; la primera termina en 3 días: SYN-SKU-6 · kaufland\.de\.$/);
+  assert.match(alertDetail(soon, messagesFor('fr'))!, /^2 offres ; la première se termine dans 3 jours : SYN-SKU-6 · kaufland\.de\.$/);
+});
+
+/**
  * Шаг 102 [Р-227]: безубыточность в полу делает «пол выше потолка» законным состоянием — рост себестоимости поднял пол выше
  * max_price, и ни одна цена не уходит. Молча замороженный товар — будущий тикет поддержки: письмо называет предложение, суть и что
  * сделать; прочие причины «границу не вычислить» подробной строки не получают (пустая подробность — не строка письма и дайджеста)

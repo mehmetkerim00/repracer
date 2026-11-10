@@ -40,7 +40,7 @@ import { competeWithOf, notEvaluatedIntent, runStrategy, strategyAvailability, t
 import { channelRefusal, writeAlertCode, type DispatchStep, type WriteDispatcher } from '@repracer/write-dispatcher';
 import { noChangeStateOf, repeatsNoChange } from './no-change.ts';
 import { planPollingTiers } from './polling.ts';
-import { PIPELINE_WRITE_FIELD, type ClearanceEnded, type FloorRaiseAfter, type FloorRaiseCandidate, type PriceScopeContext } from './store.ts';
+import { FEE_EXPIRY_WARNING_DAYS, PIPELINE_WRITE_FIELD, type ClearanceEnded, type FeeExpiryNotice, type FloorRaiseAfter, type FloorRaiseCandidate, type PriceScopeContext } from './store.ts';
 import { listingNotBuyableAlerts } from './listing-status.ts';
 import { comparedValue, DEFAULT_LOSS_GRACE_SECONDS, LOSS_GRACE_BASIS, reconcile, type HeldState } from './reconciliation.ts';
 import type {
@@ -1017,6 +1017,33 @@ export function createPricingPipeline(deps: PipelineDeps) {
         const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
         await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'CLEARANCE_EXPIRY_FAILED', message: 'CLEARANCE_EXPIRY_FAILED', details: { error: name } }]);
       }
+      /**
+       * Шаг 120 (P1-04): оценка комиссии живёт 90 суток, без неё пол не считается и цена замерзает. Владелец узнаёт заранее: за
+       * FEE_EXPIRY_WARNING_DAYS суток — WARNING, в момент истечения — CRITICAL; одно письмо на аккаунт и вид, с числом предложений и
+       * ближайшим сроком. Однократность держит журнал базы; сбой здесь заход не останавливает
+       */
+      let fees: FeeExpiryNotice[] = [];
+      try {
+        fees = await store.noticeFeeExpiry(ctx.tenantId, ctx.channelAccountId, FEE_EXPIRY_WARNING_DAYS);
+      } catch (error) {
+        const name = String((error as { code?: string }).code ?? (error as Error).name ?? 'Error').slice(0, 60);
+        await emit(ctx, [{ kind: 'log', level: 'WARN', code: 'FEE_EXPIRY_NOTICE_FAILED', message: 'FEE_EXPIRY_NOTICE_FAILED', details: { error: name } }]);
+      }
+      const feeDetails = async (list: readonly FeeExpiryNotice[]) => {
+        const first = [...list].sort((a, b) => a.validUntil.localeCompare(b.validUntil))[0]!;
+        // Подпись — как у письма о распродаже: название товара или SKU продавца; витрину словами добавит письмо
+        const label = await store.loadScopeContext(ctx.tenantId, first.writeScopeId, deps.now()).then((l) => l?.context.scope ?? null).catch(() => null);
+        return {
+          offers: list.length, writeScopeId: first.writeScopeId, validUntil: first.validUntil,
+          offer: label ? label.productTitle ?? label.productSku ?? label.externalUnitId : first.writeScopeId, ...(label ? { marketplace: label.marketplace } : {}),
+          // Сколько суток осталось до первого срока — целыми, вверх: «через 3 дня», а не «через 2,4»
+          days: Math.max(0, Math.ceil((Date.parse(first.validUntil) - Date.parse(deps.now())) / 86_400_000)),
+        };
+      };
+      const expiring = fees.filter((f) => f.kind === 'EXPIRING');
+      if (expiring.length > 0) await alerts.raise({ ...alertBase(ctx), code: 'FEE_ESTIMATE_EXPIRING', severity: 'WARNING', details: await feeDetails(expiring) });
+      const expired = fees.filter((f) => f.kind === 'EXPIRED');
+      if (expired.length > 0) await alerts.raise({ ...alertBase(ctx), code: 'FEE_ESTIMATE_EXPIRED', severity: 'CRITICAL', details: await feeDetails(expired) });
       const reports = new Map<string, ScopeReport>();
       const raises = await store.listFloorRaiseScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);
       // У единицы бывает два повода сразу (себестоимость и отказ перепроверки) — одна переоценка, снимаются оба (ревью шага 73, находка 2)

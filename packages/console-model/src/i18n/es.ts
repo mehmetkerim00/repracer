@@ -1260,6 +1260,17 @@ export const es: Messages = {
           step: 'No hace falta nada: el precio vuelve al piso dentro de su límite de paso. Si la venta debe seguir, active la liquidación de nuevo en la página del piso de la oferta.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)}: ${Number(d.steps) > 0 ? `el precio vuelve al piso de ${n.money(Number(d.floorMinor), String(d.currency))} en unos ${Number(d.steps)} ${Number(d.steps) === 1 ? 'paso' : 'pasos'} (~${Number(d.minutes)} minutos).` : 'el precio ya está en el piso o por encima.'}`,
         },
+        // Шаг 120 (P1-04): оценка комиссии кончается — за 14 суток предупреждение, в момент истечения — цены замерзают
+        FEE_ESTIMATE_EXPIRING: {
+          what: 'la estimación de comisiones de algunas ofertas termina pronto — después sus precios dejan de cambiar',
+          step: 'Antes de la fecha, vuelva a importar su archivo de costos unitarios con las columnas fee_percent y fixed_fee (Costos y pisos): una nueva estimación dura 90 días.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'oferta' : 'ofertas'}; la primera termina en ${Number(d.days)} ${Number(d.days) === 1 ? 'día' : 'días'}: ${String(d.offer)}.`,
+        },
+        FEE_ESTIMATE_EXPIRED: {
+          what: 'la estimación de comisiones de algunas ofertas terminó — sus precios ya no cambian',
+          step: 'Vuelva a importar su archivo de costos unitarios con las columnas fee_percent y fixed_fee (Costos y pisos). Hasta entonces cada precio se queda donde está.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'oferta' : 'ofertas'}, por ejemplo ${String(d.offer)}.`,
+        },
         PRICE_WRITE_NOT_SENT: { what: 'un cambio de precio no se envió al canal', step: 'Abra Cambios de precio en la consola y revise las ofertas de este canal.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'las actualizaciones de inventario de una oferta están bloqueadas: el canal rechazó una actualización de inventario y la oferta espera a una persona', step: 'Abra la pantalla Inventario en la consola, revise la oferta y la respuesta del canal y luego quite el bloqueo.' },
         QUANTITY_WRITE_NOT_SENT: { what: 'una actualización de inventario no se envió al canal, así que el canal podría mostrar un inventario que no queríamos', step: 'Abra la pantalla Inventario en la consola y revise esta oferta: el motivo aparece junto a la actualización. Si las actualizaciones de inventario se revocaron a propósito, no hace falta nada más.' },

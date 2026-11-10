@@ -222,6 +222,17 @@ export interface ClearanceState {
   history: ClearanceChangeRow[];
 }
 /** Режим распродажи, закончившийся по дате, — для письма владельцу «цена вернётся к полу примерно за N шагов» */
+/** Шаг 120 (P1-04): за сколько суток до конца последней действующей оценки комиссии владельцу уходит WARNING */
+export const FEE_EXPIRY_WARNING_DAYS = 14;
+
+/** Шаг 120 (P1-04): новое уведомление об истечении оценки комиссии предложения */
+export interface FeeExpiryNotice {
+  writeScopeId: string;
+  /** Конец последней действующей оценки — после него пол не считается и цена замерзает */
+  validUntil: Instant;
+  kind: 'EXPIRING' | 'EXPIRED';
+}
+
 export interface ClearanceEnded {
   writeScopeId: string;
   floorMinor: number;
@@ -994,6 +1005,12 @@ export interface PricingStore {
   requestFloorRaiseForPlatformInputs(tenantId: string, channelAccountId: string, now: Instant): Promise<number>;
   /** Шаг 102 [Р-227]: режимы распродажи аккаунта, чья дата окончания наступила, — строкой EXPIRE (часы базы) и запросом на переоценку */
   expireClearances(tenantId: string, channelAccountId: string): Promise<ClearanceEnded[]>;
+  /**
+   * Шаг 120 (P1-04): включённые предложения аккаунта, у которых последняя действующая оценка комиссии кончается в пределах `warnDays` суток
+   * (EXPIRING) или уже кончилась (EXPIRED), — НОВЫЕ уведомления: каждое предложение, момент истечения и вид — один раз (журнал базы).
+   * Часы — базы. Пустой список — сказать нечего
+   */
+  noticeFeeExpiry(tenantId: string, channelAccountId: string, warnDays: number): Promise<FeeExpiryNotice[]>;
   /** Р-126: опрос товаров выполнен — время последнего опроса */
   markPolled(tenantId: string, channelAccountId: string, queries: readonly CompetitorQuery[], at: Instant): Promise<void>;
   omnibusCheck(tenantId: string, writeScopeId: string, startsAt: Instant): Promise<OmnibusPriorPrice>;

@@ -306,7 +306,7 @@ const propertyView = (p: MarketplaceProperty, m: Messages, now: string): Marketp
   };
 };
 
-function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): ShadowAccountView {
+function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages, liveWritesRefused = false): ShadowAccountView {
   const t = m.ui.shadow;
   const channelName = (m.values as Record<string, string | undefined>)[a.channel] ?? a.channel;
   const state = accountState(a);
@@ -318,7 +318,8 @@ function accountView(a: ShadowAccountRow, world: StandWorld, m: Messages): Shado
     changedText: a.changedAt === null ? null : t.changed(a.changedFrom === 'SHADOW' ? t.modes.SHADOW : t.modes.LIVE, m.when(a.changedAt)),
     confirmationHint: t.confirmationHint(a.externalAccountId),
     // Включить бой может только владелец [Р-170]; вернуть в тень — он же и администратор
-    canGoLive: noAccess === null && a.writeMode === 'SHADOW' && holdsOwnerActions(world.viewer.role),
+    // Шаг 120 (P0-09): на базе, закрытой для боевых записей, поля нет вовсе — причину экран называет до попытки (`liveBlockedText`)
+    canGoLive: noAccess === null && a.writeMode === 'SHADOW' && holdsOwnerActions(world.viewer.role) && !liveWritesRefused,
     // Шаг 89 (ADR-0054): обратно в тень — безопасная сторона, своё право матрицы (у менеджера тоже)
     canGoShadow: a.writeMode === 'LIVE' && can(world.viewer.role, 'RETURN_TO_SHADOW'),
     channelLimitText: channelLimitText(a.channel, m),
@@ -345,7 +346,8 @@ function digestPreview(world: StandWorld, page: ShadowPage, accounts: readonly S
 
 export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery, m: Messages, period: Period, range: PeriodRange, timeZone?: string | null): ShadowView {
   const t = m.ui.shadow;
-  const accounts = page.accounts.map((a) => accountView(a, world, m));
+  const refused = page.liveWritesRefused === true;
+  const accounts = page.accounts.map((a) => accountView(a, world, m, refused));
   return {
     worldId: world.id, demo: world.demo === true, intro: t.intro,
     // Шаг 96: период — пресетом или своим диапазоном дат (общее правило экранов); фраза — для заголовков, `clipped` — что отрезано
@@ -355,7 +357,8 @@ export function shadowView(world: StandWorld, page: ShadowPage, query: ListQuery
      * Р-172: если бой закрыт неизвестным свойством, экран говорит это ДО нажатия кнопки. Иначе продавец нажимает,
      * получает отказ базы и решает, что сломано.
      */
-    liveBlockedText: page.properties.some((p) => p.status === 'UNKNOWN')
+    // Шаг 120 (P0-09): закрытая база — причина первая и единственная: свойства витрин бой здесь не откроют всё равно
+    liveBlockedText: refused ? t.errors.liveWritesForbidden : page.properties.some((p) => p.status === 'UNKNOWN')
       ? t.properties.blocksLive(page.properties.filter((p) => p.status === 'UNKNOWN')
           .map((p) => `${storefrontName(p.channel, p.marketplace, m)} · ${t.properties.names[p.property] ?? p.property}`).join(', '))
       : null,

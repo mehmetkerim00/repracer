@@ -1260,6 +1260,17 @@ export const fr: Messages = {
           step: 'Rien à faire : le prix remonte au plancher dans la limite de votre palier. Si la vente doit continuer, réactivez le déstockage sur la page du plancher de l’offre.',
           detail: (d: Readonly<Record<string, unknown>>, n: AlertNumbers) => `${String(d.offer)} : ${Number(d.steps) > 0 ? `le prix revient au plancher ${n.money(Number(d.floorMinor), String(d.currency))} en environ ${Number(d.steps)} ${Number(d.steps) === 1 ? 'palier' : 'paliers'} (~${Number(d.minutes)} minutes).` : 'le prix est déjà au plancher ou au-dessus.'}`,
         },
+        // Шаг 120 (P1-04): оценка комиссии кончается — за 14 суток предупреждение, в момент истечения — цены замерзают
+        FEE_ESTIMATE_EXPIRING: {
+          what: 'l’estimation des frais de certaines offres se termine bientôt — ensuite leurs prix ne changent plus',
+          step: 'Avant la date, importez de nouveau votre fichier de coûts unitaires avec les colonnes fee_percent et fixed_fee (Coûts et planchers) : une nouvelle estimation dure 90 jours.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offre' : 'offres'} ; la première se termine dans ${Number(d.days)} ${Number(d.days) === 1 ? 'jour' : 'jours'} : ${String(d.offer)}.`,
+        },
+        FEE_ESTIMATE_EXPIRED: {
+          what: 'l’estimation des frais de certaines offres est terminée — leurs prix ne changent plus',
+          step: 'Importez de nouveau votre fichier de coûts unitaires avec les colonnes fee_percent et fixed_fee (Coûts et planchers). D’ici là, chaque prix reste où il est.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offre' : 'offres'}, par exemple ${String(d.offer)}.`,
+        },
         PRICE_WRITE_NOT_SENT: { what: 'un changement de prix n’a pas été envoyé au canal', step: 'Ouvrez le journal des prix dans la console et vérifiez les offres de ce canal.' },
         QUANTITY_WRITE_SCOPE_BLOCKED: { what: 'les mises à jour du stock d’une offre sont bloquées : le canal a refusé une mise à jour du stock et l’offre attend une personne', step: 'Ouvrez l’écran Stocks dans la console, vérifiez l’offre et la réponse du canal, puis levez le blocage.' },
         QUANTITY_WRITE_NOT_SENT: { what: 'une mise à jour du stock n’a pas été envoyée au canal ; le canal peut donc afficher un stock que nous n’avions pas prévu', step: 'Ouvrez l’écran Stocks dans la console et vérifiez cette offre : la raison est indiquée à côté de la mise à jour. Si les mises à jour du stock ont été révoquées volontairement, rien d’autre n’est nécessaire.' },

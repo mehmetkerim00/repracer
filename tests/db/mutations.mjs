@@ -3108,3 +3108,25 @@ export const STEP119_ROWS = [
     ],
   },
 ];
+
+// Шаг 120 (P1-04, 0226): журнал уведомлений об истечении оценки комиссии — однократность и форма держит база, у каждой защиты своя проверка
+const R120 = T('fee-expiry-step120.pg.test.ts');
+const J120 = 'step 120 (P1-04): the database keeps the notice journal honest — a known kind that matches the time';
+const N120 = 'step 120 (P1-04): the next run says nothing — no second warning for the same expiry';
+export const STEP120_ROWS = [
+  {
+    row: 'шаг 120 (истечение оценки комиссии)', critical: false,
+    invariant: 'уведомление об истечении оценки комиссии — одно на предложение, момент истечения и вид; вид — EXPIRING или EXPIRED и согласован с часами базы; журнал только на добавление и уходит с тенантом',
+    mutations: [
+      // Без ключа повторный заход пишет ту же строку снова — и владелец получает второе письмо о том же сроке
+      m(dropConstraint('fee_expiry_notice_pkey', 'channel_data.fee_expiry_notice'), node(R120, N120, 'no second warning for the same expiry', 'FEE_ESTIMATE_EXPIR')),
+      m(dropConstraint('fee_expiry_notice_kind_known', 'channel_data.fee_expiry_notice'), node(R120, J120, 'an unknown kind is refused', '^accepted$')),
+      m(dropConstraint('fee_expiry_notice_kind_matches_time', 'channel_data.fee_expiry_notice'),
+        node(R120, J120, ['an expiry announced before its moment is refused', 'a warning about a moment already past is refused'], '^accepted$')),
+      m(dropTrigger('zz_append_only', 'channel_data.fee_expiry_notice'), smoke('append-only channel_data.fee_expiry_notice')),
+      m(dropTrigger('zz_no_truncate', 'channel_data.fee_expiry_notice'), smoke('truncate channel_data.fee_expiry_notice')),
+      m(replaceInFunction('maintenance.purge_tenant_channel_data(uuid)', "'channel_data.fee_expiry_notice', ", ''),
+        verify('channel_data\\.fee_expiry_notice: tenant closure does not delete the table')),
+    ],
+  },
+];

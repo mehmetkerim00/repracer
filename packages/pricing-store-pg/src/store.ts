@@ -51,7 +51,7 @@ import type {
   ShiftWindow,
   SnapshotOutcome, ConsoleAuditRow, MemberRoleChangeResult, ConsoleIntentRow, ConsoleWriteRow, ConsoleRejectedSnapshotRow, DecisionPageQuery, DecisionPage, DecisionDetail, ScopeDecisionStats, ConsoleStateOptions, ConsoleCatalogPage, ConsoleCatalogFactsQuery, ConsoleCatalogFacts, InterventionSlice, FeedPageQuery, FeedPage, FeedPageItem, FeedStatusGroup, WorldCounters, ConsoleDistrustRow, ConsoleStrategyVersionRow, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, InboundNotificationEntry, OfferChannelPricingObservation, DiscoveredCatalogOffer, DiscoveryStop, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, ChannelObservation, FloorRaiseAfter, FloorRaiseCandidate, BuyboxHolderObservation, BuyboxSpanRow, CompetitionData, CompetitionDataRow, OfferPageFilter,
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
-  ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded,
+  ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded, FeeExpiryNotice,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason, PricingSwitchRef } from '@repracer/pricing-pipeline';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
@@ -4063,6 +4063,31 @@ export class PgPricingStore implements PricingStore {
     return inTenant(this.pool, tenantId, async (tx) => {
       const { rows } = await tx.query('SELECT * FROM tenant_data.expire_clearance_floors($1)', [channelAccountId]);
       return rows.map((r) => ({ writeScopeId: r.write_scope_id, floorMinor: Number(r.floor_minor), currency: r.currency, endsAt: iso(r.ends_at), note: r.note ?? '' }));
+    });
+  }
+
+  /**
+   * Шаг 120 (P1-04): конец последней действующей оценки комиссии — тем же правилом формы, что у пола (0106: числовые ставка и фиксированная
+   * часть); только включённые предложения — у выключенного цена не замерзает, её не двигают. Новые уведомления пишет журнал базы:
+   * повтор того же предложения, момента и вида — не строка и не письмо. Время — часы базы, как у самой проверки срока в журнале
+   */
+  async noticeFeeExpiry(tenantId: string, channelAccountId: string, warnDays: number): Promise<FeeExpiryNotice[]> {
+    return inTenant(this.pool, tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `WITH due AS (
+           SELECT s.write_scope_id, max(fe.valid_until) AS until
+             FROM tenant_data.write_scope s
+             JOIN channel_data.fee_estimate fe ON fe.tenant_id = s.tenant_id AND fe.write_scope_id = s.write_scope_id
+            WHERE s.tenant_id = $1 AND s.channel_account_id = $2 AND s.field = 'PRICE' AND s.pricing_mode = 'ENGINE' AND s.status <> 'RETIRED'
+              AND jsonb_typeof(fe.fee_model -> 'feeRateBp') = 'number' AND jsonb_typeof(fe.fee_model -> 'fixedFeeMinor') = 'number'
+            GROUP BY s.write_scope_id
+           HAVING max(fe.valid_until) <= now() + make_interval(days => $3::int))
+         INSERT INTO channel_data.fee_expiry_notice (tenant_id, write_scope_id, valid_until, kind)
+         SELECT $1, d.write_scope_id, d.until, CASE WHEN d.until <= now() THEN 'EXPIRED' ELSE 'EXPIRING' END FROM due d
+         ON CONFLICT DO NOTHING
+         RETURNING write_scope_id, valid_until, kind`,
+        [tenantId, channelAccountId, warnDays]);
+      return rows.map((r) => ({ writeScopeId: String(r.write_scope_id), validUntil: iso(r.valid_until), kind: r.kind as FeeExpiryNotice['kind'] }));
     });
   }
 

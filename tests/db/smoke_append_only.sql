@@ -512,6 +512,9 @@ SELECT pg_temp.expect_fail('truncate tenant_data.default_strategy_change', $q$ T
   'TRUNCATE of tenant_data.default_strategy_change is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.offer_pricing_switch', $q$ TRUNCATE tenant_data.offer_pricing_switch $q$,
   'TRUNCATE of tenant_data.offer_pricing_switch is forbidden');
+-- Шаг 120 (P1-04): журнал уведомлений об истечении оценки комиссии — однократность писем, TRUNCATE его не берёт
+SELECT pg_temp.expect_fail('truncate channel_data.fee_expiry_notice', $q$ TRUNCATE channel_data.fee_expiry_notice $q$,
+  'TRUNCATE of channel_data.fee_expiry_notice is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.strategy_assignment', $q$ TRUNCATE tenant_data.strategy_assignment $q$,
   'TRUNCATE of tenant_data.strategy_assignment is forbidden');
 -- Шаг 41 [Р-170]: журнал переключений теневого режима — тоже append-only, и TRUNCATE его не берёт
@@ -791,6 +794,10 @@ VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-0000000
 INSERT INTO tenant_data.default_strategy_change (tenant_id, channel_account_id, pricing_strategy_id, created_by_membership_id)
 VALUES ('a0000000-0000-0000-0000-00000000000a', 'a4000000-0000-0000-0000-000000000001', 'a9000000-0000-0000-0000-000000000001',
         'a2000000-0000-0000-0000-00000000000a');
+
+-- Шаг 120 (P1-04): строка журнала уведомлений — оценка комиссии включённого предложения кончается через 10 суток
+INSERT INTO channel_data.fee_expiry_notice (tenant_id, write_scope_id, valid_until, kind)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'a6000000-0000-0000-0000-000000000001', now() + interval '10 days', 'EXPIRING');
 
 -- Шаг 118: строка журнала автоцены — владелец от своего имени выключил (или включил обратно) автоцену одного предложения, с запиской
 INSERT INTO tenant_data.offer_pricing_switch (tenant_id, write_scope_id, action, note, created_by_membership_id)
