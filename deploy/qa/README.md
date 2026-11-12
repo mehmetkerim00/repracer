@@ -13,22 +13,57 @@ SSH: страницу выставляет туннель исходящим с�
 
 ## 1. Сервер
 
-Ubuntu 24.04, 4 vCPU и 8 ГБ, регион США. Вход — только по ключу SSH. Дальше — от пользователя выкладки `deploy` с sudo.
+Ubuntu 24.04, регион США. Первая выкладка (2026-11-12) шла на 3 vCPU, 3,9 ГБ памяти и 2 ГБ swap: работающий стек занимает около 0,9 ГБ,
+swap не используется. Шаги 1–4 (подготовка хоста) выполняются от root. Пароль root выдаёт провайдер, и первым делом вход переводится на ключ.
+
+С машины Kerim положить ключ root. Пароль root вводится один раз, в запросе ssh:
 
 ```sh
-sudo adduser --disabled-password --gecos '' deploy && sudo usermod -aG sudo deploy
-sudo -u deploy sh -c 'install -d -m 700 "$HOME/.ssh"'   # ключ Kerim — в .ssh/authorized_keys пользователя deploy
-# Пароли SSH выключены
-sudo sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config && sudo systemctl reload ssh
+ssh-copy-id -i <ключ выкладки>.pub root@<сервер>
+```
+
+Дальше на сервере вход остаётся только по ключу. Пароль закрывается своим файлом в `/etc/ssh/sshd_config.d`, правка `sshd_config` здесь не
+поможет: в образах провайдеров `PasswordAuthentication yes` и `PermitRootLogin yes` бывают заданы в `sshd_config.d/*.conf` (у первого
+сервера — в `50-cloud-init.conf` и `99-ctrl.conf`), а sshd берёт ПЕРВОЕ прочитанное значение. Файл `00-…` читается раньше остальных:
+
+```sh
+cat > /etc/ssh/sshd_config.d/00-tmprice-hardening.conf <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+EOF
+sshd -t && sshd -T | grep -Ei '^(passwordauthentication|permitrootlogin) '   # no / without-password
+```
+
+Затем по порядку:
+
+1. Сменить пароль root на случайный (`chpasswd`). Значение не печатается и хранится вне сервера и репозитория: оно нужно только для консоли
+   провайдера.
+2. Выполнить `systemctl restart ssh`.
+3. НЕ закрывая текущую сессию, войти по ключу из второго окна.
+
+Без ключа сервер должен предлагать только `publickey`:
+
+```sh
+ssh -o PreferredAuthentications=none root@<сервер>   # Permission denied (publickey).
+```
+
+Пользователь выкладки `deploy` создаётся без пароля и без sudo. Команды с правами root выполняет root по ключу, а выкладку и всё ежедневное
+(шаги 6–9) — `deploy`:
+
+```sh
+adduser --disabled-password --gecos '' deploy
+install -d -m 700 -o deploy -g deploy ~deploy/.ssh
+install -m 600 -o deploy -g deploy /root/.ssh/authorized_keys ~deploy/.ssh/authorized_keys   # ключ Kerim
 ```
 
 ## 2. Межсетевой экран: снаружи — только SSH
 
 ```sh
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow OpenSSH
-sudo ufw enable
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow OpenSSH
+ufw --force enable
 ```
 
 Docker публикует порты мимо `ufw`. Здесь это не открывает ничего: стенд опубликован только на `127.0.0.1:4318` (проверка выкладки с хоста),
@@ -36,40 +71,61 @@ Docker публикует порты мимо `ufw`. Здесь это не от
 
 ## 3. Docker и git
 
-По `docs.docker.com/engine/install/ubuntu` (официальный репозиторий Docker; команды сверить со страницей при установке):
+По `docs.docker.com/engine/install/ubuntu` (официальный репозиторий Docker; команды сверить со страницей при установке). На 2026-11-12
+источник на странице задаётся файлом `docker.sources` в формате deb822; первая выкладка поставила Docker 29.9 и Compose v5.7:
 
 ```sh
-sudo apt-get update && sudo apt-get install -y ca-certificates curl git
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker deploy   # затем выйти и войти заново
+apt-get update && apt-get install -y ca-certificates curl git
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && chmod a+r /etc/apt/keyrings/docker.asc
+tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+usermod -aG docker deploy
 ```
 
 Node на хосте не нужен: зависимости и интерфейс собирает `deploy.sh` тем же образом Node, что исполняет процессы.
 
 ## 4. Код и настройки
 
+От root — каталоги, от `deploy` — код и настройки:
+
 ```sh
-sudo install -d -o deploy -g deploy /srv/repracer && git clone https://github.com/mehmetkerim00/repracer.git /srv/repracer
+install -d -o deploy -g deploy /srv/repracer
+install -d -m 700 -o deploy -g deploy /srv/repracer-qa /srv/repracer-qa/secrets
+# дальше — от deploy
+git clone https://github.com/mehmetkerim00/repracer.git /srv/repracer
 cd /srv/repracer
 cp deploy/qa/qa.env.example deploy/qa/qa.env            # каталог секретов и адрес QA; в репозиторий не попадает
-sudo install -d -m 700 -o deploy -g deploy /srv/repracer-qa/secrets
 ```
 
-## 5. Cloudflare: туннель и Access
+## 5. Cloudflare: Access, туннель, DNS
 
-В Zero Trust (`one.dash.cloudflare.com`) аккаунта, где зона `tmprice.com`:
+Порядок: Access раньше DNS, иначе адрес хоть на минуту окажется открыт без защиты. Первая выкладка сделала всё через API Cloudflare (токен с
+правами Cloudflare Tunnel Edit, Access: Apps and Policies Edit и DNS Edit). В Zero Trust (`one.dash.cloudflare.com`) аккаунта, где зона
+`tmprice.com`, шаги те же:
 
-1. **Туннель:** Networks → Tunnels → Create a tunnel → Cloudflared, имя `repracer-qa`. Токен установки положить в
-   `/srv/repracer-qa/secrets/tunnel.env` (образец — `deploy/qa/tunnel.env.example`), права 600. Команду установки со страницы не выполнять:
-   `cloudflared` поднимает compose.
-2. **Публичный адрес туннеля:** Public Hostname → `qa.tmprice.com` → тип HTTP, адрес `stand:4318` (имя сервиса compose).
-3. **Access** — до первого открытия адреса: Access → Applications → Add → Self-hosted, домен `qa.tmprice.com`, политика Allow → Emails:
-   адреса Kerim и Merdan, вход — One-time PIN. Сессия Access — cookie. Пароль у прокси (Basic Auth) не годится: консоль ходит в API с
-   `Authorization: Bearer`, а Basic Auth занимает тот же заголовок.
+1. **Способ входа One-time PIN включается в организации отдельно.** Новая организация Zero Trust пускает только по учётной записи Cloudflare,
+   а One-time PIN сам больше не добавляется (документация Cloudflare, «One-time PIN login»). Путь: Integrations → Identity providers →
+   Add new → One-time PIN. Через API для этого нужно право «Access: Organizations, Identity Providers, and Groups Edit». Токену QA его не
+   дают, включает владелец в панели. Пока способа входа нет, войти не может никто: это отказ, а не открытый доступ.
+2. **Access:** многоразовая политика «QA-A testers» — Allow → Emails: support@tmprice.com (пересылка владельцу) и адреса тестировщиков.
+   Новый тестировщик — одна строка в этой политике. Приложение — Self-hosted, домен `qa.tmprice.com`, сессия 24 ч, политика «QA-A testers».
+   Сессия Access хранится в cookie. Пароль у прокси (Basic Auth) не годится: консоль ходит в API с `Authorization: Bearer`, а Basic Auth
+   занимает тот же заголовок.
+3. **Туннель** `repracer-qa`, управляется из Cloudflare (`config_src: cloudflare`). Токен установки — в `/srv/repracer-qa/secrets/tunnel.env`
+   (образец — `deploy/qa/tunnel.env.example`), права 600, на экран не выводится. Команду установки со страницы не выполнять: `cloudflared`
+   поднимает compose.
+4. **Маршрут туннеля:** `qa.tmprice.com` → `http://stand:4318` (имя сервиса compose), остальное — `http_status:404`. На маршруте включена
+   проверка Access самим `cloudflared` («Protect with Access», `originRequest.access`: `required: true`, команда `tmprice`, аудитория
+   приложения из шага 2). Запрос без действующего входа Access не дойдёт до стенда, даже если приложение Access когда-нибудь удалят.
+5. **DNS:** CNAME `qa` → `<id туннеля>.cfargotunnel.com`, через прокси Cloudflare.
 
 Вход стенда — имитатор: любой, кто дошёл до страницы, входит владельцем. Поэтому Access обязателен, и `smoke.sh` проверяет, что без входа
 Access консоль не отдаётся.
@@ -90,7 +146,7 @@ deploy/qa/deploy.sh <тег-или-коммит> --first-time
 6. ждёт первых решений демо;
 7. запускает `deploy/qa/smoke.sh`.
 
-Около 3–5 минут, из них посев демо — около 2,5.
+Первая выкладка на 3 vCPU заняла 392 с, из них 376 с — сброс: база с миграциями и смоук-проверками схемы и посев демо.
 
 **Страж P0-09** (`deploy/production/README.md` §4б) ставит сброс сам: `ALTER DATABASE repracer_qa SET repracer.live_writes = 'forbidden'`.
 Проверка вручную:
@@ -110,15 +166,22 @@ deploy/qa/compose.sh exec -T postgres psql -U postgres -d repracer_qa -Atc "SELE
 - вход имитатором даёт три демо-пространства;
 - снаружи `https://qa.tmprice.com` без входа уводит на страницу входа Access.
 
-Затем — браузером не с машины Kerim: вход через Access → Owner → список пространств → Shadow mode → «Why this price» → одна выгрузка и
-одна примерка импорта → сборка в подвале.
+`/healthz` через туннель отвечает только после входа Access: без входа его закрывает Access, а `cloudflared` проверяет вход ещё раз. Сборку
+по тому адресу, на который смотрит туннель, показывает `/healthz` стенда изнутри сети compose:
+
+```sh
+deploy/qa/compose.sh exec -T bulk-worker node -e "fetch('http://stand:4318/healthz').then(r => r.text()).then(console.log)"
+```
+
+Затем — браузером не с машины Kerim (нужен One-time PIN, шаг 5.1): вход через Access → Owner → список пространств → Shadow mode →
+«Why this price» → одна выгрузка и одна примерка импорта → сборка в подвале → `https://qa.tmprice.com/healthz`.
 
 ## 8. Каждый день
 
 | Что | Команда |
 |---|---|
 | Новая версия | `deploy/qa/deploy.sh <тег>` — база заново (миграции новой версии), демо заново |
-| Чистые данные | `deploy/qa/reset.sh` — около 3 минут |
+| Чистые данные | `deploy/qa/reset.sh` — около 6 минут (376 с на первом сервере) |
 | Журналы | `deploy/qa/compose.sh logs -f stand bulk-worker` |
 | Что работает | `deploy/qa/compose.sh ps`; сборка — подвал страницы или `curl -s 127.0.0.1:4318/healthz` |
 
@@ -149,9 +212,13 @@ command="/srv/repracer/deploy/qa/ssh-gate.sh",no-port-forwarding,no-X11-forwardi
 - задание выгрузки выполняет исполнитель;
 - `docker compose config` разбирает этот файл.
 
-Не проверено, проверить при первой выкладке:
+Проверено первой выкладкой (2026-11-12, Ubuntu 24.04, шаг 121.1):
 
-- образы — Docker Hub на машине разработчика образы не отдаёт (OQ-114);
-- туннель и Access;
-- Linux вместо macOS;
-- настоящий браузер снаружи.
+- образы скачаны, и стек поднят на Linux;
+- `deploy.sh --first-time` прошёл, и `smoke.sh` зелёный;
+- туннель `healthy`;
+- снаружи без входа адрес уводит на Access;
+- сброс на временной базе без стража отказал;
+- три команды шлюза SSH работают, а проброс портов запрещён.
+
+Не проверено, проверить после включения One-time PIN: вход настоящим браузером снаружи и `/healthz` через туннель с входом.
