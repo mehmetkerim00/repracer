@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import { systemClock } from '@repracer/channel-port';
+import { buildInfoFromEnv, type BuildInfo } from './build.ts';
 
 /**
  * Работоспособность процесса снаружи (OQ-190, как у планировщика 0129): `/healthz` — 200, пока цикл процесса шевелился не позже
@@ -59,13 +60,20 @@ export interface HealthServer {
 }
 
 export async function serveHealth(
-  health: ProcessHealth, options: { port: number; prefix: string; staleAfterMs: number; host?: string },
+  health: ProcessHealth,
+  /**
+   * Шаг 121 (QA-A): `build` — какой код работает; вторая строка ответа `build <sha> <время>`. Не передана — из окружения процесса
+   * (`REPRACER_BUILD_SHA`, `REPRACER_BUILD_AT`): так её называет каждый процесс без отдельной проводки; `null` — не называть
+   */
+  options: { port: number; prefix: string; staleAfterMs: number; host?: string; build?: BuildInfo | null },
 ): Promise<HealthServer> {
+  const build = options.build === undefined ? buildInfoFromEnv(process.env) : options.build;
+  const buildLine = build ? `build ${build.sha} ${build.builtAt ?? '-'}\n` : '';
   const server = createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0];
     if (path === '/healthz') {
       const ok = health.healthy(options.staleAfterMs);
-      res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' }).end(ok ? 'ok\n' : 'stale\n');
+      res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' }).end(`${ok ? 'ok' : 'stale'}\n${buildLine}`);
       return;
     }
     if (path === '/metrics') {

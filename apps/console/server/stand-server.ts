@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/channel-port';
 import type { TenantWorldIndex } from './tenant-worlds.ts';
 import { createServer, type ServerResponse } from 'node:http';
+import { buildInfoFromEnv, ConfigError, createHeartbeat, secretFromEnv, type BuildInfo } from '@repracer/service-runtime';
 import { fileURLToPath } from 'node:url';
 import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
@@ -274,6 +275,11 @@ export interface StandServices {
    * Без него люди называются именем из базы или адресом. Развёрнутая консоль его не передаёт: синтетики в работе нет
    */
   people?: Readonly<Record<string, string>>;
+  /**
+   * Шаг 121 (QA-A, видимая версия сборки): какой код работает. Сессия отдаёт её странице, подвал показывает человеку — в отчёте об
+   * ошибке видно, на какой версии она. Тот же SHA называет `/healthz` процесса. Не задана — сборка неизвестна (запуск разработчика)
+   */
+  build?: BuildInfo | null;
 }
 
 /** Шаг 87 [Р-214]: подключение — только каналы и витрины профиля; витрину вне профиля не начать и прямым запросом */
@@ -324,6 +330,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       demoGuest: Boolean(identity.guest),
       oidc: identity.oidc ?? null,
       market: { profile: market.profile, locales: [...market.locales], omnibus: market.omnibus },
+      build: services.build ?? null,
     });
 
     /**
@@ -2113,7 +2120,11 @@ export function createStandServer(
    * остальное — файлам сборки. Стенд разработчика запускается без этого параметра: интерфейс ему даёт vite.
    */
   serveStatic?: (pathname: string) => { status: number; contentType: string; body: Buffer; cacheControl: string } | null,
-  options: { rateLimit?: RateLimitConfig; contentSecurityPolicy?: string } = {},
+  /**
+   * Шаг 121 (QA-A): `build` — какой код работает; `/healthz` называет её раньше раздачи файлов страницы (иначе он отдавал бы страницу с
+   * кодом 200) и без предела частоты: проверку здоровья зовут развёртывание и туннель, а не человек
+   */
+  options: { rateLimit?: RateLimitConfig; contentSecurityPolicy?: string; build?: BuildInfo | null } = {},
 ) {
   const fallback = messagesFor(locale).ui.server;
   const limited = options.rateLimit ? createRateLimiter(options.rateLimit) : null;
@@ -2132,6 +2143,10 @@ export function createStandServer(
       }
     }
     const pathname = new URL(req.url ?? '/', 'http://console').pathname;
+    if (pathname === '/healthz') {
+      req.resume();
+      return send(res, { status: 200, body: { status: 'ok', build: options.build ?? null } });
+    }
     if (serveStatic && !pathname.startsWith('/api/') && !pathname.startsWith('/inbound/')) {
       const file = serveStatic(pathname);
       if (!file) return send(res, { status: 404, body: { error: { code: 'NOT_FOUND', message: fallback.notFound } } });
@@ -2183,6 +2198,25 @@ export function createStandServer(
 
 async function main(): Promise<void> {
   const port = Number(process.env.STAND_PORT ?? 4318);
+  /**
+   * Шаг 121 (QA-A): стенд на сервере QA — в контейнере за Cloudflare Tunnel. Слушать не только loopback (`STAND_HOST`) — туннель живёт
+   * в соседнем контейнере; наружу порт не публикуется никогда (deploy/qa). Собранный интерфейс отдаёт сам стенд (`STAND_STATIC_DIR`) —
+   * тот же HTTP-слой, что у развёрнутой консоли: один адрес на страницу и API, без `vite preview` и его отказа чужому заголовку Host
+   */
+  const host = process.env.STAND_HOST ?? '127.0.0.1';
+  const loopback = host === '127.0.0.1' || host === '::1' || host === 'localhost';
+  const staticDir = process.env.STAND_STATIC_DIR;
+  const build = buildInfoFromEnv(process.env);
+  /**
+   * Р-127: стенд, до которого достают не только с этой машины, отмечается во внешнем сервисе или выключает отметку ЯВНО — его остановку
+   * иначе заметит только тестировщик. Стенд разработчика на loopback отметки не требует
+   */
+  const heartbeatOff = process.env.REPRACER_STAND_HEARTBEAT === 'off';
+  const heartbeatUrl = heartbeatOff ? null : secretFromEnv(process.env, 'REPRACER_STAND_HEARTBEAT_URL');
+  if (!loopback && !heartbeatOff && !heartbeatUrl) {
+    throw new ConfigError(`CONFIG_MISSING: a stand listening on ${host} beats to an external check (REPRACER_STAND_HEARTBEAT_URL) or says REPRACER_STAND_HEARTBEAT=off`);
+  }
+  if (heartbeatUrl && !heartbeatUrl.startsWith('https://')) throw new ConfigError('CONFIG_INVALID: REPRACER_STAND_HEARTBEAT_URL must be https');
   let handle: ReturnType<typeof createStandApi>;
   // Режим входа выбирает тот, кто запускает, явно (находка 6): стенд не включает имитатор молча при неполной конфигурации
   const mode = resolveStandIdentityMode(process.env);
@@ -2298,16 +2332,24 @@ async function main(): Promise<void> {
     const { PgChannelConnectStore } = await import('@repracer/pricing-store-pg');
     const demoConnect = readOnlyConnections(new PgChannelConnectStore(adminPool));
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory }), ...(simulator ? { simulator } : {}) },
-      { connect: (worldId) => (worldId === demoWorldId || demoSellerIds.includes(worldId) ? demoConnect : null), people, ...defaultLocale });
+      { connect: (worldId) => (worldId === demoWorldId || demoSellerIds.includes(worldId) ? demoConnect : null), people, build, ...defaultLocale });
   } else {
     // Стенд не включает ничего молча и ничего молча не пропускает: демо живёт только на PostgreSQL (ревью шага 34, находка 9)
     if (process.env.REPRACER_DEMO === 'on') throw new Error('REPRACER_DEMO=on needs PostgreSQL: set REPRACER_PG_URL (the demo tenant runs the real decision path)');
     if (process.env.REPRACER_DEMO_ONLY === 'on') throw new Error('REPRACER_DEMO_ONLY=on needs the demo on PostgreSQL: set REPRACER_DEMO=on and REPRACER_PG_URL');
     const worlds = await buildStandWorlds();
-    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { people: STAND_PEOPLE, ...defaultLocale });
+    handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { people: STAND_PEOPLE, build, ...defaultLocale });
   }
-  const server = createStandServer(handle);
-  server.listen(port, '127.0.0.1', () => console.log(`stand on http://127.0.0.1:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'})`));
+  const { createStaticHandler } = await import('./static.ts');
+  const server = createStandServer(handle, undefined, staticDir ? createStaticHandler(staticDir) : undefined, { build });
+  server.listen(port, host, () => console.log(`stand on http://${host}:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'}${staticDir ? ', page from the build' : ''}${build ? `, build ${build.sha}` : ''})`));
+  const heartbeat = heartbeatUrl ? createHeartbeat({ url: heartbeatUrl }) : null;
+  if (heartbeat) {
+    // Отметка — раз в минуту, пока процесс отвечает; сбой внешнего сервиса работу стенда не останавливает
+    const beat = () => heartbeat.beat(true).catch(() => undefined);
+    await beat();
+    setInterval(() => { void beat(); }, 60_000).unref();
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

@@ -468,6 +468,8 @@ export const en = {
       demoWorldDescriptionUs: 'Synthetic American seller on the channel simulator: offers on amazon.com, ebay.com and walmart.com, a warehouse in Newark, Delaware.',
       /** Шаг 91 (вид преп-центра): лёгкий продавец рядом с главным демо — у него своё имя, описание общее */
       demoSellerDescription: 'Synthetic American seller on the channel simulator: offers on amazon.com and ebay.com, in shadow mode.',
+      /** Шаг 121 (QA-A): подвал страницы — какой код работает; SHA короткий, полный — подсказкой */
+      build: (sha: string, when: string | null) => `Build ${sha}${when ? ` · ${when}` : ''}`,
       demoBadge: 'Demo', demoBanner: 'Demo workspace: synthetic data, real path. Every amount is made up.',
       languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
       // Шаг 100 (C): кнопка меню языков — глобус и код текущего; подпись для диктора — «Language: English»

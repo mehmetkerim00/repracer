@@ -1,7 +1,7 @@
 import { systemClock } from '@repracer/channel-port';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
+import { buildInfoFromEnv, channelApps, createHeartbeat, loadChannelAppsConfig, ProcessHealth, serveHealth, type Env } from '@repracer/service-runtime';
 import { ephemeralKeyring } from '@repracer/channel-oauth';
 import { createChannelConnectService, readOnlyConnections } from './connect.ts';
 import { createTenantWorlds } from './tenant-worlds.ts';
@@ -253,6 +253,8 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
    */
   // Задания тенантов продавцов ведёт ОТДЕЛЬНЫЙ процесс `bulk-worker` промышленного профиля (находка 8 ревью шага 44)
   const tenantWorlds = createTenantWorlds({ authenticator: pools.authenticator, app: pools.app, admin: pools.admin, bulkWorker: pools.bulk_worker, stock: pools.stock });
+  // Шаг 121: сборку называет развёртывание (REPRACER_BUILD_SHA, REPRACER_BUILD_AT); кривая — отказ при старте
+  const build = buildInfoFromEnv(env);
   const api = createStandApi(worlds as never, {
     ...identity,
     ...(config.oidc ? {
@@ -270,13 +272,16 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     market: config.market,
     // Шаг 88 [Р-213]: три видимые роли или пять — флаг развёртывания
     extendedRoles: config.extendedRoles,
+    // Шаг 121: какой код работает — в подвале страницы и в /healthz (сборку называет развёртывание)
+    build,
   });
   // Шаг 53 (OWASP A04, A05): ограничение частоты и полная политика содержимого — адреса поставщика входа из конфигурации
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir), {
     rateLimit: config.rateLimit,
     contentSecurityPolicy: consoleContentSecurityPolicy(config.oidc ? [config.oidc.issuer, ...(config.oidc.discoveryBase ? [config.oidc.discoveryBase] : [])] : []),
+    build,
   });
-  const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_console', staleAfterMs: 120_000, host: '0.0.0.0' });
+  const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_console', staleAfterMs: 120_000, host: '0.0.0.0', build });
   health.alive();
   // Консоль слушает ВСЕ адреса контейнера: снаружи её выставляет только прокси, у самого процесса TLS нет [Р-158]
   assertLockHeld();

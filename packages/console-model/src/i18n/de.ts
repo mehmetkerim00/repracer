@@ -446,6 +446,8 @@ export const de: Messages = {
       demoWorldTitle: 'Demo-Shop (Simulator)', demoWorldDescription: 'Synthetischer Shop auf dem Kanalsimulator: jedes Angebot hat drei Wettbewerber — einer driftet, einer unterbietet, einer in Preiswellen.',
       demoWorldDescriptionUs: 'Synthetischer US-Händler auf dem Kanalsimulator: Angebote auf amazon.com, ebay.com und walmart.com, ein Lager in Newark, Delaware.',
       demoSellerDescription: 'Synthetischer US-Händler auf dem Kanalsimulator: Angebote auf amazon.com und ebay.com, im Schattenmodus.',
+      /** Шаг 121 (QA-A): подвал страницы — какой код работает; SHA короткий, полный — подсказкой */
+      build: (sha: string, when: string | null) => `Version ${sha}${when ? ` · ${when}` : ''}`,
       demoBadge: 'Demo', demoBanner: 'Demo-Arbeitsbereich: synthetische Daten, echter Weg. Alle Beträge sind erfunden.',
       languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
       // Шаг 100 (C): кнопка меню языков — глобус и код текущего; подпись для диктора — «Language: English»

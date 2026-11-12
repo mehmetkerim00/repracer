@@ -1,0 +1,147 @@
+# Шаг 121: развёртывание QA-A — демо-стенд для независимого тестирования (план запуска, фаза 1).
+#   PostgreSQL + стенд (API, вход имитатором, собранный интерфейс) + исполнитель заданий + Cloudflare Tunnel.
+# Наружу не публикуется НИЧЕГО: страницу выставляет туннель (исходящее соединение к Cloudflare), а вход в неё закрывает Cloudflare Access
+# (cookie). Пароль у прокси (Basic Auth) не годится: консоль ходит в API с `Authorization: Bearer`, а Basic Auth занимает тот же заголовок.
+# Каналы — симуляторы, ключей каналов на хосте QA-A нет никогда; база закрыта стражем P0-09 (deploy/production/README.md §4б).
+#
+# Запуск — только обёрткой deploy/qa/compose.sh (подставляет qa.env и build.env); выкладка — deploy/qa/deploy.sh, сброс — deploy/qa/reset.sh.
+# Пошагово — deploy/qa/README.md.
+name: repracer-qa
+
+x-node: &node
+  image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+  working_dir: /app
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /tmp
+  volumes:
+    # Код и собранный интерфейс — с хоста, только на чтение: deploy/qa/deploy.sh собирает их до подъёма
+    - ../..:/app:ro
+  networks: [qa]
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+
+services:
+  postgres:
+    image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+    environment:
+      # trust — ТОЛЬКО потому, что порт базы не публикуется вовсе (ни на хост, ни наружу), а на хосте нет секретов: так подключаются CI и
+      # подготовка демо. Для QA-B и PROD — пароли ролей (deploy/production)
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Миграции и смоук-проверки для scripts/qa-reset.sh — сброс идёт внутри контейнера базы, psql на хосте не нужен
+      - ../..:/repo:ro
+    networks: [qa]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  stand:
+    <<: *node
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/stand-server.ts"]
+    environment:
+      # Слушает сеть compose: туннель — в соседнем контейнере. На хост — только loopback (проверка выкладки)
+      STAND_HOST: 0.0.0.0
+      STAND_PORT: "4318"
+      # Собранный интерфейс отдаёт сам стенд: страница и API — один адрес для туннеля
+      STAND_STATIC_DIR: /app/apps/console/dist
+      STAND_IDENTITY: simulator
+      REPRACER_PG_URL: postgres://svc_app@postgres:5432/repracer_qa
+      # Демо как у подготовки показа (scripts/demo-prepare.sh). DEMO_ONLY обязателен: без него стенд сеет и сценарные миры, их отвергает
+      # база региона US, и стенд не стартует (репетиция QA-A, 2026-11-07); на базе со стражем P0-09 их не завести и боевыми
+      REPRACER_MARKET_PROFILE: us
+      REPRACER_DEMO: "on"
+      REPRACER_DEMO_ONLY: "on"
+      REPRACER_DEMO_SHADOW: "on"
+      REPRACER_DEMO_US: "on"
+      REPRACER_DEMO_PRESS_DAYS: "7"
+      REPRACER_DEMO_SELLERS: "on"
+      REPRACER_DEMO_LOCALE: en
+      REPRACER_DEMO_TIME_ZONE: America/New_York
+      REPRACER_CONSOLE_LOCALE: en
+      # Вход стенда живёт 12 часов (предел) — тестировщик входит заново раз в день
+      REPRACER_STAND_TOKEN_SECONDS: "43200"
+      # Р-127: отметка во внешнем сервисе — аккаунта у проекта нет (OQ-188); выключена ЯВНО. Появился — адрес файлом в каталоге секретов
+      REPRACER_STAND_HEARTBEAT: ${REPRACER_STAND_HEARTBEAT:-off}
+      REPRACER_STAND_HEARTBEAT_URL_FILE: ${REPRACER_STAND_HEARTBEAT_URL_FILE:-}
+      # Шаг 121: какой код работает — подвал страницы и /healthz; задаёт deploy/qa/deploy.sh (build.env)
+      REPRACER_BUILD_SHA: ${REPRACER_BUILD_SHA:?run deploy/qa/deploy.sh — it writes build.env}
+      REPRACER_BUILD_AT: ${REPRACER_BUILD_AT:?run deploy/qa/deploy.sh — it writes build.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4318:4318"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Демо заводится при старте: три продавца и прожатая неделя тени — минуты (репетиция: 169 с)
+      start_period: 600s
+
+  bulk-worker:
+    <<: *node
+    # Исполнитель заданий: импорты, выгрузки, массовые правки, предпросмотр стратегии. scripts/demo-prepare.sh его НЕ запускает —
+    # без него задания стоят в очереди (репетиция QA-A)
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/bulk-worker.ts"]
+    environment:
+      # Строки подключения без паролей (trust внутри сети compose) — секретов в них нет; значение окружения допускает режим стенда
+      REPRACER_MODE: stand
+      REPRACER_BULK_APP_PG_URL: postgres://svc_app@postgres:5432/repracer_qa
+      REPRACER_BULK_ADMIN_PG_URL: postgres://svc_admin@postgres:5432/repracer_qa
+      REPRACER_BULK_BULK_WORKER_PG_URL: postgres://svc_bulk_worker@postgres:5432/repracer_qa
+      REPRACER_BULK_STOCK_PG_URL: postgres://svc_stock@postgres:5432/repracer_qa
+      REPRACER_BULK_METRICS_PORT: "9473"
+      REPRACER_BULK_HEARTBEAT: ${REPRACER_BULK_HEARTBEAT:-off}
+      REPRACER_BUILD_SHA: ${REPRACER_BUILD_SHA:?run deploy/qa/deploy.sh — it writes build.env}
+      REPRACER_BUILD_AT: ${REPRACER_BUILD_AT:?run deploy/qa/deploy.sh — it writes build.env}
+    # Исполнителю нужна только база: задания берёт из неё по всем тенантам
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9473/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  cloudflared:
+    # Тег выпуска 2026-10-15 закреплён digest'ом мультиархитектурного образа (Docker Hub, проверено 2026-11-12)
+    image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
+    command: ["tunnel", "--no-autoupdate", "run"]
+    # Токен туннеля — секрет: файл в каталоге секретов вне репозитория (TUNNEL_TOKEN=…, образец — tunnel.env.example)
+    env_file:
+      - ${REPRACER_QA_SECRETS_DIR:?set REPRACER_QA_SECRETS_DIR in qa.env}/tunnel.env
+    depends_on:
+      stand:
+        condition: service_healthy
+    networks: [qa]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+
+networks:
+  qa:

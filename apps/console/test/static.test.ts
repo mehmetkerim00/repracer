@@ -214,3 +214,30 @@ test('step 66: a screen response above the limit is refused with its own code; a
     await new Promise<void>((done) => server.close(() => done()));
   }
 });
+
+/**
+ * Шаг 121 (QA-A, видимая версия сборки): `/healthz` процесса консоли и стенда называет сборку — раньше раздачи файлов страницы (иначе он
+ * отдавал бы страницу с кодом 200) и раньше API; тот же SHA приходит странице в сессии, и подвал страницы показывает его человеку
+ */
+test('step 121: /healthz names the build before the page files and the API; the session carries the same build', async () => {
+  const { createStandServer, createStandApi } = await import('../server/stand-server.ts');
+  const build = { sha: '0123abc', builtAt: '2026-11-11T10:00:00.000Z' };
+  const identity = { authenticator: { authenticate: async () => null } } as never;
+  const withBuild = createStandServer(createStandApi([], identity, { build }), 'en', serve, { build });
+  const without = createStandServer(createStandApi([], identity), 'en', serve);
+  await new Promise<void>((done) => withBuild.listen(0, '127.0.0.1', done));
+  await new Promise<void>((done) => without.listen(0, '127.0.0.1', done));
+  try {
+    const at = (s: typeof withBuild, path: string) => fetch(`http://127.0.0.1:${(s.address() as { port: number }).port}${path}`);
+    const health = await at(withBuild, '/healthz');
+    assert.equal(health.status, 200);
+    assert.match(health.headers.get('content-type') ?? '', /application\/json/);
+    assert.deepEqual(await health.json(), { status: 'ok', build }, 'the health answer names the build');
+    assert.deepEqual(((await (await at(withBuild, '/api/session')).json()) as { build: unknown }).build, build, 'the session carries the same build');
+    assert.deepEqual(await (await at(without, '/healthz')).json(), { status: 'ok', build: null }, 'control: without a build it is named as unknown');
+    assert.equal(((await (await at(without, '/api/session')).json()) as { build: unknown }).build, null);
+  } finally {
+    await new Promise<void>((done) => withBuild.close(() => done()));
+    await new Promise<void>((done) => without.close(() => done()));
+  }
+});

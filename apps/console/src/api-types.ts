@@ -47,6 +47,8 @@ export interface SessionView {
   oidc: { issuer: string; clientId: string; scope: string } | null;
   /** Шаг 87 [Р-214]: профиль рынка развёртывания — языки интерфейса (один язык — без переключателя) и вкладка Omnibus */
   market: { profile: 'us' | 'eu' | 'global'; locales: Locale[]; omnibus: boolean };
+  /** Шаг 121 (QA-A): какой код работает — подвал страницы; тот же SHA называет /healthz. null — развёртывание сборку не назвало */
+  build: { sha: string; builtAt: string | null } | null;
 }
 
 /** Токен имитатора поставщика стенда */

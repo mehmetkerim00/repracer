@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ConfigError, credentialsFromFiles, intFromEnv, jsonSink, ProcessHealth, requiredValue, secretFromEnv, secretMode, serveHealth } from '../src/index.ts';
+import { buildInfoFromEnv, ConfigError, credentialsFromFiles, intFromEnv, jsonSink, ProcessHealth, requiredValue, secretFromEnv, secretMode, serveHealth } from '../src/index.ts';
 
 /** Общий слой процессов (OQ-190): проверяется поведение, на которое опираются развёртывания — секреты файлами, живость и метрики. */
 
@@ -66,6 +66,31 @@ test('OQ-190: /healthz answers 503 when the loop of the process stopped stepping
     assert.equal((await fetch(`${url}/nope`)).status, 404);
   } finally {
     await server.close();
+  }
+});
+
+/**
+ * Шаг 121 (QA-A, видимая версия сборки): процесс называет свою сборку в `/healthz` — тот же SHA, что видит человек в консоли; сборку
+ * задаёт развёртывание (`REPRACER_BUILD_SHA`, `REPRACER_BUILD_AT`). Кривая версия — отказ при старте, а не «неизвестно» молча
+ */
+test('step 121: /healthz names the build of the process; without a build it says nothing about it; a malformed build is a configuration error', async () => {
+  assert.equal(buildInfoFromEnv({}), null, 'no build given — no build named');
+  assert.deepEqual(buildInfoFromEnv({ REPRACER_BUILD_SHA: '39401c93e217014e90385e9e5e767c6a7fa3a0c8', REPRACER_BUILD_AT: '2026-11-11T10:00:00Z' }),
+    { sha: '39401c93e217014e90385e9e5e767c6a7fa3a0c8', builtAt: '2026-11-11T10:00:00.000Z' });
+  // Дерево с правками — так и называется: версия не выдаёт себя за чистую
+  assert.deepEqual(buildInfoFromEnv({ REPRACER_BUILD_SHA: '39401c9-dirty' }), { sha: '39401c9-dirty', builtAt: null });
+  assert.throws(() => buildInfoFromEnv({ REPRACER_BUILD_SHA: 'main' }), (e: unknown) => e instanceof ConfigError && /REPRACER_BUILD_SHA/.test((e as Error).message));
+  assert.throws(() => buildInfoFromEnv({ REPRACER_BUILD_SHA: '39401c9', REPRACER_BUILD_AT: 'yesterday' }), (e: unknown) => e instanceof ConfigError && /REPRACER_BUILD_AT/.test((e as Error).message));
+  const health = new ProcessHealth(() => 1_000_000);
+  health.alive();
+  const server = await serveHealth(health, { port: 0, prefix: 'repracer_test', staleAfterMs: 60_000, host: '127.0.0.1', build: { sha: '0123abc', builtAt: '2026-11-11T10:00:00.000Z' } });
+  const bare = await serveHealth(health, { port: 0, prefix: 'repracer_test', staleAfterMs: 60_000, host: '127.0.0.1', build: null });
+  try {
+    assert.equal(await (await fetch(`http://127.0.0.1:${server.port}/healthz`)).text(), 'ok\nbuild 0123abc 2026-11-11T10:00:00.000Z\n');
+    assert.equal(await (await fetch(`http://127.0.0.1:${bare.port}/healthz`)).text(), 'ok\n', 'control: without a build the answer is the old one');
+  } finally {
+    await server.close();
+    await bare.close();
   }
 });
 

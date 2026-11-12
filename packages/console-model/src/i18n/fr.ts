@@ -468,6 +468,8 @@ export const fr: Messages = {
       demoWorldDescriptionUs: 'Vendeur américain synthétique sur le simulateur de canaux : offres sur amazon.com, ebay.com et walmart.com, entrepôt à Newark, dans le Delaware.',
       /** Шаг 91 (вид преп-центра): лёгкий продавец рядом с главным демо — у него своё имя, описание общее */
       demoSellerDescription: 'Vendeur américain synthétique sur le simulateur de canaux : offres sur amazon.com et ebay.com, en mode fantôme.',
+      /** Шаг 121 (QA-A): подвал страницы — какой код работает; SHA короткий, полный — подсказкой */
+      build: (sha: string, when: string | null) => `Version ${sha}${when ? ` · ${when}` : ''}`,
       demoBadge: 'Démo', demoBanner: 'Espace de travail de démonstration : données synthétiques, parcours réel. Tous les montants sont fictifs.',
       languages: { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français' },
       // Шаг 100 (C): кнопка меню языков — глобус и код текущего; подпись для диктора — «Language: English»

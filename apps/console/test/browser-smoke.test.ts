@@ -81,6 +81,9 @@ let extendedApi: ReturnType<typeof createStandApi>;
 let currentApi: ReturnType<typeof createStandApi>;
 /** Шаг 100 (A): стенд, где у входящего ровно одно рабочее пространство */
 let soloApi: ReturnType<typeof createStandApi>;
+/** Шаг 121 (QA-A): стенд, который знает свою сборку, — подвал страницы называет её человеку */
+let buildApi: ReturnType<typeof createStandApi>;
+const SMOKE_BUILD = { sha: '0123abc', builtAt: '2026-11-11T10:00:00.000Z' };
 /** Шаг 107 [Р-232, Р-233]: своё пространство Amazon — продавцы с SellerId в снимке и рамки цены канала у двух предложений */
 let step107Api: ReturnType<typeof createStandApi>;
 let step109: { writeScopeId: string };
@@ -242,6 +245,7 @@ before(async () => {
   usApi = createStandApi(all, identity, { market: 'us', connect, people: STAND_PEOPLE });
   extendedApi = createStandApi(all, identity, { market: 'us', connect, extendedRoles: true, people: STAND_PEOPLE });
   soloApi = createStandApi([w0], identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
+  buildApi = createStandApi([w0], identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE, build: SMOKE_BUILD });
   // Шаг 107: мир Amazon стенда — своим каталогом и входом, как у теста консоли; профиль eu (витрина amazon.de)
   const amazon107 = await buildStandWorlds({ filter: (sc) => sc.id === SELLER107 });
   step107Api = createStandApi(amazon107, {
@@ -1571,6 +1575,40 @@ test('step 100 (A), step 111 [Р-237]: one workspace — straight into it after 
   await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
   await settled(b, 'a workspace of two');
   assert.equal(await b.evaluate<number>(listLinks), 1, 'with two workspaces the way back is there');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 121 (QA-A, видимая версия сборки): подвал каждой страницы — на входе и в рабочем пространстве — называет сборку, полный SHA в
+ * подсказке; так человек пишет в отчёте об ошибке, на какой версии он её видел. Без сборки подвала нет; телефон не прокручивается вбок
+ */
+test('step 121: the footer names the build on sign-in and inside a workspace, the full SHA as its title; none without a build; 375 keeps the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  const stamp = `(() => { const f = document.querySelector('footer.build-stamp'); return f ? { text: f.innerText.trim(), title: f.getAttribute('title') } : null; })()`;
+  currentApi = buildApi;
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.OWNER);
+      const atSignIn = await b.evaluate<{ text: string; title: string } | null>(stamp);
+      assert.match(atSignIn?.text ?? '', /^Build 0123abc · /, `${width}: the sign-in page names the build: ${JSON.stringify(atSignIn)}`);
+      assert.equal(atSignIn?.title, SMOKE_BUILD.sha, `${width}: the full SHA is the title`);
+      await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+      await waitFor(b, `location.hash.startsWith('#/w/')`, `${width}: into the workspace`);
+      await settled(b, `${width}: the workspace`);
+      assert.match((await b.evaluate<{ text: string } | null>(stamp))?.text ?? '', /^Build 0123abc · /, `${width}: the workspace names the build`);
+      assert.equal(await b.evaluate<boolean>(`document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth`), true, `${width}: no sideways scroll`);
+    }
+  } finally {
+    currentApi = euApi;
+  }
+  // Контроль: стенд без сборки подвала не показывает
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  assert.equal(await b.evaluate(stamp), null, 'control: no build — no footer');
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 

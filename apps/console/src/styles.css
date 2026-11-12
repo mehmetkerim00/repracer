@@ -1253,3 +1253,6 @@ p.notice.import-applied { background: var(--success-soft); color: var(--success)
 .clearance-state li { margin: var(--space-1) 0; }
 output.field-value { display: flex; align-items: center; min-height: var(--control-h); }
 .clearance-history { margin-top: var(--space-3); }
+
+/* Шаг 121 (QA-A): подвал страницы — версия сборки, тихо и мелко; переносится, а не выталкивает страницу вбок на телефоне */
+.build-stamp { font-size: var(--font-size-xs); color: var(--text-2); padding: var(--space-2) var(--space-4); text-align: center; overflow-wrap: anywhere; }

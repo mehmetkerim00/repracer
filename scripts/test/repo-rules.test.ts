@@ -415,7 +415,8 @@ test('Р-146: путь репозитория в развёртывании и �
    * с причиной — иначе правило либо краснеет на чистом клоне (так и случилось в CI шага 37: `apps/console/dist`
    * существовал только у того, кто собирал интерфейс), либо молча разрешает любой несуществующий путь.
    */
-  const BUILT = ['apps/console/dist'];
+  // Шаг 121: версия сборки сервера QA — её пишет deploy/qa/deploy.sh при выкладке (.gitignore)
+  const BUILT = ['apps/console/dist', 'deploy/qa/build.env'];
   /** Путь, названный текстом, обязан существовать — сам, как образец для оператора или как результат сборки */
   const resolves = (target: string) => existsSync(new URL(target, root)) || existsSync(new URL(`${target}.example`, root))
     || BUILT.some((b) => target === b || target.startsWith(`${b}/`));

@@ -586,6 +586,12 @@ export function App() {
                   />
                 )}
         </main>
+        {/* Шаг 121 (QA-A): подвал — какая сборка работает; так отчёт об ошибке называет версию. Полный SHA — подсказкой */}
+        {session.state === 'ready' && session.data.build ? (
+          <footer className="build-stamp" title={session.data.build.sha}>
+            {m.ui.app.build(session.data.build.sha.replace(/^([0-9a-f]{7})[0-9a-f]*/, '$1'), session.data.build.builtAt ? m.when(session.data.build.builtAt) : null)}
+          </footer>
+        ) : null}
       </div>
     </MessagesContext.Provider>
     </MarketContext.Provider>
