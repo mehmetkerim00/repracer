@@ -2,9 +2,13 @@
 # Шаг 121 (QA-A): сброс тестовых данных — база QA заново (scripts/qa-reset.sh внутри контейнера базы), процессы заново, демо сеет стенд при
 # подъёме. Страховка — ДО остановки чего-либо: на базе без стража P0-09 (repracer.live_writes) сброс отказывает, и работающий стенд не
 # трогается. После пересоздания страж ставится снова до того, как стенд подключится.
-#   deploy/qa/reset.sh [--first-time]        (около 3 минут; Мердан — `ssh … reset`, deploy/qa/ssh-gate.sh)
+#   deploy/qa/reset.sh [--first-time]        (около 6 минут; Мердан — `ssh … reset`, deploy/qa/ssh-gate.sh)
+#
+# Шаг 121.3: сброс переживает обрыв SSH — идёт в фоне под журналом (deploy/qa/state/reset.log), один за раз (deploy/qa/detach.sh);
+# этот вызов показывает журнал до конца и выходит кодом сброса. Повтор во время сброса показывает тот же журнал, а не запускает второй
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
+[ "${QA_RESET_DETACHED:-}" = 1 ] || exec "${here}/detach.sh" reset env QA_RESET_DETACHED=1 "${here}/reset.sh" "$@"
 C="${here}/compose.sh"
 DB=repracer_qa
 FIRST=()

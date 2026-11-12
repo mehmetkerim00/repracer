@@ -78,3 +78,5 @@ vendor/ebay/incoming/
 # Шаг 121 (QA-A): настройки и версия сборки сервера QA — локальные файлы, секреты — в каталоге вне репозитория
 deploy/qa/qa.env
 deploy/qa/build.env
+# Шаг 121.3: журнал, замок и итог фоновых работ QA (deploy/qa/detach.sh)
+deploy/qa/state/

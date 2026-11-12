@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -38,9 +38,17 @@ before(() => {
   psql(db, 'CREATE TABLE public.qa_marker (x int); INSERT INTO public.qa_marker VALUES (1)');
 });
 after(() => {
-  for (const name of [db, `${db}_new`]) if (exists(name)) psql('postgres', `DROP DATABASE ${name} WITH (FORCE)`);
+  for (const name of [db, `${db}_new`, `${db}_next`, `${db}_next_template`]) if (exists(name)) psql('postgres', `DROP DATABASE ${name} WITH (FORCE)`);
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
+
+/** Заглушка подготовки: пересоздаёт базу-аргумент из шаблона (настройки уровня базы при этом теряются, как у настоящей подготовки) */
+const preparer = (file: string, tail = '') => {
+  const path = join(dir, file);
+  writeFileSync(path, `#!/usr/bin/env bash\nset -euo pipefail\npsql -v ON_ERROR_STOP=1 -q -d postgres -c "DROP DATABASE IF EXISTS $1 WITH (FORCE)" -c "CREATE DATABASE $1 TEMPLATE ${template}"\n${tail}`, { mode: 0o755 });
+  return path;
+};
+const guardOf = (name: string) => psql(name, 'SELECT security.live_writes_forbidden()');
 
 test('step 121: the reset refuses a database that is not guarded by P0-09 — nothing is dropped', () => {
   const r = reset([db]);
@@ -73,4 +81,44 @@ test('step 121: a guarded database is rebuilt and guarded again before anything 
   assert.equal(psql(db, `SELECT count(*) FROM pg_tables WHERE tablename = 'qa_marker'`), '0', 'the database was rebuilt');
   assert.equal(psql(db, 'SELECT security.live_writes_forbidden()'), 't', 'the rebuilt database is guarded again');
   assert.equal(psql(db, `SELECT current_setting('repracer.region')`), 'US', 'the QA database is of the US region (the demo is an American seller)');
+});
+
+/**
+ * Шаг 121.3: сброс, убитый посреди сборки (обрыв SSH, kill -9, перезагрузка), не оставляет базу без стража, и повтор проходит.
+ * Подготовка-заглушка создаёт свою базу и засыпает — в этот момент весь сброс убивается вместе с ней
+ */
+test('step 121.3: a reset killed in the middle of the build never leaves the database unguarded, and the retry completes', async () => {
+  psql('postgres', `ALTER DATABASE ${db} SET repracer.live_writes = 'forbidden'`);
+  const marker = join(dir, 'building');
+  const slow = preparer('slow-prepare.sh', `touch ${marker}\nsleep 60\n`);
+  const child = spawn('bash', [script, db], { env: { ...env, QA_RESET_PREPARE: slow }, detached: true, stdio: 'ignore' });
+  const started = Date.now();
+  while (!existsSync(marker) && Date.now() - started < 30_000) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(existsSync(marker), 'the preparer started building');
+  process.kill(-child.pid!, 'SIGKILL');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(exists(db), 'the QA database is still there after the reset was killed mid-build');
+  assert.equal(guardOf(db), 't', 'the QA database is still guarded by P0-09 after the reset was killed mid-build');
+  const retry = reset([db], { QA_RESET_PREPARE: preparer('prepare.sh') });
+  assert.equal(retry.status, 0, `the retry after the killed reset runs: ${retry.stderr}`);
+  assert.equal(guardOf(db), 't', 'the database rebuilt by the retry is guarded');
+});
+
+test('step 121.3: a reset that died between dropping the old database and renaming the new one is completed by the retry, not refused', () => {
+  // Состояние после обрыва: старой базы нет, новая собрана и закрыта стражем
+  psql('postgres', `DROP DATABASE IF EXISTS ${db}_next WITH (FORCE)`);
+  psql('postgres', `CREATE DATABASE ${db}_next TEMPLATE ${template}`);
+  psql('postgres', `ALTER DATABASE ${db}_next SET repracer.live_writes = 'forbidden'`);
+  psql('postgres', `ALTER DATABASE ${db}_next SET repracer.region = 'US'`);
+  psql('postgres', `DROP DATABASE ${db} WITH (FORCE)`);
+  const check = reset([db], { QA_RESET_CHECK_ONLY: '1' });
+  assert.equal(check.status, 0, `the check before the retry passes: ${check.stderr}`);
+  // Доводится замена — подготовка не нужна: заглушка, которая падает, не должна быть вызвана
+  const failing = join(dir, 'never.sh');
+  writeFileSync(failing, '#!/usr/bin/env bash\necho "prepare must not run" >&2\nexit 9\n', { mode: 0o755 });
+  const r = reset([db], { QA_RESET_PREPARE: failing });
+  assert.equal(r.status, 0, `the retry completes the swap: ${r.stderr}`);
+  assert.ok(exists(db) && !exists(`${db}_next`), 'the built database took the QA name');
+  assert.equal(guardOf(db), 't', 'the QA database is guarded after the completed swap');
+  assert.equal(psql(db, `SELECT current_setting('repracer.region')`), 'US');
 });
