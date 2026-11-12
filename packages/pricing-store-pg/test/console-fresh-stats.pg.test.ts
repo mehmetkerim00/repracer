@@ -12,6 +12,10 @@ import { createIsolatedDatabase, requireEnv, type IsolatedDatabase } from './iso
  * новыми запросами — поэтому тест нарочно стирает статистику каталога и держит ВСЕ чтения консоли по каталогу: мир страницы, страницу
  * каталога, факты каталога и каталог целиком. Положительный контроль — прежний свободный запрос страницы при той же статистике упирается
  * в предел времени: ловушка взведена, и быстрые чтения быстры не потому, что она пуста.
+ *
+ * Шаг 121.2: без статистики планировщик оценивает строки по фактическим страницам таблиц, и контроль взводился не на каждом раннере —
+ * мёртвые версии строк после посева раздували таблицы, и план свободного запроса становился быстрым (четыре красных CI). Тест оставляет
+ * худший случай всегда и переписывает таблицы `VACUUM FULL` до стирания статистики: план один и тот же на любом раннере.
  */
 const TENANT = '10000000-0000-4000-8000-000000000367';
 const ACCOUNT = '20000000-0000-4000-8000-000000000367';
@@ -21,6 +25,7 @@ const CATALOG_TABLES = ['tenant_data.offer_mapping', 'tenant_data.write_scope', 
 let db: IsolatedDatabase;
 let world: SeededPricingWorld;
 let su: PgPool;
+let suUrl = '';
 let store: PgPricingStore;
 
 const scope = (n: number): MemorySeedScope => ({
@@ -31,20 +36,53 @@ const scope = (n: number): MemorySeedScope => ({
 before(async () => {
   db = await createIsolatedDatabase('freshstats');
   const url = new URL(requireEnv('REPRACER_PG_ADMIN_URL')); url.pathname = `/${db.name}`;
-  su = createPool(url.toString(), { max: 1, applicationName: 'repracer-fresh-stats' });
+  suUrl = url.toString();
+  su = createPool(suUrl, { max: 1, applicationName: 'repracer-fresh-stats' });
   const admin = db.pool('svc_admin', 3);
   world = await seedPricingWorld(db.pool('svc_app', 4), {
     provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin, fixtureTenantId: TENANT, fixtureChannelAccountId: ACCOUNT,
     marketplaces: ['de'], clock: new Date().toISOString(), seed: { scopes: Array.from({ length: UNITS }, (_, i) => scope(i + 1)) },
   });
   store = new PgPricingStore(db.pool('svc_app', 2), { adminPool: admin });
-  // Статистика — как у свежей базы: стёрта и не появится сама (автоанализ этих таблиц выключен в одноразовой базе)
+  for (const t of CATALOG_TABLES) await su.query(`ALTER TABLE ${t} SET (autovacuum_enabled = false)`);
+  await leaveDeadVersions();
   for (const t of CATALOG_TABLES) {
-    await su.query(`ALTER TABLE ${t} SET (autovacuum_enabled = false)`);
-    await su.query(`DELETE FROM pg_catalog.pg_statistic WHERE starelid = '${t}'::regclass`);
-    await su.query(`UPDATE pg_catalog.pg_class SET reltuples = -1, relpages = 0 WHERE oid = '${t}'::regclass`);
+    // Шаг 121.2: таблица переписывается заново — планировщик видит одни и те же страницы на любом раннере, сколько бы мёртвых версий ни
+    // оставил посев. Затем статистика — как у свежей базы: стёрта и не появится сама (автоанализ этих таблиц выключен), у индексов тоже
+    await su.query(`VACUUM FULL ${t}`);
+    const relations = `oid = '${t}'::regclass OR oid IN (SELECT indexrelid FROM pg_catalog.pg_index WHERE indrelid = '${t}'::regclass)`;
+    await su.query(`DELETE FROM pg_catalog.pg_statistic WHERE starelid IN (SELECT oid FROM pg_catalog.pg_class WHERE ${relations})`);
+    await su.query(`UPDATE pg_catalog.pg_class SET reltuples = -1, relpages = 0, relallvisible = 0 WHERE ${relations}`);
   }
 });
+
+/**
+ * Шаг 121.2: худший раннер — каждый раз. Посев оставляет мёртвые версии строк, а сколько их уберёт очистка до стирания статистики,
+ * зависит от загрузки раннера. Без статистики планировщик считает строки по ФАКТИЧЕСКОМУ числу страниц: у таблиц втрое больше по
+ * страницам он ведёт соединение от `write_scope` по индексу с `ANY(ids)`, и свободный запрос контроля заканчивается за 0,0 с (EXPLAIN,
+ * docs/evidence/step121.2-trap-control.md). Здесь эти версии оставляются всегда: три лишних на строку, пока открыт снимок, — очистка
+ * их не тронет
+ */
+async function leaveDeadVersions() {
+  const holder = await su.connect();
+  try {
+    await holder.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    await holder.query('SELECT count(*) FROM tenant_data.product');
+    const extra = createPool(suUrl, { max: 1, applicationName: 'repracer-fresh-stats-bloat' });
+    try {
+      for (let round = 0; round < 3; round++) {
+        for (const t of CATALOG_TABLES) {
+          await extra.query(`BEGIN; SET LOCAL session_replication_role = replica; UPDATE ${t} SET tenant_id = tenant_id; COMMIT`);
+        }
+      }
+    } finally {
+      await extra.end();
+    }
+  } finally {
+    await holder.query('ROLLBACK').catch(() => undefined);
+    holder.release();
+  }
+}
 
 after(async () => {
   await su?.end();
@@ -69,15 +107,20 @@ test('step 67 (Р-146): with no catalog statistics, every console read over the 
     await client.query('SET LOCAL ROLE svc_admin');
     await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenant]);
     await client.query(`SET LOCAL statement_timeout = '5s'`);
-    const started = performance.now();
-    const control = await client.query(
-      `SELECT count(*) FROM tenant_data.offer_mapping m
+    const oldPageQuery = `SELECT count(*) FROM tenant_data.offer_mapping m
          JOIN tenant_data.write_scope s ON s.tenant_id = m.tenant_id AND s.write_scope_id = m.price_write_scope_id AND s.field = 'PRICE' AND s.status <> 'RETIRED'
          JOIN tenant_data.product p ON p.tenant_id = s.tenant_id AND p.product_id = s.product_id
          JOIN tenant_data.write_scope_sync_state ss ON ss.tenant_id = s.tenant_id AND ss.write_scope_id = s.write_scope_id
-        WHERE m.tenant_id = $1 AND m.status <> 'ENDED' AND s.write_scope_id = ANY ($2::uuid[])`, [tenant, ids]).then(() => 'finished', (e: { code?: string }) => e.code ?? 'error');
+        WHERE m.tenant_id = $1 AND m.status <> 'ENDED' AND s.write_scope_id = ANY ($2::uuid[])`;
+    // Шаг 121.2: план и размеры таблиц — в сообщении, чтобы невзведённую ловушку можно было разобрать по журналу CI
+    const plan = (await client.query(`EXPLAIN ${oldPageQuery}`, [tenant, ids])).rows
+      .map((r) => String(r['QUERY PLAN'])).filter((l) => /Scan|Join|Loop/.test(l)).map((l) => l.replace(/'\{[^}]*\}'/, "'{…}'").trim()).join(' | ');
+    const started = performance.now();
+    const control = await client.query(oldPageQuery, [tenant, ids]).then(() => 'finished', (e: { code?: string }) => e.code ?? 'error');
     controlSeconds = (performance.now() - started) / 1000;
-    assert.equal(control, '57014', `the trap is set: the free plan of the old page query runs into the time limit (${controlSeconds.toFixed(1)} s)`);
+    const pages = control === '57014' ? '' : (await client.query(`SELECT string_agg(relname || '=' || pg_relation_size(oid) / 8192, ' ' ORDER BY relname) AS p FROM pg_class
+      WHERE oid = ANY (ARRAY[${CATALOG_TABLES.map((t) => `'${t}'::regclass`).join(', ')}])`)).rows[0].p;
+    assert.equal(control, '57014', `the trap is set: the free plan of the old page query runs into the time limit (${controlSeconds.toFixed(1)} s; pages ${pages}; plan ${plan})`);
   } finally {
     await client.query('ROLLBACK').catch(() => undefined);
     client.release();
