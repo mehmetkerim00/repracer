@@ -23,8 +23,8 @@ after(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-const run = (name: string, command: string[]) => {
-  const child = spawn('bash', [script, name, ...command], { env: { PATH: process.env.PATH ?? '', QA_STATE_DIR: state }, stdio: ['ignore', 'pipe', 'pipe'] });
+const run = (name: string, command: string[], extra: Record<string, string> = {}) => {
+  const child = spawn('bash', [script, name, ...command], { env: { PATH: process.env.PATH ?? '', QA_STATE_DIR: state, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => { out += String(d); });
   child.stderr.on('data', (d) => { out += String(d); });
@@ -66,6 +66,19 @@ test('step 121.3: a second call while the work runs attaches to it instead of st
 test('step 121.3: the caller ends with the exit code of the work', async () => {
   const a = run('job3', ['bash', '-c', 'echo failing; exit 7']);
   assert.equal(await a.done, 7, a.out());
+});
+
+/**
+ * Шаг 121.4: показ журнала не молчит. Пока стенд поднимается, журнал минутами не растёт, и промежуточные звенья (NAT, VPN) режут «тихое»
+ * соединение; пульс «идёт, N с» раз в интервал (30 с, в тесте — 1 с) держит его живым. Пульс — только в показе, журнал работы чист
+ */
+test('step 121.4: while the work is silent the caller prints a pulse with the seconds the work has run, and the log of the work stays clean', async () => {
+  const a = run('job5', ['bash', '-c', 'echo started; sleep 4; echo finished'], { QA_DETACH_PULSE_SECONDS: '1' });
+  assert.equal(await a.done, 0, a.out());
+  const pulses = [...a.out().matchAll(/== job5: идёт, (\d+) с/g)].map((m) => Number(m[1]));
+  assert.ok(pulses.length >= 2, `the caller printed a pulse at least twice during 4 silent seconds: ${a.out()}`);
+  assert.ok(pulses.every((n, i) => i === 0 || n > pulses[i - 1]!), `the seconds grow from pulse to pulse: ${pulses.join(', ')}`);
+  assert.doesNotMatch(readFileSync(join(state, 'job5.log'), 'utf8'), /идёт, \d+ с/, 'the pulse is not written into the log of the work');
 });
 
 test('step 121.3: a lock left by a killed work does not block the next run', async () => {
