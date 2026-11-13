@@ -293,6 +293,11 @@ export interface DiscoveryCatalogNote {
 export interface DiscoveryPage extends Page<DiscoveredOffer> {
   notBefore?: Instant;
   catalogs?: DiscoveryCatalogNote[];
+  /**
+   * Шаг 122 (П7, A-39): SKU, которые назвал отчёт каталога, а поиск подробностей на этой странице не вернул (листинг снят между отчётом и поиском, предложения
+   * нет). В каталог круга они не попадают; ядро записывает их у источника витрины — продавец видит их на экране Channels, а не только журнал процесса
+   */
+  reportSkusNotFound?: { marketplace: string; skus: string[] };
 }
 
 export interface DiscoveredOffer {

@@ -525,3 +525,55 @@ test('ревью шага 47, находка 5: пересчёт по распи
   outcomes.push({ scopes: 0, changed: 0, failed: 0, firstError: null });
   assert.deepEqual(await run(), { items: 0 }, 'должных нет — пустой успешный запуск');
 });
+
+/**
+ * Шаг 122 (П2, аудит авторизации Amazon): круг обнаружения, который заход не закрыл (отчёт ещё готовится, каталог больше захода), продолжается
+ * не через час, а по лестнице от возраста круга. Планировщик принимает от работы «продолжить раньше»: следующий срок — конец запуска плюс пауза,
+ * но не позже обычного срока. Провал паузу не укорачивает, EVERY_SLOT-работа её не принимает (её слоты — сутки истории)
+ */
+test('step 122 (П2): a run may ask to continue sooner — the next run is the end of this one plus the pause, never later than its period', async () => {
+  const c = clock('2026-11-14T10:00:00.000Z');
+  const state = new MemorySchedulerState(c.now);
+  let ask: number | undefined = 300;
+  const job = spec({ name: 'circle', intervalSeconds: 3_600, run: async () => { c.advance(20_000); return { items: 1, ...(ask === undefined ? {} : { continueAfterSeconds: ask }) }; } });
+  const s = createScheduler({ state, source: { jobs: async () => [job] }, owner: 'a', now: c.now, alerts: sink() });
+  const first = await s.tick();
+  assert.equal((await state.list())[0]!.nextDueAt, '2026-11-14T10:05:20.000Z', 'the run ended at 10:00:20 and asked for five minutes');
+  assert.equal(first.nextDueAt, '2026-11-14T10:05:20.000Z', 'the process wakes for the continuation, not for the next period');
+  c.set('2026-11-14T10:05:20.000Z');
+  ask = 7_200;
+  await s.tick();
+  assert.equal((await state.list())[0]!.nextDueAt, '2026-11-14T11:05:20.000Z', 'a pause longer than the period does not delay the job: the period wins');
+  c.set('2026-11-14T11:05:20.000Z');
+  ask = undefined;
+  await s.tick();
+  assert.equal((await state.list())[0]!.nextDueAt, '2026-11-14T12:05:20.000Z', 'without the ask — the period, as before');
+  const daily = spec({ name: 'daily', intervalSeconds: 86_400, catchUp: 'EVERY_SLOT', firstDueAt: () => '2026-11-14T00:30:00.000Z',
+    run: async () => ({ items: 1, continueAfterSeconds: 60 }) });
+  const d = new MemorySchedulerState(c.now);
+  await createScheduler({ state: d, source: { jobs: async () => [daily] }, owner: 'a', now: c.now, alerts: sink() }).tick();
+  assert.equal((await d.list())[0]!.nextDueAt, '2026-11-15T00:30:00.000Z', 'an every-slot job keeps its slots: a day of history is a day');
+});
+
+/** Шаг 122 (П2): работа обнаружения — лестница пауз от возраста незакрытого круга; квота приложения и закрытый круг — обычный час */
+test('step 122 (П2): offer discovery continues an unfinished circle by a ladder of 5, 10, 20 and 40 minutes from the age of the circle, then hourly', async () => {
+  const results: Array<{ stop: string; circleStartedAt: string | null }> = [];
+  const deps: JobDeps = { ...jobDeps(), pipelineFor: () => ({
+    discoverOffers: async () => ({ offers: 7, recorded: 0, catalogued: 7, withChannelPricing: [], resumed: true, ...results.shift()! }),
+  }) as never };
+  const job = (await jobSource(deps).jobs('2026-11-14T10:00:00.000Z')).find((s) => s.name === 'offer-discovery' && s.scope?.channelAccountId === '20000000-0000-4000-8000-000000000002')!;
+  const run = async (stop: string, ageMinutes: number | null) => {
+    results.push({ stop, circleStartedAt: ageMinutes === null ? null : new Date(Date.parse('2026-11-14T12:00:00.000Z') - ageMinutes * 60_000).toISOString() });
+    return (await job.run({ now: '2026-11-14T12:00:00.000Z', startedAt: '2026-11-14T12:00:00.000Z', slotAt: '2026-11-14T12:00:00.000Z', runIndex: 0, previousSucceededAt: null } as never)) as { items: number; continueAfterSeconds?: number };
+  };
+  // Отчёт готовится: первый заход прождал срок — следующий через 5 минут, а не через час
+  assert.deepEqual(await run('DEADLINE', 25), { items: 7, continueAfterSeconds: 300 });
+  assert.equal((await run('DEADLINE', 45)).continueAfterSeconds, 600);
+  assert.equal((await run('PAGE_LIMIT', 90)).continueAfterSeconds, 1_200);
+  assert.equal((await run('DEADLINE', 200)).continueAfterSeconds, 2_400);
+  assert.equal((await run('DEADLINE', 300)).continueAfterSeconds, undefined, 'a circle open four hours and more goes on hourly');
+  assert.equal((await run('DEADLINE', null)).continueAfterSeconds, 300, 'a circle without a recorded start counts as new');
+  assert.equal((await run('APP_QUOTA', 25)).continueAfterSeconds, undefined, 'the daily app quota is not refilled sooner — hourly, as before');
+  assert.equal((await run('COMPLETED', 25)).continueAfterSeconds, undefined, 'a closed circle — the next one starts on its own schedule');
+  assert.equal((await run('NOT_DUE', null)).continueAfterSeconds, undefined);
+});

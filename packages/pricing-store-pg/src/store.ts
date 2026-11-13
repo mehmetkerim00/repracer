@@ -2334,6 +2334,13 @@ export class PgPricingStore implements PricingStore {
       [tenantId, channelAccountId, note.marketplace, note.source, note.listed, note.fallbackReason, note.mayBeIncomplete, note.observedAt]));
   }
 
+  /** Шаг 122 (П7, 0227): SKU отчёта, которых поиск не вернул, — функцией узкой роли обнаружения; число и первые 20 — у источника витрины */
+  async recordDiscoveryNotFound(tenantId: string, channelAccountId: string, entry: { marketplace: string; skus: readonly string[] }): Promise<void> {
+    if (entry.skus.length === 0) return;
+    await this.tx(tenantId, (tx) => tx.query('SELECT tenant_data.record_discovery_not_found($1, $2, $3, $4::text[])',
+      [tenantId, channelAccountId, entry.marketplace, [...entry.skus]]));
+  }
+
   /** Шаг 55 (0148, OQ-240): вызов из суточной квоты приложения — счётчик общий для всех процессов, поэтому в базе */
   async reserveAppCall(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean> {
     const { rows: [r] } = await this.pool.query('SELECT platform.reserve_channel_app_call($1, $2, $3, $4) AS granted', [channel, quota, dayLimit, at]);

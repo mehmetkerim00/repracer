@@ -173,8 +173,8 @@ test('step 56–57 (Р-198): the connection says how long the discovery circle r
 test('step 117 (P0-16): Channels names the catalog source of each storefront — the report, or search that may see only part of the catalog', () => {
   const at = '2026-11-07T10:00:00.000Z' as never;
   const sources: ConnectionRow['catalogSources'] = [
-    { marketplace: 'A1PA6795UKMFR9', source: 'REPORT', listed: 2500, fallbackReason: null, mayBeIncomplete: false, observedAt: at },
-    { marketplace: 'ATVPDKIKX0DER', source: 'SEARCH', listed: 2500, fallbackReason: 'REPORT_REFUSED', mayBeIncomplete: true, observedAt: at },
+    { marketplace: 'A1PA6795UKMFR9', source: 'REPORT', listed: 2500, fallbackReason: null, mayBeIncomplete: false, observedAt: at, notFound: 0, notFoundSample: [] },
+    { marketplace: 'ATVPDKIKX0DER', source: 'SEARCH', listed: 2500, fallbackReason: 'REPORT_REFUSED', mayBeIncomplete: true, observedAt: at, notFound: 0, notFoundSample: [] },
   ];
   for (const locale of ['en', 'de', 'es', 'fr'] as const) {
     const m = messagesFor(locale);
@@ -187,6 +187,29 @@ test('step 117 (P0-16): Channels names the catalog source of each storefront —
   const en = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ catalogSources: sources.slice(1) })], pending: [] }, [], messagesFor('en')).accounts[0]!;
   assert.match(en.catalogTexts[0]!.text, /read by search.*Amazon counts 2500 offers — search stops at 1,000 offers, so the catalog may be visible only in part\.$/);
   assert.deepEqual(connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({})], pending: [] }, [], messagesFor('en')).accounts[0]!.catalogTexts, [], 'no circle yet — nothing to say');
+});
+
+/**
+ * Шаг 122 (П7, A-39): SKU отчёта, которых поиск подробностей не вернул, — не только журнал процесса: Channels называет их число и сами SKU (первые 20, остальные —
+ * числом) и помечает каталог витрины пилюлей «может быть неполным». На каждом языке; без пропусков — прежняя строка без пилюли
+ */
+test('step 122 (П7): Channels names the report SKUs the detail search did not return — how many, which, and the catalog as possibly incomplete', () => {
+  const at = '2026-11-14T10:00:00.000Z' as never;
+  const sample = Array.from({ length: 20 }, (_, i) => `SYN-GONE-${String(i).padStart(3, '0')}`);
+  const sources: ConnectionRow['catalogSources'] = [
+    { marketplace: 'ATVPDKIKX0DER', source: 'REPORT', listed: 2500, fallbackReason: null, mayBeIncomplete: false, observedAt: at, notFound: 23, notFoundSample: sample },
+  ];
+  for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(locale);
+    const [text] = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ marketplaces: ['ATVPDKIKX0DER'], catalogSources: sources })], pending: [] }, [], m).accounts[0]!.catalogTexts;
+    assert.equal(text!.incomplete, true, `${locale}: SKUs missing from this circle — the catalog may be incomplete`);
+    assert.ok(text!.text.includes('23') && text!.text.includes('SYN-GONE-000') && text!.text.includes('SYN-GONE-019') && text!.text.includes('3'),
+      `${locale}: the count, the named SKUs and how many more: ${text!.text}`);
+  }
+  const en = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ marketplaces: ['ATVPDKIKX0DER'], catalogSources: sources })], pending: [] }, [], messagesFor('en')).accounts[0]!.catalogTexts[0]!;
+  assert.match(en.text, /Not found when we asked Amazon for details, so not in the catalog this circle: 23 — SYN-GONE-000, .*SYN-GONE-019 and 3 more\.$/);
+  const clean = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, { accounts: [row({ catalogSources: [{ ...sources[0]!, notFound: 0, notFoundSample: [] }] })], pending: [] }, [], messagesFor('en')).accounts[0]!.catalogTexts[0]!;
+  assert.deepEqual([clean.incomplete, /Not found/.test(clean.text)], [false, false], 'nothing missing — the report line as before');
 });
 
 test('шаг 60 [Р-202]: вопрос о других инструментах, запись количества по подтверждению владельца и внешние правки — словами на обоих языках', () => {

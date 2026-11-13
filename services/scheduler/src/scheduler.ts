@@ -45,7 +45,11 @@ export interface JobSpec {
   lagWarningSeconds: number;
   lagCriticalSeconds: number;
   leaseSeconds: number;
-  run(ctx: JobRunContext): Promise<{ items: number; alerts?: Array<{ code: string; severity: 'WARNING' | 'CRITICAL'; details: Record<string, string | number | boolean | null> }> }>;
+  /**
+   * Шаг 122 (П2): `continueAfterSeconds` — работа не закончила своё (круг обнаружения ждёт отчёт канала или длиннее захода) и просит продолжить
+   * раньше периода. Следующий срок — конец запуска плюс пауза, но не позже обычного; только у LATEST-работы и только после успеха
+   */
+  run(ctx: JobRunContext): Promise<{ items: number; continueAfterSeconds?: number; alerts?: Array<{ code: string; severity: 'WARNING' | 'CRITICAL'; details: Record<string, string | number | boolean | null> }> }>;
 }
 
 export interface JobSource {
@@ -151,11 +155,13 @@ export function createScheduler(options: SchedulerOptions) {
     let items: number | null = null;
     let errorCode: string | null = null;
     let error: string | null = null;
+    let continueAfterSeconds: number | undefined;
     // Долгий запуск продлевает аренду каждую треть её срока: второй процесс не начнёт ту же работу (ревью шага 25, находка 6)
     const heartbeat = setInterval(() => { void state.renew(claimed.jobKey, owner, spec.leaseSeconds).catch(() => false); }, Math.max(200, (spec.leaseSeconds * 1000) / 3));
     try {
       const r = await spec.run({ slotAt: claimed.nextDueAt, now, runIndex: claimed.runsCompleted, scope: spec.scope, startedAt, previousFinishedAt: claimed.lastFinishedAt, previousSucceededAt: claimed.lastSucceededAt, consecutiveFailures: claimed.consecutiveFailures });
       items = r.items;
+      continueAfterSeconds = r.continueAfterSeconds;
       for (const a of r.alerts ?? []) await alerts.raise({ ...a, details: { job: claimed.jobKey, ...a.details } });
     } catch (e) {
       outcome = 'FAILED';
@@ -166,11 +172,15 @@ export function createScheduler(options: SchedulerOptions) {
       clearInterval(heartbeat);
     }
     const finishedAt = await clock();
-    const next = outcome === 'SUCCEEDED'
+    const regular = outcome === 'SUCCEEDED'
       ? spec.catchUp === 'EVERY_SLOT'
         ? { nextDueAt: new Date(Date.parse(claimed.nextDueAt) + spec.intervalSeconds * 1000).toISOString(), coalesced: 0 }
         : spaced(nextSlotAfter(claimed.nextDueAt, now, spec.intervalSeconds), startedAt, spec.intervalSeconds)
       : { nextDueAt: claimed.nextDueAt, coalesced: 0 };
+    // Шаг 122 (П2): продолжение раньше периода — только у LATEST после успеха; позже обычного срока оно работу не отодвигает
+    const sooner = outcome === 'SUCCEEDED' && spec.catchUp === 'LATEST' && continueAfterSeconds !== undefined && continueAfterSeconds > 0
+      ? Date.parse(finishedAt) + continueAfterSeconds * 1000 : null;
+    const next = sooner !== null && sooner < Date.parse(regular.nextDueAt) ? { nextDueAt: new Date(sooner).toISOString(), coalesced: regular.coalesced } : regular;
     const run: RunRecord = {
       jobKey: claimed.jobKey, jobName: spec.name, slotAt: claimed.nextDueAt, owner, startedAt, finishedAt, outcome,
       lagSeconds: Math.max(0, (Date.parse(startedAt) - Date.parse(claimed.nextDueAt)) / 1000), items, errorCode,

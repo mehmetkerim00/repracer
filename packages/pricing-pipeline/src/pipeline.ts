@@ -1232,6 +1232,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
       circleEveryMs?: number } = {}): Promise<{
       offers: number; recorded: number; catalogued: number; withChannelPricing: Array<{ marketplace: string; externalSku: string; automatedPricing: boolean; channelBounds: boolean }>;
       stop: DiscoveryStop | 'NOT_DUE'; resumed: boolean; externalEdits?: number;
+      /** Шаг 122 (П2): когда начат круг, которому принадлежит заход — работа продолжает незакрытый круг по лестнице от его возраста */
+      circleStartedAt?: Instant | null;
     }> {
       /**
        * Шаг 55 (OQ-240; ревью шага 54, находка 9): обход — КРУГ. Заход продолжает с курсора, на котором остановился прошлый, и останавливается
@@ -1248,6 +1250,8 @@ export function createPricingPipeline(deps: PipelineDeps) {
           && Date.parse(deps.now()) - Date.parse(state.lastCircleCompletedAt) < options.circleEveryMs) {
         return { offers: 0, recorded: 0, catalogued: 0, withChannelPricing: [], stop: 'NOT_DUE', resumed: false };
       }
+      // Шаг 122 (П2): продолжение — круг начат раньше (момент знает хранилище круга); иначе этот заход и начинает круг
+      const circleStartedAt: Instant | null = startedFrom !== null ? (state?.circleStartedAt ?? null) : runStartedAt;
       let cursor: string | undefined = startedFrom ?? undefined;
       let offers = 0;
       // Шаг 60 [Р-202]: новых внешних правок за заход — видно числом на экране подключений (сутки), здесь — в ответе захода
@@ -1291,6 +1295,10 @@ export function createPricingPipeline(deps: PipelineDeps) {
             await emit(ctx, [{ kind: 'alert', code: 'AMAZON_CATALOG_MAY_BE_INCOMPLETE', severity: 'WARNING',
               details: { marketplace: note.marketplace, found: note.listed, reason: note.fallbackReason } }]);
           }
+        }
+        // Шаг 122 (П7, A-39): SKU отчёта, которых поиск не вернул, — у источника витрины (экран Channels), а не только в журнале процесса
+        if (result.reportSkusNotFound && result.reportSkusNotFound.skus.length > 0) {
+          await store.recordDiscoveryNotFound?.(ctx.tenantId, ctx.channelAccountId, result.reportSkusNotFound);
         }
         const observations = result.items.flatMap((o) => (o.channelPricing && o.identity.externalSku && o.identity.marketplace
           ? [{ marketplace: o.identity.marketplace, externalSku: o.identity.externalSku, ...o.channelPricing, source: 'DISCOVERY' as const, observedAt: deps.now() }]
@@ -1381,7 +1389,7 @@ export function createPricingPipeline(deps: PipelineDeps) {
       if (withChannelPricing.length > 0) {
         await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);
       }
-      return { offers, recorded, catalogued, withChannelPricing, stop: stop!, resumed: startedFrom !== null, externalEdits };
+      return { offers, recorded, catalogued, withChannelPricing, stop: stop!, resumed: startedFrom !== null, externalEdits, circleStartedAt };
     },
 
     /** Р-118: снятие остановки по недоверию каналу — только человек; права, второй фактор и заметку проверяют хранилище и БД */

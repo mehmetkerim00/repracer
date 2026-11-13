@@ -986,6 +986,7 @@ export const de: Messages = {
       catalog: {
         incompletePill: 'möglicherweise unvollständig',
         report: (store: string, n: number, when: string) => `${store}: Der Katalog stammt aus dem Katalogbericht von Amazon — ${n} Angebote, gelesen ${when}.`,
+        notFound: (n: number, skus: readonly string[], more: number) => ` Bei der Abfrage der Details bei Amazon nicht gefunden, daher in diesem Durchlauf nicht im Katalog: ${n} — ${skus.join(', ')}${more > 0 ? ` und ${more} weitere` : ''}.`,
         search: (store: string, n: number | null, when: string, incomplete: boolean) => `${store}: Amazon hat uns den Katalogbericht nicht geliefert, daher wurde der Katalog über die Suche gelesen, ${when}${n === null ? '' : `; Amazon zählt ${n} Angebote`}${incomplete ? ' — die Suche endet bei 1.000 Angeboten, der Katalog ist daher möglicherweise nur teilweise sichtbar' : ''}.`,
       },
       authorization: {

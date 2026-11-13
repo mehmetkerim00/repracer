@@ -359,3 +359,45 @@ test('step 106 (A-31): the search model pages through at most 1000 SKUs and stil
   assert.equal(JSON.stringify([body.numberOfResults, body.items.length, body.pagination.nextToken ?? null]), JSON.stringify([1200, 20, null]),
     'numberOfResults says 1200 found; the page that reaches 1000 has no next token');
 });
+
+/**
+ * Шаг 122 (П7, аудит авторизации Amazon): SKU, которые назвал отчёт листингов, а поиск по SKU не вернул (A-39: листинг снят между отчётом и поиском, предложения нет),
+ * в каталог этого круга не попадают — и адаптер называет их на странице, а не только числом в журнале процесса: продавец увидит их на экране Channels
+ */
+test('step 122 (П7, A-39): SKUs the report names and the detail search does not return come back with the page, by name', async () => {
+  const { channelFetch, amazonRequestChecker } = await import('./harness/channel.ts');
+  const { VirtualClock, worldDependencies } = await import('./harness/world.ts');
+  const { SimulatedAmazonChannel } = await import('./simulator/amazon-channel.ts');
+  const { neverWrittenAttributes } = await import('@repracer/channel-port');
+  const offers = Array.from({ length: 45 }, (_, i) => ({ sku: `SYN-SKU-GONE-${String(i).padStart(3, '0')}`, asin: `B0SYNG${String(i).padStart(4, '0')}`, marketplaces: [DE], priceMinor: 1000 + i, quantity: 1 }));
+  const w = world({ seed: 122, offers });
+  const clock = new VirtualClock(w.clock);
+  const violations: string[] = [];
+  const model = new SimulatedAmazonChannel(w.channelModel as AmazonChannelModelSpec, w.clock, ACCESS_TOKEN);
+  const adapter = amazonUnderTest({ deps: worldDependencies(w, clock, { logs: [], alerts: [] }), world: w, clock,
+    fetch: channelFetch(model, amazonRequestChecker(w, clock, neverWrittenAttributes('AMAZON')), clock, violations, []) });
+  const ctx = { tenantId: w.tenantId, channelAccountId: w.channelAccountId, correlationId: 'step122-gone', deadline: new Date(clock.nowMs() + 3_600_000).toISOString() } as never;
+  const skus: string[] = [];
+  const notFound: Array<{ marketplace: string; skus: string[] }> = [];
+  let cursor: string | undefined;
+  let removed = false;
+  for (let pages = 0; pages < 50; pages++) {
+    const p = await adapter.discoverOffers(ctx, { limit: 20, ...(cursor ? { cursor } : {}) });
+    skus.push(...p.items.map((o) => o.identity.externalSku!));
+    if (p.reportSkusNotFound) notFound.push(p.reportSkusNotFound);
+    // Отчёт заказан — три листинга снимаются до поиска подробностей (A-39)
+    if (!removed) {
+      const map = (model as unknown as { offers: Map<string, unknown> }).offers;
+      for (const i of [3, 21, 44]) map.delete(`${DE}|SYN-SKU-GONE-${String(i).padStart(3, '0')}`);
+      removed = true;
+    }
+    if (!p.nextCursor) break;
+    cursor = p.nextCursor;
+    clock.advance(p.notBefore ? Date.parse(p.notBefore) - clock.nowMs() + 1_000 : 1_000);
+  }
+  assert.equal(skus.length, 42, 'the three removed listings are not offers of this circle');
+  assert.deepEqual(notFound, [
+    { marketplace: DE, skus: ['SYN-SKU-GONE-003'] }, { marketplace: DE, skus: ['SYN-SKU-GONE-021'] }, { marketplace: DE, skus: ['SYN-SKU-GONE-044'] },
+  ], 'each page names the SKUs of its portion the search did not return');
+  assert.deepEqual(violations, []);
+});

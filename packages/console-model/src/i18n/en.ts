@@ -1028,6 +1028,8 @@ export const en = {
       catalog: {
         incompletePill: 'may be incomplete',
         report: (store: string, n: number, when: string) => `${store}: the catalog comes from Amazon's catalog report — ${n} offers, read ${when}.`,
+        // Шаг 122 (П7, A-39): SKU отчёта, которых поиск подробностей не вернул — число, первые 20 по имени, остальные числом
+        notFound: (n: number, skus: readonly string[], more: number) => ` Not found when we asked Amazon for details, so not in the catalog this circle: ${n} — ${skus.join(', ')}${more > 0 ? ` and ${more} more` : ''}.`,
         search: (store: string, n: number | null, when: string, incomplete: boolean) => `${store}: Amazon did not give us its catalog report, so the catalog was read by search, ${when}${n === null ? '' : `; Amazon counts ${n} offers`}${incomplete ? ' — search stops at 1,000 offers, so the catalog may be visible only in part' : ''}.`,
       },
       authorization: {

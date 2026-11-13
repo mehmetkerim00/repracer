@@ -99,7 +99,8 @@
   - в базе — записи аккаунта (`channel_write`).
 - **Успех:**
   - аккаунт в тени, «нашли N офферов», где N — число листингов amazon.com в Seller Central;
-  - на Channels — «amazon.com: the catalog comes from Amazon's catalog report — N offers»; в журнале AMZ_C16 `PARSED` без пропущенных строк;
+  - на Channels — «amazon.com: the catalog comes from Amazon's catalog report — N offers»; в журнале AMZ_C16 `PARSED` без пропущенных строк; строки «Not found
+    when we asked Amazon for details…» нет, а если есть — названные SKU сверены с Seller Central (A-39, шаг 122);
   - на Offers — названия из `summaries[].itemName`;
   - решения тени идут, записи только `SHADOW_HELD`, ни одной отправленной;
   - для A-19: в ответе есть идентификатор продавца, и он равен `selling_partner_id` возврата OAuth.

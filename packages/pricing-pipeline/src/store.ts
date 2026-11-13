@@ -1053,6 +1053,8 @@ export interface PricingStore {
   saveDiscoveryCircle?(tenantId: string, channelAccountId: string, entry: { startedFrom: string | null; cursor: string | null; stop: DiscoveryStop; startedAt: Instant; at: Instant; noProgress: boolean }): Promise<'SAVED' | 'RESET'>;
   /** Шаг 117 (P0-16): источник каталога витрины за круг — отчёт или поиск и может ли каталог быть неполным (экран Channels) */
   recordDiscoveryCatalog?(tenantId: string, channelAccountId: string, note: DiscoveryCatalogNote & { observedAt: Instant }): Promise<void>;
+  /** Шаг 122 (П7, A-39): SKU отчёта каталога, которых поиск подробностей не вернул, — у источника витрины этого круга (0227) */
+  recordDiscoveryNotFound?(tenantId: string, channelAccountId: string, entry: { marketplace: string; skus: readonly string[] }): Promise<void>;
   /** Шаг 55 (OQ-240): один вызов из суточной квоты канала на приложение, размазанной по суткам; false — отложить вызов */
   reserveAppCall?(channel: string, quota: string, dayLimit: number, at: Instant): Promise<boolean>;
   /** Шаг 23: PRICING_HEALTH — в решение не входит, состояние оффера для продавца */

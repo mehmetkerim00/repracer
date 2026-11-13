@@ -1283,12 +1283,21 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   readonly appQuota = new Map<string, number>();
 
   /** Шаг 117: источник каталога витрины — как 0220: строка на аккаунт и витрину, последняя запись круга */
-  readonly discoveryCatalogs = new Map<string, DiscoveryCatalogNote & { observedAt: Instant }>();
+  readonly discoveryCatalogs = new Map<string, DiscoveryCatalogNote & { observedAt: Instant; notFound: number; notFoundSample: string[] }>();
   async recordDiscoveryCatalog(_tenantId: string, channelAccountId: string, note: DiscoveryCatalogNote & { observedAt: Instant }): Promise<void> {
     if (note.source === 'REPORT' ? note.fallbackReason !== null || note.mayBeIncomplete || note.listed === null : note.fallbackReason === null) {
       throw new Error('discovery catalog source: a report has no fallback and is complete; a search names why the report was not used (0220)');
     }
-    this.discoveryCatalogs.set(`${channelAccountId}|${note.marketplace}`, { ...note });
+    // Шаг 122 (П7): новый круг — новый счёт пропусков отчёта, как 0227
+    this.discoveryCatalogs.set(`${channelAccountId}|${note.marketplace}`, { ...note, notFound: 0, notFoundSample: [] });
+  }
+
+  /** Шаг 122 (П7): как 0227 — только у строки отчёта; число — все, имена — первые 20 */
+  async recordDiscoveryNotFound(_tenantId: string, channelAccountId: string, entry: { marketplace: string; skus: readonly string[] }): Promise<void> {
+    const row = this.discoveryCatalogs.get(`${channelAccountId}|${entry.marketplace}`);
+    if (!row || row.source !== 'REPORT') return;
+    row.notFound += entry.skus.length;
+    row.notFoundSample = [...row.notFoundSample, ...entry.skus].slice(0, 20);
   }
 
   async discoveryCircleCursor(_tenantId: string, channelAccountId: string): Promise<string | null> {

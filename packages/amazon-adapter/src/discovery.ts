@@ -182,13 +182,16 @@ async function advance(options: AmazonAdapterOptions, ctx: AdapterCallContext, s
     const part = skus.slice(cursor.offset, cursor.offset + SEARCH_PAGE_MAX);
     if (part.length === 0) return after(cursor.i, marketplaces);
     const r = await searchListingsPage(options, ctx, session, { marketplaces: [marketplace], pageSize: SEARCH_PAGE_MAX, skus: part, pageToken: token });
-    // SKU отчёта, которого поиск не вернул (снят между отчётом и поиском, A-39), — не предложение этого круга; число — в журнале (порция одной страницей)
-    const missing = token === null && r.nextToken === null ? part.filter((s) => !r.returnedSkus.has(s)).length : 0;
-    if (missing > 0) logConservative(options.deps.logger, ctx, 'AMZ_C16_LISTINGS_REPORT', { outcome: 'SKU_NOT_FOUND', missing, asked: part.length });
+    /**
+     * SKU отчёта, которого поиск не вернул (снят между отчётом и поиском, A-39), — не предложение этого круга (порция одной страницей). Шаг 122 (П7): не только
+     * число в журнале процесса — SKU уходят со страницей, и ядро записывает их у источника витрины для экрана Channels
+     */
+    const missing = token === null && r.nextToken === null ? part.filter((s) => !r.returnedSkus.has(s)) : [];
+    if (missing.length > 0) logConservative(options.deps.logger, ctx, 'AMZ_C16_LISTINGS_REPORT', { outcome: 'SKU_NOT_FOUND', missing: missing.length, asked: part.length });
     const next = r.nextToken ? { kind: 'DOCUMENT' as const, i: cursor.i, documentId: cursor.documentId, offset: cursor.offset, token: r.nextToken }
       : cursor.offset + part.length < skus.length ? { kind: 'DOCUMENT' as const, i: cursor.i, documentId: cursor.documentId, offset: cursor.offset + part.length }
         : cursor.i + 1 < marketplaces.length ? { kind: 'CREATE' as const, i: cursor.i + 1 } : null;
-    return { page: { items: r.items, ...(next ? { nextCursor: encodeDiscoveryCursor(next) } : {}) } };
+    return { page: { items: r.items, ...(next ? { nextCursor: encodeDiscoveryCursor(next) } : {}), ...(missing.length > 0 ? { reportSkusNotFound: { marketplace, skus: missing } } : {}) } };
   }
   // Резерв — поиск по витрине: первая страница называет, сколько найдено; найдено не меньше предела — каталог может быть неполным (A-31)
   const r = await searchListingsPage(options, ctx, session, { marketplaces: [marketplace], pageSize: limit, pageToken: cursor.token });

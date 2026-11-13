@@ -84,7 +84,9 @@ export interface ConnectionRow {
   discoveryCircleStartedAt: Instant | null;
   discoveryCircleCompletedAt: Instant | null;
   /** Шаг 117 (P0-16, 0220): откуда последний круг взял каталог каждой витрины — отчёт или поиск — и может ли он быть неполным */
-  catalogSources: Array<{ marketplace: string; source: 'REPORT' | 'SEARCH'; listed: number | null; fallbackReason: string | null; mayBeIncomplete: boolean; observedAt: Instant }>;
+  /** Шаг 122 (П7): `notFound` — SKU отчёта, которых поиск не вернул за круг; `notFoundSample` — первые 20 из них */
+  catalogSources: Array<{ marketplace: string; source: 'REPORT' | 'SEARCH'; listed: number | null; fallbackReason: string | null; mayBeIncomplete: boolean; observedAt: Instant;
+    notFound: number; notFoundSample: string[] }>;
   /**
    * Шаг 60 [Р-202]: обновляет ли другой инструмент остатки или цены в этом канале — ответ владельца (NULL — не отвечено);
    * автора и время ставит база
@@ -278,7 +280,8 @@ export class PgChannelConnectStore {
              LEFT JOIN LATERAL tenant_data.discovery_circle_state(ca.tenant_id, ca.channel_account_id) dc ON true
              -- Шаг 117 (0220): источник каталога витрин — функцией узкой роли обнаружения (прав на таблицу у административной роли нет)
              LEFT JOIN LATERAL (SELECT json_agg(json_build_object('marketplace', s.marketplace, 'source', s.source, 'listed', s.listed, 'fallbackReason', s.fallback_reason,
-                                                                  'mayBeIncomplete', s.may_be_incomplete, 'observedAt', s.observed_at) ORDER BY s.marketplace) AS sources
+                                                                  'mayBeIncomplete', s.may_be_incomplete, 'observedAt', s.observed_at,
+                                                                  'notFound', s.not_found, 'notFoundSample', s.not_found_sample) ORDER BY s.marketplace) AS sources
                                   FROM tenant_data.discovery_catalog_sources(ca.tenant_id, ca.channel_account_id) s) cs ON true
              LEFT JOIN tenant_data.channel_credential cr
                ON cr.tenant_id = ca.tenant_id AND cr.channel_account_id = ca.channel_account_id AND cr.superseded_at IS NULL

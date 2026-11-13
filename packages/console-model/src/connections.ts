@@ -318,8 +318,11 @@ export function connectionsView(
     const catalogTexts = (a.catalogSources ?? []).map((c) => {
       const store = storefrontName(a.channel, c.marketplace, m);
       const when = m.when(c.observedAt);
-      return { incomplete: c.mayBeIncomplete,
-        text: c.source === 'REPORT' ? t.catalog.report(store, c.listed ?? 0, when) : t.catalog.search(store, c.listed, when, c.mayBeIncomplete) };
+      // Шаг 122 (П7, A-39): SKU отчёта, которых поиск не вернул, — словами, а не только в журнале процесса; каталог круга без них — «может быть неполным»
+      const notFound = c.notFound ?? 0;
+      const missing = notFound > 0 ? t.catalog.notFound(notFound, c.notFoundSample ?? [], notFound - (c.notFoundSample ?? []).length) : '';
+      return { incomplete: c.mayBeIncomplete || notFound > 0,
+        text: (c.source === 'REPORT' ? t.catalog.report(store, c.listed ?? 0, when) : t.catalog.search(store, c.listed, when, c.mayBeIncomplete)) + missing };
     });
     return {
       discoveryText, catalogTexts,

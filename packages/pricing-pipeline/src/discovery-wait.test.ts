@@ -215,3 +215,20 @@ test('step 56 (review of step 55, findings 3–4): a failure keeps the progress;
   nowMs += 86_400_000;
   assert.equal((await run()).stop, 'COMPLETED', 'a new circle once the circle interval has passed');
 });
+
+/** Шаг 122 (П2): заход называет, когда начат его круг — от возраста круга работа обнаружения считает паузу до продолжения */
+test('step 122 (П2): discovery names when its circle started — this run for a new circle, the stored start for a continuation', async () => {
+  const start = '2026-11-14T10:00:00.000Z';
+  const make = (state: { cursor: string | null; circleStartedAt: string | null } | null) => {
+    const adapter = { async discoverOffers() { return { items: [] }; } } as unknown as ChannelAdapter;
+    const store = {
+      async recordOfferChannelPricing() { return 0; }, async recordDiscoveredOffers() { return 0; },
+      async discoveryCircleState() { return state ? { ...state, lastCircleCompletedAt: null, lastStop: 'DEADLINE' } : null; },
+      async saveDiscoveryCircle() { return 'SAVED' as const; },
+    } as unknown as PricingStore;
+    return createPricingPipeline({ store, adapter, alerts: { raise: async () => undefined }, logger: { log: () => undefined }, now: () => start as never });
+  };
+  assert.equal((await make(null).discoverOffers(ctx('2026-11-14T10:25:00.000Z'))).circleStartedAt, start, 'a new circle starts with this run');
+  assert.equal((await make({ cursor: 'c-17', circleStartedAt: '2026-11-14T08:40:00.000Z' }).discoverOffers(ctx('2026-11-14T10:25:00.000Z'))).circleStartedAt,
+    '2026-11-14T08:40:00.000Z', 'a continuation belongs to the circle started earlier');
+});

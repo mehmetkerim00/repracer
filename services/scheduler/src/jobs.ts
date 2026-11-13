@@ -160,6 +160,26 @@ export interface JobDeps {
   config?: Partial<JobConfig>;
 }
 
+/**
+ * Шаг 122 (П2, аудит авторизации Amazon): круг обнаружения, который заход не закрыл, продолжается не через час. Первый круг нового продавца — это
+ * его каталог на экране: отчёт листингов Amazon готовится минуты или десятки минут (A-38), и заход, прождавший свой срок, иначе отдавал бы
+ * следующую попытку через час. Пауза растёт с возрастом круга: пока он открыт меньше получаса — 5 минут, меньше часа — 10, меньше двух — 20,
+ * меньше четырёх — 40, дальше — обычный час. Только когда заход остановил срок или предел страниц; суточная квота приложения раньше не
+ * восполнится — там остаётся час
+ */
+export const DISCOVERY_CONTINUE_LADDER: ReadonlyArray<{ circleOpenUnderMinutes: number; pauseSeconds: number }> = [
+  { circleOpenUnderMinutes: 30, pauseSeconds: 300 },
+  { circleOpenUnderMinutes: 60, pauseSeconds: 600 },
+  { circleOpenUnderMinutes: 120, pauseSeconds: 1_200 },
+  { circleOpenUnderMinutes: 240, pauseSeconds: 2_400 },
+];
+
+export function discoveryContinueSeconds(stop: string, circleStartedAt: string | null, startedAt: string): number | undefined {
+  if (stop !== 'DEADLINE' && stop !== 'PAGE_LIMIT') return undefined;
+  const openMinutes = Math.max(0, Date.parse(startedAt) - Date.parse(circleStartedAt ?? startedAt)) / 60_000;
+  return DISCOVERY_CONTINUE_LADDER.find((step) => openMinutes < step.circleOpenUnderMinutes)?.pauseSeconds;
+}
+
 /** Что делает работа и что будет при её пропуске — для отчёта и экрана эксплуатации */
 export interface JobCatalogEntry { name: string; scope: 'GLOBAL' | 'ACCOUNT'; when: string; missed: string }
 
@@ -170,7 +190,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
   { name: 'halt-review', scope: 'ACCOUNT', when: 'каждые 5 мин (каналы с выборкой)', missed: 'LATEST: остановка снимается позже' },
   { name: 'order-lines', scope: 'ACCOUNT', when: 'каждые 5 мин', missed: 'LATEST: окно чтения — с предыдущего запуска; пропуск ничего не теряет, резервации создаются позже, доступный остаток в каналах завышен на время пропуска' },
   { name: 'scheduled-recompute', scope: 'ACCOUNT', when: 'период планового пересчёта канала (15 мин): сперва единицы с запросом базы на переоценку и лестницы к полу (шаг 73), потом единицы без решения за 24 часа; до 1000 тех и других за заход', missed: 'LATEST: фиксированные и маржинальные цены пересчитываются позже, подъём к полу после роста себестоимости и ступени лестницы ждут; у канала без данных конкурентов (eBay) решений нет всё время простоя' },
-  { name: 'offer-discovery', scope: 'ACCOUNT', when: 'раз в сутки', missed: 'LATEST: чужое ценообразование нового оффера обнаружится при записи или следующем обходе' },
+  { name: 'offer-discovery', scope: 'ACCOUNT', when: 'заход каждый час, новый круг — раз в сутки; незакрытый круг (отчёт канала готовится, каталог длиннее захода) — по лестнице 5, 10, 20, 40 минут от возраста круга (шаг 122)', missed: 'LATEST: чужое ценообразование нового оффера обнаружится при записи или следующем обходе' },
   { name: 'analytics-export-day', scope: 'GLOBAL', when: 'сутки UTC, в 00:30 следующих суток', missed: 'EVERY_SLOT: каждые пропущенные сутки выгружаются по очереди; провалившиеся, непроверенные и изменившиеся после проверки сутки повторяются каждым запуском из отставания (13 суток); секции журнала не удаляются без проверенной выгрузки; отставание CRITICAL — с 72 часов, принудительное удаление через 14 суток — CRITICAL ANALYTICS_PARTITION_FORCE_DROPPED' },
   { name: 'price-days-close', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: функция закрывает все незакрытые сутки по очереди; сырьё цен не удаляется, пока сутки не закрыты' },
   { name: 'partitions', scope: 'GLOBAL', when: 'каждый час', missed: 'LATEST: секции созданы на 3 суток вперёд; простой дольше — отказ записи снимков и цен (CRITICAL через 2 суток)' },
@@ -519,7 +539,9 @@ export function jobSource(deps: JobDeps): JobSource {
              * записано, следующий заход продолжит. Круг, не закрытый заходом, — не провал: это нормальный ход крупного каталога
              */
             const r = await pipeline().discoverOffers(ctxOf(a, startedAt, 'offer-discovery', 1500), { quotas: cfg.discoveryAppQuotas, circleEveryMs: cfg.discoveryCircleEverySeconds * 1000 });
-            return { items: r.offers };
+            // Шаг 122 (П2): незакрытый круг — продолжение по лестнице от его возраста, а не через час
+            const continueAfterSeconds = discoveryContinueSeconds(r.stop, r.circleStartedAt ?? null, startedAt);
+            return { items: r.offers, ...(continueAfterSeconds === undefined ? {} : { continueAfterSeconds }) };
           },
         });
       }

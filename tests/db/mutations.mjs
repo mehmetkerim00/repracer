@@ -3130,3 +3130,17 @@ export const STEP120_ROWS = [
     ],
   },
 ];
+
+// Шаг 122 (П7, 0227): пропуски отчёта каталога у источника витрины — форму числа и образца держит база, своей проверкой с причиной [Р-94, Р-99]
+const R122 = T('discovery-not-found-step122.pg.test.ts');
+const J122 = 'step 122 (П7): the database keeps the form of the count — never negative, at most 20 named, never more named than counted, only for a report';
+export const STEP122_ROWS = [
+  {
+    row: 'шаг 122 (пропуски отчёта каталога)', critical: false,
+    invariant: 'SKU отчёта каталога, которых поиск подробностей не вернул: число не отрицательное, названо не больше 20 и не больше числа; у поиска по витрине — ноль',
+    mutations: [
+      m(dropConstraint('discovery_catalog_source_not_found', 'tenant_data.discovery_catalog_source'),
+        node(R122, J122, ['a negative count is refused', 'more than 20 named is refused', 'more named than counted is refused', 'a search source with a count is refused'], '^accepted$')),
+    ],
+  },
+];
