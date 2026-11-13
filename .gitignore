@@ -80,3 +80,7 @@ deploy/qa/qa.env
 deploy/qa/build.env
 # Шаг 121.3: журнал, замок и итог фоновых работ QA (deploy/qa/detach.sh)
 deploy/qa/state/
+# Шаг 124: настройки и версия сборки пилота — на сервере, не в репозитории
+deploy/pilot/pilot.env
+deploy/pilot/build.env
+deploy/pilot/state/

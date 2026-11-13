@@ -416,7 +416,7 @@ test('Р-146: путь репозитория в развёртывании и �
    * существовал только у того, кто собирал интерфейс), либо молча разрешает любой несуществующий путь.
    */
   // Шаг 121: версия сборки сервера QA — её пишет deploy/qa/deploy.sh при выкладке (.gitignore)
-  const BUILT = ['apps/console/dist', 'deploy/qa/build.env', 'deploy/qa/state'];
+  const BUILT = ['apps/console/dist', 'deploy/qa/build.env', 'deploy/qa/state', 'deploy/pilot/build.env', 'deploy/pilot/state', 'deploy/pilot/pilot.env'];
   /** Путь, названный текстом, обязан существовать — сам, как образец для оператора или как результат сборки */
   const resolves = (target: string) => existsSync(new URL(target, root)) || existsSync(new URL(`${target}.example`, root))
     || BUILT.some((b) => target === b || target.startsWith(`${b}/`));

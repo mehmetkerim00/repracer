@@ -61,8 +61,10 @@
 git clone https://github.com/mehmetkerim00/repracer.git /srv/repracer/app && cd /srv/repracer/app
 npm ci
 
-# 2. Схема базы (один раз и при каждом обновлении миграций)
-PGHOST=db PGUSER=postgres scripts/db/prepare.sh repracer_eu
+# 2. Схема базы. Шаг 124: scripts/db/prepare.sh базу ПЕРЕСОЗДАЁТ (и сеет смоук-мир) — на живой базе НИКОГДА. Первая: журнал миграций с регионом,
+#    роли входа и строки возможностей каналов; дальше — только новые миграции журналом. Образец со стражем и паролями ролей — deploy/pilot/db.sh
+PGHOST=db PGUSER=postgres scripts/db/migrate.sh repracer_eu --create EU && PGHOST=db PGUSER=postgres psql -d repracer_eu -f packages/pricing-store-pg/test/setup.sql
+PGHOST=db PGUSER=postgres scripts/db/migrate.sh repracer_eu        # каждая следующая выкладка
 
 # 3. Интерфейс: контейнер видит репозиторий только на чтение и собрать себя не может
 npm run build -w apps/console

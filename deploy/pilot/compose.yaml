@@ -1,0 +1,193 @@
+# Шаг 124 [Р-246…Р-248]: развёртывание ПИЛОТА — первый прод на отдельном сервере (не QA-A: стенд тестировщика живёт своим сервером). Код, а не сервер:
+# сервер покупается с одобрения тестировщика при запуске, его параметры здесь не зашиты.
+#   PostgreSQL (живая база: только новые миграции, страж боевых записей с первого дня) + ClickHouse (история снимков [Р-122], выгрузка обязательна) +
+#   промышленная консоль (вход у поставщика identity [Р-180], подключение Amazon продавцом [Р-175]) + планировщик + исполнитель заданий + панель оператора
+#   (только loopback [Р-165]) + Cloudflare Tunnel на app.<домен>.
+# Брокера и диспетчера записей НЕТ: пилот в тени [Р-169] — записи рождаются удержанными, отправлять и подтверждать нечего. Без них бой невозможен и
+# по стражу базы [Р-247], и по устройству: подтверждение принятой записи ведёт только диспетчер (deploy/worker, брокер).
+# Наружу не публикуется ничего: страницу выставляет туннель (исходящее соединение к Cloudflare). Процессы описаны ОДИН раз в своих развёртываниях и
+# берутся через `extends`; здесь — только то, чем пилот от них отличается.
+#
+# Запуск — только обёрткой deploy/pilot/compose.sh (подставляет pilot.env, build.env и amazon.env из каталога секретов). Пошагово — deploy/pilot/README.md.
+name: repracer-pilot
+
+x-build: &build
+  # Какой код работает: подвал страницы и /healthz каждого процесса; пишет deploy/pilot/deploy.sh
+  REPRACER_BUILD_SHA: ${REPRACER_BUILD_SHA:?run deploy/pilot/deploy.sh — it writes build.env}
+  REPRACER_BUILD_AT: ${REPRACER_BUILD_AT:?run deploy/pilot/deploy.sh — it writes build.env}
+
+x-amazon: &amazon
+  # Приложение Amazon [Р-175]: идентификаторы — из amazon.env каталога секретов (deploy/pilot/secrets.sh), секрет клиента — файлом
+  REPRACER_AMAZON_APP_ID: ${REPRACER_AMAZON_APP_ID:?amazon.env of the pilot secrets — deploy/pilot/secrets.sh}
+  REPRACER_AMAZON_LWA_CLIENT_ID: ${REPRACER_AMAZON_LWA_CLIENT_ID:?amazon.env of the pilot secrets — deploy/pilot/secrets.sh}
+  # Черновик приложения согласуется только с version=beta; умолчания нет — состояние приложения называется явно (README, §1)
+  REPRACER_AMAZON_APP_DRAFT: ${REPRACER_AMAZON_APP_DRAFT:?set REPRACER_AMAZON_APP_DRAFT=on|off by the state of the app in Developer Central}
+  REPRACER_AMAZON_LWA_CLIENT_SECRET_FILE: /run/secrets/amazon_lwa_client_secret
+  REPRACER_CHANNEL_KEYRING_FILE: /run/secrets/channel_keyring.json
+  REPRACER_CONNECT_REDIRECT_URL: https://${REPRACER_PILOT_HOST:?set REPRACER_PILOT_HOST}/connect/callback
+
+services:
+  postgres:
+    image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+    environment:
+      # Пароли, а не trust (как у QA-A): в базе пилота — токены продавца шифротекстом и его данные. Суперпользователь — файлом
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Миграции и сборка базы (deploy/pilot/db.sh) идут внутри контейнера базы: psql на хосте не нужен
+      - ../..:/repo:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}:/run/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+  clickhouse:
+    # Версия и digest — как в CI (.github/workflows/ci.yml) и infra/local/compose.yaml
+    image: clickhouse/clickhouse-server:26.8.4.11@sha256:b1d9f9baec7727c779a6febb2a95eb08a8e1de3f463294e3ebb35c3d3fb30360
+    # Администратор кластера пилота — тем же способом, что CI (CLICKHOUSE_USER, CLICKHOUSE_PASSWORD); файл в каталоге секретов, в репозитории нет
+    env_file:
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}/clickhouse.env
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - chdata:/var/lib/clickhouse
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+  console:
+    extends:
+      file: ../console/compose.yaml
+      service: console
+    environment:
+      <<: [*build, *amazon]
+      # Р-180: промышленный профиль — только настоящий поставщик identity (ZITADEL, README §1); без значений compose отказывает до контейнера
+      REPRACER_PROFILE: production
+      REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:?set REPRACER_CONSOLE_OIDC_ISSUER (Р-180)}
+      REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:?set REPRACER_CONSOLE_OIDC_AUDIENCE (Р-180)}
+      REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:?set REPRACER_CONSOLE_OIDC_JWKS_URL (Р-180)}
+      REPRACER_CONSOLE_OIDC_CLIENT_ID: ${REPRACER_CONSOLE_OIDC_CLIENT_ID:?set REPRACER_CONSOLE_OIDC_CLIENT_ID (Р-180)}
+      # Пилот — не витрина: публичного демо на нём нет [Р-160]
+      REPRACER_CONSOLE_PUBLIC_DEMO: "off"
+      # Консоль видит только туннель: адрес клиента для ограничения частоты — из X-Forwarded-For, который ставит cloudflared
+      REPRACER_CONSOLE_TRUST_PROXY: "on"
+      REPRACER_MARKET_PROFILE: us
+      REPRACER_CONSOLE_LOCALE: en
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  scheduler:
+    extends:
+      file: ../scheduler/compose.yaml
+      service: scheduler
+    environment:
+      <<: [*build, *amazon]
+      REPRACER_PROFILE: production
+      # Р-127: отметки внешнего сервиса у проекта нет (OQ-188) — выключено ЯВНО; появится — пусто и файл heartbeat_url
+      REPRACER_SCHEDULER_HEARTBEAT: ${REPRACER_SCHEDULER_HEARTBEAT:-off}
+      # Роль адаптеров — единственная, что читает шифротекст токенов (0132): без неё планировщик не обменяет токен продавца
+      REPRACER_CREDENTIALS_PG_URL_FILE: /run/secrets/credentials_pg_url
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  # Исполнитель заданий тенантов (импорт себестоимости и границ, выгрузки, включение набора) — как в deploy/production, своими файлами ролей консоли
+  bulk-worker:
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "apps/console/server/bulk-worker.ts"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      <<: *build
+      REPRACER_BULK_METRICS_PORT: "9473"
+      REPRACER_BULK_HEARTBEAT: ${REPRACER_BULK_HEARTBEAT:-off}
+      REPRACER_BULK_HEARTBEAT_URL_FILE: /run/secrets/bulk_heartbeat_url
+      REPRACER_BULK_APP_PG_URL_FILE: /run/secrets/console_app_pg_url
+      REPRACER_BULK_ADMIN_PG_URL_FILE: /run/secrets/console_admin_pg_url
+      REPRACER_BULK_BULK_WORKER_PG_URL_FILE: /run/secrets/console_bulk_worker_pg_url
+      REPRACER_BULK_STOCK_PG_URL_FILE: /run/secrets/console_stock_pg_url
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}:/run/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9473/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "127.0.0.1:9473:9473"
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+  operator:
+    extends:
+      file: ../operator/compose.yaml
+      service: operator
+    environment:
+      <<: *build
+      REPRACER_PROFILE: production
+      # Р-245: почтового провайдера нет — ссылку приглашения владельца пилота оператор получает один раз в панели (со вторым фактором, в аудите)
+      REPRACER_INVITE_LINK_REVEAL: "on"
+      REPRACER_OPERATOR_DEFAULT_LOCALE: en
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  cloudflared:
+    # Как у QA-A: тег выпуска 2026-10-15, закреплён digest'ом мультиархитектурного образа
+    image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
+    command: ["tunnel", "--no-autoupdate", "run"]
+    # Токен туннеля — файл в каталоге секретов (TUNNEL_TOKEN=…, образец — tunnel.env.example); туннель ведёт app.<домен> на http://console:4319
+    env_file:
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}/tunnel.env
+    depends_on:
+      console:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: 20m, max-file: "3" } }
+
+  # Разовые работы выкладки (DDL ClickHouse и логины ролей выгрузки): `deploy/pilot/compose.sh run --rm tools …`, в `up` не поднимается
+  tools:
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+    profiles: [tools]
+    working_dir: /app
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}/clickhouse.env
+    environment:
+      REPRACER_CH_URL: http://clickhouse:8123
+      REPRACER_CH_INGEST_USER: ${REPRACER_CH_INGEST_USER:?set REPRACER_CH_INGEST_USER in pilot.env}
+      REPRACER_CH_VERIFIER_USER: ${REPRACER_CH_VERIFIER_USER:?set REPRACER_CH_VERIFIER_USER in pilot.env}
+      REPRACER_CH_INGEST_PASSWORD_FILE: /run/secrets/ch_ingest_password
+      REPRACER_CH_VERIFIER_PASSWORD_FILE: /run/secrets/ch_verifier_password
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}:/run/secrets:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  chdata:
