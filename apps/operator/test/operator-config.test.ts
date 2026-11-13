@@ -95,3 +95,17 @@ test('шаг 69: язык нового тенанта по умолчанию �
   assert.throws(() => loadOperatorConfig({ ...BASE, REPRACER_OPERATOR_DEFAULT_LOCALE: 'it' }, read),
     (e: unknown) => e instanceof ConfigError && /REPRACER_OPERATOR_DEFAULT_LOCALE must be de, en, es or fr/.test(e.message));
 });
+
+/**
+ * Шаг 123 [Р-245]: показ ссылки приглашения оператору — за флагом развёртывания с умолчанием off. Ослабление «токен приглашения не попадает в ответ» —
+ * осознанное и только под флагом; неизвестное значение — отказ при старте, а не молчаливое «выключено» или «включено»
+ */
+test('step 123 [Р-245]: the invitation link is revealed only with REPRACER_INVITE_LINK_REVEAL=on; off by default; anything else refuses to start', () => {
+  assert.equal(loadOperatorConfig(BASE, read).inviteLinkReveal, false, 'off by default');
+  assert.equal(loadOperatorConfig({ ...BASE, REPRACER_INVITE_LINK_REVEAL: 'off' }, read).inviteLinkReveal, false);
+  assert.equal(loadOperatorConfig({ ...BASE, REPRACER_INVITE_LINK_REVEAL: 'on' }, read).inviteLinkReveal, true);
+  for (const value of ['yes', 'true', 'ON', '1']) {
+    assert.throws(() => loadOperatorConfig({ ...BASE, REPRACER_INVITE_LINK_REVEAL: value }, read),
+      (e: Error) => e instanceof ConfigError && /REPRACER_INVITE_LINK_REVEAL must be on or off/.test(e.message), value);
+  }
+});

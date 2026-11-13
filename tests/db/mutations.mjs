@@ -3144,3 +3144,21 @@ export const STEP122_ROWS = [
     ],
   },
 ];
+
+// Шаг 123 [Р-245] (0229): показ ссылки приглашения оператору — только в транзакции выдачи и один раз; каждая ветка — своей проверкой с причиной [Р-94, Р-99]
+const R123 = 'apps/operator/test/invite-reveal.pg.test.ts';
+const J123 = 'step 123 [Р-245]: the database keeps the reveal honest — in the issuing transaction only, once only';
+export const STEP123_ROWS = [
+  {
+    row: 'шаг 123 (показ ссылки приглашения, Р-245)', critical: false,
+    invariant: 'ссылку приглашения оператор видит только в транзакции, которая выдала приглашение, этим же оператором для этого тенанта, и только один раз; показ — событие аудита',
+    mutations: [
+      m(replaceInFunction('security.operator_reveal_invitation_link(uuid, uuid, uuid)',
+        'AND a.actor_user_id = p_operator_id AND a.occurred_at = now()) THEN', 'AND a.actor_user_id = p_operator_id AND a.occurred_at = now()) AND false THEN'),
+        node(R123, J123, 'a reveal outside the issuing transaction is refused', '^accepted$')),
+      m(replaceInFunction('security.operator_reveal_invitation_link(uuid, uuid, uuid)',
+        "IF EXISTS (SELECT 1 FROM audit.audit_event a WHERE a.action = 'operator.invitation_link_revealed' AND a.entity_id = p_invitation_id) THEN", 'IF false THEN'),
+        node(R123, J123, 'a second reveal is refused', '^accepted$')),
+    ],
+  },
+];

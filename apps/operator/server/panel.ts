@@ -27,6 +27,8 @@ export interface PanelDeps {
   mail: MailSender;
   invitationBaseUrl: string;
   invitationTtlHours: number;
+  /** Шаг 123 [Р-245]: ссылку приглашения — оператору один раз, в ответе действия; показ записывает база той же транзакцией */
+  inviteLinkReveal?: boolean;
   /** Шаг 69 (K1): язык нового тенанта, когда оператор его не назвал, — язык развёртывания региона */
   defaultLocale?: 'de' | 'en' | 'es' | 'fr';
   /** Счётчики процесса: панель считает вызовы так же, как остальные процессы */
@@ -269,16 +271,25 @@ export function createPanel(deps: PanelDeps): Server {
       const invitationId = await act<string>(who, async (query) => {
         const { rows } = await query('SELECT security.operator_invite_owner($1, $2, $3, $4, $5::interval) AS id',
           [who.operatorId, tenantId, email, sha, ttl]);
-        return (rows[0] as { id: string }).id;
+        const id = (rows[0] as { id: string }).id;
+        // Шаг 123 [Р-245]: показ ссылки — событие аудита ТОЙ ЖЕ транзакцией; база пустит его только для этой выдачи и один раз
+        if (deps.inviteLinkReveal) await query('SELECT security.operator_reveal_invitation_link($1, $2, $3)', [who.operatorId, tenantId, id]);
+        return id;
       });
       const tenants = await read<{ tenant_id: string; name: string; locale: string }>('SELECT * FROM platform.operator_tenants()');
       const tenant = tenants.find((t) => t.tenant_id === tenantId);
       const expiresAt = new Date(now().getTime() + deps.invitationTtlHours * 3_600_000).toISOString();
       // Письмо читает ПРОДАВЕЦ, поэтому язык — тенанта [Р-161], а не оператора
-      const letter = invitationMessage(email, tenant?.name ?? '', `${deps.invitationBaseUrl}#${token}`, expiresAt, messagesFor(localeOf(tenant?.locale)));
+      const link = `${deps.invitationBaseUrl}#${token}`;
+      const letter = invitationMessage(email, tenant?.name ?? '', link, expiresAt, messagesFor(localeOf(tenant?.locale)));
       const sent = await deps.mail.send(letter);
       count('owner_invited');
-      json(res, 201, { invitationId, mailRef: sent.ref, dryRun: Boolean(deps.mail.dry), expiresAt });
+      /**
+       * Шаг 123 [Р-245, ADR-0075]: под флагом ссылка — в ответе действия, один раз: токен не хранится нигде, кроме отпечатка в базе, и второго показа быть не
+       * может. Ответ панели не кэшируется (`no-store`), в журнал процесса ссылка не идёт
+       */
+      if (deps.inviteLinkReveal) count('invitation_link_revealed');
+      json(res, 201, { invitationId, mailRef: sent.ref, dryRun: Boolean(deps.mail.dry), expiresAt, ...(deps.inviteLinkReveal ? { invitationUrl: link } : {}) });
       return;
     }
 

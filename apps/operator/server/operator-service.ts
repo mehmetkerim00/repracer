@@ -51,6 +51,7 @@ export async function startOperatorPanel(env: Env = process.env, overrides: Pane
     mail,
     invitationBaseUrl: config.invitationBaseUrl,
     invitationTtlHours: config.invitationTtlHours,
+    inviteLinkReveal: config.inviteLinkReveal,
     defaultLocale: config.defaultLocale,
     count: (name) => health.count(name),
   });
@@ -58,7 +59,7 @@ export async function startOperatorPanel(env: Env = process.env, overrides: Pane
   const healthServer = await serveHealth(health, { port: config.metricsPort, prefix: 'repracer_operator', staleAfterMs: 120_000, host: '0.0.0.0' });
   health.alive();
   await new Promise<void>((resolve) => server.listen(config.port, '0.0.0.0', () => {
-    console.log(JSON.stringify({ level: 'INFO', code: 'OPERATOR_PANEL_STARTED', message: `operator panel on :${config.port}`, details: { mailDry: !config.mail } }));
+    console.log(JSON.stringify({ level: 'INFO', code: 'OPERATOR_PANEL_STARTED', message: `operator panel on :${config.port}`, details: { mailDry: !config.mail, inviteLinkReveal: config.inviteLinkReveal } }));
     resolve();
   }));
 

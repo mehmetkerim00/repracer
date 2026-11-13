@@ -42,6 +42,11 @@ export interface OperatorConfig {
   defaultLocale: 'de' | 'en' | 'es' | 'fr';
   /** Провайдер почты; null — СУХОЙ режим [шаг 37, OQ-224]: письмо собирается целиком и не уходит никуда */
   mail: { apiUrl: string; apiKey: string; from: string } | null;
+  /**
+   * Шаг 123 [Р-245, ADR-0075]: `REPRACER_INVITE_LINK_REVEAL=on` — ссылка приглашения владельца показывается оператору один раз в ответе действия (провайдера
+   * почты нет, а без ссылки продавцу не войти). Умолчание — off: токен приглашения не покидает панель, как с шага 40
+   */
+  inviteLinkReveal: boolean;
   /** Р-127: отметка во внешнем сервисе — панель такой же процесс, как остальные */
   heartbeatUrl: string | null;
   /**
@@ -114,6 +119,10 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
     throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_INVITATION_URL must be https');
   }
 
+  // Шаг 123 [Р-245]: только явные on и off; опечатка — отказ при старте, а не молчаливое «включено» или «выключено»
+  const reveal = env.REPRACER_INVITE_LINK_REVEAL ?? 'off';
+  if (reveal !== 'on' && reveal !== 'off') throw new ConfigError('CONFIG_INVALID: REPRACER_INVITE_LINK_REVEAL must be on or off (Р-245)');
+
   const defaultLocale = env.REPRACER_OPERATOR_DEFAULT_LOCALE || 'de';
   if (defaultLocale !== 'de' && defaultLocale !== 'en' && defaultLocale !== 'es' && defaultLocale !== 'fr') throw new ConfigError('CONFIG_INVALID: REPRACER_OPERATOR_DEFAULT_LOCALE must be de, en, es or fr');
 
@@ -128,6 +137,7 @@ export function loadOperatorConfig(env: Env = process.env, read: (path: string) 
     profile,
     invitationBaseUrl,
     invitationTtlHours: intFromEnv(env, 'REPRACER_OPERATOR_INVITATION_TTL_HOURS', 168, 1, 14 * 24),
+    inviteLinkReveal: reveal === 'on',
     defaultLocale,
     mail,
     heartbeatUrl,

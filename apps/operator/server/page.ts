@@ -114,7 +114,12 @@ function action(id, request) {
     try {
       const { path, method, payload } = request(f);
       const body = await call(path, method, payload);
-      $('result').textContent = 'done: ' + JSON.stringify(body);
+      // Шаг 123 [Р-245]: ссылка приглашения — один раз; страница её не хранит, перезагрузка её стирает
+      if (body.invitationUrl) {
+        const { invitationUrl, ...rest } = body;
+        $('result').textContent = 'invitation link — shown ONCE, not stored anywhere: copy it now and hand it to the owner (expires ' + body.expiresAt + '): '
+          + invitationUrl + ' · ' + JSON.stringify(rest);
+      } else $('result').textContent = 'done: ' + JSON.stringify(body);
       await load();
     } catch (e) { $('result').textContent = 'refused: ' + e.message; }
   };

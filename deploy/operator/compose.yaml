@@ -34,6 +34,8 @@ services:
       REPRACER_MAIL_API_URL: ${REPRACER_MAIL_API_URL:-}
       REPRACER_MAIL_FROM: ${REPRACER_MAIL_FROM:-}
       REPRACER_MAIL_API_KEY_FILE: /run/secrets/mail_api_key
+      # Шаг 123 [Р-245, ADR-0075]: ссылка приглашения — оператору один раз в ответе действия (провайдера почты нет). Умолчание — off
+      REPRACER_INVITE_LINK_REVEAL: ${REPRACER_INVITE_LINK_REVEAL:-off}
       # Р-127: отметка во внешнем сервисе. Умолчание — `off`: аккаунта у проекта нет (OQ-188), и с пустым значением
       # процесс не стартовал бы вовсе
       REPRACER_OPERATOR_HEARTBEAT: ${REPRACER_OPERATOR_HEARTBEAT:-off}
