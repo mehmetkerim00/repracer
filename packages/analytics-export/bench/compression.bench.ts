@@ -157,6 +157,8 @@ function competitorSnapshot(i: number): PgRow {
     'offers.condition': sellers.map(() => 'new'), 'offers.fulfillment': sellers.map(() => (rand() < 0.9 ? 'MERCHANT' : 'CHANNEL')), 'offers.is_self': sellers.map((_, k) => k === 1),
     'offers.feedback_count': sellers.map(() => null), 'offers.feedback_pct': sellers.map(() => null), 'offers.rank': sellers.map((_, k) => k + 1),
     'offers.delivery_min_days': sellers.map(() => 1), 'offers.delivery_max_days': sellers.map(() => 2 + Math.floor(rand() * 3)),
+    // Шаг 124: столбцы 097 и 098 — у вложенной структуры все массивы одной длины; до шага скрипт DDL их не применял, и строка замера их не знала
+    'offers.holds_buybox': sellers.map(() => null), 'offers.coupon_minor': sellers.map(() => null),
     offer_counts: { new: n }, data_class: 'CHANNEL_INFO',
   };
 }
