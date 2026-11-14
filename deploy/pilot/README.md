@@ -46,9 +46,10 @@
 **Кабинет разработчика Amazon** (Developer Central / Solution Provider Portal), приложение TMPrice:
 - [ ] **OAuth Redirect URI** — `https://app.<домен>/connect/callback`, **первым в списке**. Адрес согласия не передаёт `redirect_uri`, и
   Amazon берёт первый зарегистрированный.
-- [ ] **OAuth Login URI** — по документации обязателен: шаги 5–8 потока с сайта ([vendor/amazon/lwa-authorization/2026-11-14](../../vendor/amazon/lwa-authorization/2026-11-14/SOURCE.md)).
-  **Консоль этого шага не обслуживает (П6, шаг 122 — ждёт решения владельца).** До его постройки настоящая авторизация, скорее всего,
-  до кода не дойдёт.
+- [ ] **OAuth Login URI** — `https://app.<домен>/connect/amazon/login`. По документации обязателен: после согласия Amazon ведёт продавца на
+  него (шаги 5–8 потока с сайта, [vendor/amazon/lwa-authorization/2026-11-14](../../vendor/amazon/lwa-authorization/2026-11-14/SOURCE.md)),
+  консоль сверяет его со своим «Connect» и возвращает на Amazon (шаг 125). Подключение начинается только с Channels → «Connect Amazon» в
+  консоли; приход из Appstore без этого консоль не продолжает (до публикации приложения его нет).
 - [ ] Роли: Product Listing (листинги и запись цены) и Pricing или Inventory and Order Tracking (отчёт листингов, A-40) —
   [docs/channels/amazon.md](../../docs/channels/amazon.md), «Роли разработчика».
 - [ ] Флаг `REPRACER_AMAZON_APP_DRAFT` в `pilot.env` — по фактическому состоянию приложения:

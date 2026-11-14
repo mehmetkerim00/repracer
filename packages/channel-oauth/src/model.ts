@@ -16,12 +16,23 @@ export interface ModelProviderOptions {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+  /**
+   * Шаг 125 (П6): log-in URI приложения Amazon — адрес, на который Amazon отправляет продавца после согласия (шаг 5 потока с сайта,
+   * website-authorization-workflow, снимок vendor/amazon/lwa-authorization/2026-11-14). У Amazon обязателен: потока без него в документации нет
+   */
+  loginUri?: string;
   now: () => number;
   /** Срок кода согласия; у Amazon — пять минут (website-authorization-workflow) */
   codeTtlMs?: number;
 }
 
 interface Grant { sellerId: string; code: string; issuedAt: number; used: boolean }
+
+/** Шаг 125 (П6): что Amazon помнит между согласием (шаг 4) и возвратом приложения на `amazon_callback_uri` (шаг 8) */
+interface LoginVisit { sellerId: string; applicationId: string; draft: boolean; issuedAt: number; used: boolean }
+
+/** Весь поток с сайта дольше десяти минут «may break» (website-authorization-workflow) — модель обрывает его ровно так */
+const AMAZON_FLOW_MS = 10 * 60_000;
 
 export class ModelOAuthProvider {
   readonly opts: ModelProviderOptions;
@@ -32,9 +43,12 @@ export class ModelOAuthProvider {
   private readonly refreshTokens = new Map<string, { sellerId: string; revoked: boolean }>();
   /** Шаг 47 (E-11): токен доступа → продавец — его называет Commerce Identity API модели eBay */
   private readonly accessTokens = new Map<string, string>();
+  /** Шаг 125 (П6): `amazon_state` → визит на log-in URI, который ждёт возврата приложения */
+  private readonly loginVisits = new Map<string, LoginVisit>();
   private platformBroken = false;
 
   constructor(opts: ModelProviderOptions) {
+    if (opts.channel === 'AMAZON' && !opts.loginUri) throw new Error('MODEL_AMAZON_LOGIN_URI_REQUIRED');
     this.opts = opts;
   }
 
@@ -46,12 +60,35 @@ export class ModelOAuthProvider {
   }
 
   /**
-   * Продавец на странице согласия нажал «разрешить»: браузер уходит на наш адрес возврата с кодом. Адрес согласия
-   * модель читает так же, как канал, — `state` берётся из него, а не передаётся отдельно.
+   * Продавец на странице согласия нажал «разрешить». Адрес согласия модель читает так же, как канал, — `state` и `application_id`
+   * берутся из него, а не передаются отдельно.
+   *
+   * eBay: браузер уходит на наш адрес возврата с кодом. Amazon (шаг 125, П6 — website-authorization-workflow, шаги 5–8): кода ещё нет —
+   * Amazon отправляет продавца на log-in URI приложения с `amazon_callback_uri`, `amazon_state`, `selling_partner_id` и, у черновика
+   * (`version=beta` в адресе согласия), `version=beta`. Код Amazon выдаёт только после возврата приложения на `amazon_callback_uri`
+   * ({@link confirm}). До шага 125 модель отдавала код сразу — того шага в потоке подключения не было, и модель его тоже не делала.
    */
   approve(consentUrl: string, sellerId: string): string {
     this.stats.consents += 1;
-    const state = new URL(consentUrl).searchParams.get('state') ?? '';
+    const consent = new URL(consentUrl);
+    const state = consent.searchParams.get('state') ?? '';
+    if (this.opts.channel === 'AMAZON') {
+      const applicationId = consent.searchParams.get('application_id') ?? '';
+      const draft = consent.searchParams.get('version') === 'beta';
+      const amazonState = randomBytes(12).toString('base64url');
+      this.loginVisits.set(amazonState, { sellerId, applicationId, draft, issuedAt: this.opts.now(), used: false });
+      // Callback URI — на том же Seller Central, где продавец дал согласие; путь — как в примерах страницы: /apps/authorize/confirm/<application_id>
+      const login = new URL(this.opts.loginUri!);
+      login.searchParams.set('amazon_callback_uri', `${consent.origin}/apps/authorize/confirm/${applicationId}`);
+      login.searchParams.set('amazon_state', amazonState);
+      login.searchParams.set('selling_partner_id', sellerId);
+      if (draft) login.searchParams.set('version', 'beta');
+      return login.toString();
+    }
+    return this.grant(state, sellerId);
+  }
+
+  private grant(state: string, sellerId: string): string {
     const code = randomBytes(16).toString('base64url');
     this.grants.set(code, { sellerId, code, issuedAt: this.opts.now(), used: false });
     const back = new URL(this.opts.redirectUri);
@@ -63,6 +100,31 @@ export class ModelOAuthProvider {
       back.searchParams.set('code', code);
     }
     return back.toString();
+  }
+
+  /**
+   * Шаг 125 (П6): приложение вернуло продавца на `amazon_callback_uri` (шаг 8) — Amazon показывает подтверждение и отправляет его на
+   * redirect URI с `state`, `selling_partner_id` и `spapi_oauth_code` (шаги 9–10). Модель строже страницы там, где та молчит: путь
+   * и `application_id` — те, что Amazon выдал на log-in URI, `amazon_state` — свой, одноразовый и не старше десяти минут, `version`
+   * — тот же, что у согласия, `redirect_uri` — зарегистрированный (без него — первый зарегистрированный), `state` — обязателен.
+   * Отказ — исключение с причиной: настоящий Amazon показал бы продавцу страницу ошибки, и до redirect URI браузер не дошёл бы.
+   */
+  confirm(callbackUrl: string): string {
+    const url = new URL(callbackUrl);
+    const refuse = (why: string): never => { throw new Error(`AMAZON_CONFIRM_REFUSED: ${why}`); };
+    if (this.opts.channel !== 'AMAZON') refuse('NOT_AMAZON');
+    const amazonState = url.searchParams.get('amazon_state') ?? '';
+    const visit = this.loginVisits.get(amazonState);
+    if (!visit || visit.used) refuse('AMAZON_STATE');
+    if (this.opts.now() - visit!.issuedAt > AMAZON_FLOW_MS) refuse('FLOW_EXPIRED');
+    if (url.protocol !== 'https:' || url.pathname !== `/apps/authorize/confirm/${visit!.applicationId}`) refuse('CALLBACK_PATH');
+    if ((url.searchParams.get('version') === 'beta') !== visit!.draft) refuse('VERSION');
+    const redirect = url.searchParams.get('redirect_uri');
+    if (redirect !== null && redirect !== this.opts.redirectUri) refuse('REDIRECT_URI_NOT_REGISTERED');
+    const state = url.searchParams.get('state') ?? '';
+    if (state === '') refuse('STATE');
+    visit!.used = true;
+    return this.grant(state, visit!.sellerId);
   }
 
   /** Продавец отказал на странице согласия */

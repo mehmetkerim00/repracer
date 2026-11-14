@@ -1064,6 +1064,8 @@ export const es: Messages = {
         badMarketplaces: 'Elija sitios de una sola región.',
         unavailable: 'Este canal todavía no se puede conectar.',
         unknownState: 'Este regreso no corresponde a una conexión iniciada en esta cuenta. Empiece de nuevo desde esta pantalla.',
+        loginWithoutConnect: 'Esta pestaña del navegador no inició una conexión con Amazon. Abra Canales, elija «Conectar Amazon» y conceda el acceso en Seller Central desde allí.',
+        loginRefused: 'Amazon envió una dirección a la que no continuamos, así que no se conectó nada. Empiece de nuevo desde Canales; si vuelve a ocurrir, avise al equipo de la plataforma.',
         expired: 'El consentimiento llegó demasiado tarde. Empiece de nuevo desde esta pantalla.',
         alreadyDone: 'Esta conexión ya está terminada.',
         denied: 'Lo rechazó en la página del canal. No se conectó nada.',

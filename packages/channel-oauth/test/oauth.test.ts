@@ -16,8 +16,20 @@ const REDIRECT = 'https://console.example.invalid/connect/callback';
 const clock = { ms: Date.parse('2026-09-26T10:00:00Z') };
 const now = () => clock.ms;
 
-const amazonModel = () => new ModelOAuthProvider({ channel: 'AMAZON', clientId: 'amzn1.application-oa2-client.synthetic', clientSecret: 'synthetic-secret', redirectUri: REDIRECT, now });
+const LOGIN = 'https://console.example.invalid/connect/amazon/login';
+const amazonModel = () => new ModelOAuthProvider({ channel: 'AMAZON', clientId: 'amzn1.application-oa2-client.synthetic', clientSecret: 'synthetic-secret', redirectUri: REDIRECT, loginUri: LOGIN, now });
 const amazon = (draft = true) => amazonLwa({ applicationId: 'amzn1.sellerapps.app.synthetic', clientId: 'amzn1.application-oa2-client.synthetic', clientSecret: 'synthetic-secret', redirectUri: REDIRECT, draft });
+
+/**
+ * Шаг 125 (П6): поток Amazon с сайта целиком (website-authorization-workflow, шаги 4–10) — согласие, log-in URI консоли, возврат на
+ * `amazon_callback_uri`, redirect URI с кодом. `state` консоль берёт из адреса согласия, как SPA из ответа «Connect»
+ */
+function authorize(model: ModelOAuthProvider, consentUrl: string, seller: string, provider = amazon()): URL {
+  const login = new URL(model.approve(consentUrl, seller));
+  const next = provider.continueFromLogin!(Object.fromEntries(login.searchParams), new URL(consentUrl).searchParams.get('state')!);
+  assert.equal(next.kind, 'CONTINUE', JSON.stringify(next));
+  return new URL(model.confirm(next.kind === 'CONTINUE' ? next.url : ''));
+}
 
 test('Р-175: адрес согласия Amazon — Seller Central витрины, application_id, state и version=beta для черновика', () => {
   const de = new URL(amazon(true).consentUrl({ state: 's1', marketplaces: ['A1PA6795UKMFR9'] }));
@@ -37,7 +49,7 @@ test('Р-175: адрес согласия Amazon — Seller Central витрин
 test('Р-175: поток Amazon на модели — согласие, обмен кода, refresh; код одноразовый', async () => {
   const model = amazonModel();
   const { state } = newState();
-  const back = new URL(model.approve(amazon().consentUrl({ state, marketplaces: ['A1PA6795UKMFR9'] }), 'A3SYNTHSELLER'));
+  const back = authorize(model, amazon().consentUrl({ state, marketplaces: ['A1PA6795UKMFR9'] }), 'A3SYNTHSELLER');
   const cb = amazon().parseCallback(Object.fromEntries(back.searchParams));
   assert.equal(cb.kind, 'CODE');
   assert.ok(cb.kind === 'CODE');
@@ -54,7 +66,7 @@ test('Р-175: поток Amazon на модели — согласие, обме
 
 test('Р-175: код согласия живёт пять минут (website-authorization-workflow)', async () => {
   const model = amazonModel();
-  const back = new URL(model.approve(amazon().consentUrl({ state: 'late', marketplaces: ['A1PA6795UKMFR9'] }), 'A3LATE'));
+  const back = authorize(model, amazon().consentUrl({ state: 'late', marketplaces: ['A1PA6795UKMFR9'] }), 'A3LATE');
   clock.ms += 5 * 60_000 + 1000;
   const r = await exchangeCode(amazon(), back.searchParams.get('spapi_oauth_code')!, model.fetch);
   assert.deepEqual(r.ok ? 'ok' : r.code, 'invalid_grant', 'код старше пяти минут не меняется на токены');
@@ -62,7 +74,7 @@ test('Р-175: код согласия живёт пять минут (website-au
 
 test('Р-177: отзыв продавцом — класс REVOKED; сломанные ключи приложения — PLATFORM, а не «продавец отозвал»', async () => {
   const model = amazonModel();
-  const back = new URL(model.approve(amazon().consentUrl({ state: 'r', marketplaces: ['A1PA6795UKMFR9'] }), 'A3REVOKER'));
+  const back = authorize(model, amazon().consentUrl({ state: 'r', marketplaces: ['A1PA6795UKMFR9'] }), 'A3REVOKER');
   const tokens = await exchangeCode(amazon(), back.searchParams.get('spapi_oauth_code')!, model.fetch);
   assert.ok(tokens.ok);
   model.breakPlatformCredentials();
@@ -156,7 +168,7 @@ test('Р-177: проверка авторизаций — отзыв, полом
   const model = amazonModel();
   const keyring = ephemeralKeyring('k-check');
   const issue = async (seller: string) => {
-    const back = new URL(model.approve(amazon().consentUrl({ state: seller, marketplaces: ['A1PA6795UKMFR9'] }), seller));
+    const back = authorize(model, amazon().consentUrl({ state: seller, marketplaces: ['A1PA6795UKMFR9'] }), seller);
     const t = await exchangeCode(amazon(), back.searchParams.get('spapi_oauth_code')!, model.fetch);
     assert.ok(t.ok);
     return t.refreshToken!;
@@ -188,7 +200,7 @@ test('Р-177, находка 7 ревью шага 43: массовый invalid_
   const keyring = ephemeralKeyring('k-mass');
   const rows: Array<{ tenantId: string; channelAccountId: string; channel: string; region: string; credentialId: string; sealed: ReturnType<typeof sealToken> }> = [];
   for (const seller of ['A3M1', 'A3M2', 'A3M3', 'A3M4']) {
-    const back = new URL(model.approve(amazon().consentUrl({ state: seller, marketplaces: ['A1PA6795UKMFR9'] }), seller));
+    const back = authorize(model, amazon().consentUrl({ state: seller, marketplaces: ['A1PA6795UKMFR9'] }), seller);
     const t = await exchangeCode(amazon(), back.searchParams.get('spapi_oauth_code')!, model.fetch);
     assert.ok(t.ok);
     rows.push({ tenantId: 't1', channelAccountId: seller, channel: 'AMAZON', region: 'EU', credentialId: seller, sealed: sealToken(keyring, t.refreshToken!, { tenantId: 't1', channelAccountId: seller }) });
@@ -217,4 +229,74 @@ test('шаг 39, E-11 [песочница]: продавца eBay называе
   assert.equal(await provider.identifySeller!('syn-access', answer(404, '{"errors":[]}')), null);
   assert.equal(await provider.identifySeller!('syn-access', answer(200, 'not json')), null);
   assert.equal(await provider.identifySeller!('syn-access', answer(200, '{"username":"no-id"}')), null);
+});
+
+test('step 125 (П6): after consent Amazon sends the seller to the log-in URI with amazon_callback_uri, amazon_state, selling_partner_id and version=beta; the console continues to amazon_callback_uri with amazon_state, its state, redirect_uri and version=beta', async () => {
+  const model = amazonModel();
+  const { state } = newState();
+  const consentUrl = amazon(true).consentUrl({ state, marketplaces: ['A1PA6795UKMFR9'] });
+  // Шаг 5 потока: Amazon вызывает log-in URI — кода здесь ещё нет
+  const login = new URL(model.approve(consentUrl, 'A3SYNTHLOGIN'));
+  assert.equal(login.origin + login.pathname, LOGIN, 'Amazon calls the log-in URI of the app, not the redirect URI');
+  assert.deepEqual([...login.searchParams.keys()].sort(), ['amazon_callback_uri', 'amazon_state', 'selling_partner_id', 'version']);
+  assert.equal(login.searchParams.get('spapi_oauth_code'), null, 'no code before the app sends the seller back');
+  assert.equal(login.searchParams.get('version'), 'beta', 'a Draft app — version=beta on the log-in URI');
+  // Шаги 7–8: консоль проверяет запрос и отправляет продавца на amazon_callback_uri
+  const next = amazon(true).continueFromLogin!(Object.fromEntries(login.searchParams), state);
+  assert.ok(next.kind === 'CONTINUE', JSON.stringify(next));
+  assert.equal(next.sellerId, 'A3SYNTHLOGIN', 'the log-in URI names the seller');
+  const back = new URL(next.url);
+  assert.equal(back.origin + back.pathname, 'https://sellercentral-europe.amazon.com/apps/authorize/confirm/amzn1.sellerapps.app.synthetic');
+  assert.equal(back.searchParams.get('amazon_state'), login.searchParams.get('amazon_state'), 'amazon_state goes back as Amazon sent it');
+  assert.equal(back.searchParams.get('state'), state, 'our state — the one of the consent address, its digest is in the database');
+  assert.equal(back.searchParams.get('redirect_uri'), REDIRECT, 'redirect_uri named explicitly: the code exchange uses the same');
+  assert.equal(back.searchParams.get('version'), 'beta');
+  // Шаги 9–12: Amazon отправляет на redirect URI с кодом — и он меняется на токены
+  const redirect = new URL(model.confirm(next.url));
+  assert.equal(redirect.origin + redirect.pathname, REDIRECT);
+  const cb = amazon().parseCallback(Object.fromEntries(redirect.searchParams));
+  assert.ok(cb.kind === 'CODE' && cb.state === state && cb.sellerId === 'A3SYNTHLOGIN');
+  const tokens = await exchangeCode(amazon(), cb.code, model.fetch);
+  assert.ok(tokens.ok, 'the code of the log-in flow exchanges for tokens');
+  // Модель строже страницы: amazon_state одноразовый
+  assert.throws(() => model.confirm(next.url), /AMAZON_CONFIRM_REFUSED: AMAZON_STATE/);
+  // Опубликованное приложение: version нет ни на log-in URI, ни в возврате
+  const published = new URL(model.approve(amazon(false).consentUrl({ state, marketplaces: ['ATVPDKIKX0DER'] }), 'A3PUBLISHED'));
+  assert.equal(published.searchParams.get('version'), null);
+  const onward = amazon(false).continueFromLogin!(Object.fromEntries(published.searchParams), state);
+  assert.ok(onward.kind === 'CONTINUE' && new URL(onward.url).searchParams.get('version') === null, JSON.stringify(onward));
+  assert.equal(new URL(onward.url).origin, 'https://sellercentral.amazon.com');
+});
+
+test('step 125 (П6): the console continues only to the confirm address of its own app on an Amazon host — anything else is refused with a reason, not followed', () => {
+  const app = 'amzn1.sellerapps.app.synthetic';
+  const base = { amazon_state: 'amazon-state-125', selling_partner_id: 'A3SYNTH', version: 'beta' };
+  const go = (callback: string | undefined, extra: Record<string, string> = {}, draft = true) =>
+    amazon(draft).continueFromLogin!({ ...base, ...(callback === undefined ? {} : { amazon_callback_uri: callback }), ...extra }, 'our-state-0123456789abcdef');
+  // Пример страницы — `https://amazon.com/apps/authorize/confirm/<application_id>`: хост amazon.com принимается так же, как Seller Central
+  assert.equal(go(`https://amazon.com/apps/authorize/confirm/${app}`).kind, 'CONTINUE', 'the documented example');
+  assert.equal(go(`https://sellercentral.amazon.com/apps/authorize/confirm/${app}`).kind, 'CONTINUE');
+  const refused: Array<[string | undefined, string, Record<string, string>?, boolean?]> = [
+    [undefined, 'NO_CALLBACK'],
+    ['not a url', 'CALLBACK_NOT_AMAZON'],
+    [`http://sellercentral.amazon.com/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://evil.example/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://amazon.com.evil.example/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://evilamazon.com/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://amazon.com@evil.example/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://user:pass@sellercentral.amazon.com/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://sellercentral.amazon.com:8443/apps/authorize/confirm/${app}`, 'CALLBACK_NOT_AMAZON'],
+    [`https://sellercentral.amazon.com/apps/authorize/confirm/${app}#x`, 'CALLBACK_NOT_AMAZON'],
+    ['https://sellercentral.amazon.com/apps/authorize/confirm/amzn1.sellerapps.app.someone-else', 'CALLBACK_OTHER_APP'],
+    [`https://sellercentral.amazon.com/apps/authorize/confirm/${app}/more`, 'CALLBACK_OTHER_APP'],
+    [`https://sellercentral.amazon.com/apps/authorize/consent?application_id=${app}`, 'CALLBACK_OTHER_APP'],
+    [`https://sellercentral.amazon.com/apps/authorize/confirm/${app}`, 'NO_AMAZON_STATE', { amazon_state: '' }],
+    [`https://sellercentral.amazon.com/apps/authorize/confirm/${app}`, 'VERSION_MISMATCH', { version: '' }],
+    [`https://sellercentral.amazon.com/apps/authorize/confirm/${app}`, 'VERSION_MISMATCH', { version: 'gamma' }],
+    [`https://sellercentral.amazon.com/apps/authorize/confirm/${app}`, 'VERSION_MISMATCH', {}, false],
+  ];
+  for (const [callback, reason, extra, draft] of refused) {
+    const out = go(callback, extra, draft ?? true);
+    assert.deepEqual(out.kind === 'REFUSED' ? out.reason : out.url, reason, `${callback} ${JSON.stringify(extra ?? {})} draft=${draft ?? true}`);
+  }
 });

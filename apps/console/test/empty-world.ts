@@ -49,5 +49,6 @@ export const emptyWorldConnect: ChannelConnectService = {
   connections: async () => ({ accounts: [], pending: [] }),
   start: async () => ({ status: 'UNAVAILABLE' }),
   callback: async () => ({ status: 'BAD_CALLBACK' }),
+  amazonLogin: async () => ({ status: 'UNAVAILABLE' }),
   cancel: async () => false,
 };

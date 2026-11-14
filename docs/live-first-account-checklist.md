@@ -84,6 +84,10 @@
 ### A1. Подключение, продавец по токену, тень · 5 мин
 
 - **Что проверяем:**
+  - поток с сайта через log-in URI (шаг 125, П6): после согласия Amazon ведёт браузер на `https://app.<домен>/connect/amazon/login` с
+    `amazon_callback_uri`, `amazon_state`, `selling_partner_id` и `version=beta`; консоль возвращает его на `amazon_callback_uri`. Записать
+    настоящий хост и путь `amazon_callback_uri` (у страницы пример — `amazon.com/apps/authorize/confirm/<application_id>`) и форму
+    идентификатора приложения в пути (A-34);
   - обмен кода и токен LWA боевого приложения;
   - каким вызовом узнать продавца по токену (A-19): `selling_partner_id` приходит в адресе возврата и подделывается;
   - тень читает и не пишет [Р-169, Р-171], обнаружение стартует само [Р-176];
@@ -98,6 +102,8 @@
     (шаг 70);
   - в базе — записи аккаунта (`channel_write`).
 - **Успех:**
+  - после «Allow» браузер проходит log-in URI и возвращается на `/connect/callback` с кодом; в журнале консоли —
+    `channel_connect_login_continue`, без `channel_connect_login_refused`;
   - аккаунт в тени, «нашли N офферов», где N — число листингов amazon.com в Seller Central;
   - на Channels — «amazon.com: the catalog comes from Amazon's catalog report — N offers»; в журнале AMZ_C16 `PARSED` без пропущенных строк; строки «Not found
     when we asked Amazon for details…» нет, а если есть — названные SKU сверены с Seller Central (A-39, шаг 122);
@@ -105,6 +111,8 @@
   - решения тени идут, записи только `SHADOW_HELD`, ни одной отправленной;
   - для A-19: в ответе есть идентификатор продавца, и он равен `selling_partner_id` возврата OAuth.
 - **Если иначе:**
+  - log-in URI отказал (`channel_connect_login_refused`: причина и хост в журнале консоли) → стоп, доложить: хост или путь
+    `amazon_callback_uri` не тот, что в документации, или флаг `REPRACER_AMAZON_APP_DRAFT` не совпал с `version` от Amazon;
   - продавца по токену не назвать → A-19 остаётся открытым: перепривязка аккаунта — только со вторым фактором, конфликт — исход
     `SELLER_TAKEN` (шаг 43);
   - хоть одна запись ушла из тени → стоп, доложить владельцу (нарушен Р-169);

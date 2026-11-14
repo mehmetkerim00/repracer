@@ -665,7 +665,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             }
         }
       }
-      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel' && param4 !== 'other-tools' && param4 !== 'quantity-writes' && param4 !== 'quantity-writes-revoke')) return fail(404, 'NOT_FOUND', s.notFound);
+      if (req.method !== 'POST' || (param4 !== 'start' && param4 !== 'callback' && param4 !== 'cancel' && param4 !== 'amazon-login' && param4 !== 'other-tools' && param4 !== 'quantity-writes' && param4 !== 'quantity-writes-revoke')) return fail(404, 'NOT_FOUND', s.notFound);
       if (!can(viewer.role, 'MANAGE_TENANT')) return fail(403, 'FORBIDDEN', t.noRight);
       const actor = { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) };
       /**
@@ -725,6 +725,26 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         const id = typeof body.authorizationRequestId === 'string' && /^[0-9a-f-]{36}$/.test(body.authorizationRequestId) ? body.authorizationRequestId : null;
         if (!id) return fail(400, 'BAD_REQUEST', s.badRequest);
         return (await connect.cancel(live.tenantId, id, actor)) ? ok({ cancelled: true }) : fail(409, 'ALREADY_DONE', t.errors.alreadyDone);
+      }
+      /**
+       * Шаг 125 (П6): log-in URI Amazon (website-authorization-workflow, шаги 5–8). SPA пересылает то, что Amazon прислал на
+       * `/connect/amazon/login`, и `state` из адреса согласия; ответ — адрес, на который SPA уводит браузер обратно к Amazon
+       */
+      if (param4 === 'amazon-login') {
+        const raw = (body.params ?? {}) as Record<string, unknown>;
+        const params: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw).slice(0, 10)) if (typeof v === 'string' && v.length <= 2048) params[k] = v;
+        const e = t.errors;
+        if (typeof body.state !== 'string' || body.state.length === 0) return fail(409, 'UNKNOWN_STATE', e.loginWithoutConnect);
+        const next = await connect.amazonLogin(live.tenantId, { params, state: body.state }, actor);
+        switch (next.status) {
+          case 'CONTINUE': return ok({ continueUrl: next.continueUrl });
+          case 'UNAVAILABLE': return fail(409, 'CHANNEL_UNAVAILABLE', e.unavailable);
+          case 'UNKNOWN_STATE': return fail(409, 'UNKNOWN_STATE', e.loginWithoutConnect);
+          case 'EXPIRED': return fail(409, 'EXPIRED', e.expired);
+          case 'ALREADY_DONE': return fail(409, 'ALREADY_DONE', e.alreadyDone);
+          case 'BAD_LOGIN': return fail(400, `LOGIN_${next.reason}`, e.loginRefused);
+        }
       }
       if (param4 === 'start') {
         const marketplaces = Array.isArray(body.marketplaces) && body.marketplaces.every((x) => typeof x === 'string') ? body.marketplaces as string[] : null;

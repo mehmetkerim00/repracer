@@ -73,6 +73,9 @@ let stand: ReturnType<typeof createStandServer> | null = null;
 let vite: ViteDevServer | null = null;
 let browser: Browser | null = null;
 let pageUrl = '';
+/** Шаг 125 (П6): что SPA переслала серверу со своего log-in URI — смоук утверждает это, а сервер стенда уводит её обратно, как к Amazon */
+const amazonLoginSeen: unknown[] = [];
+let smokeWorldId = '';
 /** Шаг 87: два экземпляра API на одних мирах — профиль eu (Kaufland, немецкий, Omnibus) и профиль us; сервер стенда ходит в текущий */
 let euApi: ReturnType<typeof createStandApi>;
 let usApi: ReturnType<typeof createStandApi>;
@@ -238,7 +241,10 @@ before(async () => {
     start: async () => ({ status: 'UNAVAILABLE' }),
     callback: async () => ({ status: 'BAD_CALLBACK' }),
     cancel: async () => false,
+    // Шаг 125 (П6): «продолжить у Amazon» — адрес на той же странице: смоук видит, что браузер ушёл по ответу сервера, и не ходит в сеть
+    amazonLogin: async (_tenantId, input) => { amazonLoginSeen.push(input); return { status: 'CONTINUE', continueUrl: `${pageUrl}?continued-from-amazon-login` }; },
   };
+  smokeWorldId = w0.id;
   const connect = (worldId: string) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : worldId === w0.id ? smokeConnect : null);
   // Основной стенд — профиль eu: смоук Kaufland и немецкие проходы шагов 76–86 гоняются на нём (Европа заморожена, не удалена)
   euApi = createStandApi(all, identity, { defaultLocale: 'en', market: 'eu', connect, people: STAND_PEOPLE });
@@ -1582,6 +1588,47 @@ test('step 100 (A), step 111 [Р-237]: one workspace — straight into it after 
  * Шаг 121 (QA-A, видимая версия сборки): подвал каждой страницы — на входе и в рабочем пространстве — называет сборку, полный SHA в
  * подсказке; так человек пишет в отчёте об ошибке, на какой версии он её видел. Без сборки подвала нет; телефон не прокручивается вбок
  */
+test('step 125 (П6): the log-in URI page — Amazon arrives with amazon_callback_uri, amazon_state, selling_partner_id and version; the page keeps them over sign-in, sends them with the state of «Connect» once and leaves for Amazon; without «Connect» it says so', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  const callback = 'https://sellercentral-europe.amazon.com/apps/authorize/confirm/amzn1.sellerapps.app.smoke';
+  const query = new URLSearchParams({ amazon_callback_uri: callback, amazon_state: 'smoke-amazon-state', selling_partner_id: 'A3SMOKESELLER', version: 'beta' });
+  const loginUrl = `${pageUrl}connect/amazon/login?${query}`;
+  const stored = `JSON.stringify(Object.keys(sessionStorage).filter((k) => k.startsWith('repracer.connect.')).sort())`;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  // «Connect Amazon» в этой вкладке: мир и state помнит вкладка — как Connections.tsx после ответа сервера
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.evaluate(`(sessionStorage.clear(), sessionStorage.setItem('repracer.connect.world', ${JSON.stringify(smokeWorldId)}),
+    sessionStorage.setItem('repracer.connect.state', 'smoke-state-0123456789abcdef'), true)`);
+  // Amazon ведёт браузер на log-in URI: адрес стирается сразу (параметры — в хранилище вкладки), страница — вход
+  await b.open(loginUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  assert.deepEqual(await b.evaluate<string>(`location.pathname + location.search`), '/', 'the log-in address leaves the history at once');
+  assert.equal(amazonLoginSeen.length, 0, 'nothing is sent before sign-in');
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await waitFor(b, `location.search === '?continued-from-amazon-login'`, 'after sign-in the page leaves for the address the server named');
+  assert.deepEqual(amazonLoginSeen, [{ params: Object.fromEntries(query), state: 'smoke-state-0123456789abcdef' }],
+    'the page sends what Amazon sent and the state of «Connect» — once');
+  // Мир остаётся: после Amazon браузер вернётся на /connect/callback, и возврат найдёт мир по нему, как прежде
+  assert.equal(await b.evaluate<string>(stored), '["repracer.connect.world"]', 'the log-in parameters and the state are not kept after use; the world is, for the callback');
+  // Без «Connect» в этой вкладке продолжать нечем: страница говорит начать с Channels и серверу ничего не шлёт
+  await b.open(loginUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.connections.errors.loginWithoutConnect);
+  assert.equal(amazonLoginSeen.length, 1, 'no request without the state of «Connect»');
+  // Контроль: обычный вход без log-in URI сюда не ведёт
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await settled(b, 'control: a plain sign-in');
+  assert.equal(await b.evaluate<boolean>(`document.body.innerText.includes(${JSON.stringify(en.ui.connections.errors.loginWithoutConnect)})`), false, 'control: no log-in message on a plain sign-in');
+  assert.equal(amazonLoginSeen.length, 1);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 121: the footer names the build on sign-in and inside a workspace, the full SHA as its title; none without a build; 375 keeps the page', async () => {
   const b = browser!;
   const before = b.errors().length;

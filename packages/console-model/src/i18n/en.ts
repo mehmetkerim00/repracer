@@ -1065,6 +1065,9 @@ export const en = {
         badMarketplaces: 'Choose storefronts of one region.',
         unavailable: 'This channel cannot be connected yet.',
         unknownState: 'This return does not belong to a connection started in this account. Start again from this screen.',
+        // Шаг 125 (П6): log-in URI Amazon — вкладка не начинала подключение, или Amazon прислал адрес, куда мы не продолжаем
+        loginWithoutConnect: 'This browser tab did not start a connection to Amazon. Open Channels, choose Connect Amazon and allow access in Seller Central from there.',
+        loginRefused: 'Amazon sent an address we do not continue to, so nothing was connected. Start again from Channels; if it happens again, tell the platform team.',
         expired: 'The consent came back too late. Start again from this screen.',
         alreadyDone: 'This connection is already finished.',
         denied: 'You declined on the page of the channel. Nothing was connected.',

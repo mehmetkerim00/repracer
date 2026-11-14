@@ -13,6 +13,8 @@ import { CheckField, Field, FieldGrid, FormActions } from '../forms.tsx';
  */
 
 const PENDING_WORLD = 'repracer.connect.world';
+/** Шаг 125 (П6): `state` адреса согласия — им консоль продолжает поток Amazon с log-in URI; в базе только его отпечаток */
+const PENDING_STATE = 'repracer.connect.state';
 
 const tone = (state: string): 'ok' | 'warn' | 'stop' => (state === 'LIVE' ? 'ok' : state === 'REVOKED' ? 'stop' : 'warn');
 
@@ -25,7 +27,10 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
   const start = (channel: string, marketplaces: string[]) =>
     void requestJson<{ consentUrl: string }>(worldPath(worldId, 'connections', 'start'), { method: 'POST', locale: m.locale, body: { channel, marketplaces } })
       .then((r) => {
-        try { sessionStorage.setItem(PENDING_WORLD, worldId); } catch { /* вкладка без хранилища: возврат спросит мир заново */ }
+        try {
+          sessionStorage.setItem(PENDING_WORLD, worldId);
+          sessionStorage.setItem(PENDING_STATE, new URL(r.consentUrl).searchParams.get('state') ?? '');
+        } catch { /* вкладка без хранилища: возврат спросит мир заново */ }
         window.location.assign(r.consentUrl);
       })
       .catch((e: unknown) => setError(errorText(e, m)));
@@ -300,11 +305,56 @@ export function ConnectCallback({ onDone }: { onDone: () => void }) {
       params = JSON.parse(sessionStorage.getItem(PENDING_CALLBACK) ?? '{}') as Record<string, string>;
       worldId = sessionStorage.getItem(PENDING_WORLD);
       sessionStorage.removeItem(PENDING_CALLBACK);
+      sessionStorage.removeItem(PENDING_STATE);
     } catch { worldId = null; }
     if (!worldId) { setMessage(m.ui.connections.errors.unknownState); return; }
     void requestJson<{ message: string }>(worldPath(worldId, 'connections', 'callback'), { method: 'POST', locale: m.locale, body: { params } })
       // Шаг 95: прежний адрес `#/worlds/…/connections` разбор не знал (`w`, а не `worlds`) — возврат вёл на список пространств
       .then(() => { window.location.hash = href(worldId!, 'channels', 'accounts'); onDone(); })
+      .catch((e: unknown) => setMessage(errorText(e, m)));
+  }, []);
+  return <section className="card"><p>{message ?? '…'}</p></section>;
+}
+
+const PENDING_LOGIN = 'repracer.connect.amazonLogin';
+
+/**
+ * Шаг 125 (П6): log-in URI Amazon — `/connect/amazon/login?amazon_callback_uri=…&amazon_state=…&selling_partner_id=…&version=beta`
+ * (website-authorization-workflow, шаг 5). Как и возврат канала, параметры сохраняются в хранилище вкладки ДО входа, а адрес сразу
+ * стирается: после входа страница пересылает их серверу вместе со `state` «Connect» и уходит туда, куда сервер скажет, — обратно к Amazon
+ */
+export function captureAmazonLogin(): void {
+  if (typeof window === 'undefined' || window.location.pathname !== '/connect/amazon/login') return;
+  try { sessionStorage.setItem(PENDING_LOGIN, JSON.stringify(Object.fromEntries(new URLSearchParams(window.location.search)))); } catch { /* без хранилища — экран скажет начать заново */ }
+  window.history.replaceState(null, '', '/');
+}
+
+export function pendingAmazonLogin(): boolean {
+  try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem(PENDING_LOGIN) !== null; } catch { return false; }
+}
+
+export function AmazonLogin() {
+  const m = useMessages();
+  const [message, setMessage] = useState<string | null>(null);
+  // Строгий режим React запускает эффект дважды — log-in URI уходит серверу ОДИН раз
+  const sent = useRef(false);
+  useEffect(() => {
+    if (sent.current) return;
+    sent.current = true;
+    let params: Record<string, string> = {};
+    let worldId: string | null = null;
+    let state: string | null = null;
+    try {
+      params = JSON.parse(sessionStorage.getItem(PENDING_LOGIN) ?? '{}') as Record<string, string>;
+      worldId = sessionStorage.getItem(PENDING_WORLD);
+      state = sessionStorage.getItem(PENDING_STATE);
+      sessionStorage.removeItem(PENDING_LOGIN);
+      sessionStorage.removeItem(PENDING_STATE);
+    } catch { worldId = null; }
+    // Вкладка не начинала подключение (или Amazon пришёл сам, из Appstore): продолжать нечем — сказать, откуда начать
+    if (!worldId || !state) { setMessage(m.ui.connections.errors.loginWithoutConnect); return; }
+    void requestJson<{ continueUrl: string }>(worldPath(worldId, 'connections', 'amazon-login'), { method: 'POST', locale: m.locale, body: { params, state } })
+      .then((r) => window.location.assign(r.continueUrl))
       .catch((e: unknown) => setMessage(errorText(e, m)));
   }, []);
   return <section className="card"><p>{message ?? '…'}</p></section>;

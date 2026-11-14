@@ -188,7 +188,9 @@ before(async () => {
   consoleOrigin = `http://127.0.0.1:${consolePort}`;
   clients['console-spa'] = { redirectUris: [`${consoleOrigin}/auth/callback`], audience: CONSOLE_AUDIENCE };
   const redirectUri = `${consoleOrigin}/connect/callback`;
-  lwa = new ModelOAuthProvider({ channel: 'AMAZON', clientId: 'amzn1.application-oa2-client.pilot', clientSecret: 'syn-pilot-client-secret', redirectUri, now: () => Date.now() });
+  // Шаг 125 (П6): log-in URI приложения — адрес консоли, который владелец регистрирует у приложения (deploy/pilot/README.md, §1)
+  lwa = new ModelOAuthProvider({ channel: 'AMAZON', clientId: 'amzn1.application-oa2-client.pilot', clientSecret: 'syn-pilot-client-secret', redirectUri,
+    loginUri: `${consoleOrigin}/connect/amazon/login`, now: () => Date.now() });
   // Конечная точка токенов LWA по HTTP — консоль ходит к ней обычным fetch, как к api.amazon.com
   lwaServer = createHttpServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -344,7 +346,13 @@ test('Р-179: путь пилота целиком — от оператора �
   assert.equal(path.status, 200, JSON.stringify(path.body));
   const start = await consoleCall<{ consentUrl: string }>('Connect Amazon', 'POST', api('connections', 'start'), { channel: 'AMAZON', marketplaces: [AMAZON_DE] });
   assert.equal(start.status, 200, JSON.stringify(start.body));
-  const back = new URL(lwa.approve(start.body.consentUrl, SELLER));
+  // Шаг 125 (П6): Amazon ведёт браузер на log-in URI консоли; SPA пересылает его параметры и свой state, консоль отправляет обратно на Amazon
+  const login = new URL(lwa.approve(start.body.consentUrl, SELLER));
+  assert.equal(login.origin + login.pathname, `${consoleOrigin}/connect/amazon/login`, 'после согласия — log-in URI консоли');
+  const onward = await consoleCall<{ continueUrl: string }>('log-in URI Amazon', 'POST', api('connections', 'amazon-login'),
+    { params: Object.fromEntries(login.searchParams), state: new URL(start.body.consentUrl).searchParams.get('state') });
+  assert.equal(onward.status, 200, JSON.stringify(onward.body));
+  const back = new URL(lwa.confirm(onward.body.continueUrl));
   const connected = await consoleCall<{ channelAccountId: string }>('возврат с кодом согласия', 'POST', api('connections', 'callback'), { params: Object.fromEntries(back.searchParams) });
   assert.equal(connected.status, 200, JSON.stringify(connected.body));
   ids.accountId = connected.body.channelAccountId;

@@ -1,4 +1,4 @@
-import { exchangeCode, newState, sealToken, stateDigest, type Fetch, type Keyring, type OAuthProvider } from '@repracer/channel-oauth';
+import { exchangeCode, newState, sealToken, stateDigest, type Fetch, type Keyring, type LoginContinuation, type OAuthProvider } from '@repracer/channel-oauth';
 import { systemClock } from '@repracer/channel-port';
 import type { ConnectableChannel } from '@repracer/console-model';
 import type { ConnectionRow, ConnectOutcome, PendingRequestRow, PgChannelConnectStore } from '@repracer/pricing-store-pg';
@@ -29,6 +29,12 @@ export interface ChannelConnectService {
   connections(tenantId: string): Promise<{ accounts: ConnectionRow[]; pending: PendingRequestRow[] }>;
   start(tenantId: string, input: { channel: string; marketplaces: string[] }, actor: Actor): Promise<StartOutcome>;
   callback(tenantId: string, params: Record<string, string>, actor: Actor): Promise<CallbackOutcome>;
+  /**
+   * Шаг 125 (П6): Amazon после согласия отправил продавца на log-in URI консоли (website-authorization-workflow, шаги 5–8). SPA пересылает
+   * параметры Amazon и `state` из адреса согласия, который вкладка запомнила при «Connect»; служба сверяет его с ждущим запросом Amazon
+   * этого тенанта и называет адрес, на который вернуть продавца, — `amazon_callback_uri` с `amazon_state`, `state` и `redirect_uri`
+   */
+  amazonLogin(tenantId: string, input: { params: Record<string, string>; state: string }, actor: Actor): Promise<AmazonLoginOutcome>;
   cancel(tenantId: string, authorizationRequestId: string, actor: Actor): Promise<boolean>;
 }
 
@@ -47,6 +53,11 @@ export type CallbackOutcome =
   | { status: 'BAD_CALLBACK' }
   | { status: 'EXCHANGE_FAILED'; failure: 'REVOKED' | 'PLATFORM' | 'TRANSIENT' }
   | { status: 'IDENTITY_UNKNOWN' };
+
+export type AmazonLoginOutcome =
+  | { status: 'CONTINUE'; continueUrl: string }
+  | { status: 'UNAVAILABLE' | 'UNKNOWN_STATE' | 'EXPIRED' | 'ALREADY_DONE' }
+  | { status: 'BAD_LOGIN'; reason: Extract<LoginContinuation, { kind: 'REFUSED' }>['reason'] };
 
 /** Срок запроса согласия: Amazon предупреждает, что поток дольше десяти минут ломается; база больше не примет */
 export const CONSENT_TTL_SECONDS = 600;
@@ -68,6 +79,30 @@ export function createChannelConnectService(o: {
     })),
     connections: (tenantId) => o.store.connections(tenantId),
     cancel: (tenantId, id, actor) => o.store.cancel(tenantId, id, actor),
+
+    async amazonLogin(tenantId, input, actor) {
+      const p = byChannel('AMAZON');
+      if (!p?.provider?.continueFromLogin || p.platformMissing.length > 0) return { status: 'UNAVAILABLE' };
+      if (input.state.length < 16 || input.state.length > 128) return { status: 'UNKNOWN_STATE' };
+      /**
+       * Продолжать можно только ЖДУЩИЙ запрос Amazon этого тенанта, ещё не дошедший до обмена кода: отменённый, истёкший, чужой или
+       * уже завершённый дальше log-in URI не идёт — продавец не уходит обратно к Amazon с `state`, который консоль не примет.
+       * В базе ничего не меняется: `amazon_state` проверяет Amazon, а код придёт на адрес возврата, где обмен захватывается, как прежде
+       */
+      const pending = await o.store.pendingRequest(tenantId, stateDigest(input.state));
+      if (pending.status === 'UNKNOWN' || pending.channel !== 'AMAZON') return { status: 'UNKNOWN_STATE' };
+      if (pending.status !== 'PENDING') return { status: pending.status === 'EXPIRED' ? 'EXPIRED' : 'ALREADY_DONE' };
+      const next = p.provider.continueFromLogin(input.params, input.state);
+      if (next.kind === 'REFUSED') {
+        // Хост — чтобы оператор увидел, какой адрес прислал Amazon (первое живое подключение); ни amazon_state, ни state в журнал не идут
+        let host: string | null = null;
+        try { host = new URL(input.params.amazon_callback_uri ?? '').host; } catch { host = null; }
+        o.log?.('channel_connect_login_refused', { tenantId, reason: next.reason, callbackHost: host, version: input.params.version ?? null, actor: actor.membershipId });
+        return { status: 'BAD_LOGIN', reason: next.reason };
+      }
+      o.log?.('channel_connect_login_continue', { tenantId, actor: actor.membershipId });
+      return { status: 'CONTINUE', continueUrl: next.url };
+    },
 
     async start(tenantId, input, actor) {
       const p = byChannel(input.channel);
@@ -164,6 +199,7 @@ export function readOnlyConnections(store: PgChannelConnectStore): ChannelConnec
     connections: (tenantId) => store.connections(tenantId),
     start: async () => ({ status: 'UNAVAILABLE' }),
     callback: async () => ({ status: 'BAD_CALLBACK' }),
+    amazonLogin: async () => ({ status: 'UNAVAILABLE' }),
     cancel: async () => false,
   };
 }

@@ -22,6 +22,7 @@ export function connectionsOnly(store: PgChannelConnectStore): ChannelConnectSer
     connections: (tenantId) => store.connections(tenantId),
     start: async () => ({ status: 'UNAVAILABLE' }),
     callback: async () => ({ status: 'BAD_CALLBACK' }),
+    amazonLogin: async () => ({ status: 'UNAVAILABLE' }),
     cancel: async () => false,
   };
 }

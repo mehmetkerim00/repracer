@@ -17,10 +17,12 @@ import { JobHistory } from './screens/Jobs.tsx';
 import { ProtectionsScreen } from './screens/Protections.tsx';
 import { ShadowScreen } from './screens/Shadow.tsx';
 import { captureLoginReturns, completeLogin, forgetInvitation, pendingInvitation, startLogin } from './login.ts';
-import { captureConnectCallback, ConnectCallback, pendingConnectCallback } from './screens/Connections.tsx';
+import { AmazonLogin, captureAmazonLogin, captureConnectCallback, ConnectCallback, pendingAmazonLogin, pendingConnectCallback } from './screens/Connections.tsx';
 
 // Р-175: возврат от канала запоминается ДО входа — адрес стирается сразу, код согласия в истории браузера не живёт
 captureConnectCallback();
+// Шаг 125 (П6): log-in URI Amazon — тоже до входа
+captureAmazonLogin();
 // Шаг 44 [Р-178]: возврат от поставщика входа и ссылка приглашения — тоже до входа
 captureLoginReturns();
 import { StockScreen } from './screens/Stock.tsx';
@@ -335,7 +337,9 @@ function SignedIn({ route }: { route: Route }) {
   const m = useMessages();
   const [worlds, retry] = useResource<WorldSummary[]>('/api/worlds', m.locale);
   const [callback, setCallback] = useState(pendingConnectCallback);
+  const [amazonLogin] = useState(pendingAmazonLogin);
   if (callback) return <ConnectCallback onDone={() => setCallback(false)} />;
+  if (amazonLogin) return <AmazonLogin />;
   return (
     <Load resource={worlds} retry={retry}>
       {(list) => (route.worldId === null ? (list.length === 1 && route.screen !== 'workspaces' ? <OnlyWorld world={list[0]!} /> : <WorldList worlds={list} />)

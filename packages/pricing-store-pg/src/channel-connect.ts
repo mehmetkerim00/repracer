@@ -207,6 +207,23 @@ export class PgChannelConnectStore {
   }
 
   /**
+   * Шаг 125 (П6): запрос по отпечатку state для log-in URI Amazon — ждёт ли он ещё согласия (не отменён, не истёк, обмен кода не начат) и
+   * какого он канала. Ничего не меняет
+   */
+  async pendingRequest(tenantId: string, stateSha256: Buffer): Promise<{ status: 'PENDING' | 'EXPIRED' | 'UNKNOWN' | 'DONE'; channel: string | null }> {
+    return inTenant(this.adminPool, tenantId, async (tx) => {
+      const { rows: [r] } = await tx.query(
+        `SELECT channel, status, exchange_started_at IS NOT NULL AS exchanging, expires_at < now() AS expired
+           FROM tenant_data.channel_authorization_request WHERE tenant_id = $1 AND state_sha256 = $2`,
+        [tenantId, stateSha256]);
+      if (!r) return { status: 'UNKNOWN', channel: null };
+      const channel = r.channel as string;
+      if (r.status !== 'PENDING' || r.exchanging) return { status: 'DONE', channel };
+      return { status: r.expired ? 'EXPIRED' : 'PENDING', channel };
+    });
+  }
+
+  /**
    * Находка 9 ревью шага 43: обмен кода ЗАХВАТЫВАЕТСЯ до обращения к каналу одним оператором — второй одновременный
    * возврат получает «уже обменивается» и ни кода не тратит, ни чужой успех не перетирает. Канал запроса берётся отсюда,
    * а не из вида параметров возврата (находка 19).

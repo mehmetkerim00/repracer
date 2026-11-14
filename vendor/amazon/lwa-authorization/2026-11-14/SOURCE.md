@@ -28,3 +28,6 @@
 
 Поток подключения шага 43 строит адрес согласия и ждёт код сразу на redirect URI — шагов 5–8 в нём нет, и модель поставщика LWA в прогонах их тоже не делает.
 Доклад владельцу — [docs/evidence/step122-small-fixes.md](../../../../docs/evidence/step122-small-fixes.md), раздел «П6».
+
+**Шаг 125 (П6):** шаги 5–8 построены — log-in URI консоли `/connect/amazon/login`, модель поставщика LWA ведёт продавца через него
+([docs/evidence/step125-amazon-login-uri.md](../../../../docs/evidence/step125-amazon-login-uri.md)).

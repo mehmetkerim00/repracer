@@ -22,6 +22,17 @@ export type ConsentCallback =
   | { kind: 'CODE'; state: string; code: string; sellerId: string | null }
   | { kind: 'DENIED'; state: string | null; error: string };
 
+/**
+ * Шаг 125 (П6): куда отправить продавца с log-in URI — или почему не отправлять. Причины отказа:
+ *   NO_CALLBACK — Amazon не прислал `amazon_callback_uri`; NO_AMAZON_STATE — не прислал `amazon_state`;
+ *   CALLBACK_NOT_AMAZON — адрес не https на хосте Amazon (с логином, портом или фрагментом — тоже);
+ *   CALLBACK_OTHER_APP — путь не `/apps/authorize/confirm/<наш application_id>`;
+ *   VERSION_MISMATCH — `version=beta` на log-in URI и черновик приложения в нашей конфигурации расходятся.
+ */
+export type LoginContinuation =
+  | { kind: 'CONTINUE'; url: string; sellerId: string | null }
+  | { kind: 'REFUSED'; reason: 'NO_CALLBACK' | 'NO_AMAZON_STATE' | 'CALLBACK_NOT_AMAZON' | 'CALLBACK_OTHER_APP' | 'VERSION_MISMATCH' };
+
 export interface OAuthProvider {
   channel: OAuthChannel;
   /** Адрес страницы согласия, на которую уходит браузер продавца */
@@ -34,6 +45,12 @@ export interface OAuthProvider {
    * обмена кода; `null` — узнать не удалось, и аккаунт получает временный идентификатор, как на шаге 43.
    */
   identifySeller?(accessToken: string, http: Fetch): Promise<string | null>;
+  /**
+   * Шаг 125 (П6): Amazon после согласия отправляет продавца на log-in URI приложения (website-authorization-workflow, шаги 5–8). Разбор
+   * его параметров и адрес, на который продавца надо вернуть, — `amazon_callback_uri` с `amazon_state`, нашим `state`, `redirect_uri` и,
+   * у черновика, `version=beta`. Вызывающий до этого сверяет `state` с ждущим запросом своего тенанта; есть только у Amazon.
+   */
+  continueFromLogin?(login: Readonly<Record<string, string | undefined>>, state: string): LoginContinuation;
 }
 
 // ---------------------------------------------------------------------------------------------------- Amazon LWA
@@ -64,6 +81,16 @@ export interface AmazonLwaConfig {
   tokenUrl?: string;
 }
 
+/**
+ * Шаг 125 (П6): хост `amazon_callback_uri`, на который консоль отправляет продавца. Пример страницы — `https://amazon.com/apps/authorize/confirm/…`,
+ * Seller Central наших витрин (seller-central-urls) — поддомены amazon.com; какой хост пришлёт настоящий Amazon, проверит первое живое
+ * подключение (docs/live-first-account-checklist.md). Всё вне amazon.com — открытая переадресация, а не продолжение потока: отказ.
+ */
+function amazonHost(host: string, central: Readonly<Record<string, string>>): boolean {
+  if (host === 'amazon.com' || host.endsWith('.amazon.com')) return true;
+  return Object.values(central).some((origin) => new URL(origin).host === host);
+}
+
 export function amazonLwa(cfg: AmazonLwaConfig): OAuthProvider {
   const central = cfg.sellerCentral ?? AMAZON_SELLER_CENTRAL;
   return {
@@ -86,6 +113,31 @@ export function amazonLwa(cfg: AmazonLwaConfig): OAuthProvider {
         return { kind: 'CODE', state: q.state, code: q.spapi_oauth_code, sellerId: q.selling_partner_id ?? null };
       }
       return { kind: 'DENIED', state: q.state ?? null, error: q.error ?? 'NO_CODE' };
+    },
+    continueFromLogin(login, state) {
+      // Log-in URI: `amazon_callback_uri`, `amazon_state`, `selling_partner_id`, у черновика `version=beta` (website-authorization-workflow, «Log-in URI details»)
+      const raw = login.amazon_callback_uri;
+      if (!raw) return { kind: 'REFUSED', reason: 'NO_CALLBACK' };
+      let callback: URL;
+      try { callback = new URL(raw); } catch { return { kind: 'REFUSED', reason: 'CALLBACK_NOT_AMAZON' }; }
+      if (callback.protocol !== 'https:' || callback.username !== '' || callback.password !== '' || callback.port !== '' || callback.hash !== ''
+        || !amazonHost(callback.hostname, central)) return { kind: 'REFUSED', reason: 'CALLBACK_NOT_AMAZON' };
+      // Путь — «Amazon callback URI details»: /apps/authorize/confirm/<application_id>; чужое приложение — не наш поток
+      if (callback.pathname !== `/apps/authorize/confirm/${cfg.applicationId}`) return { kind: 'REFUSED', reason: 'CALLBACK_OTHER_APP' };
+      const amazonState = login.amazon_state;
+      if (!amazonState) return { kind: 'REFUSED', reason: 'NO_AMAZON_STATE' };
+      /**
+       * `version=beta` приходит, когда авторизуется черновик; без него Amazon авторизует опубликованное приложение. Расхождение с нашей
+       * конфигурацией (REPRACER_AMAZON_APP_DRAFT) — ошибка настройки, а не повод угадывать: продолжать нечем
+       */
+      if (login.version !== undefined && login.version !== 'beta') return { kind: 'REFUSED', reason: 'VERSION_MISMATCH' };
+      if ((login.version === 'beta') !== cfg.draft) return { kind: 'REFUSED', reason: 'VERSION_MISMATCH' };
+      // Возврат на callback URI — «Amazon callback URI details»: amazon_state, state, redirect_uri (тот, с которым меняется код), у черновика version=beta
+      callback.searchParams.set('amazon_state', amazonState);
+      callback.searchParams.set('state', state);
+      callback.searchParams.set('redirect_uri', cfg.redirectUri);
+      if (cfg.draft) callback.searchParams.set('version', 'beta');
+      return { kind: 'CONTINUE', url: callback.toString(), sellerId: login.selling_partner_id ?? null };
     },
     tokenRequest(grant) {
       const form = grant.kind === 'CODE'

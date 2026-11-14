@@ -112,11 +112,24 @@ async function schedulerFor(minutes: number): Promise<void> {
   await running.finished;
 }
 
-const lwaApprove = (url: string) => model.approve(url, SELLER);
+/**
+ * Шаг 125 (П6): после «Allow» Amazon ведёт браузер не на адрес возврата, а на log-in URI консоли — с `amazon_callback_uri`, `amazon_state`,
+ * `selling_partner_id` и `version=beta` (website-authorization-workflow, шаги 5–8). SPA пересылает их серверу вместе со своим `state`
+ * (его вкладка помнит с «Connect») и уводит браузер по ответу сервера — обратно на Amazon
+ */
+async function loginStep(consentUrl: string) {
+  const login = new URL(model.approve(consentUrl, SELLER));
+  assert.equal(login.origin + login.pathname, `${origin}/connect/amazon/login`, 'после согласия Amazon ведёт браузер на log-in URI консоли');
+  for (const key of ['amazon_callback_uri', 'amazon_state', 'selling_partner_id', 'version']) assert.ok(login.searchParams.get(key), `Amazon sends ${key}`);
+  return call<{ continueUrl: string }>('log-in URI Amazon', owner, 'POST', api('connections', 'amazon-login'),
+    { params: Object.fromEntries(login.searchParams), state: new URL(consentUrl).searchParams.get('state') });
+}
 
-/** Браузер продавца: страница согласия канала → «Allow» → адрес возврата. Параметры возврата SPA шлёт серверу как есть */
-function consent(consentUrl: string): Record<string, string> {
-  const back = new URL(model.approve(consentUrl, SELLER));
+/** Браузер продавца: страница согласия канала → «Allow» → log-in URI консоли → Amazon → адрес возврата. Параметры возврата SPA шлёт серверу как есть */
+async function consent(consentUrl: string): Promise<Record<string, string>> {
+  const next = await loginStep(consentUrl);
+  assert.equal(next.status, 200, `the console continues the Amazon flow from its log-in URI: ${JSON.stringify(next.body)}`);
+  const back = new URL(model.confirm(next.body.continueUrl));
   assert.equal(back.origin + back.pathname, `${origin}/connect/callback`, 'канал возвращает браузер на адрес возврата консоли');
   const params = Object.fromEntries(back.searchParams);
   codes.push(params.spapi_oauth_code!);
@@ -212,7 +225,7 @@ before(async () => {
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   model = new ModelOAuthProvider({
     channel: 'AMAZON', clientId: 'amzn1.application-oa2-client.synthetic-43', clientSecret: 'synthetic-client-secret-43',
-    redirectUri: `${origin}/connect/callback`, now: () => Date.now(),
+    redirectUri: `${origin}/connect/callback`, loginUri: `${origin}/connect/amazon/login`, now: () => Date.now(),
   });
   connectService = createChannelConnectService({
     store: new PgChannelConnectStore(adminPool), keyring, http: (url, init) => model.fetch(url, init), log,
@@ -264,10 +277,29 @@ test('Р-175, Р-176: от «Connect Amazon» до тени — продавец
   const afterCancel = await call<ConnectionsView>('экран после отмены', owner, 'GET', api('connections'));
   assert.deepEqual([amazonOf(afterCancel.body).state, amazonOf(afterCancel.body).canConnect, amazonOf(afterCancel.body).pendingText], ['NOT_CONNECTED', true, null], 'отмена — снова «не подключён», без «последняя попытка не удалась»');
   const cancelledUrl = started.body.consentUrl;
-  const late = await call<{ error: { code: string } }>('возврат отменённой попытки', owner, 'POST', api('connections', 'callback'), { params: Object.fromEntries(new URL(lwaApprove(cancelledUrl)).searchParams) });
-  assert.equal(late.status, 409, 'возврат отменённой попытки ничего не подключает');
+  // Шаг 125 (П6): отменённая попытка дальше log-in URI не идёт — консоль не отправляет продавца обратно на Amazon
+  const late = await loginStep(cancelledUrl) as unknown as { status: number; body: { error: { code: string } } };
+  assert.deepEqual([late.status, late.body.error?.code], [409, 'ALREADY_DONE'], 'возврат отменённой попытки ничего не подключает');
   const restarted = await call<{ consentUrl: string }>('Connect Amazon ещё раз', owner, 'POST', api('connections', 'start'), { channel: 'AMAZON', marketplaces: [AMAZON_DE] });
   started.body.consentUrl = restarted.body.consentUrl;
+
+  // Шаг 125 (П6): log-in URI не уводит продавца куда попало. Чужой адрес «продолжения», state не этого тенанта и роль без права — отказ
+  // своей причиной; ждущий запрос остаётся ждущим, и настоящее продолжение после них проходит
+  const tampered = new URL(model.approve(started.body.consentUrl, SELLER));
+  tampered.searchParams.set('amazon_callback_uri', 'https://amazon.com.evil.example/apps/authorize/confirm/amzn1.sellerapps.app.synthetic-43');
+  const stateOf = new URL(started.body.consentUrl).searchParams.get('state');
+  const evil = await call<{ error: { code: string; message: string } }>('log-in URI с чужим адресом', owner, 'POST', api('connections', 'amazon-login'),
+    { params: Object.fromEntries(tampered.searchParams), state: stateOf });
+  assert.deepEqual([evil.status, evil.body.error.code], [400, 'LOGIN_CALLBACK_NOT_AMAZON'], 'чужой хост — отказ, а не переадресация');
+  assert.doesNotMatch(JSON.stringify(evil.body), /evil\.example/, 'адрес из запроса в ответ не попадает');
+  const stranger = await call<{ error: { code: string } }>('log-in URI с чужим state', owner, 'POST', api('connections', 'amazon-login'),
+    { params: Object.fromEntries(tampered.searchParams), state: 'x'.repeat(43) });
+  assert.deepEqual([stranger.status, stranger.body.error.code], [409, 'UNKNOWN_STATE'], 'state не этого тенанта — продолжать нечего');
+  const notAllowed = await call<{ error: { code: string } }>('log-in URI оператором', viewer, 'POST', api('connections', 'amazon-login'),
+    { params: Object.fromEntries(tampered.searchParams), state: stateOf });
+  assert.deepEqual([notAllowed.status, notAllowed.body.error.code], [403, 'FORBIDDEN'], 'продолжает подключение тот, кто может подключать');
+  assert.equal(amazonOf((await call<ConnectionsView>('экран: всё ещё ждём согласия', owner, 'GET', api('connections'))).body).state, 'AWAITING_CONSENT',
+    'отказ log-in URI запрос не закрывает');
 
   const params = await timed('согласие на странице канала', async () => consent(started.body.consentUrl));
   const back = await call<{ channelAccountId: string; reconnected: boolean }>('возврат с кодом', owner, 'POST', api('connections', 'callback'), { params });

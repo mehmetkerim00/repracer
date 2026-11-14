@@ -1022,6 +1022,8 @@ export const de: Messages = {
         badMarketplaces: 'Wählen Sie Storefronts einer Region.',
         unavailable: 'Dieser Kanal lässt sich noch nicht verbinden.',
         unknownState: 'Diese Rückkehr gehört zu keiner Verbindung, die in diesem Konto begonnen wurde. Beginnen Sie auf dieser Seite neu.',
+        loginWithoutConnect: 'In diesem Browser-Tab wurde keine Verbindung zu Amazon begonnen. Öffnen Sie Kanäle, wählen Sie „Amazon verbinden“ und erteilen Sie den Zugriff in Seller Central von dort aus.',
+        loginRefused: 'Amazon hat eine Adresse gesendet, zu der wir nicht weiterleiten; es wurde nichts verbunden. Beginnen Sie unter Kanäle neu; passiert es wieder, informieren Sie das Plattform-Team.',
         expired: 'Die Zustimmung kam zu spät zurück. Beginnen Sie auf dieser Seite neu.',
         alreadyDone: 'Diese Verbindung ist bereits abgeschlossen.',
         denied: 'Sie haben auf der Seite des Kanals abgelehnt. Es wurde nichts verbunden.',
