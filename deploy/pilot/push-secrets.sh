@@ -11,4 +11,8 @@ REMOTE="${2:-/srv/repracer-pilot/secrets}"
 LOCAL="${REPRACER_PILOT_LOCAL_SECRETS:-${HOME}/.config/repracer/secrets/pilot}"
 [ -d "${LOCAL}" ] || { echo "нет ${LOCAL} — сначала deploy/pilot/secrets.sh" >&2; exit 1; }
 [ -e "${LOCAL}/tunnel.env" ] || { echo "нет ${LOCAL}/tunnel.env — токен туннеля кладёт владелец (deploy/pilot/README.md, §3)" >&2; exit 1; }
+# Шаг 126: закрытый ключ копий живёт только у владельца — каталог, в котором он оказался, на сервер не уходит
+if grep -rlq -- '-----BEGIN PGP PRIVATE KEY BLOCK-----' "${LOCAL}" 2> /dev/null; then
+  echo "в ${LOCAL} лежит закрытый ключ PGP — на сервер он не уходит: держите его вне этого каталога (deploy/pilot/README.md, «Копии базы»)" >&2; exit 1
+fi
 tar -C "${LOCAL}" -cf - . | ssh "${DEST}" "umask 077 && mkdir -p '${REMOTE}' && tar -C '${REMOTE}' -xf - && chmod 700 '${REMOTE}' && find '${REMOTE}' -type f -exec chmod 600 {} + && echo \"секретов на сервере: \$(find '${REMOTE}' -type f | wc -l)\""

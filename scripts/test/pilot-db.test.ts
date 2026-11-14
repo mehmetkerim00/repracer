@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -105,4 +105,75 @@ test('step 124 [Р-247, Р-248]: a deploy applies nothing new and keeps the guar
   const reset = db();
   assert.notEqual(reset.code, 0);
   assert.match(reset.out, /нет настройки repracer\.live_writes/, reset.out);
+});
+
+/**
+ * Шаг 126 [Р-249] («копия без проверенного восстановления копией не считается»): проверка восстановления копии пилота — тем, что владелец запускает на
+ * сервере (deploy/pilot/restore-check-inner.sh внутри deploy/pilot/restore-check.sh), на базе пилота этого файла: суточная копия тем же скриптом, что в
+ * работе (deploy/production/backup-loop.sh, одна итерация, gpg открытым ключом), база исчезает (проверка идёт на пустом месте, как во временном кластере
+ * контейнера), копия восстанавливается закрытым ключом со стандартного ввода. У восстановленной базы — регион, СТРАЖ (копия, потерявшая его, подняла бы
+ * пилот с разрешёнными боевыми записями), журнал миграций, числа. Контроли: чужой закрытый ключ — отказ; копия базы со снятым без значения стражем —
+ * отказ своей причиной. Тест — в этом файле, на его базе: вторая сборка базы пилота параллельным файлом исчерпывала таблицу блокировок кластера
+ * («out of shared memory»). Нужен gpg — как учению восстановления шага 65.
+ */
+const gpgIn = (home: string, args: string[]) => execFileSync('gpg', ['--homedir', home, '--batch', '--no-tty', '--pinentry-mode', 'loopback', '--passphrase', '', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+function keyPair(name: string): { publicKey: string; privateKey: string } {
+  const home = join(work, `gnupg-${name}`);
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  gpgIn(home, ['--quick-gen-key', `pilot backup ${name} <${name}@example.invalid>`, 'default', 'default', 'never']);
+  const publicKey = join(work, `${name}-public.asc`);
+  writeFileSync(publicKey, gpgIn(home, ['--armor', '--export', `${name}@example.invalid`]));
+  return { publicKey, privateKey: gpgIn(home, ['--armor', '--export-secret-keys', `${name}@example.invalid`]).toString() };
+}
+const superUrl = (database: string) => { const u = new URL(admin!); u.pathname = `/${database}`; return u.toString(); };
+function backupOnce(dir: string, publicKey: string): string {
+  const url = join(work, 'backup_pg_url');
+  writeFileSync(url, superUrl(DB));
+  execFileSync('bash', [join(root, 'deploy/production/backup-loop.sh')],
+    { env: { ...process.env, ...pgEnv(), PGURL_FILE: url, REPRACER_BACKUP_OUT: dir, REPRACER_BACKUP_PUBLIC_KEY_FILE: publicKey, REPRACER_BACKUP_ONCE: '1' }, stdio: 'pipe' });
+  return readdirSync(dir).filter((f) => f.endsWith('.sha256')).sort().at(-1)!.replace('.sha256', '');
+}
+function restoreCheck(dir: string, name: string, privateKey: string) {
+  const r = spawnSync('bash', [join(root, 'deploy/pilot/restore-check-inner.sh'), dir, name],
+    { env: { PATH: process.env.PATH ?? '', HOME: work, ...pgEnv(), REPRACER_RESTORE_CHECK_ADMIN_URL: superUrl('postgres'), REPRACER_PILOT_REGION: 'US' }, encoding: 'utf8', input: privateKey });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+}
+
+test('step 126 [Р-249]: a copy of the pilot restores with the owner key from stdin — region, the live-writes guard, the migration journal and the numbers come back', { timeout: 10 * 60_000 }, () => {
+  // База этого файла после прошлого теста — со снятым без значения стражем: вернуть его, как вернул бы владелец
+  psql(`ALTER DATABASE ${DB} SET repracer.live_writes = 'forbidden'`);
+  const owner = keyPair('owner');
+  const dir = join(work, 'backups');
+  mkdirSync(dir, { recursive: true });
+  const journalBefore = psql(`SELECT current_setting('repracer.migrations', true)`, DB);
+  const tenantsBefore = psql('SELECT count(*) FROM tenant_data.tenant', DB);
+  const name = backupOnce(dir, owner.publicKey);
+  psql(`DROP DATABASE ${DB} WITH (FORCE)`);
+  const r = restoreCheck(dir, name, owner.privateKey);
+  assert.equal(r.code, 0, r.err);
+  const done = JSON.parse(r.out.trim().split('\n').at(-1)!) as { event: string; copy: string; database: string; region: string; liveWrites: string; migrationsThrough: string; facts: Record<string, number> };
+  assert.deepEqual([done.event, done.copy, done.database, done.region], ['RESTORE_CHECK_DONE', name, DB, 'US']);
+  assert.equal(done.liveWrites, 'forbidden', 'the live-writes guard of the pilot came back with the copy [Р-247]');
+  assert.equal(psql('SELECT security.live_writes_forbidden()', DB), 't', 'the restored database refuses live writes');
+  assert.equal(done.migrationsThrough, journalBefore.split(':')[0], 'the migration journal came back: the next deployment knows what is applied');
+  assert.equal(psql(`SELECT current_setting('repracer.migrations', true)`, DB), journalBefore);
+  assert.equal(String(done.facts.tenants), tenantsBefore, 'the numbers of the restored database are reported');
+  assert.ok(!r.out.includes(owner.privateKey.slice(40, 120)) && !r.err.includes(owner.privateKey.slice(40, 120)), 'the private key is not printed');
+
+  // Контроль: чужой закрытый ключ копию не открывает — отказ, а не «проверено»
+  const stranger = keyPair('stranger');
+  psql(`DROP DATABASE ${DB} WITH (FORCE)`);
+  const wrong = restoreCheck(dir, name, stranger.privateKey);
+  assert.equal(wrong.code, 1, wrong.out);
+  assert.match(wrong.err, /RESTORE_FAILED.*decrypt|RESTORE_CHECK_FAILED/);
+
+  // Контроль: страж снят без значения — копия такой базы проверку не проходит своей причиной
+  const again = restoreCheck(dir, name, owner.privateKey);
+  assert.equal(again.code, 0, again.err);
+  psql(`ALTER DATABASE ${DB} RESET repracer.live_writes`);
+  const unguarded = backupOnce(dir, owner.publicKey);
+  psql(`DROP DATABASE ${DB} WITH (FORCE)`);
+  const lost = restoreCheck(dir, unguarded, owner.privateKey);
+  assert.equal(lost.code, 1, lost.out);
+  assert.match(lost.err, /копия потеряла страж боевых записей \(Р-247\)/);
 });

@@ -8,4 +8,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 [ -f "${here}/build.env" ] || { echo "нет ${here}/build.env — его пишет deploy/pilot/deploy.sh" >&2; exit 1; }
 secrets="$(sed -n 's/^REPRACER_SECRETS_DIR=//p' "${here}/pilot.env")"
 [ -f "${secrets}/amazon.env" ] || { echo "нет ${secrets}/amazon.env — секреты пилота (deploy/pilot/secrets.sh, push-secrets.sh)" >&2; exit 1; }
-exec docker compose -f "${here}/compose.yaml" --env-file "${here}/pilot.env" --env-file "${secrets}/amazon.env" --env-file "${here}/build.env" "$@"
+# Шаг 126: вынос копий в R2 — свой сервис под профилем r2; при pull его нет (копии забирает машина оператора)
+profile=()
+[ "$(sed -n 's/^REPRACER_BACKUP_OFFSITE=//p' "${here}/pilot.env")" = r2 ] && profile=(--profile r2)
+exec docker compose -f "${here}/compose.yaml" --env-file "${here}/pilot.env" --env-file "${secrets}/amazon.env" --env-file "${here}/build.env" ${profile[@]+"${profile[@]}"} "$@"

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { canonicalRequest, signRequest } from '../src/sigv4.ts';
 import { createSqsClient, regionOfQueue } from '../src/sqs.ts';
@@ -21,6 +22,15 @@ test('SigV4: the signature equals an independent implementation of the documente
     'GET|/|a=x%20y&b=2');
   const temporary = signRequest({ method: 'POST', url: 'https://sqs.eu-west-1.amazonaws.com/', headers: {}, body: '{}' }, { ...CREDENTIALS, sessionToken: 'syn-session-token' }, 'eu-west-1', 'sqs', new Date());
   assert.match(temporary.authorization!, /SignedHeaders=host;x-amz-date;x-amz-security-token,/);
+});
+
+test('step 126: S3 (Cloudflare R2, region auto) signs the payload hash of x-amz-content-sha256 — the same signature as the independent implementation (test/sigv4_reference.py)', () => {
+  const body = Buffer.from('syn-backup-bytes');
+  const payloadHash = createHash('sha256').update(body).digest('hex');
+  const headers = signRequest({ method: 'PUT', url: 'https://repracer-pilot-backups.0000000000000000.r2.cloudflarestorage.com/pilot/repracer-20260917T101500Z.dump.gpg',
+    headers: { 'content-type': 'application/octet-stream', 'x-amz-content-sha256': payloadHash }, body: '', payloadHash }, CREDENTIALS, 'auto', 's3', new Date('2026-09-17T10:15:00.000Z'));
+  assert.equal(headers.authorization,
+    'AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260917/auto/s3/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=3d010f340b0d06f5c1548e0ede25b9a2da7408ce16bc16d1d8c2dcf62cf3e9d2');
 });
 
 test('SQS JSON protocol: target header, attributes, long-poll timeout beyond WaitTimeSeconds, partial delete failure, errors without message text', async () => {

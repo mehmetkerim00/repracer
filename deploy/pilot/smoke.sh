@@ -24,6 +24,14 @@ case "${guard}" in
   f) echo "ВНИМАНИЕ: боевые записи на базе пилота разрешены — страж снят по процедуре README, §6" ;;
   *) fail "страж базы не ответил: ${guard}" ;;
 esac
+# Шаг 126: копии базы — сервис идёт, первая копия снимается при его старте (ждём её до 5 минут, у R2 — и выноса), дальше — backup-state.sh: свежая
+# копия, вынесена с сервера, одна из хранимых проверена восстановлением. Первая выкладка здесь красная, пока не сделаны вынос и проверка (README, «Копии базы»)
+"${C}" ps --services --status running | grep -qx backup || fail "сервис копий backup не работает"
+for _ in $(seq 1 60); do
+  ls "${REPRACER_BACKUP_DIR}"/repracer-*.sha256 > /dev/null 2>&1 && { [ "${REPRACER_BACKUP_OFFSITE}" != r2 ] || ls "${REPRACER_BACKUP_DIR}"/repracer-*.offsite > /dev/null 2>&1; } && break
+  sleep 5
+done
+"${here}/backup-state.sh" "${REPRACER_BACKUP_DIR}" "${REPRACER_BACKUP_OFFSITE}" || fail "копии базы не в порядке — строка BACKUP RED выше"
 tables="$("${C}" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database = 'repracer_analytics'")"
 [ "${tables}" -gt 0 ] || fail "в ClickHouse нет таблиц repracer_analytics — DDL не применён"
 "${C}" ps --services --status running | grep -qE '^(worker|redpanda|kafka)$' && fail "в пилоте поднят брокер или диспетчер — пилот в тени, их здесь нет"

@@ -19,3 +19,19 @@ sts = '\n'.join(['AWS4-HMAC-SHA256', amz_date, scope, hashlib.sha256(canonical.e
 def h(k, m): return hmac.new(k, m.encode(), hashlib.sha256).digest()
 key = h(h(h(h(('AWS4' + secret).encode(), day), region), service), 'aws4_request')
 print(hmac.new(key, sts.encode(), hashlib.sha256).hexdigest())
+
+# Шаг 126: S3 (Cloudflare R2, регион auto) — PUT объекта копии: хэш тела — значение заголовка x-amz-content-sha256 и последняя строка канонического запроса
+body3 = b'syn-backup-bytes'
+payload = hashlib.sha256(body3).hexdigest()
+headers3 = {
+  'content-type': 'application/octet-stream',
+  'host': 'repracer-pilot-backups.0000000000000000.r2.cloudflarestorage.com',
+  'x-amz-content-sha256': payload,
+  'x-amz-date': amz_date,
+}
+signed3 = sorted(headers3)
+canonical3 = '\n'.join(['PUT', '/pilot/repracer-20260917T101500Z.dump.gpg', '', ''.join(f'{h}:{headers3[h]}\n' for h in signed3), ';'.join(signed3), payload])
+scope3 = f'{day}/auto/s3/aws4_request'
+sts3 = '\n'.join(['AWS4-HMAC-SHA256', amz_date, scope3, hashlib.sha256(canonical3.encode()).hexdigest()])
+key3 = h(h(h(h(('AWS4' + secret).encode(), day), 'auto'), 's3'), 'aws4_request')
+print(hmac.new(key3, sts3.encode(), hashlib.sha256).hexdigest())

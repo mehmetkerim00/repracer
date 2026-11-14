@@ -59,6 +59,8 @@ vendor/*
 !vendor/healthchecks/
 # Шаг 45 [OQ-238]: снимок документации ZITADEL — решение по email_verified и amr стоит на нём; вне git его бы не было в CI
 !vendor/zitadel/
+# Шаг 126: страницы Cloudflare R2 — вынос копий пилота (deploy/pilot/offsite-r2.ts)
+!vendor/cloudflare/
 
 # --- Infrastructure ---
 .terraform/

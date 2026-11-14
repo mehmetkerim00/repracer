@@ -164,6 +164,54 @@ services:
     restart: unless-stopped
     logging: { driver: json-file, options: { max-size: 20m, max-file: "3" } }
 
+  # Шаг 126 (решение владельца): суточная зашифрованная копия PostgreSQL — прежний сервис промышленного профиля (pg_dump → gpg открытым ключом владельца,
+  # срок 7 суток, отметка BACKUP_FAILED). Пилот без копий не выкладывается: deploy/pilot/deploy.sh спрашивает deploy/pilot/backup-state.sh --ready.
+  # ClickHouse не копируется (README, «Копии базы»)
+  # Описан здесь, а не через `extends`: compose читает расширяемый файл целиком, и обязательные переменные прокси промышленного профиля стали бы
+  # обязательными пилоту. Скрипт — тот же файл (deploy/production/backup-loop.sh), образ — тот же, что у базы пилота
+  backup:
+    image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+    user: "1000:1000"
+    environment:
+      REPRACER_BACKUP_KEEP_DAYS: ${REPRACER_BACKUP_KEEP_DAYS:-7}
+      REPRACER_BACKUP_EVERY_SECONDS: ${REPRACER_BACKUP_EVERY_SECONDS:-86400}
+      REPRACER_BACKUP_RETRY_SECONDS: ${REPRACER_BACKUP_RETRY_SECONDS:-900}
+      PGURL_FILE: /run/secrets/backup_pg_url
+      REPRACER_BACKUP_PUBLIC_KEY_FILE: /run/secrets/backup_public_key.asc
+    entrypoint: ["/bin/bash", "/opt/repracer/backup-loop.sh"]
+    volumes:
+      - ../production/backup-loop.sh:/opt/repracer/backup-loop.sh:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}:/run/secrets:ro
+      - ${REPRACER_BACKUP_DIR:?set REPRACER_BACKUP_DIR in pilot.env}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+  # Шаг 126: вынос копий с сервера в Cloudflare R2 — только при REPRACER_BACKUP_OFFSITE=r2 (обёртка compose.sh включает профиль); при pull копии
+  # забирает машина оператора (deploy/pilot/pull-backups.sh). Адрес бакета — без умолчания и без отказа здесь: его спрашивает backup-state.sh --ready
+  backup-offsite:
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+    profiles: [r2]
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "deploy/pilot/offsite-r2.ts"]
+    user: "1000:1000"
+    read_only: true
+    environment:
+      REPRACER_BACKUP_OUT: /backups
+      REPRACER_BACKUP_R2_BUCKET_URL: ${REPRACER_BACKUP_R2_BUCKET_URL:-}
+      REPRACER_BACKUP_R2_PREFIX: ${REPRACER_BACKUP_R2_PREFIX:-pilot/}
+      REPRACER_BACKUP_KEEP_DAYS: ${REPRACER_BACKUP_KEEP_DAYS:-7}
+      REPRACER_BACKUP_R2_ACCESS_KEY_ID_FILE: /run/secrets/backup_r2_access_key_id
+      REPRACER_BACKUP_R2_SECRET_ACCESS_KEY_FILE: /run/secrets/backup_r2_secret_access_key
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}:/run/secrets:ro
+      - ${REPRACER_BACKUP_DIR:?set REPRACER_BACKUP_DIR in pilot.env}:/backups
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: 20m, max-file: "3" } }
+
   # Разовые работы выкладки (DDL ClickHouse и логины ролей выгрузки): `deploy/pilot/compose.sh run --rm tools …`, в `up` не поднимается
   tools:
     image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752

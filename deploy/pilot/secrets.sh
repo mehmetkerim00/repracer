@@ -52,6 +52,8 @@ url svc_exporter | put exporter_pg_url
 url svc_alert_delivery | put alert_delivery_pg_url
 url svc_credentials | put credentials_pg_url
 url svc_operator | put operator_pg_url
+# Шаг 126: копия базы — суперпользователем (pg_dump всей базы под FORCE RLS и роли кластера без паролей, deploy/production/backup-loop.sh)
+printf 'postgres://postgres:%s@postgres:5432/%s' "$(cat "${OUT}/postgres_password")" "${DB}" | put backup_pg_url
 
 # ClickHouse: администратор кластера пилота (образ заводит его при первом старте) и логины ролей выгрузки
 if [ ! -e "${OUT}/clickhouse.env" ]; then
@@ -85,5 +87,6 @@ fi
 
 [ ${#made[@]} -eq 0 ] || echo "создано: $(printf '%s ' "${made[@]}" | sort -u | xargs)"
 [ ${#kept[@]} -eq 0 ] || echo "оставлено как было: ${#kept[@]} файлов"
+[ -e "${OUT}/backup_public_key.asc" ] || echo "нет backup_public_key.asc — открытый ключ копий (deploy/pilot/README.md, «Копии базы»); без него выкладки нет"
 [ -e "${OUT}/tunnel.env" ] || echo "нет tunnel.env — токен туннеля кладёт владелец при создании туннеля (deploy/pilot/README.md, §3)"
 echo "каталог секретов пилота: ${OUT}"

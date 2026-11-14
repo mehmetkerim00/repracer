@@ -20,6 +20,8 @@ sha="$(git rev-parse HEAD)"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || sha="${sha}-dirty"
 C=deploy/pilot/compose.sh
 set -a; . deploy/pilot/pilot.env; set +a
+# Шаг 126 (решение владельца): пилот без копий базы не выкладывается — ключ, строка подключения копии, цель выноса и каталог копий спрашиваются ДО всего
+deploy/pilot/backup-state.sh --ready "${REPRACER_SECRETS_DIR}" "${REPRACER_BACKUP_DIR:-}" "${REPRACER_BACKUP_OFFSITE:-}"
 # Зависимости и сборка — тем же образом Node, что исполняет процессы; на хосте Node не нужен
 NODE_IMAGE="$(awk '/^  bulk-worker:/{f=1} f && /image:/{print $2; exit}' deploy/pilot/compose.yaml)"
 echo "== зависимости и сборка интерфейса (${sha})"

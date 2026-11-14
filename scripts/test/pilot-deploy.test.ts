@@ -39,8 +39,9 @@ after(() => { if (work) rmSync(work, { recursive: true, force: true }); });
 const envOf = (name: string): Record<string, string> => Object.fromEntries(Object.entries(services[name]?.environment ?? {}).map(([k, v]) => [k, String(v ?? '')]));
 const read = (path: string) => readFileSync(path.replace('/run/secrets', secrets), 'utf8');
 
-test('step 124 [Р-248]: the pilot is the console, scheduler, task worker, operator panel, PostgreSQL, ClickHouse and the tunnel — no broker, no write dispatcher', () => {
-  assert.deepEqual(Object.keys(services).sort(), ['bulk-worker', 'clickhouse', 'cloudflared', 'console', 'operator', 'postgres', 'scheduler', 'tools']);
+test('step 124 [Р-248], step 126: the pilot is the console, scheduler, task worker, operator panel, PostgreSQL with its daily copy, ClickHouse and the tunnel — no broker, no write dispatcher', () => {
+  // Шаг 126: копия базы (backup) — всегда; вынос в R2 (backup-offsite) — под профилем r2, здесь его нет (scripts/test/pilot-backup.test.ts)
+  assert.deepEqual(Object.keys(services).sort(), ['backup', 'bulk-worker', 'clickhouse', 'cloudflared', 'console', 'operator', 'postgres', 'scheduler', 'tools']);
   // Наружу — ничего: базы без портов, процессы — только loopback (правило шага 54 смотрит и этот файл)
   assert.equal(services.postgres!.ports, undefined, 'the database publishes no port');
   assert.equal(services.clickhouse!.ports, undefined, 'ClickHouse publishes no port');

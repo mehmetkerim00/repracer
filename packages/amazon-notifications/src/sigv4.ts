@@ -19,6 +19,11 @@ export interface SignableRequest {
   url: string;
   headers: Record<string, string>;
   body: string;
+  /**
+   * Шаг 126: S3 (Cloudflare R2) подписывает хэш тела из заголовка `x-amz-content-sha256` — тело файла копии не строка, и хэш считает
+   * вызывающий. Без поля — SHA-256 строки `body`, как у SQS
+   */
+  payloadHash?: string;
 }
 
 const sha256 = (data: string) => createHash('sha256').update(data, 'utf8').digest('hex');
@@ -41,7 +46,7 @@ export function canonicalRequest(req: SignableRequest, signedHeaderNames: readon
     .sort(([a, av], [b, bv]) => (a === b ? (av < bv ? -1 : 1) : a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join('&');
   const lower = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k.toLowerCase(), v.trim().replace(/\s+/g, ' ')]));
   const canonicalHeaders = signedHeaderNames.map((h) => `${h}:${lower[h] ?? ''}\n`).join('');
-  return [req.method.toUpperCase(), path, query, canonicalHeaders, signedHeaderNames.join(';'), sha256(req.body)].join('\n');
+  return [req.method.toUpperCase(), path, query, canonicalHeaders, signedHeaderNames.join(';'), req.payloadHash ?? sha256(req.body)].join('\n');
 }
 
 /**
