@@ -2908,6 +2908,30 @@ export const STEP107_ROWS = [
 ];
 
 /**
+ * Шаг 128 [Р-250] (решение владельца по П1 в бою, 0231): рамки Amazon без прочитанных значений — блок предложения целиком у аккаунта В БОЮ
+ * (назначение стратегии, включение движка, стратегия по умолчанию, привязка), а в тени — нет (решения считаются, пометка шага 127). Обе стороны —
+ * своими проверками: снятая ветка боя ловится отказом в бою, снятое условие «в бою» — отказом в тени
+ */
+const GUARD128 = 'channel_data.offer_channel_pricing_active(uuid,uuid)';
+const MAP128 = 'tenant_data.offer_mapping_channel_pricing_guard()';
+export const STEP128_ROWS = [
+  {
+    row: 'шаг 128 (Р-250, Р-120)', critical: true,
+    invariant: 'у аккаунта в бою рамки канала без прочитанных значений или со значениями не в валюте предложения блокируют предложение целиком — при назначении стратегии, включении движка, стратегии по умолчанию и привязке предложения; у аккаунта в тени — не блокируют',
+    mutations: [
+      m(replaceInFunction(GUARD128, "WHEN o.channel_bounds AND o.bounds_currency IS DISTINCT FROM s.currency AND a.write_mode = 'LIVE' THEN 'CHANNEL_BOUNDS_PRESENT'", "WHEN false THEN 'CHANNEL_BOUNDS_PRESENT'"),
+        node(R107, 'on a live account channel bounds with values the channel named', 'live, values not read: the whole offer stays blocked (fail-closed)', '^OK$')),
+      m(replaceInFunction(GUARD128, "AND a.write_mode = 'LIVE'", ''),
+        node(T('channel-bounds-unread-step127.pg.test.ts'), 'the offer takes a strategy and the engine', 'offer 1: bounds whose values we cannot compare no longer block the whole offer (П1)', 'CHANNEL_BOUNDS_PRESENT')),
+      m(replaceInFunction(MAP128, "WHEN x.channel_bounds AND x.bounds_currency IS DISTINCT FROM currency AND live THEN 'CHANNEL_BOUNDS_PRESENT'", "WHEN false THEN 'CHANNEL_BOUNDS_PRESENT'"),
+        node(T('channel-pricing-guard.pg.test.ts'), 'on a live account the mapping guard', 'step 128: live — bounds without values block the mapping', 'resolved')),
+      m(replaceInFunction(MAP128, 'AND live THEN', 'THEN'),
+        node(T('channel-pricing-guard.pg.test.ts'), 'in the shadow the mapping guard', 'step 128: shadow — bounds without values do not block the mapping', 'CHANNEL_BOUNDS_PRESENT')),
+    ],
+  },
+];
+
+/**
  * Шаг 109 [Р-234]: цена с купоном у строки картины рынка решения (0207) — целое число центов и строго ниже базовой цены строки. Отрезки
  * держателя из снимков сверки [Р-235] пишет прежнее правило в прежнюю таблицу — её защиты (0188) в каталоге шага 97
  */

@@ -647,6 +647,9 @@ export const fr: Messages = {
       automatedPricingDetail: (when: string) => `Automate Pricing est rattaché à cette offre (constaté le ${when}) : notre moteur ne peut pas en fixer le prix — désactivez-le d’abord sur le canal`,
       channelBounds: 'Prix retenu : limites Amazon',
       channelBoundsDetail: (when: string) => `Cette offre a sur Amazon des prix minimum et maximum autorisés du vendeur (constatés le ${when}) dont nous n’avons pas pu lire les valeurs. Les décisions sont calculées et affichées, mais un nouveau prix pour cette offre est retenu et n’est pas envoyé, en réel aussi : nous n’envoyons pas un prix qui pourrait sortir de limites que nous ne voyons pas. Retirez les limites dans Seller Central pour que les prix partent.`,
+      // Шаг 128 (решение владельца по П1): у аккаунта в бою те же рамки — отказ включения своей причиной, как до шага 127
+      channelBoundsLive: 'Bloqué : limites Amazon',
+      channelBoundsLiveDetail: (when: string) => `Cette offre a sur Amazon des prix minimum et maximum autorisés du vendeur (constatés le ${when}) dont nous n’avons pas pu lire les valeurs. En mode réel, la tarification automatique ne peut pas être activée pour cette offre : nous n’envoyons pas un prix qui pourrait sortir de limites que nous ne voyons pas. Retirez les limites dans Seller Central pour l’activer. Si la tarification automatique est déjà activée, les nouveaux prix de cette offre sont retenus et vous recevez une alerte.`,
       pricingHealth: (issue: string) => `Canal : ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `L’offre a perdu l’offre vedette (Featured Offer) à cause de son prix (${when})${threshold ? ` ; seuil de prix compétitif du canal : ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -1628,6 +1631,7 @@ export const fr: Messages = {
         notProvided: 'Non fournies par le canal.',
         notSet: (when: string) => `Aucune définie sur le canal (constaté le ${when}). Le canal peut tout de même appliquer des limites qu’il n’affiche pas.`,
         notRead: (when: string) => `Définies sur le canal (constaté le ${when}), mais les valeurs n’ont pas été lues. Les décisions sont calculées ; les nouveaux prix de cette offre sont retenus et ne sont pas envoyés tant que les limites ne sont pas retirées dans Seller Central ou que leurs valeurs ne peuvent pas être lues.`,
+        notReadLive: (when: string) => `Définies sur le canal (constaté le ${when}), mais les valeurs n’ont pas été lues. En mode réel, la tarification automatique de cette offre ne peut pas être activée tant que les limites ne sont pas retirées dans Seller Central ou que leurs valeurs ne peuvent pas être lues.`,
         seen: (when: string) => `Constaté le ${when}.`,
         withoutShipping: 'Hors livraison : comparées à votre plancher et à votre prix maximum, eux aussi hors livraison.',
         inside: 'Votre plancher et votre prix maximum sont dans les limites du canal.',

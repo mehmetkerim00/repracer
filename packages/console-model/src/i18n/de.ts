@@ -621,6 +621,9 @@ export const de: Messages = {
       automatedPricingDetail: (when: string) => `An diesem Angebot hängt Automate Pricing (gesehen ${when}): unsere Engine kann es nicht bepreisen — zuerst im Kanal abschalten`,
       channelBounds: 'Preis angehalten: Amazon-Grenzen',
       channelBoundsDetail: (when: string) => `Für dieses Angebot sind bei Amazon ein minimaler und ein maximaler zulässiger Verkäuferpreis gesetzt (gesehen ${when}), deren Werte wir nicht lesen konnten. Entscheidungen werden berechnet und angezeigt, ein neuer Preis wird aber angehalten und nicht gesendet — auch scharf: Wir senden keinen Preis, der außerhalb von Grenzen liegen könnte, die wir nicht sehen. Entfernen Sie die Grenzen in Seller Central, damit Preise gesendet werden.`,
+      // Шаг 128 (решение владельца по П1): у аккаунта в бою те же рамки — отказ включения своей причиной, как до шага 127
+      channelBoundsLive: 'Gesperrt: Amazon-Grenzen',
+      channelBoundsLiveDetail: (when: string) => `Für dieses Angebot sind bei Amazon ein minimaler und ein maximaler zulässiger Verkäuferpreis gesetzt (gesehen ${when}), deren Werte wir nicht lesen konnten. Bei einem scharfen Konto lässt sich das Repricing für dieses Angebot nicht einschalten: Wir senden keinen Preis, der außerhalb von Grenzen liegen könnte, die wir nicht sehen. Entfernen Sie die Grenzen in Seller Central, um es einzuschalten. Ist das Repricing bereits eingeschaltet, werden neue Preise angehalten, und Sie erhalten eine Benachrichtigung.`,
       pricingHealth: (issue: string) => `Kanal: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `Das Angebot hat das Featured Offer wegen seines Preises verloren (${when})${threshold ? `; Wettbewerbspreisschwelle des Kanals ${threshold}` : ''}`,
       unpublished: 'Nicht veröffentlicht (Preis nicht wettbewerbsfähig)',
@@ -1570,6 +1573,7 @@ export const de: Messages = {
         notProvided: 'Vom Kanal nicht geliefert.',
         notSet: (when: string) => `Im Kanal keine festgelegt (gesehen ${when}). Der Kanal kann dennoch eigene Grenzen anwenden, die er nicht zeigt.`,
         notRead: (when: string) => `Im Kanal festgelegt (gesehen ${when}), aber die Werte wurden nicht gelesen. Entscheidungen werden berechnet; neue Preise für dieses Angebot werden angehalten und nicht gesendet, bis die Grenzen in Seller Central entfernt sind oder ihre Werte gelesen werden können.`,
+        notReadLive: (when: string) => `Im Kanal festgelegt (gesehen ${when}), aber die Werte wurden nicht gelesen. Bei einem scharfen Konto lässt sich das Repricing dieses Angebots nicht einschalten, bis die Grenzen in Seller Central entfernt sind oder ihre Werte gelesen werden können.`,
         seen: (when: string) => `Gesehen ${when}.`,
         withoutShipping: 'Ohne Versand — verglichen mit Ihrer Untergrenze und Ihrem Höchstpreis, die ebenfalls ohne Versand sind.',
         inside: 'Ihre Untergrenze und Ihr Höchstpreis liegen innerhalb der Preisgrenzen im Kanal.',

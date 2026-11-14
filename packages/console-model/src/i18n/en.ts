@@ -648,6 +648,9 @@ export const en = {
       channelBounds: 'Price held: Amazon bounds',
       // Шаг 127 [Р-250] (П1): рамки без прочитанных значений — решения считаются, новая цена удержана (в бою — тоже: её не отправит адаптер)
       channelBoundsDetail: (when: string) => `This offer has Amazon minimum/maximum seller allowed prices (seen ${when}), and we could not read their values. Decisions are calculated and shown, but a new price for this offer is held and not sent — in live too: we do not send a price that could fall outside bounds we cannot see. Remove the bounds in Seller Central to let prices go.`,
+      // Шаг 128 (решение владельца по П1): у аккаунта в бою те же рамки — отказ включения своей причиной, как до шага 127
+      channelBoundsLive: 'Blocked: Amazon bounds',
+      channelBoundsLiveDetail: (when: string) => `This offer has Amazon minimum/maximum seller allowed prices (seen ${when}), and we could not read their values. On a live account repricing cannot be turned on for this offer: we do not send a price that could fall outside bounds we cannot see. Remove the bounds in Seller Central to turn it on. If repricing is already on, new prices for this offer are held and you get an alert.`,
       pricingHealth: (issue: string) => `Channel: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `The offer lost the Featured Offer because of its price (${when})${threshold ? `; competitive price threshold of the channel ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -1632,6 +1635,7 @@ export const en = {
         notProvided: 'Not provided by the channel.',
         notSet: (when: string) => `None set in the channel (seen ${when}). The channel may still apply limits it does not show.`,
         notRead: (when: string) => `Set in the channel (seen ${when}), but the values were not read. Decisions are calculated; new prices for this offer are held and not sent until the bounds are removed in Seller Central or their values can be read.`,
+        notReadLive: (when: string) => `Set in the channel (seen ${when}), but the values were not read. On a live account repricing for this offer cannot be turned on until the bounds are removed in Seller Central or their values can be read.`,
         seen: (when: string) => `Seen ${when}.`,
         withoutShipping: 'Without shipping — compared with your floor and maximum price, which are without shipping too.',
         inside: 'Your floor and maximum price are inside the channel bounds.',

@@ -10,7 +10,8 @@ import { channelOf, type ConsoleScope, type StandWorld } from './world.ts';
  * Четыре состояния, без домысла:
  *  - NOT_PROVIDED — канал о рамках ничего не сказал (Kaufland, eBay, Walmart такого понятия не отдают; у Amazon — наблюдения ещё нет);
  *  - NOT_SET — канал сказал «рамок нет» (свои оценённые рамки Amazon может применять, не показывая их — A-30);
- *  - NOT_READ — рамки есть, значений нет или они не в валюте предложения: решения считаются, новая цена удержана (шаг 127, Р-250);
+ *  - NOT_READ — рамки есть, значений нет или они не в валюте предложения: в тени решения считаются, новая цена удержана (шаг 127, Р-250); у
+ *    аккаунта в бою — блок предложения, как до шага 127 (шаг 128);
  *  - VALUES — значения есть; конфликт — ровно когда наш пол ниже Min канала или наш потолок выше Max канала.
  */
 
@@ -22,14 +23,17 @@ interface PricingObservation {
   channelBounds: boolean;
   boundValues?: { minMinor: number | null; maxMinor: number | null; currency: string } | null;
   observedAt: string;
+  /** Шаг 128: аккаунт сейчас в бою (строка состояния консоли несёт его режим) */
+  accountLive?: boolean;
 }
 
 /**
- * Предложение целиком блокирует только правило автоматического ценообразования канала (Automate Pricing) — как стражи базы (0230) [Р-120].
- * Шаг 127 [Р-250] (П1): рамки без значений в валюте предложения больше не блок — решения считаются, а новая цена удержана: её не отправит адаптер
+ * Предложение целиком блокирует правило автоматического ценообразования канала (Automate Pricing) — всегда [Р-120]; рамки без значений в валюте
+ * предложения — только у аккаунта в бою (шаг 128, решение владельца по П1): включение отказывает своей причиной, как до шага 127. В тени — не блок
+ * (шаг 127, Р-250): решения считаются, а новая цена удержана. Как стражи базы (0231)
  */
-export function channelPricingBlocks(o: Pick<PricingObservation, 'automatedPricing'>): boolean {
-  return o.automatedPricing;
+export function channelPricingBlocks(o: Pick<PricingObservation, 'automatedPricing' | 'channelBounds' | 'boundValues' | 'accountLive'>, currency: string): boolean {
+  return o.automatedPricing || (o.accountLive === true && channelBoundsUnread(o, currency));
 }
 
 /** Шаг 127 [Р-250]: рамки канала есть, а значений в валюте предложения нет — цену с ними не сравнить, и новая цена удержана (пометка, не блок) */
@@ -42,6 +46,8 @@ export interface ChannelBoundsFacts {
   minMinor: number | null;
   maxMinor: number | null;
   observedAt: string | null;
+  /** Шаг 128: у NOT_READ — аккаунт в бою, и рамки блокируют предложение */
+  live?: boolean;
 }
 
 export function channelBoundsFacts(world: StandWorld, scope: ConsoleScope): ChannelBoundsFacts {
@@ -52,7 +58,7 @@ export function channelBoundsFacts(world: StandWorld, scope: ConsoleScope): Chan
     .find((x) => x.channelAccountId === scope.channelAccountId && x.marketplace === scope.marketplace && x.externalSku === scope.externalUnitId);
   if (!o) return none;
   if (!o.channelBounds) return { state: 'NOT_SET', minMinor: null, maxMinor: null, observedAt: o.observedAt };
-  if (!o.boundValues || o.boundValues.currency !== scope.currency) return { state: 'NOT_READ', minMinor: null, maxMinor: null, observedAt: o.observedAt };
+  if (!o.boundValues || o.boundValues.currency !== scope.currency) return { state: 'NOT_READ', minMinor: null, maxMinor: null, observedAt: o.observedAt, live: o.accountLive === true };
   return { state: 'VALUES', minMinor: o.boundValues.minMinor, maxMinor: o.boundValues.maxMinor, observedAt: o.observedAt };
 }
 
@@ -108,7 +114,7 @@ export function channelBoundsView(world: StandWorld, scope: ConsoleScope, m: Mes
     title: c.title, lead: c.lead, state: facts.state,
     min: values ? (facts.minMinor === null ? c.notSetSide : money(facts.minMinor)) : null,
     max: values ? (facts.maxMinor === null ? c.notSetSide : money(facts.maxMinor)) : null,
-    text: facts.state === 'NOT_PROVIDED' ? c.notProvided : facts.state === 'NOT_SET' ? c.notSet(when) : facts.state === 'NOT_READ' ? c.notRead(when) : c.withoutShipping,
+    text: facts.state === 'NOT_PROVIDED' ? c.notProvided : facts.state === 'NOT_SET' ? c.notSet(when) : facts.state === 'NOT_READ' ? (facts.live ? c.notReadLive(when) : c.notRead(when)) : c.withoutShipping,
     seen: values ? c.seen(when) : null,
     ok: values && conflicts.length === 0 ? c.inside : null,
     conflicts,

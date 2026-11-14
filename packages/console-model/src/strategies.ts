@@ -237,7 +237,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
       // рамки без значений (не блок, но цена удержана) — в списке, как в запросе фактов базы
       const currencyOf = (o: (typeof world.state.offerChannelPricing)[number]) => world.state.scopes.find((sc) => sc.channelAccountId === o.channelAccountId
         && sc.marketplace === o.marketplace && sc.externalUnitId === o.externalSku)?.currency ?? '';
-      flagged = [...newest.values()].filter((o) => channelPricingBlocks(o) || channelBoundsUnread(o, currencyOf(o)));
+      flagged = [...newest.values()].filter((o) => channelPricingBlocks(o, currencyOf(o)) || channelBoundsUnread(o, currencyOf(o)));
       channelPricingTotal += flagged.length;
     }
     return flagged.map((o) => ({

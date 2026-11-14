@@ -287,3 +287,18 @@ test('step 103 [Р-228, Р-39]: the latest version of the default became unavail
   const row = (await journal(amazon)).filter((r) => r.write_scope_id === s.write_scope_id);
   assert.equal(JSON.stringify([s.pricing_strategy_id, row.map((r) => [r.outcome, r.reason])]), JSON.stringify([null, [['NOT_ASSIGNED', 'STRATEGY_UNAVAILABLE']]]));
 });
+
+test('step 128 [Р-250]: on a live account a new offer with unread Amazon bounds is not assigned the default — «not assigned» with the reason, as before step 127', async () => {
+  const account = amazon.ids.dbId(AMAZON);
+  assert.equal((await store.setDefaultStrategy(amazon.tenantId, account, amazon.ids.dbId('st-fixed'), actor(amazon))).status, 'SET');
+  // Аккаунт мира — в бою; рамки Min/Max есть, значений адаптер не прочитал (A-30)
+  await store.recordOfferChannelPricing(amazon.tenantId, account, [{ marketplace: AMAZON_DE, externalSku: 'SYN-128-AMZ-BOUNDS', automatedPricing: false, channelBounds: true,
+    source: 'DISCOVERY', observedAt: now() as never }]);
+  await store.recordDiscoveredOffers(amazon.tenantId, account, [
+    { marketplace: AMAZON_DE, externalSku: 'SYN-128-AMZ-BOUNDS', externalUnitId: null, externalOfferId: null, channelProductRef: 'B0SYN1281', gtin: null, condition: 'new', fulfillment: 'MERCHANT' },
+  ]);
+  const s = await scopeOf(amazon, 'SYN-128-AMZ-BOUNDS');
+  assert.equal(s.pricing_strategy_id, null, 'live: the default is not assigned to an offer with unread Amazon bounds');
+  const row = (await journal(amazon)).filter((r) => r.write_scope_id === s.write_scope_id);
+  assert.equal(JSON.stringify(row.map((r) => [r.outcome, r.reason])), JSON.stringify([['NOT_ASSIGNED', 'CHANNEL_PRICING']]));
+});

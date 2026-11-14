@@ -66,7 +66,7 @@ export interface OfferFilter {
 
 /** AUTOMATED_PRICING и CHANNEL_BOUNDS — стратегию не назначит база (0082, Р-120); PRICING_HEALTH — только предупреждение */
 export type ChannelNote = StatusCell & {
-  code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED' | 'LISTING_NOT_BUYABLE';
+  code: 'AUTOMATED_PRICING' | 'CHANNEL_BOUNDS' | 'CHANNEL_BOUNDS_LIVE' | 'PRICING_HEALTH' | 'WALMART_UNPUBLISHED' | 'LISTING_NOT_BUYABLE';
   /** Шаг 96 (аудит А6): короткое «что делать» у пилюли — раскрывается по ссылке */
   whatToDo?: { label: string; text: string };
 };
@@ -221,8 +221,9 @@ export const WALMART_PUBLISHED = 'WALMART_PUBLISHED';
 
 /** Шаг 23: наблюдения канала по офферу — последнее наблюдение ценообразования канала и последнее состояние PRICING_HEALTH */
 /**
- * Пометка канала мешает назначить стратегию и включить движок — как база (0230): всё, кроме состояния PRICING_HEALTH и (шаг 127, Р-250) рамок
- * Amazon без прочитанных значений — у них решения считаются, а новая цена удержана
+ * Пометка канала мешает назначить стратегию и включить движок — как база (0231): всё, кроме состояния PRICING_HEALTH и (шаг 127, Р-250) рамок
+ * Amazon без прочитанных значений у аккаунта в тени — у них решения считаются, а новая цена удержана. В бою те же рамки — пометка
+ * CHANNEL_BOUNDS_LIVE, и она блокирует (шаг 128)
  */
 export function noteBlocksPricing(n: Pick<ChannelNote, 'code'>): boolean {
   return n.code !== 'PRICING_HEALTH' && n.code !== 'CHANNEL_BOUNDS';
@@ -236,7 +237,10 @@ export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages
   // Шаг 107 [Р-231]: рамки со значениями в валюте предложения — не блок; их конфликт — пилюля строки и блок страницы пола [Р-233].
   // Шаг 127 [Р-250]: рамки без значений — тоже не блок, а пометка «цена удержана»: решения считаются, новую цену не отправит адаптер
   if (pricing && channelBoundsUnread(pricing, scope.currency)) {
-    notes.push({ code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
+    // Шаг 128 (решение владельца по П1): у аккаунта в бою — отказ включения своей причиной, как до шага 127; в тени — пометка шага 127
+    notes.push(pricing.accountLive
+      ? { code: 'CHANNEL_BOUNDS_LIVE', tone: 'stop', label: n.channelBoundsLive, detail: n.channelBoundsLiveDetail(m.when(pricing.observedAt)) }
+      : { code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
   }
   const health = world.state.pricingHealth.find((h) => h.channelAccountId === scope.channelAccountId && h.marketplace === scope.marketplace
     && h.channelProductRef === scope.channelProductRef && h.condition === scope.condition);

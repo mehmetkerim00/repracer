@@ -647,6 +647,9 @@ export const es: Messages = {
       automatedPricingDetail: (when: string) => `Automate Pricing está vinculado a esta oferta (visto ${when}): nuestro motor no puede fijar su precio; primero desactívelo en el canal`,
       channelBounds: 'Precio retenido: límites de Amazon',
       channelBoundsDetail: (when: string) => `Esta oferta tiene en Amazon un precio mínimo y uno máximo permitidos al vendedor (visto ${when}) cuyos valores no pudimos leer. Las decisiones se calculan y se muestran, pero un precio nuevo para esta oferta se retiene y no se envía, también en vivo: no enviamos un precio que podría quedar fuera de límites que no vemos. Quite los límites en Seller Central para que los precios se envíen.`,
+      // Шаг 128 (решение владельца по П1): у аккаунта в бою те же рамки — отказ включения своей причиной, как до шага 127
+      channelBoundsLive: 'Bloqueado: límites de Amazon',
+      channelBoundsLiveDetail: (when: string) => `Esta oferta tiene en Amazon un precio mínimo y uno máximo permitidos al vendedor (visto ${when}) cuyos valores no pudimos leer. En una cuenta en vivo no se pueden activar los precios automáticos de esta oferta: no enviamos un precio que podría quedar fuera de límites que no vemos. Quite los límites en Seller Central para activarlos. Si los precios automáticos ya están activados, los precios nuevos de esta oferta se retienen y usted recibe una alerta.`,
       pricingHealth: (issue: string) => `Canal: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `La oferta perdió la Oferta destacada por su precio (${when})${threshold ? `; umbral de precio competitivo del canal: ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -1628,6 +1631,7 @@ export const es: Messages = {
         notProvided: 'El canal no los proporciona.',
         notSet: (when: string) => `Ninguno definido en el canal (visto ${when}). El canal aún puede aplicar límites propios que no muestra.`,
         notRead: (when: string) => `Definidos en el canal (visto ${when}), pero sus valores no se leyeron. Las decisiones se calculan; los precios nuevos de esta oferta se retienen y no se envían hasta que se quiten los límites en Seller Central o se puedan leer sus valores.`,
+        notReadLive: (when: string) => `Definidos en el canal (visto ${when}), pero sus valores no se leyeron. En una cuenta en vivo los precios automáticos de esta oferta no se pueden activar hasta que se quiten los límites en Seller Central o se puedan leer sus valores.`,
         seen: (when: string) => `Visto ${when}.`,
         withoutShipping: 'Sin envío: se comparan con su piso y su precio máximo, que tampoco incluyen el envío.',
         inside: 'Su piso y su precio máximo están dentro de los límites del canal.',

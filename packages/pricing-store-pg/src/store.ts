@@ -2825,15 +2825,18 @@ export class PgPricingStore implements PricingStore {
        */
       const onlyKeys = (cols: string, keys: string) => only
         ? ` AND (${cols}) IN (SELECT ${keys} ${SCOPE_FROM}${listedScopes('$2', '$3')})` : '';
+      // Шаг 128 [Р-250]: с режимом аккаунта — в бою рамки без значений блокируют предложение (страж 0231), в тени — пометка
       const offerChannelPricing = (await q(`SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
                                                    channel_account_id, marketplace, external_sku, automated_pricing, channel_bounds,
-                                                   channel_min_minor, channel_max_minor, bounds_currency, source, observed_at
-                                              FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
+                                                   channel_min_minor, channel_max_minor, bounds_currency, source, observed_at,
+                                                   (SELECT a.write_mode = 'LIVE' FROM tenant_data.channel_account a
+                                                     WHERE a.tenant_id = x.tenant_id AND a.channel_account_id = x.channel_account_id) AS account_live
+                                              FROM channel_data.offer_channel_pricing x WHERE tenant_id = $1
                                                    ${onlyKeys('channel_account_id, marketplace, external_sku', `s.channel_account_id, m.marketplace, coalesce(m.external_unit_id, m.external_sku, '')`)}
                                              ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC`, only ? [tenantId, only, onlyProducts] : [tenantId]))
         .map((r): ConsoleOfferChannelPricingRow => ({
           channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
-          channelBounds: r.channel_bounds, ...boundValuesOf(r), source: r.source, observedAt: iso(r.observed_at),
+          channelBounds: r.channel_bounds, ...boundValuesOf(r), source: r.source, observedAt: iso(r.observed_at), accountLive: r.account_live === true,
         }));
       const pricingHealth = (await q(`SELECT DISTINCT ON (h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition)
                                              h.channel_account_id, h.marketplace, h.channel_product_ref, h.condition, h.issue_type, h.event_time,
@@ -3197,8 +3200,10 @@ export class PgPricingStore implements PricingStore {
         const { rows } = await tx.query(
           `WITH latest AS (SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
                                   channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds,
-                                  channel_min_minor, channel_max_minor, bounds_currency, source, observed_at
-                             FROM channel_data.offer_channel_pricing WHERE tenant_id = $1
+                                  channel_min_minor, channel_max_minor, bounds_currency, source, observed_at,
+                                  (SELECT a.write_mode = 'LIVE' FROM tenant_data.channel_account a
+                                    WHERE a.tenant_id = x.tenant_id AND a.channel_account_id = x.channel_account_id) AS account_live
+                             FROM channel_data.offer_channel_pricing x WHERE tenant_id = $1
                             ORDER BY channel_account_id, marketplace, external_sku, observed_at DESC, recorded_at DESC),
                 flagged AS (SELECT l.*, row_number() OVER (PARTITION BY l.channel_account_id ORDER BY l.marketplace, l.external_sku) AS rn,
                                    count(*) OVER (PARTITION BY l.channel_account_id) AS total
@@ -3209,7 +3214,7 @@ export class PgPricingStore implements PricingStore {
         for (const r of rows) {
           const a = byAccount.get(r.channel_account_id) ?? { channelAccountId: String(r.channel_account_id), total: Number(r.total), rows: [] };
           a.rows.push({ channelAccountId: r.channel_account_id, marketplace: r.marketplace, externalSku: r.external_sku, automatedPricing: r.automated_pricing,
-            channelBounds: r.channel_bounds, ...boundValuesOf(r), source: r.source, observedAt: iso(r.observed_at) });
+            channelBounds: r.channel_bounds, ...boundValuesOf(r), source: r.source, observedAt: iso(r.observed_at), accountLive: r.account_live === true });
           byAccount.set(r.channel_account_id, a);
         }
         channelPricing = [...byAccount.values()];

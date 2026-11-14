@@ -72,14 +72,18 @@ const decisions = (n: number) => inTenant(pool, world.tenantId, async (tx) => (a
 const writes = (n: number) => inTenant(pool, world.tenantId, async (tx) => Number((await tx.query(
   `SELECT count(*) AS n FROM tenant_data.channel_write WHERE tenant_id = $1 AND write_scope_id = $2 AND field = 'PRICE'`, [world.tenantId, ws(n)])).rows[0].n));
 
-test('step 107 [Р-231]: channel bounds with values the channel named do not block the offer (unread values — step 127: no longer either)', async () => {
+test('step 107 [Р-231], step 128 [Р-250]: on a live account channel bounds with values the channel named do not block the offer; unread values or another currency still do', async () => {
   const owner = world.ids.dbId(standUserOf('membership-owner'));
   assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'OFF', owner)), 'OK');
-  // Шаг 127 [Р-250] (П1): значения не прочитаны или в чужой валюте — предложение больше не блокируется целиком
-  // (channel-bounds-unread-step127.pg.test.ts); запись держит адаптер перед отправкой
+  // Аккаунт мира — в бою. Шаг 128 (решение владельца по П1): в бою рамки без значений — прежний блок предложения, отказ своей причиной;
+  // в тени — пометка шага 127 (channel-bounds-unread-step127.pg.test.ts)
   await observe(4, null);
-  assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), 'OK', 'step 127: values not read — the offer takes the engine');
-  assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'OFF', owner)), 'OK');
+  assert.match(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), /channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/,
+    'live, values not read: the whole offer stays blocked (fail-closed)');
+  // Значения в чужой валюте — сравнивать не с чем: в бою блок
+  await observe(4, { minMinor: 900, maxMinor: 3500, currency: 'USD' });
+  assert.match(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), /channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/,
+    'live, values in another currency: blocked');
   // Значения в валюте предложения: Р-231 — рамки не блокируют, цену вне них держит путь решения
   await observe(4, { minMinor: 900, maxMinor: 3500, currency: 'EUR' });
   assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), 'OK', 'Р-231: bounds with known values do not block the offer');

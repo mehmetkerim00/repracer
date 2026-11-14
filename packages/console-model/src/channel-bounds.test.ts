@@ -113,7 +113,8 @@ test('step 107 [Р-233, Р-227]: the receipt names the hold outside the channel 
 });
 
 test('step 127 [Р-250] (П1): Amazon bounds whose values we did not read — no block: the offer can be enabled and take a strategy; the note says the price is held, in four languages; the receipt says it too', () => {
-  const w = world({ channelBounds: true }, { pricingMode: 'OFF', strategy: { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 } });
+  // Шаг 128: так — у аккаунта в тени; в бою — отказ включения (тест ниже)
+  const w = world({ channelBounds: true, accountLive: false } as never, { pricingMode: 'OFF', strategy: { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 } });
   const scope = (w as { state: { scopes: never[] } }).state.scopes[0]!;
   for (const l of LOCALES) {
     const m = messagesFor(l);
@@ -145,4 +146,29 @@ test('step 127 [Р-250] (П1): Amazon bounds whose values we did not read — no
   assert.equal(write.status, 'WARN');
   // Контроль: без рамок у шага записи пометки нет
   assert.ok(!JSON.stringify(decisionTrace(world(null, { strategy: null }), detail, en)).includes('Amazon price bounds'), 'no bounds — no note');
+});
+
+test('step 128 [Р-250] (решение владельца по П1): on a LIVE account unread Amazon bounds refuse enabling with an honest reason, as before step 127; the shadow keeps the step 127 note', () => {
+  const strategy = { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 };
+  const live = world({ channelBounds: true, accountLive: true } as never, { pricingMode: 'OFF', strategy });
+  const scope = (live as { state: { scopes: never[] } }).state.scopes[0]!;
+  for (const l of LOCALES) {
+    const m = messagesFor(l);
+    assert.deepEqual(channelNotes(live, scope, m).map((n) => [n.code, n.tone, n.label, n.detail]),
+      [['CHANNEL_BOUNDS_LIVE', 'stop', m.ui.channelNotes.channelBoundsLive, m.ui.channelNotes.channelBoundsLiveDetail(m.when(SEEN))]], l);
+    assert.equal(block(live, m).text, m.ui.bounds.channelBounds.notReadLive(m.when(SEEN)), `${l}: the floor page says why`);
+  }
+  const [note] = channelNotes(live, scope, en);
+  assert.equal(note!.label, 'Blocked: Amazon bounds');
+  assert.match(note!.detail, /On a live account repricing cannot be turned on for this offer/);
+  assert.match(block(live).text ?? '', /On a live account repricing for this offer cannot be turned on/);
+  assert.equal(productList(live, en).rows[0]!.canEnable, false, 'live: enabling is refused — as the database (0231)');
+  // Значения в чужой валюте — сравнить не с чем: в бою тоже отказ
+  const otherCurrency = world({ channelBounds: true, accountLive: true, boundValues: { minMinor: 1200, maxMinor: null, currency: 'EUR' } } as never, { pricingMode: 'OFF', strategy });
+  assert.equal(productList(otherCurrency, en).rows[0]!.canEnable, false, 'live: values in another currency — refused too');
+  // Контроли: в тени — пометка шага 127 и включение; в бою значения в валюте предложения — не блок (Р-231)
+  const shadow = world({ channelBounds: true, accountLive: false } as never, { pricingMode: 'OFF', strategy });
+  assert.deepEqual([channelNotes(shadow, scope, en).map((n) => n.code), productList(shadow, en).rows[0]!.canEnable], [['CHANNEL_BOUNDS'], true]);
+  const known = world({ channelBounds: true, accountLive: true, boundValues: usd(900, 6000) } as never, { pricingMode: 'OFF', strategy });
+  assert.equal(productList(known, en).rows[0]!.canEnable, true, 'live, values read in the offer currency — no block [Р-231]');
 });

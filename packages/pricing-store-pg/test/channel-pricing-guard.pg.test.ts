@@ -25,12 +25,12 @@ const scope = (sku: string): MemorySeedScope => ({
   currentPriceMinor: 1850, minPrice: { amountMinor: 1500, id: `min-${sku}` }, maxPrice: { amountMinor: 2500, id: `max-${sku}` },
 });
 
-async function world() {
+async function world(writeMode: 'SHADOW' | 'LIVE' = 'LIVE') {
   const tag = randomBytes(3).toString('hex').toUpperCase();
   const sku = `SYN-SKU-G${tag}`;
   const w = await seedPricingWorld(pool, {
     provisioningPool: provisioning, adminPool: admin, fixtureTenantId: '10000000-0000-4000-8000-000000000239', fixtureChannelAccountId: ACCOUNT,
-    fixtureChannel: 'AMAZON', fixtureRegion: 'EU', fixtureExternalAccountId: `A1SYNG${tag}`, marketplaces: [DE], clock: new Date().toISOString(), seed: { scopes: [scope(sku)] },
+    fixtureChannel: 'AMAZON', fixtureRegion: 'EU', fixtureExternalAccountId: `A1SYNG${tag}`, marketplaces: [DE], clock: new Date().toISOString(), seed: { scopes: [scope(sku)] }, writeMode,
   });
   const accountId = w.ids.dbId(ACCOUNT);
   // Шаг 107 [Р-231]: рамки канала без значений (как читает настоящий адаптер) или со значениями в валюте предложения
@@ -97,13 +97,24 @@ test('finding 3 [Р-120]: an offer the channel prices itself is not mapped to a 
   await assert.rejects(mapFresh(w, fresh), /has channel-owned pricing \(CHANNEL_REPRICER_ACTIVE\)/, 'finding 3: an offer with channel-owned pricing is mapped to a strategy write scope');
 });
 
-test('step 107 [Р-231], step 127 [Р-250]: the mapping guard lets channel bounds through — with known values (step 107) and, since П1, without them', async () => {
+test('step 107 [Р-231], step 128 [Р-250]: on a live account the mapping guard blocks channel bounds without values and lets bounds with known values through', async () => {
   const w = await world();
   const unread = `SYN-SKU-U${randomBytes(3).toString('hex').toUpperCase()}`;
   await w.observe(unread, 'BOUNDS_UNREAD');
-  // Шаг 127 (П1): рамки без значений больше не блокируют предложение целиком — запись держит адаптер перед отправкой (AMZ_C03)
-  assert.equal(await outcome(mapFresh(w, unread)), 'OK', 'step 127: bounds without values do not block the mapping');
+  // Аккаунт мира — в бою: шаг 128 (решение владельца по П1) — рамки без значений блокируют привязку, как до шага 127
+  await assert.rejects(mapFresh(w, unread), /has channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/, 'step 128: live — bounds without values block the mapping');
   const known = `SYN-SKU-K${randomBytes(3).toString('hex').toUpperCase()}`;
   await w.observe(known, 'BOUNDS_KNOWN');
   assert.equal(await outcome(mapFresh(w, known)), 'OK', 'step 107: bounds with known values do not block the mapping');
+});
+
+test('step 128 [Р-250]: in the shadow the mapping guard lets channel bounds without values through — the step 127 note, not a block', async () => {
+  const w = await world('SHADOW');
+  const unread = `SYN-SKU-S${randomBytes(3).toString('hex').toUpperCase()}`;
+  await w.observe(unread, 'BOUNDS_UNREAD');
+  assert.equal(await outcome(mapFresh(w, unread)), 'OK', 'step 128: shadow — bounds without values do not block the mapping');
+  // Контроль: правило автоматического ценообразования канала блокирует и в тени [Р-120]
+  const repricer = `SYN-SKU-R${randomBytes(3).toString('hex').toUpperCase()}`;
+  await w.observe(repricer);
+  await assert.rejects(mapFresh(w, repricer), /has channel-owned pricing \(CHANNEL_REPRICER_ACTIVE\)/, 'shadow: Automate Pricing still blocks');
 });

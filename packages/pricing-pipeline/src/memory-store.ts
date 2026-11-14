@@ -286,7 +286,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private readonly competitorSourcesByChannel: Partial<Record<string, CompetitorSourceDescriptor[]>>;
   private readonly accountChannels = new Map<string, string>();
   /** Р-120: как channel_data.offer_channel_pricing */
-  readonly offerChannelPricing: ConsoleOfferChannelPricingRow[] = [];
+  readonly offerChannelPricing: Array<Omit<ConsoleOfferChannelPricingRow, 'accountLive'>> = [];
   readonly pricingHealth: ConsolePricingHealthRow[] = [];
   /** Р-122 (шаг 24): как channel_data.competitor_snapshot_log — полный снимок при любом вердикте, для выгрузки в ClickHouse */
   readonly snapshotLog: Array<{ competitorSnapshotId: string; receivedAt: Instant; verdict: SnapshotOutcome['verdict'] | 'RECONCILIATION'; delivery: SnapshotDelivery; key: ProductKey; snapshot: CompetitorSnapshot }> = [];
@@ -1241,19 +1241,26 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   /** Последнее наблюдение ценообразования канала у предложения единицы */
-  private latestChannelPricing(row: ScopeRow): ConsoleOfferChannelPricingRow | undefined {
+  private latestChannelPricing(row: ScopeRow): Omit<ConsoleOfferChannelPricingRow, 'accountLive'> | undefined {
     return this.offerChannelPricing
       .filter((o) => o.channelAccountId === row.channelAccountId && o.marketplace === row.marketplace && o.externalSku === row.externalUnitId)
       .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0];
   }
 
   /**
-   * Как channel_data.offer_channel_pricing_active (0082, 0230): правило автоматического ценообразования канала [Р-120]; код блока или null.
-   * Шаг 127 [Р-250]: рамки канала с непрочитанными значениями предложение больше не блокируют — запись держит адаптер перед отправкой
+   * Как channel_data.offer_channel_pricing_active (0082, 0231): правило автоматического ценообразования канала [Р-120] — всегда; рамки канала с
+   * непрочитанными значениями (или не в валюте единицы) — только у аккаунта в бою (шаг 128), в тени — пометка шага 127 [Р-250]; код блока или null
    */
-  private channelPricingBlock(row: ScopeRow): 'CHANNEL_REPRICER_ACTIVE' | null {
+  private channelPricingBlock(row: ScopeRow): 'CHANNEL_REPRICER_ACTIVE' | 'CHANNEL_BOUNDS_PRESENT' | null {
     if (this.channel === 'KAUFLAND') return null;
-    return this.latestChannelPricing(row)?.automatedPricing ? 'CHANNEL_REPRICER_ACTIVE' : null;
+    const latest = this.latestChannelPricing(row);
+    if (!latest) return null;
+    if (latest.automatedPricing) return 'CHANNEL_REPRICER_ACTIVE';
+    return latest.channelBounds && latest.boundValues?.currency !== row.currency && this.accountLive(row.channelAccountId) ? 'CHANNEL_BOUNDS_PRESENT' : null;
+  }
+  /** Как `channel_account.write_mode = 'LIVE'`: аккаунт посева без режима — в бою (как у базы посева) */
+  private accountLive(channelAccountId: string): boolean {
+    return this.seedAccounts.find((a) => a.channelAccountId === channelAccountId)?.writeMode !== 'SHADOW';
   }
   private channelPricingActive(row: ScopeRow): boolean { return this.channelPricingBlock(row) !== null; }
 
@@ -2676,7 +2683,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       haltReviews: this.haltReviews.map((r) => ({ ...r })),
       distrusts: this.distrusts.map((d) => ({ ...d, details: { ...d.details } })),
       offerChannelPricing: [...new Map([...this.offerChannelPricing].sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt))
-        .map((o) => [`${o.channelAccountId}|${o.marketplace}|${o.externalSku}`, { ...o }])).values()],
+        .map((o) => [`${o.channelAccountId}|${o.marketplace}|${o.externalSku}`, { ...o, accountLive: this.accountLive(o.channelAccountId) }])).values()],
       pricingHealth: [...new Map([...this.pricingHealth].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
         .map((h) => [`${h.channelAccountId}|${h.marketplace}|${h.channelProductRef}|${h.condition}`, { ...h }])).values()],
       listingStatus: this.consoleListingStatus(),

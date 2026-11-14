@@ -778,6 +778,8 @@ export interface OfferChannelPricingObservation {
 
 export interface ConsoleOfferChannelPricingRow extends OfferChannelPricingObservation {
   channelAccountId: string;
+  /** Шаг 128 [Р-250]: аккаунт сейчас в бою — рамки без прочитанных значений блокируют предложение (как страж базы 0231); в тени — пометка */
+  accountLive: boolean;
 }
 
 /** Шаг 23: последнее состояние PRICING_HEALTH оффера для экрана товаров (данные канала, 18 мес) */
