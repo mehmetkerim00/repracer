@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@repracer/pricing-model": "0.1.0",
-    "pg": "8.23.0"
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@repracer/pricing-store-pg": "0.1.0",
