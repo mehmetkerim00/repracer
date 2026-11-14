@@ -77,7 +77,8 @@ if [ "${pending}" -gt 0 ]; then
   echo "== копия базы до миграций (${pending} к применению, база на ${at})"
   deploy/pilot/pre-release-copy.sh "${before}" "${sha}" "${at}"
 fi
-"${C}" exec -T -u postgres -e REPRACER_PILOT_DB="${REPRACER_PILOT_DB}" -e REPRACER_PILOT_REGION="${REPRACER_PILOT_REGION}" postgres \
+# Шаг 132: стенд (pilot | qa-b) — отметка базы при первой сборке; по ней сброс отличает QA-B от пилота
+"${C}" exec -T -u postgres -e REPRACER_PILOT_DB="${REPRACER_PILOT_DB}" -e REPRACER_PILOT_REGION="${REPRACER_PILOT_REGION}" -e REPRACER_PILOT_STAND="${REPRACER_PILOT_STAND:-pilot}" postgres \
   bash /repo/deploy/pilot/db.sh ${FIRST[@]+"${FIRST[@]}"}
 "${C}" run --rm tools sh -c 'node infra/local/apply-clickhouse.mjs && node deploy/pilot/clickhouse-users.mjs'
 echo "== процессы"

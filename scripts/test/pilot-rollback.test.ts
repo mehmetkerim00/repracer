@@ -105,3 +105,36 @@ test('step 131: rollback.sh — no migrations between the versions: a deploy of 
   assert.equal(spawnSync('bash', ['-n', join(root, 'deploy/pilot/rollback.sh')]).status, 0);
   assert.equal(spawnSync('bash', ['-n', join(root, 'deploy/pilot/rollback-inner.sh')]).status, 0);
 });
+
+test('step 132: reset.sh — only on QA-B (REPRACER_PILOT_STAND=qa-b), refused before anything stops; then stop, a copy before the reset, the database reset, processes, smoke', () => {
+  // reset.sh ищет deploy/pilot/pilot.env от корня репозитория — копия раскладки репозитория со своими настройками
+  const repo = join(work, 'reset-repo', 'deploy', 'pilot');
+  mkdirSync(repo, { recursive: true });
+  for (const f of ['reset.sh', 'compose.sh']) copyFileSync(join(root, 'deploy/pilot', f), join(repo, f));
+  writeFileSync(join(repo, 'build.env'), 'REPRACER_BUILD_SHA=x\n');
+  const before = readFileSync(join(wrap, 'pilot.env'), 'utf8');
+  for (const stand of ['', 'REPRACER_PILOT_STAND=pilot\n']) {
+    writeFileSync(join(repo, 'pilot.env'), `${before}${stand}`);
+    rmSync(join(work, 'docker.log'), { force: true });
+    const r = spawnSync('bash', [join(repo, 'reset.sh')], { env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: work }, encoding: 'utf8' });
+    assert.equal(r.status, 1, `${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /QA-B RESET RED: сброс — только QA-B/);
+    assert.ok(!existsSync(join(work, 'docker.log')), 'refused before any docker command');
+  }
+  // Контроль: на QA-B проверка стенда пропускает дальше (в этой копии раскладки дальше упирается в отсутствующую выгрузку журналов)
+  writeFileSync(join(repo, 'pilot.env'), `${before}REPRACER_PILOT_STAND=qa-b\n`);
+  const onQaB = spawnSync('bash', [join(repo, 'reset.sh')], { env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: work }, encoding: 'utf8' });
+  assert.doesNotMatch(`${onQaB.stdout}${onQaB.stderr}`, /сброс — только QA-B/, 'qa-b goes past the stand check');
+  assert.match(onQaB.stdout, /== журналы по сей момент/);
+  const rs = readFileSync(join(root, 'deploy/pilot/reset.sh'), 'utf8');
+  const at = (s: string) => { const i = rs.indexOf(s); assert.ok(i >= 0, `reset.sh has ${s}`); return i; };
+  assert.ok(at('[ "${REPRACER_PILOT_STAND:-pilot}" = qa-b ] || red') < at('logs-archive.sh --until-now'), 'the stand is checked first');
+  assert.ok(at('logs-archive.sh --until-now') < at('xargs -r "${C}" stop'));
+  assert.ok(at('xargs -r "${C}" stop') < at('-e REPRACER_BACKUP_ONCE=1 backup'), 'a copy before the reset — the rehearsal keeps its backups');
+  assert.ok(at('-e REPRACER_BACKUP_ONCE=1 backup') < at('bash /repo/deploy/pilot/db.sh --reset-qa-b'));
+  assert.ok(at('bash /repo/deploy/pilot/db.sh --reset-qa-b') < at('up -d --wait --remove-orphans') && at('up -d --wait --remove-orphans') < at('deploy/pilot/smoke.sh'));
+  // Выкладка передаёт стенд базе: первая сборка ставит отметку
+  assert.match(readFileSync(join(root, 'deploy/pilot/deploy.sh'), 'utf8'), /-e REPRACER_PILOT_STAND="\$\{REPRACER_PILOT_STAND:-pilot\}"/);
+  assert.match(readFileSync(join(root, 'deploy/pilot/pilot.env.example'), 'utf8'), /^REPRACER_PILOT_STAND=pilot$/m);
+  assert.equal(spawnSync('bash', ['-n', join(root, 'deploy/pilot/reset.sh')]).status, 0);
+});

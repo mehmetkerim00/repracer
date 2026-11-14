@@ -17,7 +17,9 @@
 - архив журналов (шаг 130): выгрузка проекта пилота тем же скриптом, отметка захода, строка crontab, вердикт смоука
   (`scripts/test/pilot-logs.test.ts`);
 - откат (шаг 131): план миграций и отказ «база новее кода» (`scripts/test/db-migrate.test.ts`), копия перед выкладкой и порядок шагов
-  (`scripts/test/pilot-rollback.test.ts`), учение «N → N+1 с миграцией → откат» (`scripts/test/pilot-db.test.ts`).
+  (`scripts/test/pilot-rollback.test.ts`), учение «N → N+1 с миграцией → откат» (`scripts/test/pilot-db.test.ts`);
+- сброс QA-B (шаг 132): только база с отметкой `qa-b` при настройках `qa-b`, новая база со стражем, повтор после обрыва
+  (`scripts/test/pilot-db.test.ts`), отказ `reset.sh` на пилоте до любой команды Docker (`scripts/test/pilot-rollback.test.ts`).
 
 `deploy.sh`, `smoke.sh`, `backup-key.sh`, `restore-check.sh` и `rollback.sh` (контейнерами), выгрузка журналов настоящим `docker compose logs`
 и туннель впервые пройдут на сервере.
@@ -381,7 +383,64 @@ PostgreSQL). Выкладка N+1 даёт план с одной миграци
 
 Остановку процессов и одноразовый контейнер на сервере (`rollback.sh`) пройдёт первая репетиция на QA-B.
 
-## 12. Чего здесь нет
+## 12. QA-B (шаг 132)
+
+Решения владельца 2026-11-15:
+- QA-B — этот же `deploy/pilot` на временной машине, и он же первая генеральная репетиция выкладки пилота;
+- перед QA-B стоит Cloudflare Access: внутренний стенд с настоящими токенами. Пилот остаётся без Access;
+- копии проходятся целиком, как репетиция, без исключений для QA;
+- аккаунт продавца Amazon для QA-B — владелец с Мерданом. Машину покупают с одобрения Мердана.
+
+Код QA-B — код пилота. Отличаются настройки, секреты и внешние шаги:
+
+| Что | Пилот | QA-B |
+|---|---|---|
+| `REPRACER_PILOT_STAND` в `pilot.env` | `pilot` | `qa-b` — первая сборка отмечает им базу, сброс работает только на ней |
+| `REPRACER_PILOT_HOST` | `app.<домен>` | `qa-b.<домен>` |
+| Секреты на машине владельца | `$HOME/.config/repracer/secrets/pilot` | `REPRACER_PILOT_LOCAL_SECRETS=$HOME/.config/repracer/secrets/qa-b` у `secrets.sh` и `push-secrets.sh` |
+| Ключ копий | `pilot-backup-private.asc` | свой: `backup-key.sh` на машине QA-B → `qa-b-backup-private.asc` |
+| Внешний контроль (§9) | `setup-heartbeats.mjs --stand pilot` | `--stand qa-b`: свои 7 проверок; адрес выноса — `$HOME/.config/repracer/secrets/qa-b-pull-heartbeat-url` |
+| Вынос копий (§8) | `pull-backups.sh deploy@<пилот>` | `REPRACER_PILOT_BACKUP_PULL_DIR=$HOME/.config/repracer/backups/qa-b REPRACER_PILOT_PULL_HEARTBEAT_URL_FILE=$HOME/.config/repracer/secrets/qa-b-pull-heartbeat-url deploy/pilot/pull-backups.sh deploy@<QA-B>` |
+| Монитор `/healthz` снаружи | UptimeRobot | не заводится: за Access монитор видит только страницу входа. Обход Access для `/healthz` — решение владельца |
+| Cloudflare Access | нет | да, как у QA-A ([deploy/qa/README.md](../qa/README.md)): приложение на `qa-b.<домен>`, политика — адреса тестировщиков, One-time PIN, проверка Access на туннеле (`originRequest.access`); Access — раньше DNS |
+| Сброс базы | нет и не бывает | `deploy/pilot/reset.sh` |
+
+**Внешние шаги в день одобрения:**
+1. **Машина** — подготовка хоста по §2.
+2. **Cloudflare** — туннель `repracer-qa-b` (`qa-b.<домен>` → `http://console:4319`), приложение Access и CNAME. Порядок и API — как у
+   QA-A.
+3. **ZITADEL** — приложения консоли и панели QA-B: адрес возврата консоли `https://qa-b.<домен>/auth/callback`, остальное — по §1.
+4. **Amazon** — у приложения TMPrice добавить Redirect URI `https://qa-b.<домен>/connect/callback` и Login URI `https://qa-b.<домен>/connect/amazon/login`.
+   Адрес согласия не передаёт `redirect_uri`: Amazon берёт первый зарегистрированный (§1). Пока у приложения один Login URI (проверить), QA-B
+   и пилот подключают продавца по очереди: перед подключением на QA-B его адреса ставятся первыми, перед пилотом — адреса пилота.
+5. **Секреты, контроль, выкладка** — §4, §9 с `qa-b`, затем `deploy/pilot/deploy.sh <SHA> --first-time`. Первая выкладка кончается красной
+   строкой копий, как у пилота (§5, §8).
+
+**Сброс базы QA-B** — одной командой на машине QA-B:
+
+```sh
+deploy/pilot/reset.sh
+```
+
+Порядок:
+1. журналы по сей момент;
+2. остановка процессов, кроме базы;
+3. копия перед сбросом — ошибочный сброс восстанавливается, как беда;
+4. новая база (`db.sh --reset-qa-b`).
+
+Новая база собирается под именем `<база>_next` со стражем, прежняя целая до замены. Повтор после обрыва между удалением и переименованием
+доводит замену. Сброс отказывает, если `pilot.env` или сама база говорят не `qa-b`. На пилоте он отказывает первой строкой, до любой команды
+Docker. ClickHouse не сбрасывается: выгруженная история прежних тенантов живёт свой срок, консоль и решение о цене её не читают [Р-22].
+После сброса онбординг — заново: тенант и приглашение из панели (§7).
+
+**Когда QA-B больше не нужен:**
+- машина удаляется;
+- туннель, DNS и приложение Access `qa-b` удаляются;
+- проверки `repracer-qa-b-*` в healthchecks.io удаляются;
+- Redirect URI и Login URI QA-B у приложения Amazon и приложения QA-B в ZITADEL удаляются;
+- на машине владельца удаляются каталоги `secrets/qa-b`, `backups/qa-b` и ключ `qa-b-backup-private.asc`.
+
+## 13. Чего здесь нет
 
 - **Почты.** Письма собираются и не уходят, в базе отметка `DRY_RUN` (OQ-224); приглашение — ссылкой в панели.
 - **Приёмника уведомлений Amazon** — часть Б заблокирована снаружи; пилот — на опросе [Р-240].

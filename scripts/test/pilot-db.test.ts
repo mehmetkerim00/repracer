@@ -47,7 +47,8 @@ after(() => {
   if (admin) {
     psql(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`);
     // Шаг 131: учение, упавшее посреди отката, оставило бы отложенные базы `<база>_rb_<время>`
-    for (const aside of psql(`SELECT datname FROM pg_database WHERE datname LIKE '${DB}\\_rb\\_%'`).split('\n').filter(Boolean)) psql(`DROP DATABASE IF EXISTS ${aside} WITH (FORCE)`);
+    // Шаг 132: и недостроенная сборка сброса QA-B `<база>_next`
+    for (const aside of psql(`SELECT datname FROM pg_database WHERE datname LIKE '${DB}\\_rb\\_%' OR datname = '${DB}_next'`).split('\n').filter(Boolean)) psql(`DROP DATABASE IF EXISTS ${aside} WITH (FORCE)`);
     // Пароли ролей кластера — обратно пустые: в тестовом кластере вход идёт без пароля, и чужим прогонам пароль ни к чему
     if (secrets) for (const role of roles()) psql(`ALTER ROLE ${role} PASSWORD NULL`);
   }
@@ -268,4 +269,47 @@ test('step 131: the rollback drill — N → N+1 with a migration → back to N 
   assert.match(deployN.out, /applied 0/);
   assert.ok(!`${back.out}${back.err}`.includes(owner.privateKey.slice(40, 120)), 'the private key is not printed');
   psql(`DROP DATABASE ${done.aside} WITH (FORCE)`);
+});
+
+/**
+ * Шаг 132 (решение владельца 2026-11-15, п. 3.4): сброс базы QA-B. QA-B — тот же deploy/pilot на временной машине, и его база устроена как база пилота
+ * (страж боевых записей стоит на обеих), поэтому стражем их не отличить. Первая сборка ставит настройку базы `repracer.stand` (pilot | qa-b), и сброс
+ * (deploy/pilot/db.sh --reset-qa-b) работает, только если и настройки стенда, и сама база говорят qa-b: базу пилота не пересоздаёт ничто.
+ * Как у сброса QA-A (шаг 121.3): новая база собирается под именем `<база>_next` со стражем, прежняя целая до замены; убитый между удалением и
+ * переименованием сброс повтор доводит, а не отказывает.
+ */
+test('step 132: the QA-B reset — only a qa-b database under qa-b settings; a fresh database with the guard; a reset killed before the rename is finished by the next run', { timeout: 15 * 60_000 }, () => {
+  const reset = (stand: string) => sh('deploy/pilot/db.sh', ['--reset-qa-b'], { ...pgEnv(), REPRACER_PILOT_DB: DB, REPRACER_PILOT_REGION: 'US', REPRACER_PILOT_SECRETS: secrets, REPRACER_PILOT_STAND: stand });
+  const standOf = (database: string) => psql(`SELECT coalesce((SELECT substr(c, length('repracer.stand=') + 1) FROM pg_db_role_setting s CROSS JOIN LATERAL unnest(s.setconfig) c
+    WHERE s.setrole = 0 AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = '${database}') AND starts_with(c, 'repracer.stand=')), '')`);
+  // База этого файла собрана первой сборкой пилота: отметка стенда — pilot
+  assert.equal(standOf(DB), 'pilot', 'the first build marks the database with its stand');
+  // Настройки пилота — отказ: базу пилота сброс не трогает ни при каких данных
+  const onPilot = reset('pilot');
+  assert.equal(onPilot.code, 1, onPilot.out);
+  assert.match(onPilot.out, /сброс — только QA-B/);
+  // Настройки говорят qa-b, а база — pilot: отказ (не та машина или не тот pilot.env)
+  const mismatch = reset('qa-b');
+  assert.equal(mismatch.code, 1, mismatch.out);
+  assert.match(mismatch.out, /база .* отмечена стендом «pilot»/);
+  assert.notEqual(psql(`SELECT count(*) FROM pg_database WHERE datname = '${DB}'`), '0', 'nothing was dropped');
+  // База QA-B: сброс — новая база со стражем, прежние данные ушли
+  psql(`ALTER DATABASE ${DB} SET repracer.stand = 'qa-b'`);
+  psql('CREATE TABLE public.qa_b_marker (id int)', DB);
+  const fresh = reset('qa-b');
+  assert.equal(fresh.code, 0, fresh.out);
+  assert.match(fresh.out, /QA-B RESET GREEN/);
+  assert.equal(psql("SELECT to_regclass('public.qa_b_marker') IS NULL", DB), 't', 'the old data is gone');
+  assert.equal(psql('SELECT security.live_writes_forbidden()', DB), 't', 'the new database is closed for live writes from the first moment (Р-247)');
+  assert.equal(standOf(DB), 'qa-b');
+  const last = readdirSync(join(root, 'migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1)!.slice(0, 4);
+  assert.match(psql(`SELECT current_setting('repracer.migrations', true)`, DB), new RegExp(`^${last}:`), 'every migration, through the journal');
+  assert.equal(psql(`SELECT count(*) FROM pg_database WHERE datname = '${DB}_next'`), '0', 'no build left behind');
+  // Сброс убит между удалением прежней базы и переименованием готовой: повтор доводит замену, не собирая заново
+  psql(`ALTER DATABASE ${DB} RENAME TO ${DB}_next`);
+  const finish = reset('qa-b');
+  assert.equal(finish.code, 0, finish.out);
+  assert.match(finish.out, /доводит замену/);
+  assert.equal(psql('SELECT security.live_writes_forbidden()', DB), 't');
+  assert.equal(psql(`SELECT count(*) FROM pg_database WHERE datname = '${DB}_next'`), '0');
 });
