@@ -119,7 +119,8 @@ test('step 129: the pilot compose has backup-heartbeat — copies read-only, the
   assert.equal(svc.read_only, true);
 });
 
-const FILES = ['scheduler_heartbeat_url', 'console_heartbeat_url', 'operator_heartbeat_url', 'bulk_heartbeat_url', 'backup_heartbeat_url'];
+// Шаг 130: и архив журналов (deploy/pilot/logs-archive.sh отмечается после каждого захода)
+const FILES = ['scheduler_heartbeat_url', 'console_heartbeat_url', 'operator_heartbeat_url', 'bulk_heartbeat_url', 'backup_heartbeat_url', 'logs_heartbeat_url'];
 
 test('step 129: deployment and smoke refuse a pilot without external control — a heartbeat turned off, a missing or non-https address file', () => {
   const secrets = join(work, 'hb-secrets');
@@ -136,7 +137,7 @@ test('step 129: deployment and smoke refuse a pilot without external control —
   }
   const green = state();
   assert.equal(green.code, 0, green.out);
-  assert.match(green.out, /HEARTBEAT READY: 5 адресов отметок/);
+  assert.match(green.out, /HEARTBEAT READY: 6 адресов отметок/);
   assert.ok(!green.out.includes('hc-ping.invalid'), 'no address reaches the output');
   // Выкладка спрашивает это до сборки, смоук — после подъёма; смоук видит и сервис отметок копий
   const deploy = readFileSync(join(root, 'deploy/pilot/deploy.sh'), 'utf8');
@@ -213,7 +214,7 @@ function modelHealthchecks(): { server: Server; bodies: Array<Record<string, unk
   return { server, bodies };
 }
 
-test('step 129: setup-heartbeats --stand pilot — six checks with notifications, address files 600 (the pull one outside the server secrets), nothing printed, a second run changes nothing', async () => {
+test('step 129, step 130: setup-heartbeats --stand pilot — seven checks with notifications, address files 600 (the pull one outside the server secrets), nothing printed, a second run changes nothing', async () => {
   const model = modelHealthchecks();
   await new Promise<void>((resolve) => model.server.listen(0, '127.0.0.1', resolve));
   try {
@@ -232,7 +233,7 @@ test('step 129: setup-heartbeats --stand pilot — six checks with notifications
     const first = await run('--stand', 'pilot');
     assert.equal(first.code, 0, first.out);
     const bySlug = new Map(model.bodies.map((b) => [b.slug, b]));
-    assert.deepEqual([...bySlug.keys()].sort(), ['backup', 'bulk-worker', 'console', 'operator', 'pull', 'scheduler'].map((p) => `repracer-pilot-${p}`).sort());
+    assert.deepEqual([...bySlug.keys()].sort(), ['backup', 'bulk-worker', 'console', 'logs', 'operator', 'pull', 'scheduler'].map((p) => `repracer-pilot-${p}`).sort());
     for (const b of model.bodies) {
       assert.equal(b.channels, '*', `${String(b.slug)}: the check gets the project's notifications (the API assigns none by default)`);
       assert.deepEqual(b.unique, ['slug'], 'a second run updates, not duplicates');
@@ -240,6 +241,7 @@ test('step 129: setup-heartbeats --stand pilot — six checks with notifications
     assert.deepEqual([bySlug.get('repracer-pilot-scheduler')!.timeout, bySlug.get('repracer-pilot-scheduler')!.grace], [120, 180]);
     assert.deepEqual([bySlug.get('repracer-pilot-backup')!.timeout, bySlug.get('repracer-pilot-backup')!.grace], [86_400, 7_200], 'a copy a day; silent 26 h — an email');
     assert.deepEqual([bySlug.get('repracer-pilot-pull')!.timeout, bySlug.get('repracer-pilot-pull')!.grace], [86_400, 7_200]);
+    assert.deepEqual([bySlug.get('repracer-pilot-logs')!.timeout, bySlug.get('repracer-pilot-logs')!.grace], [86_400, 7_200], 'the logs archive runs nightly');
     for (const f of FILES) {
       const p = join(secrets, f);
       assert.match(readFileSync(p, 'utf8'), /^https:\/\/hc-ping\.invalid\/[0-9a-f]{32}\n$/, f);
@@ -253,7 +255,7 @@ test('step 129: setup-heartbeats --stand pilot — six checks with notifications
     const again = await run('--stand', 'pilot');
     assert.equal(again.code, 0, again.out);
     assert.deepEqual(FILES.map((f) => readFileSync(join(secrets, f), 'utf8')), before, 'the same addresses');
-    assert.equal(model.bodies.length, 12, 'the second run updates the same six checks');
+    assert.equal(model.bodies.length, 14, 'the second run updates the same seven checks');
     // Второй стенд (QA-B) — свои проверки, а не чужие
     const qab = await run('--stand', 'qa-b', '--dry-run');
     assert.equal(qab.code, 0, qab.out);

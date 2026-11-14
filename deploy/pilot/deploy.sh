@@ -30,6 +30,12 @@ echo "== зависимости и сборка интерфейса (${sha})"
 docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/.npm -v "${PWD}":/app -w /app "${NODE_IMAGE}" \
   sh -c 'npm ci --no-audit --no-fund && node scripts/browser-imports.mjs && npm run build -w @repracer/console'
 printf 'REPRACER_BUILD_SHA=%s\nREPRACER_BUILD_AT=%s\n' "${sha}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > deploy/pilot/build.env
+# Шаг 130 (Amazon DPP — журналы ≥ 12 месяцев): журнал контейнера уходит вместе с ним, а `up` пересоздаёт контейнеры с изменённой настройкой.
+# Поэтому сначала — журналы по сей момент; провал выгрузки останавливает выкладку (строка LOGS_ARCHIVE_FAILED выше). Первая выкладка — контейнеров ещё нет
+if [ -n "$("${C}" ps -aq 2> /dev/null)" ]; then
+  echo "== журналы по сей момент (до пересоздания контейнеров)"
+  deploy/pilot/logs-archive.sh --until-now
+fi
 echo "== база и ClickHouse"
 "${C}" up -d --wait postgres clickhouse
 "${C}" exec -T -u postgres -e REPRACER_PILOT_DB="${REPRACER_PILOT_DB}" -e REPRACER_PILOT_REGION="${REPRACER_PILOT_REGION}" postgres \
@@ -37,4 +43,8 @@ echo "== база и ClickHouse"
 "${C}" run --rm tools sh -c 'node infra/local/apply-clickhouse.mjs && node deploy/pilot/clickhouse-users.mjs'
 echo "== процессы"
 "${C}" up -d --wait --remove-orphans
+# Шаг 130: отметка «выгружено по» у новых контейнеров и ежедневная выгрузка в crontab (одна строка, сколько бы ни было выкладок)
+echo "== журналы: выгрузка и ежедневный запуск"
+deploy/pilot/logs-archive.sh --until-now
+deploy/pilot/logs-cron.sh
 deploy/pilot/smoke.sh

@@ -35,6 +35,8 @@ done
 # Шаг 129 [Р-127]: внешний контроль — отметки процессов включены и с адресами, отметки копий шлёт свой сервис (README, §9)
 "${here}/heartbeat-state.sh" "${REPRACER_SECRETS_DIR}" || fail "внешний контроль не настроен — строка HEARTBEAT RED выше"
 "${C}" ps --services --status running | grep -qx backup-heartbeat || fail "сервис отметок копий backup-heartbeat не работает"
+# Шаг 130 (Amazon DPP): архив журналов ≥ 12 месяцев — ежедневная выгрузка стоит, провала нет, выгружено не раньше 26 часов назад (README, §10)
+"${here}/logs-state.sh" "${REPRACER_LOGS_HOT_DIR}" || fail "архив журналов не в порядке — строка LOGS RED выше"
 tables="$("${C}" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database = 'repracer_analytics'")"
 [ "${tables}" -gt 0 ] || fail "в ClickHouse нет таблиц repracer_analytics — DDL не применён"
 "${C}" ps --services --status running | grep -qE '^(worker|redpanda|kafka)$' && fail "в пилоте поднят брокер или диспетчер — пилот в тени, их здесь нет"

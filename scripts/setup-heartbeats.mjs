@@ -3,8 +3,8 @@
  * Р-127: работоспособность процесса контролируется извне — изнутри остановленный процесс о себе не сообщает. Скрипт заводит проверки во внешнем
  * сервисе (healthchecks.io) и кладёт их адреса туда, где их читают процессы. Два режима:
  *
- *   --stand <имя> (шаг 129) — проверки стенда deploy/pilot (пилот, QA-B): планировщик, консоль, панель, исполнитель заданий, копии базы и вынос
- *     копий. Адреса пишутся файлами 600: пять — в каталог секретов стенда на машине владельца (REPRACER_PILOT_LOCAL_SECRETS, по умолчанию
+ *   --stand <имя> (шаг 129) — проверки стенда deploy/pilot (пилот, QA-B): планировщик, консоль, панель, исполнитель заданий, копии базы, архив
+ *     журналов (шаг 130) и вынос копий. Адреса пишутся файлами 600: шесть — в каталог секретов стенда на машине владельца (REPRACER_PILOT_LOCAL_SECRETS, по умолчанию
  *     $HOME/.config/repracer/secrets/<имя>), откуда их копирует на сервер deploy/pilot/push-secrets.sh; адрес выноса — рядом
  *     ($HOME/.config/repracer/secrets/<имя>-pull-heartbeat-url): его читает pull-backups.sh на машине оператора, серверу он не нужен.
  *   без --stand (шаг 33) — три процесса deploy/scheduler, deploy/worker, deploy/notification-receiver; адреса уходят в секреты GitHub через `gh`.
@@ -40,8 +40,8 @@ if (!key) {
 }
 
 /**
- * Процессы отмечаются каждую минуту: период 2 минуты и допуск 3 минуты — письмо примерно через пять минут молчания. Копия снимается раз в сутки,
- * вынос идёт раз в сутки: период сутки и допуск 2 часа — письмо после 26 часов молчания. Это тот же предел, что у смоука (backup-state.sh).
+ * Процессы отмечаются каждую минуту: период 2 минуты и допуск 3 минуты — письмо примерно через пять минут молчания. Копия, архив журналов
+ * и вынос идут раз в сутки: период сутки и допуск 2 часа — письмо после 26 часов молчания. Это тот же предел, что у смоука (backup-state.sh).
  */
 const PROCESS = { timeout: 120, grace: 180 };
 const DAILY = { timeout: 86_400, grace: 7_200 };
@@ -54,6 +54,7 @@ const CHECKS = stand
     { proc: 'operator', what: 'панель оператора', ...PROCESS, file: join(standSecrets, 'operator_heartbeat_url') },
     { proc: 'bulk-worker', what: 'исполнитель заданий тенантов', ...PROCESS, file: join(standSecrets, 'bulk_heartbeat_url') },
     { proc: 'backup', what: 'копия базы: отметка после каждой готовой копии, сбой — BACKUP_FAILED', ...DAILY, file: join(standSecrets, 'backup_heartbeat_url') },
+    { proc: 'logs', what: 'архив журналов ≥ 12 месяцев: отметка после каждого захода deploy/pilot/logs-archive.sh', ...DAILY, file: join(standSecrets, 'logs_heartbeat_url') },
     { proc: 'pull', what: 'вынос копий на машину оператора: отметка после каждого прохода pull-backups.sh', ...DAILY,
       file: process.env.REPRACER_PILOT_PULL_HEARTBEAT_URL_FILE ?? join(home, '.config', 'repracer', 'secrets', `${stand}-pull-heartbeat-url`) },
   ].map((c) => ({ ...c, slug: `repracer-${stand}-${c.proc}`, name: `repracer · ${stand} · ${c.proc}`, desc: c.what }))
