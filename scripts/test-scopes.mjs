@@ -137,27 +137,29 @@ export function filesForScope(included, scope) {
  * код в соседнем прогоне прошёл за 36 (раннер был на четверть медленнее по всему прогону, зависших тестов не было).
  *
  * Единица деления — общий прогон рабочего пространства или файл-замер (они идут по одному, MEASURED_FILES). Вес — минуты из журнала
- * зелёного быстрого прогона шага 105 по запросу (39600159918); единице без веса — FAST_UNIT_DEFAULT_MINUTES. Деление жадное: тяжёлые
+ * зелёного быстрого прогона шага 105 по запросу (39600159918); шаг 124 — по журналу push-прогона main 43531834468: шард 1 шёл 38,5 мин при
+ * пределе 40, шард 2 — 19; `tests/contract` вырос с 9,3 до 29,5 мин, и первый же шаг с минутой тестов снимался пределом. Единице без веса —
+ * FAST_UNIT_DEFAULT_MINUTES. Деление жадное: тяжёлые
  * единицы первыми в более лёгкий шард, при равенстве — в меньший номер; каждый файл — ровно в одном шарде (правило репозитория).
  * Веса — не предел и не обещание: при сильном перекосе шардов в CI таблицу обновляют по свежему журналу.
  */
 export const FAST_SHARDS = 2;
 const FAST_UNIT_DEFAULT_MINUTES = 0.1;
 const FAST_UNIT_MINUTES = {
-  'tests/contract': 9.3,
-  'apps/console': 7.9,
-  'apps/console/test/console-live.pg.test.ts': 6.5,
-  'apps/console/test/onboarding-live.pg.test.ts': 4.1,
-  'tests/contract/src/cost-import-live.pg.test.ts': 2.1,
-  'apps/operator': 0.8,
+  'tests/contract': 29.5,
+  'apps/console': 8.8,
+  'apps/console/test/console-live.pg.test.ts': 4.0,
+  'apps/console/test/onboarding-live.pg.test.ts': 3.8,
+  'apps/operator': 1.7,
+  'apps/console/test/pilot-live.pg.test.ts': 1.0,
+  'tests/contract/src/cost-import-live.pg.test.ts': 0.9,
   'packages/pricing-store-pg': 0.6,
-  'apps/console/test/pilot-live.pg.test.ts': 0.4,
-  'apps/console/test/pilot-us-live.pg.test.ts': 0.4,
+  'apps/console/test/connect-live.pg.test.ts': 0.6,
+  'apps/console/test/pilot-us-live.pg.test.ts': 0.3,
   'apps/console/test/pilot-ebay-live.pg.test.ts': 0.3,
   'apps/console/test/stock-only-live.pg.test.ts': 0.3,
-  'apps/console/test/connect-live.pg.test.ts': 0.2,
-  'apps/console/test/guest-demo-live.pg.test.ts': 0.2,
-  'apps/operator/test/operator-live.pg.test.ts': 0.2,
+  'apps/console/test/guest-demo-live.pg.test.ts': 0.1,
+  'apps/operator/test/operator-live.pg.test.ts': 0.1,
 };
 
 /**
