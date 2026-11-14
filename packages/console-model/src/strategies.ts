@@ -3,9 +3,9 @@ import type { StrategyPreview } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { catalogPageOf, listQuery, type ListQuery, type PageInfo } from './page.ts';
-import { channelNotes, strategyLabel } from './products.ts';
+import { channelNotes, noteBlocksPricing, strategyLabel } from './products.ts';
 import { catalogFirst, channelOf, gap, scopeById, storefrontName, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type Tone, type UnitRef } from './world.ts';
-import { channelPricingBlocks } from './channel-bounds.ts';
+import { channelBoundsUnread, channelPricingBlocks } from './channel-bounds.ts';
 
 /**
  * Экран стратегий (шаг 21): черновик стратегии проверяется на реальных единицах записи до сохранения — те же движок и Gate, что
@@ -205,10 +205,12 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
   // Р-136: список предложений — страницей; ответ экрана на каталоге целевого клиента был 3,7 МБ
   const { items: shownScopes, page } = catalogPageOf(world, listQuery(query), m);
   const scopes = shownScopes.map((s): StrategyScopeItem => {
-    const notes = channelNotes(world, s, m).filter((n) => n.code !== 'PRICING_HEALTH');
+    // Шаг 127 [Р-250]: пометка рамок без значений назначению не мешает — показывается, но стратегия назначается
+    const shown = channelNotes(world, s, m).filter((n) => n.code !== 'PRICING_HEALTH');
+    const notes = shown.filter(noteBlocksPricing);
     return {
       unit: unitOf(world, s, m), mode: m.values[s.pricingMode], strategy: strategyLabel(s.strategy, s.currency, m).label,
-      channelPricing: notes[0] ?? null, assignable: notes.length === 0,
+      channelPricing: notes[0] ?? shown[0] ?? null, assignable: notes.length === 0,
       strategyId: s.strategy?.strategyId ?? null, version: s.strategy?.version ?? null,
       canUnassign: canEdit && s.strategy !== null && s.pricingMode !== 'ENGINE',
       byDefaultRule: assignedByDefaultRule(s) ? m.ui.strategies.byDefaultRule : null,
@@ -231,10 +233,11 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
     } else {
       const newest = new Map<string, (typeof world.state.offerChannelPricing)[number]>();
       for (const o of world.state.offerChannelPricing.filter((x) => x.channelAccountId === a.channelAccountId)) newest.set(`${o.marketplace}|${o.externalSku}`, o);
-      // Шаг 107 [Р-231]: рамки со значениями в валюте предложения не блокируют — в списке только блокирующие (как база)
+      // Шаг 107 [Р-231]: рамки со значениями в валюте предложения не блокируют — их в списке нет; правило канала (блок) и, с шага 127 [Р-250],
+      // рамки без значений (не блок, но цена удержана) — в списке, как в запросе фактов базы
       const currencyOf = (o: (typeof world.state.offerChannelPricing)[number]) => world.state.scopes.find((sc) => sc.channelAccountId === o.channelAccountId
         && sc.marketplace === o.marketplace && sc.externalUnitId === o.externalSku)?.currency ?? '';
-      flagged = [...newest.values()].filter((o) => channelPricingBlocks(o, currencyOf(o)));
+      flagged = [...newest.values()].filter((o) => channelPricingBlocks(o) || channelBoundsUnread(o, currencyOf(o)));
       channelPricingTotal += flagged.length;
     }
     return flagged.map((o) => ({
@@ -406,7 +409,7 @@ export function strategyPreviewView(world: StandWorld, draft: StrategyDraft, pre
     };
   });
   const label = strategyLabel({ strategyId: 'draft', version: 1, params: draft.params, deadbandMinor: draft.deadbandMinor }, previews[0]?.currency ?? '', m);
-  const channelPriced = rows.filter((r) => { const scope = scopeById(world, r.unit.writeScopeId); return scope ? channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH') : false; });
+  const channelPriced = rows.filter((r) => { const scope = scopeById(world, r.unit.writeScopeId); return scope ? channelNotes(world, scope, m).some(noteBlocksPricing) : false; });
   // Запрет сохранения считается по ВСЕМ предложениям, а не по показанным: иначе он зависел бы от длины страницы
   const saveBlocked = rows.some((r) => r.unavailable !== null) ? t.blockedUnavailable
     : channelPriced.length > 0 ? t.blockedChannelPricing(channelPriced.slice(0, 5).map((r) => r.unit.label).join(', ')) : null;

@@ -97,11 +97,12 @@ test('finding 3 [Р-120]: an offer the channel prices itself is not mapped to a 
   await assert.rejects(mapFresh(w, fresh), /has channel-owned pricing \(CHANNEL_REPRICER_ACTIVE\)/, 'finding 3: an offer with channel-owned pricing is mapped to a strategy write scope');
 });
 
-test('step 107 [Р-231]: the mapping guard blocks channel bounds without values and lets bounds with known values through', async () => {
+test('step 107 [Р-231], step 127 [Р-250]: the mapping guard lets channel bounds through — with known values (step 107) and, since П1, without them', async () => {
   const w = await world();
   const unread = `SYN-SKU-U${randomBytes(3).toString('hex').toUpperCase()}`;
   await w.observe(unread, 'BOUNDS_UNREAD');
-  await assert.rejects(mapFresh(w, unread), /has channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/, 'step 107: bounds without values block the mapping');
+  // Шаг 127 (П1): рамки без значений больше не блокируют предложение целиком — запись держит адаптер перед отправкой (AMZ_C03)
+  assert.equal(await outcome(mapFresh(w, unread)), 'OK', 'step 127: bounds without values do not block the mapping');
   const known = `SYN-SKU-K${randomBytes(3).toString('hex').toUpperCase()}`;
   await w.observe(known, 'BOUNDS_KNOWN');
   assert.equal(await outcome(mapFresh(w, known)), 'OK', 'step 107: bounds with known values do not block the mapping');

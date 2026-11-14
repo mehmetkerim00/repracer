@@ -125,7 +125,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
   const discovery = scenario(
     'amazon/pipeline/discovery-channel-pricing',
     'Р-120: при обнаружении офферов видно правило автоматического ценообразования и границы канала — до назначения стратегии',
-    'Путь решения читает офферы аккаунта searchListingsItems с атрибутами. У первого оффера — привязка automated_pricing_merchandising_rule_plan (Automate Pricing), у второго — minimum/maximum_seller_allowed_price, третий чистый. Наблюдения записываются для всех трёх; продавец получает предупреждение о двух офферах, а назначить им стратегию не даст база (write_scope_strategy_guard, 0082). Раньше правило обнаруживалось только при первой записи цены [Р-115].',
+    'Путь решения читает офферы аккаунта searchListingsItems с атрибутами. У первого оффера — привязка automated_pricing_merchandising_rule_plan (Automate Pricing), у второго — minimum/maximum_seller_allowed_price, третий чистый. Наблюдения записываются для всех трёх. Предупреждение — об одном оффере с Automate Pricing: ему стратегию не назначит база (write_scope_strategy_guard, 0082). Шаг 127 [Р-250]: рамки без прочитанных значений предложение не блокируют — решения считаются, а новую цену удержит адаптер перед отправкой. Раньше правило обнаруживалось только при первой записи цены [Р-115].',
     ['pipeline', 'r120', 'mandatory:discovery-channel-pricing'],
     [fixedScope(8301, 1999, 1850), fixedScope(8302, 2100, 2000), fixedScope(8303, 2200, 2100)],
     [{ id: 'discover-account-offers', kind: 'pipelineDiscoverOffers', expect: { offers: 3, recorded: 3, withChannelPricing: [
@@ -141,7 +141,7 @@ export function buildCoreScenarios(): Array<{ file: string; scenario: Scenario }
       ]),
     ],
     {
-      alerts: [{ code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', count: 1, details: { offers: 2 } }],
+      alerts: [{ code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', count: 1, details: { offers: 1 } }],
       pipeline: { offerChannelPricing: [
         { externalSku: sku(8301), automatedPricing: true, channelBounds: false, source: 'DISCOVERY' },
         { externalSku: sku(8302), automatedPricing: false, channelBounds: true, source: 'DISCOVERY' },

@@ -7,6 +7,7 @@ import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { strategyLabel } from './products.ts';
+import { channelBoundsFacts } from './channel-bounds.ts';
 import { accountLabel } from './strategies.ts';
 import { channelOf, gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
@@ -370,7 +371,10 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
 
   // 6–7. Запись и подтверждение канала
   const writes = [...detail.writes].sort((a, b) => a.version - b.version);
-  steps.push(writeStep(d, writes, m));
+  // Шаг 127 [Р-250] (П1): у предложения рамки Amazon без прочитанных значений — решение посчитано, а цена удержана и в бою (её не отправит адаптер)
+  const boundsHeld: TraceItem | null = d.outcome === 'APPROVED' && scope && channelBoundsFacts(world, scope).state === 'NOT_READ'
+    ? { label: t.channelBoundsHeld.label, value: t.channelBoundsHeld.text(m.when(channelBoundsFacts(world, scope).observedAt!)) } : null;
+  steps.push(writeStep(d, writes, m, boundsHeld));
   steps.push(channelStep(world, d, writes, m));
 
   const last = writes[writes.length - 1];
@@ -395,22 +399,23 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
   };
 }
 
-function writeStep(d: ConsoleDecision, writes: readonly ConsoleWrite[], m: Messages): TraceStep {
+function writeStep(d: ConsoleDecision, writes: readonly ConsoleWrite[], m: Messages, boundsHeld: TraceItem | null = null): TraceStep {
   const t = m.ui.trace;
   const money = (v: number) => m.money(v, d.currency);
   const status = (s: string) => (m.ui.writeStatus as Record<string, string | undefined>)[s] ?? s;
   if (writes.length === 0) {
     if (d.outcome !== 'APPROVED') return { key: 'WRITE', title: t.titles.WRITE, status: 'SKIPPED', summary: t.nothingSent, items: [], gaps: [] };
-    return { key: 'WRITE', title: t.titles.WRITE, status: 'UNKNOWN', summary: t.writeMissing, items: [], gaps: [] };
+    return { key: 'WRITE', title: t.titles.WRITE, status: boundsHeld ? 'WARN' : 'UNKNOWN', summary: t.writeMissing, items: boundsHeld ? [boundsHeld] : [], gaps: [] };
   }
-  const items: TraceItem[] = [];
+  const items: TraceItem[] = boundsHeld ? [boundsHeld] : [];
   for (const w of writes) {
     items.push({ label: t.writeVersion(w.version, money(w.amountMinor)), value: t.writeDetail(status(w.status), w.attemptCount, w.dispatchedAt ? m.when(w.dispatchedAt) : null) });
     if (w.endReason) items.push({ label: t.endReason, outcome: 'INFO', reason: describe({ code: w.endReason, params: w.endParams }, m) });
   }
   const last = writes[writes.length - 1]!;
   // Шаг 77: удержанное тенью — янтарным (тень — внимание, а не отказ), как пилюля режима на экране тени
-  const st: StepStatus = last.status === 'APPLIED' || last.status === 'ACCEPTED' ? 'OK' : ['PENDING', 'DISPATCHED', 'FAILED', 'SUPERSEDED', 'SHADOW_HELD'].includes(last.status) ? 'WARN' : 'STOP';
+  const st: StepStatus = (last.status === 'APPLIED' || last.status === 'ACCEPTED') && !boundsHeld ? 'OK'
+    : ['PENDING', 'DISPATCHED', 'FAILED', 'SUPERSEDED', 'SHADOW_HELD', 'APPLIED', 'ACCEPTED'].includes(last.status) ? 'WARN' : 'STOP';
   return { key: 'WRITE', title: t.titles.WRITE, status: st, summary: `${money(last.amountMinor)}: ${status(last.status)}`, items, gaps: [] };
 }
 

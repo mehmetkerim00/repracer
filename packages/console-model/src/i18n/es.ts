@@ -645,8 +645,8 @@ export const es: Messages = {
     channelNotes: {
       automatedPricing: 'Precios automáticos del canal activos',
       automatedPricingDetail: (when: string) => `Automate Pricing está vinculado a esta oferta (visto ${when}): nuestro motor no puede fijar su precio; primero desactívelo en el canal`,
-      channelBounds: 'Límites de precio del canal definidos',
-      channelBoundsDetail: (when: string) => `La oferta tiene en el canal un precio mínimo y uno máximo permitidos al vendedor (visto ${when}): un segundo conjunto de límites que nosotros nunca definimos`,
+      channelBounds: 'Precio retenido: límites de Amazon',
+      channelBoundsDetail: (when: string) => `Esta oferta tiene en Amazon un precio mínimo y uno máximo permitidos al vendedor (visto ${when}) cuyos valores no pudimos leer. Las decisiones se calculan y se muestran, pero un precio nuevo para esta oferta se retiene y no se envía, también en vivo: no enviamos un precio que podría quedar fuera de límites que no vemos. Quite los límites en Seller Central para que los precios se envíen.`,
       pricingHealth: (issue: string) => `Canal: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `La oferta perdió la Oferta destacada por su precio (${when})${threshold ? `; umbral de precio competitivo del canal: ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -1541,6 +1541,7 @@ export const es: Messages = {
       writeVersion: (version: number, price: string) => `Versión ${version}: ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status}; intentos: ${attempts}${sent ? `; enviado ${sent}` : ''}`,
       endReason: 'Terminó porque', divergence: 'Discrepancia',
+      channelBoundsHeld: { label: 'Límites de precio de Amazon', text: (when: string) => `Esta oferta tiene en Amazon un precio mínimo y uno máximo (visto ${when}) cuyos valores no pudimos leer: este precio se retiene y no se envía, también en vivo, no solo en sombra.` },
       channelApplied: (price: string, when: string) => `El canal aplicó ${price} (aceptado ${when})`,
       channelAccepted: (price: string, when: string) => `El canal aceptó ${price} ${when}; aplicación aún no confirmada`,
       channelWaiting: (when: string) => `Sin respuesta del canal desde ${when}`,
@@ -1626,7 +1627,7 @@ export const es: Messages = {
         min: 'Mínimo del canal', max: 'Máximo del canal', notSetSide: 'sin definir',
         notProvided: 'El canal no los proporciona.',
         notSet: (when: string) => `Ninguno definido en el canal (visto ${when}). El canal aún puede aplicar límites propios que no muestra.`,
-        notRead: (when: string) => `Definidos en el canal (visto ${when}), pero sus valores no se leyeron: el repricing de esta oferta sigue bloqueado hasta poder leerlos.`,
+        notRead: (when: string) => `Definidos en el canal (visto ${when}), pero sus valores no se leyeron. Las decisiones se calculan; los precios nuevos de esta oferta se retienen y no se envían hasta que se quiten los límites en Seller Central o se puedan leer sus valores.`,
         seen: (when: string) => `Visto ${when}.`,
         withoutShipping: 'Sin envío: se comparan con su piso y su precio máximo, que tampoco incluyen el envío.',
         inside: 'Su piso y su precio máximo están dentro de los límites del canal.',

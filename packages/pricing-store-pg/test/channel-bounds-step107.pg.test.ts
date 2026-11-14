@@ -10,7 +10,7 @@ import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts'
  * Шаг 107 [Р-233, Р-231] на PostgreSQL: рамки цены, заданные продавцом в канале (Amazon Min/Max на SKU), — со значениями, которые назвал
  * канал (0205). Рамки с прочитанными значениями в валюте предложения больше не блокируют предложение целиком (Р-231 построено): стратегия
  * назначается, а цена вне рамок не уходит — «без изменения» CHANNEL_BOUNDS_HOLD с обеими суммами. Рамки без значений или в чужой валюте —
- * прежний блок CHANNEL_BOUNDS_PRESENT (fail-closed). Распродажа ниже Min канала — цена уходит, конфликт записан в квитанции, а в вечном
+ * до шага 127 блок CHANNEL_BOUNDS_PRESENT; с него (Р-250, П1) — не блок предложения (channel-bounds-unread-step127.pg.test.ts). Распродажа ниже Min канала — цена уходит, конфликт записан в квитанции, а в вечном
  * объяснении — без суммы канала [Р-3, Р-85]. Данные синтетические.
  */
 
@@ -72,17 +72,14 @@ const decisions = (n: number) => inTenant(pool, world.tenantId, async (tx) => (a
 const writes = (n: number) => inTenant(pool, world.tenantId, async (tx) => Number((await tx.query(
   `SELECT count(*) AS n FROM tenant_data.channel_write WHERE tenant_id = $1 AND write_scope_id = $2 AND field = 'PRICE'`, [world.tenantId, ws(n)])).rows[0].n));
 
-test('step 107 [Р-231]: channel bounds with values the channel named no longer block the offer; unread values or another currency still do', async () => {
+test('step 107 [Р-231]: channel bounds with values the channel named do not block the offer (unread values — step 127: no longer either)', async () => {
   const owner = world.ids.dbId(standUserOf('membership-owner'));
   assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'OFF', owner)), 'OK');
-  // Значения не прочитаны (так читает настоящий адаптер Amazon до живого аккаунта, A-30): прежний блок
+  // Шаг 127 [Р-250] (П1): значения не прочитаны или в чужой валюте — предложение больше не блокируется целиком
+  // (channel-bounds-unread-step127.pg.test.ts); запись держит адаптер перед отправкой
   await observe(4, null);
-  assert.match(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), /channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/,
-    'values not read: the whole offer stays blocked (fail-closed)');
-  // Значения в чужой валюте — сравнивать не с чем: блок
-  await observe(4, { minMinor: 900, maxMinor: 3500, currency: 'USD' });
-  assert.match(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), /channel-owned pricing \(CHANNEL_BOUNDS_PRESENT\)/,
-    'values in another currency: blocked');
+  assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), 'OK', 'step 127: values not read — the offer takes the engine');
+  assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'OFF', owner)), 'OK');
   // Значения в валюте предложения: Р-231 — рамки не блокируют, цену вне них держит путь решения
   await observe(4, { minMinor: 900, maxMinor: 3500, currency: 'EUR' });
   assert.equal(await outcome(store.setPricingMode(world.tenantId, ws(4), 'ENGINE', owner)), 'OK', 'Р-231: bounds with known values do not block the offer');
@@ -136,10 +133,10 @@ test('step 107 [Р-233, Р-227]: clearance below the channel minimum is sent, an
   assert.ok(!eternal.includes('channelMinMinor'), 'the channel amount is not eternal [Р-3, Р-85]');
 });
 
-test('step 107 [Р-231]: the Strategies screen facts list only offers the channel pricing blocks — bounds with known values are not listed', async () => {
+test('step 107 [Р-231], step 127 [Р-250]: the Strategies screen facts list offers with unread channel bounds (held, not blocked) — bounds with known values are not listed', async () => {
   await store.recordOfferChannelPricing(world.tenantId, world.ids.dbId(AMAZON), [{ marketplace: DE, externalSku: 'SYN-SKU-107U', automatedPricing: false, channelBounds: true,
     source: 'DISCOVERY', observedAt: now() as never }]);
   const facts = await store.consoleCatalogFacts(world.tenantId, { channelPricing: { limit: 50 } });
-  // Известные значения в валюте витрины (предложения 1–4, строка 107X) — не блок; рамки без значений — блок
+  // Известные значения в валюте витрины (предложения 1–4, строка 107X) — не в списке; рамки без значений — в списке (с шага 127 — пометка «цена удержана»)
   assert.deepEqual(facts.channelPricing!.flatMap((a) => a.rows.map((r) => r.externalSku)).sort(), ['SYN-SKU-107U']);
 });

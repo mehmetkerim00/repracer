@@ -35,7 +35,7 @@ function world(pricing: { channelBounds: boolean; boundValues?: Values } | null,
 const usd = (minMinor: number | null, maxMinor: number | null): Values => ({ minMinor, maxMinor, currency: 'USD' });
 const block = (w: never, m = en) => boundsView(w, 'ws-1', m)!.channelBounds;
 
-test('step 107 [Р-233]: without channel data the block says «not provided» honestly; bounds without values stay a block', () => {
+test('step 107 [Р-233]: without channel data the block says «not provided» honestly; bounds without values — «not read» (step 127: the price held, no block)', () => {
   for (const l of LOCALES) {
     const m = messagesFor(l);
     const none = block(world(null), m);
@@ -48,8 +48,8 @@ test('step 107 [Р-233]: without channel data the block says «not provided» ho
   assert.match(notSet.text ?? '', /^None set in the channel \(seen .+\)\. The channel may still apply limits it does not show\.$/);
   const notRead = block(world({ channelBounds: true }));
   assert.equal(notRead.state, 'NOT_READ');
-  assert.match(notRead.text ?? '', /values were not read — repricing for this offer stays blocked/);
-  // Значения в чужой валюте сравнивать не с чем — тоже «не прочитаны», и блок предложения остаётся
+  assert.match(notRead.text ?? '', /values were not read\. Decisions are calculated; new prices for this offer are held and not sent/);
+  // Значения в чужой валюте сравнивать не с чем — тоже «не прочитаны» (с шага 127 — пометка, а не блок)
   assert.equal(block(world({ channelBounds: true, boundValues: { minMinor: 1200, maxMinor: null, currency: 'EUR' } })).state, 'NOT_READ');
   assert.deepEqual(channelNotes(world({ channelBounds: true }), (world({ channelBounds: true }) as { state: { scopes: never[] } }).state.scopes[0]!, en).map((n) => n.code), ['CHANNEL_BOUNDS']);
 });
@@ -110,4 +110,39 @@ test('step 107 [Р-233, Р-227]: the receipt names the hold outside the channel 
   } as never;
   const receipt = JSON.stringify(decisionTrace(world(null), detail, en));
   assert.ok(receipt.includes('Price $10.99 is below the channel\'s own minimum $12.00'), receipt);
+});
+
+test('step 127 [Р-250] (П1): Amazon bounds whose values we did not read — no block: the offer can be enabled and take a strategy; the note says the price is held, in four languages; the receipt says it too', () => {
+  const w = world({ channelBounds: true }, { pricingMode: 'OFF', strategy: { strategyId: 'st-fixed', version: 1, params: { type: 'FIXED', priceMinor: 2100 }, deadbandMinor: 0 } });
+  const scope = (w as { state: { scopes: never[] } }).state.scopes[0]!;
+  for (const l of LOCALES) {
+    const m = messagesFor(l);
+    const notes = channelNotes(w, scope, m);
+    assert.deepEqual(notes.map((n) => [n.code, n.tone, n.label, n.detail]),
+      [['CHANNEL_BOUNDS', 'warn', m.ui.channelNotes.channelBounds, m.ui.channelNotes.channelBoundsDetail(m.when(SEEN))]], l);
+  }
+  const [note] = channelNotes(w, scope, en);
+  assert.equal(note!.label, 'Price held: Amazon bounds');
+  assert.match(note!.detail, /Decisions are calculated and shown, but a new price for this offer is held and not sent — in live too/);
+  assert.equal(productList(w, en).rows[0]!.canEnable, true, 'unread bounds no longer block enabling — as the database (0230)');
+  // Контроль: правило автоматического ценообразования канала — по-прежнему блок
+  const repricer = world({ channelBounds: false, automatedPricing: true } as never, { pricingMode: 'OFF' });
+  assert.equal(productList(repricer, en).rows[0]!.canEnable, false, 'Automate Pricing still blocks [Р-120]');
+
+  // Квитанция одобренного решения: цена удержана и в бою — у шага записи пометка рамок
+  const detail = {
+    decision: {
+      decisionId: 'd-2', intentId: 'i-2', writeScopeId: 'ws-1', decidedAt: '2026-10-23T11:00:00.000Z', outcome: 'APPROVED', decisionClass: 'CHANGED',
+      currency: 'USD', basis: 'NET', finalMinor: 2100, proposedMinor: 2100, rejectionReason: null, boundDeviationBp: null, noChangeReason: null,
+      reason: { code: 'FIXED_PRICE', params: { priceMinor: 2100, currency: 'USD' } }, explanation: null, checks: [], clearanceChangeId: null,
+    },
+    intent: null,
+    writes: [{ channelWriteId: 'cw-1', writeScopeId: 'ws-1', field: 'PRICE', version: 1, amountMinor: 2100, status: 'SHADOW_HELD', attemptCount: 0, dispatchedAt: null, acceptedAt: null, endReason: null, endParams: {} }],
+  } as never;
+  const write = decisionTrace(w, detail, en).steps.find((s) => s.key === 'WRITE')!;
+  assert.deepEqual(write.items[0], { label: 'Amazon price bounds',
+    value: `Amazon minimum/maximum prices are set on this offer (seen ${en.when(SEEN)}), and we could not read their values: this price is held and not sent — in live too, not only in the shadow.` });
+  assert.equal(write.status, 'WARN');
+  // Контроль: без рамок у шага записи пометки нет
+  assert.ok(!JSON.stringify(decisionTrace(world(null, { strategy: null }), detail, en)).includes('Amazon price bounds'), 'no bounds — no note');
 });

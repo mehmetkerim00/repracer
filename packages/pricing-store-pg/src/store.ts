@@ -3192,7 +3192,8 @@ export class PgPricingStore implements PricingStore {
       let channelPricing: ConsoleCatalogFacts['channelPricing'] = null;
       if (query.channelPricing) {
         // Как экран стратегий: последнее наблюдение каждого предложения, с правилом или границами канала; порядок — витрина, SKU
-        // Шаг 107 [Р-231]: рамки со значениями в валюте витрины предложение не блокируют — в списке только блокирующие (как страж 0205)
+        // Шаг 107 [Р-231]: рамки со значениями в валюте витрины — не в списке; правило канала (блок, страж 0230) и, с шага 127 [Р-250], рамки без
+        // значений (не блок: решения считаются, новую цену удержит адаптер) — в списке, у каждой своя пометка
         const { rows } = await tx.query(
           `WITH latest AS (SELECT DISTINCT ON (channel_account_id, marketplace, external_sku)
                                   channel_account_id, channel, marketplace, external_sku, automated_pricing, channel_bounds,

@@ -1386,8 +1386,11 @@ export function createPricingPipeline(deps: PipelineDeps) {
       if (stop === 'COMPLETED' || cursor !== undefined) {
         await store.saveDiscoveryCircle?.(ctx.tenantId, ctx.channelAccountId, { startedFrom, cursor: stop === 'COMPLETED' ? null : cursor!, stop: stop!, startedAt: runStartedAt, at: deps.now(), noProgress: false });
       }
-      if (withChannelPricing.length > 0) {
-        await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: withChannelPricing.length } }]);
+      // Шаг 127 [Р-250]: алерт — о чужом репрайсере (Automate Pricing): наш движок для таких предложений не работает. Рамки Min/Max без
+      // прочитанных значений движок больше не останавливают — их видно пометкой на Offers, а запись держит адаптер
+      const repricers = withChannelPricing.filter((o) => o.automatedPricing).length;
+      if (repricers > 0) {
+        await emit(ctx, [{ kind: 'alert', code: 'OFFERS_WITH_CHANNEL_PRICING', severity: 'WARNING', details: { offers: repricers } }]);
       }
       return { offers, recorded, catalogued, withChannelPricing, stop: stop!, resumed: startedFrom !== null, externalEdits, circleStartedAt };
     },

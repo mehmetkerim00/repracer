@@ -645,8 +645,8 @@ export const fr: Messages = {
     channelNotes: {
       automatedPricing: 'Tarification automatique du canal active',
       automatedPricingDetail: (when: string) => `Automate Pricing est rattaché à cette offre (constaté le ${when}) : notre moteur ne peut pas en fixer le prix — désactivez-le d’abord sur le canal`,
-      channelBounds: 'Limites de prix du canal définies',
-      channelBoundsDetail: (when: string) => `L’offre a des prix minimum et maximum autorisés définis sur le canal (constatés le ${when}) : un second jeu de limites que nous ne définissons jamais`,
+      channelBounds: 'Prix retenu : limites Amazon',
+      channelBoundsDetail: (when: string) => `Cette offre a sur Amazon des prix minimum et maximum autorisés du vendeur (constatés le ${when}) dont nous n’avons pas pu lire les valeurs. Les décisions sont calculées et affichées, mais un nouveau prix pour cette offre est retenu et n’est pas envoyé, en réel aussi : nous n’envoyons pas un prix qui pourrait sortir de limites que nous ne voyons pas. Retirez les limites dans Seller Central pour que les prix partent.`,
       pricingHealth: (issue: string) => `Canal : ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `L’offre a perdu l’offre vedette (Featured Offer) à cause de son prix (${when})${threshold ? ` ; seuil de prix compétitif du canal : ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -1541,6 +1541,7 @@ export const fr: Messages = {
       writeVersion: (version: number, price: string) => `Version ${version} : ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status} ; tentatives ${attempts}${sent ? ` ; envoyé le ${sent}` : ''}`,
       endReason: 'Terminé parce que', divergence: 'Écart',
+      channelBoundsHeld: { label: 'Limites de prix Amazon', text: (when: string) => `Cette offre a sur Amazon des prix minimum et maximum (constatés le ${when}) dont nous n’avons pas pu lire les valeurs : ce prix est retenu et n’est pas envoyé, en réel aussi, pas seulement en fantôme.` },
       channelApplied: (price: string, when: string) => `Le canal a appliqué ${price} (accepté le ${when})`,
       channelAccepted: (price: string, when: string) => `Le canal a accepté ${price} le ${when} ; application pas encore confirmée`,
       channelWaiting: (when: string) => `Aucune réponse du canal depuis ${when}`,
@@ -1626,7 +1627,7 @@ export const fr: Messages = {
         min: 'Minimum du canal', max: 'Maximum du canal', notSetSide: 'non défini',
         notProvided: 'Non fournies par le canal.',
         notSet: (when: string) => `Aucune définie sur le canal (constaté le ${when}). Le canal peut tout de même appliquer des limites qu’il n’affiche pas.`,
-        notRead: (when: string) => `Définies sur le canal (constaté le ${when}), mais les valeurs n’ont pas été lues : le repricing de cette offre reste bloqué tant qu’elles ne peuvent pas être lues.`,
+        notRead: (when: string) => `Définies sur le canal (constaté le ${when}), mais les valeurs n’ont pas été lues. Les décisions sont calculées ; les nouveaux prix de cette offre sont retenus et ne sont pas envoyés tant que les limites ne sont pas retirées dans Seller Central ou que leurs valeurs ne peuvent pas être lues.`,
         seen: (when: string) => `Constaté le ${when}.`,
         withoutShipping: 'Hors livraison : comparées à votre plancher et à votre prix maximum, eux aussi hors livraison.',
         inside: 'Votre plancher et votre prix maximum sont dans les limites du canal.',

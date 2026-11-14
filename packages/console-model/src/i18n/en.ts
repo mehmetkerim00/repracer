@@ -645,8 +645,9 @@ export const en = {
     channelNotes: {
       automatedPricing: 'Channel repricer active',
       automatedPricingDetail: (when: string) => `Automate Pricing is attached to this offer (seen ${when}): our engine cannot price it — switch it off in the channel first`,
-      channelBounds: 'Channel price bounds set',
-      channelBoundsDetail: (when: string) => `The offer has minimum/maximum seller allowed prices in the channel (seen ${when}): a second set of bounds that we never set`,
+      channelBounds: 'Price held: Amazon bounds',
+      // Шаг 127 [Р-250] (П1): рамки без прочитанных значений — решения считаются, новая цена удержана (в бою — тоже: её не отправит адаптер)
+      channelBoundsDetail: (when: string) => `This offer has Amazon minimum/maximum seller allowed prices (seen ${when}), and we could not read their values. Decisions are calculated and shown, but a new price for this offer is held and not sent — in live too: we do not send a price that could fall outside bounds we cannot see. Remove the bounds in Seller Central to let prices go.`,
       pricingHealth: (issue: string) => `Channel: ${issue}`,
       pricingHealthDetail: (when: string, threshold: string | null) => `The offer lost the Featured Offer because of its price (${when})${threshold ? `; competitive price threshold of the channel ${threshold}` : ''}`,
       /** Шаг 89: Walmart снял предложение с публикации — правило неконкурентной цены; движок за это цену не меняет */
@@ -1543,6 +1544,8 @@ export const en = {
       writeVersion: (version: number, price: string) => `Version ${version}: ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status}; attempts ${attempts}${sent ? `; sent ${sent}` : ''}`,
       endReason: 'Ended because', divergence: 'Divergence',
+      // Шаг 127 [Р-250] (П1): у предложения рамки Amazon без прочитанных значений — цена удержана и в бою
+      channelBoundsHeld: { label: 'Amazon price bounds', text: (when: string) => `Amazon minimum/maximum prices are set on this offer (seen ${when}), and we could not read their values: this price is held and not sent — in live too, not only in the shadow.` },
       channelApplied: (price: string, when: string) => `The channel applied ${price} (accepted ${when})`,
       channelAccepted: (price: string, when: string) => `The channel accepted ${price} ${when}; application not confirmed yet`,
       channelWaiting: (when: string) => `No channel answer since ${when}`,
@@ -1628,7 +1631,7 @@ export const en = {
         min: 'Channel minimum', max: 'Channel maximum', notSetSide: 'not set',
         notProvided: 'Not provided by the channel.',
         notSet: (when: string) => `None set in the channel (seen ${when}). The channel may still apply limits it does not show.`,
-        notRead: (when: string) => `Set in the channel (seen ${when}), but the values were not read — repricing for this offer stays blocked until they can be read.`,
+        notRead: (when: string) => `Set in the channel (seen ${when}), but the values were not read. Decisions are calculated; new prices for this offer are held and not sent until the bounds are removed in Seller Central or their values can be read.`,
         seen: (when: string) => `Seen ${when}.`,
         withoutShipping: 'Without shipping — compared with your floor and maximum price, which are without shipping too.',
         inside: 'Your floor and maximum price are inside the channel bounds.',

@@ -10,7 +10,7 @@ import { channelOf, type ConsoleScope, type StandWorld } from './world.ts';
  * Четыре состояния, без домысла:
  *  - NOT_PROVIDED — канал о рамках ничего не сказал (Kaufland, eBay, Walmart такого понятия не отдают; у Amazon — наблюдения ещё нет);
  *  - NOT_SET — канал сказал «рамок нет» (свои оценённые рамки Amazon может применять, не показывая их — A-30);
- *  - NOT_READ — рамки есть, значений нет или они не в валюте предложения: блок предложения целиком, как прежде [Р-120];
+ *  - NOT_READ — рамки есть, значений нет или они не в валюте предложения: решения считаются, новая цена удержана (шаг 127, Р-250);
  *  - VALUES — значения есть; конфликт — ровно когда наш пол ниже Min канала или наш потолок выше Max канала.
  */
 
@@ -24,9 +24,17 @@ interface PricingObservation {
   observedAt: string;
 }
 
-/** Рамки без значений в валюте предложения блокируют его целиком — как страж базы (0205); правило канала — всегда [Р-120] */
-export function channelPricingBlocks(o: Pick<PricingObservation, 'automatedPricing' | 'channelBounds' | 'boundValues'>, currency: string): boolean {
-  return o.automatedPricing || (o.channelBounds && o.boundValues?.currency !== currency);
+/**
+ * Предложение целиком блокирует только правило автоматического ценообразования канала (Automate Pricing) — как стражи базы (0230) [Р-120].
+ * Шаг 127 [Р-250] (П1): рамки без значений в валюте предложения больше не блок — решения считаются, а новая цена удержана: её не отправит адаптер
+ */
+export function channelPricingBlocks(o: Pick<PricingObservation, 'automatedPricing'>): boolean {
+  return o.automatedPricing;
+}
+
+/** Шаг 127 [Р-250]: рамки канала есть, а значений в валюте предложения нет — цену с ними не сравнить, и новая цена удержана (пометка, не блок) */
+export function channelBoundsUnread(o: Pick<PricingObservation, 'automatedPricing' | 'channelBounds' | 'boundValues'>, currency: string): boolean {
+  return !o.automatedPricing && o.channelBounds && o.boundValues?.currency !== currency;
 }
 
 export interface ChannelBoundsFacts {

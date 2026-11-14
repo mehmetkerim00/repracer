@@ -4,7 +4,7 @@
   "channel": "AMAZON",
   "apiVersion": "listings-items-2021-08-01",
   "title": "Р-120: при обнаружении офферов видно правило автоматического ценообразования и границы канала — до назначения стратегии",
-  "description": "Путь решения читает офферы аккаунта searchListingsItems с атрибутами. У первого оффера — привязка automated_pricing_merchandising_rule_plan (Automate Pricing), у второго — minimum/maximum_seller_allowed_price, третий чистый. Наблюдения записываются для всех трёх; продавец получает предупреждение о двух офферах, а назначить им стратегию не даст база (write_scope_strategy_guard, 0082). Раньше правило обнаруживалось только при первой записи цены [Р-115].",
+  "description": "Путь решения читает офферы аккаунта searchListingsItems с атрибутами. У первого оффера — привязка automated_pricing_merchandising_rule_plan (Automate Pricing), у второго — minimum/maximum_seller_allowed_price, третий чистый. Наблюдения записываются для всех трёх. Предупреждение — об одном оффере с Automate Pricing: ему стратегию не назначит база (write_scope_strategy_guard, 0082). Шаг 127 [Р-250]: рамки без прочитанных значений предложение не блокируют — решения считаются, а новую цену удержит адаптер перед отправкой. Раньше правило обнаруживалось только при первой записи цены [Р-115].",
   "tags": [
     "pipeline",
     "r120",
@@ -498,7 +498,7 @@
         "severity": "WARNING",
         "count": 1,
         "details": {
-          "offers": 2
+          "offers": 1
         }
       }
     ],

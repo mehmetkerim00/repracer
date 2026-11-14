@@ -1248,15 +1248,12 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   }
 
   /**
-   * Как channel_data.offer_channel_pricing_active (0082, 0205): правило канала или рамки канала, чьи значения неизвестны (не прочитаны или
-   * не в валюте единицы) [Р-120, Р-231]; код блока или null
+   * Как channel_data.offer_channel_pricing_active (0082, 0230): правило автоматического ценообразования канала [Р-120]; код блока или null.
+   * Шаг 127 [Р-250]: рамки канала с непрочитанными значениями предложение больше не блокируют — запись держит адаптер перед отправкой
    */
-  private channelPricingBlock(row: ScopeRow): 'CHANNEL_REPRICER_ACTIVE' | 'CHANNEL_BOUNDS_PRESENT' | null {
+  private channelPricingBlock(row: ScopeRow): 'CHANNEL_REPRICER_ACTIVE' | null {
     if (this.channel === 'KAUFLAND') return null;
-    const latest = this.latestChannelPricing(row);
-    if (!latest) return null;
-    if (latest.automatedPricing) return 'CHANNEL_REPRICER_ACTIVE';
-    return latest.channelBounds && latest.boundValues?.currency !== row.currency ? 'CHANNEL_BOUNDS_PRESENT' : null;
+    return this.latestChannelPricing(row)?.automatedPricing ? 'CHANNEL_REPRICER_ACTIVE' : null;
   }
   private channelPricingActive(row: ScopeRow): boolean { return this.channelPricingBlock(row) !== null; }
 

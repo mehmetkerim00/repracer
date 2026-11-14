@@ -1,6 +1,6 @@
 import { can, COMPETITOR_DERIVED_RULES, type BoundResolution, type StrategyDefinition } from '@repracer/pricing-model';
 import { effectiveFloor } from './bounds.ts';
-import { channelBoundsPill, channelPricingBlocks } from './channel-bounds.ts';
+import { channelBoundsPill, channelBoundsUnread } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
@@ -220,13 +220,22 @@ export const WALMART_UNPUBLISHED = 'WALMART_UNPUBLISHED_UNCOMPETITIVE_PRICE';
 export const WALMART_PUBLISHED = 'WALMART_PUBLISHED';
 
 /** Шаг 23: наблюдения канала по офферу — последнее наблюдение ценообразования канала и последнее состояние PRICING_HEALTH */
+/**
+ * Пометка канала мешает назначить стратегию и включить движок — как база (0230): всё, кроме состояния PRICING_HEALTH и (шаг 127, Р-250) рамок
+ * Amazon без прочитанных значений — у них решения считаются, а новая цена удержана
+ */
+export function noteBlocksPricing(n: Pick<ChannelNote, 'code'>): boolean {
+  return n.code !== 'PRICING_HEALTH' && n.code !== 'CHANNEL_BOUNDS';
+}
+
 export function channelNotes(world: StandWorld, scope: ConsoleScope, m: Messages): ChannelNote[] {
   const n = m.ui.channelNotes;
   const notes: ChannelNote[] = [];
   const pricing = world.state.offerChannelPricing.find((o) => o.channelAccountId === scope.channelAccountId && o.marketplace === scope.marketplace && o.externalSku === scope.externalUnitId);
   if (pricing?.automatedPricing) notes.push({ code: 'AUTOMATED_PRICING', tone: 'stop', label: n.automatedPricing, detail: n.automatedPricingDetail(m.when(pricing.observedAt)) });
-  // Шаг 107 [Р-231]: рамки со значениями в валюте предложения — не блок; их конфликт — пилюля строки и блок страницы пола [Р-233]
-  if (pricing?.channelBounds && !pricing.automatedPricing && channelPricingBlocks(pricing, scope.currency)) {
+  // Шаг 107 [Р-231]: рамки со значениями в валюте предложения — не блок; их конфликт — пилюля строки и блок страницы пола [Р-233].
+  // Шаг 127 [Р-250]: рамки без значений — тоже не блок, а пометка «цена удержана»: решения считаются, новую цену не отправит адаптер
+  if (pricing && channelBoundsUnread(pricing, scope.currency)) {
     notes.push({ code: 'CHANNEL_BOUNDS', tone: 'warn', label: n.channelBounds, detail: n.channelBoundsDetail(m.when(pricing.observedAt)) });
   }
   const health = world.state.pricingHealth.find((h) => h.channelAccountId === scope.channelAccountId && h.marketplace === scope.marketplace
@@ -331,7 +340,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       latestDecisionId: stat?.latestDecisionId ?? null,
       decisions: stat ? stat.decisions : null,
       // Р-120 (ревью шага 23, находка 1): у предложения ценообразование канала — включение отклонит база, кнопки нет
-      canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH'),
+      canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some(noteBlocksPricing),
       // Шаг 118: выключить можно всегда, когда движок включён — ценообразование канала выключению не мешает (как база, Р-120)
       canDisable: scope.pricingMode === 'ENGINE' && can(world.viewer.role, 'ENABLE_REPRICING'),
       channelNotes: channelNotes(world, scope, m),

@@ -5,7 +5,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import { buildInfoFromEnv, ConfigError, createHeartbeat, secretFromEnv, type BuildInfo } from '@repracer/service-runtime';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, noteBlocksPricing, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
@@ -1213,7 +1213,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const channelPriced = (ids: readonly string[]) => {
       for (const id of ids) {
         const scope = scopeById(world, id);
-        if (scope && channelNotes(world, scope, m).some((n) => n.code !== 'PRICING_HEALTH')) return unitOf(world, scope, m).label;
+        if (scope && channelNotes(world, scope, m).some(noteBlocksPricing)) return unitOf(world, scope, m).label;
       }
       return null;
     };
