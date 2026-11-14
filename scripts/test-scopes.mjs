@@ -138,26 +138,29 @@ export function filesForScope(included, scope) {
  *
  * Единица деления — общий прогон рабочего пространства или файл-замер (они идут по одному, MEASURED_FILES). Вес — минуты из журнала
  * зелёного быстрого прогона шага 105 по запросу (39600159918); шаг 124 — по журналу push-прогона main 43531834468: шард 1 шёл 38,5 мин при
- * пределе 40, шард 2 — 19; `tests/contract` вырос с 9,3 до 29,5 мин, и первый же шаг с минутой тестов снимался пределом. Единице без веса —
- * FAST_UNIT_DEFAULT_MINUTES. Деление жадное: тяжёлые
+ * пределе 40, шард 2 — 19; `tests/contract` вырос с 9,3 до 29,5 мин, и первый же шаг с минутой тестов снимался пределом. Шаг 124.1 (красная ночь
+ * 2026-11-14): веса одного прогона одного раннера — push-прогона 43544865808. Веса шага 124 смешали медленный раннер (29,5) с быстрым, деление
+ * вышло 20,7 / 28 мин на быстром и шард 2 снят на медленном ночном (единицы ×1,5). Важны ДОЛИ, а не минуты: раннеры отличаются в полтора раза.
+ * Единице без веса — FAST_UNIT_DEFAULT_MINUTES. Деление жадное: тяжёлые
  * единицы первыми в более лёгкий шард, при равенстве — в меньший номер; каждый файл — ровно в одном шарде (правило репозитория).
  * Веса — не предел и не обещание: при сильном перекосе шардов в CI таблицу обновляют по свежему журналу.
  */
 export const FAST_SHARDS = 2;
 const FAST_UNIT_DEFAULT_MINUTES = 0.1;
 const FAST_UNIT_MINUTES = {
-  'tests/contract': 29.5,
-  'apps/console': 8.8,
-  'apps/console/test/console-live.pg.test.ts': 4.0,
-  'apps/console/test/onboarding-live.pg.test.ts': 3.8,
+  'tests/contract': 17.6,
+  'apps/console': 8.4,
+  'apps/console/test/console-live.pg.test.ts': 4.1,
+  'apps/console/test/onboarding-live.pg.test.ts': 3.1,
+  '.': 1.7,
   'apps/operator': 1.7,
-  'apps/console/test/pilot-live.pg.test.ts': 1.0,
-  'tests/contract/src/cost-import-live.pg.test.ts': 0.9,
+  'apps/console/test/pilot-live.pg.test.ts': 0.9,
+  'tests/contract/src/cost-import-live.pg.test.ts': 0.8,
   'packages/pricing-store-pg': 0.6,
   'apps/console/test/connect-live.pg.test.ts': 0.6,
   'apps/console/test/pilot-us-live.pg.test.ts': 0.3,
   'apps/console/test/pilot-ebay-live.pg.test.ts': 0.3,
-  'apps/console/test/stock-only-live.pg.test.ts': 0.3,
+  'apps/console/test/stock-only-live.pg.test.ts': 0.2,
   'apps/console/test/guest-demo-live.pg.test.ts': 0.1,
   'apps/operator/test/operator-live.pg.test.ts': 0.1,
 };
@@ -180,4 +183,12 @@ export function fastShards(files, workspaceOf) {
     shards[lightest].files.push(...units.get(key));
   }
   return shards.map((s) => s.files);
+}
+
+/**
+ * Шаг 124.1 (красная ночь 2026-11-14, Issue #23): отдельный прогон тестов репозитория (`test:repo`) — только без шарда. Его файлы — те же, что единица `.`
+ * быстрой области, а она — ровно в одном шарде; с шардом `test:repo` повторял их в КАЖДОМ шарде (и дважды в шарде с единицей `.`)
+ */
+export function runsRepositoryScripts({ sharded }) {
+  return !sharded;
 }

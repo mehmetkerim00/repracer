@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findUnincludedTests } from './check-test-inclusion.mjs';
-import { CHAOS_FILES, FAST_SHARDS, fastShards, filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, SCALE_FILES, SCOPES, SHADOW_FILES } from './test-scopes.mjs';
+import { CHAOS_FILES, FAST_SHARDS, fastShards, filesForScope, INFRASTRUCTURE_TESTS, MEASURED_FILES, runsRepositoryScripts, SCALE_FILES, SCOPES, SHADOW_FILES } from './test-scopes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const inclusion = findUnincludedTests(root);
@@ -133,7 +133,8 @@ for (const [cwd, files] of [...byWorkspace].sort((a, b) => a[0].localeCompare(b[
   if (shared.length > 0) runs.push({ name, ...(await runNode(cwd, shared.sort())) });
   for (const file of measured.sort()) runs.push({ name: `${name} (замер, в одиночку): ${file}`, ...(await runNode(cwd, [file])) });
 }
-runs.push({ name: 'repository scripts', ...(await run(['run', 'test:repo'])) });
+// Шаг 124.1: с шардом тесты репозитория идут единицей `.` своего шарда — отдельный test:repo повторял их в каждом шарде
+if (runsRepositoryScripts({ sharded: Boolean(shardArg) })) runs.push({ name: 'repository scripts', ...(await run(['run', 'test:repo'])) });
 
 const totals = { tests: 0, pass: 0, fail: 0, skipped: 0, todo: 0, cancelled: 0 };
 let summaries = 0;

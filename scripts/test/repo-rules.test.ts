@@ -958,6 +958,25 @@ test('шаг 106: быстрая область делится на шарды �
 });
 
 /**
+ * Шаг 124.1 (красная ночь 2026-11-14, Issue #23): тесты репозитория (`scripts/test/*.test.ts`) — те же файлы, что единица `.` быстрой области. В шардированном
+ * прогоне они шли ТРИЖДЫ: единицей `.` в своём шарде и отдельным `test:repo` в каждом шарде — минуты в обоих шардах, и медленный раннер снял шард 2 пределом
+ * 40 минут. С шардом отдельный прогон тестов репозитория не нужен: единица `.` — ровно в одном шарде (правило выше). Без шарда — как прежде
+ */
+test('step 124.1: with shards the repository tests run once — as the root unit of one shard, not again by test:repo in every shard', async () => {
+  const { runsRepositoryScripts } = await import('../test-scopes.mjs');
+  assert.equal(runsRepositoryScripts({ sharded: true }), false, 'a shard does not run test:repo again');
+  assert.equal(runsRepositoryScripts({ sharded: false }), true, 'an unsharded run keeps test:repo as before');
+  // Ничего не теряется: файлы test:repo — ровно файлы единицы `.`
+  const { readdirSync } = await import('node:fs');
+  const { includedTestFiles } = await import('../check-test-inclusion.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const rootPath = fileURLToPath(new URL('../../', import.meta.url));
+  const repo = readdirSync(new URL('./', import.meta.url)).filter((f) => f.endsWith('.test.ts')).map((f) => `scripts/test/${f}`).sort();
+  const rootUnit = [...includedTestFiles(rootPath).included].filter((f) => f.startsWith('scripts/test/')).sort();
+  assert.deepEqual(rootUnit, repo, 'every repository test is a file of the build, so the root unit runs it');
+});
+
+/**
  * Шаг 116: тест шага 114 жил в литерале 2026-11-05 и писал в суточные секции. Секции шаблона идут от вчерашнего дня до +3 суток от дня подготовки базы, поэтому в день
  * написания всё зелёное, а с третьего дня красная сборка на любой ветке и ночью на main. Литерал внутри этого окна держится на дне прогона, и видно это только здесь:
  * старый литерал без своих секций краснеет сразу и сам. Такой файл называет `ensure_partitions`, либо берёт дату вне окна.
