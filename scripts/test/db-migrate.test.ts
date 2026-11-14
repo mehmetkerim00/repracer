@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -74,6 +74,48 @@ test('step 124 [Р-248]: a migration changed after it was applied stops the run;
   migration('0002_second.sql', 'INSERT INTO t VALUES (2);');
   assert.equal(run(db).code, 0, 'restored file — the run goes on');
   assert.equal(psql('SELECT string_agg(id::text, \',\' ORDER BY id) FROM t', db), '2,3,4');
+});
+
+/**
+ * Шаг 131 (решение владельца 2026-11-15, п. 3.3): откат выкладки. Код версии N к базе, которой версия N+1 уже применила миграцию, — не «изменённая
+ * миграция», а «база новее кода»: прежнее сообщение «applied migrations changed» уводило искать правку задним числом. Отказ называет обе миграции
+ * и путь — восстановление копии, снятой перед миграциями. `--check` даёт план, ничего не применяя: его deploy.sh спрашивает ДО переключения
+ * рабочей копии.
+ */
+test('step 131: --check gives the plan and applies nothing; a database ahead of the code is refused as such — exit 3, both numbers, the rollback path', () => {
+  // База — на 0004 (тесты выше). Новая миграция: план её называет, но не применяет
+  migration('0005_fifth.sql', 'INSERT INTO t VALUES (5);');
+  const plan = run(db, '--check');
+  assert.equal(plan.code, 0, plan.out);
+  assert.match(plan.out, /^MIGRATIONS PLAN: .* at 0004; pending 1: 0005$/m);
+  assert.equal(psql('SELECT string_agg(id::text, \',\' ORDER BY id) FROM t', db), '2,3,4', '--check applied nothing');
+  assert.match(psql(`SELECT setconfig::text FROM pg_db_role_setting WHERE setrole = 0 AND setdatabase = (SELECT oid FROM pg_database WHERE datname = '${db}')`),
+    /repracer\.migrations=0004:/, 'the journal did not move');
+  const applied = run(db);
+  assert.equal(applied.code, 0, applied.out);
+  assert.match(run(db, '--check').out, /^MIGRATIONS PLAN: .* at 0005; pending 0$/m, 'nothing new — pending 0');
+  // Код прежней версии (миграции только до 0003) к базе на 0005 — «база новее кода», код 3
+  const older = mkdtempSync(join(tmpdir(), 'repracer-migrate-older-'));
+  try {
+    for (const f of ['0001_first.sql', '0002_second.sql', '0003_third.sql']) writeFileSync(join(older, f), readFileSync(join(dir, f)));
+    const ahead = spawnSync('bash', [script, db, '--check'], { env: { ...env(), REPRACER_MIGRATIONS_DIR: older }, encoding: 'utf8' });
+    assert.equal(ahead.status, 3, `${ahead.stdout}${ahead.stderr}`);
+    assert.match(ahead.stderr, /database .* is at migration 0005, this code knows migrations only through 0003/);
+    assert.match(ahead.stderr, /restore of the copy taken before them/);
+    assert.doesNotMatch(ahead.stderr, /applied migrations changed/, 'not the misleading "changed"');
+    // Без --check — тот же отказ, и ничего не применено
+    const applying = spawnSync('bash', [script, db], { env: { ...env(), REPRACER_MIGRATIONS_DIR: older }, encoding: 'utf8' });
+    assert.equal(applying.status, 3);
+    // Правка задним числом остаётся правкой задним числом
+    migration('0003_third.sql', 'INSERT INTO t VALUES (33);');
+    const changed = run(db, '--check');
+    assert.equal(changed.code, 1, changed.out);
+    assert.match(changed.out, /applied migrations changed/);
+    migration('0003_third.sql', 'INSERT INTO t VALUES (3);');
+    assert.equal(run(db, '--check').code, 0);
+  } finally {
+    rmSync(older, { recursive: true, force: true });
+  }
 });
 
 test('step 124 [Р-248]: a database without the journal is not migrated — what was applied there is unknown', () => {

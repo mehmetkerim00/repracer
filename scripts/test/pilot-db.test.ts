@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -46,6 +46,8 @@ before(() => {
 after(() => {
   if (admin) {
     psql(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`);
+    // Шаг 131: учение, упавшее посреди отката, оставило бы отложенные базы `<база>_rb_<время>`
+    for (const aside of psql(`SELECT datname FROM pg_database WHERE datname LIKE '${DB}\\_rb\\_%'`).split('\n').filter(Boolean)) psql(`DROP DATABASE IF EXISTS ${aside} WITH (FORCE)`);
     // Пароли ролей кластера — обратно пустые: в тестовом кластере вход идёт без пароля, и чужим прогонам пароль ни к чему
     if (secrets) for (const role of roles()) psql(`ALTER ROLE ${role} PASSWORD NULL`);
   }
@@ -176,4 +178,94 @@ test('step 126 [Р-249]: a copy of the pilot restores with the owner key from st
   const lost = restoreCheck(dir, unguarded, owner.privateKey);
   assert.equal(lost.code, 1, lost.out);
   assert.match(lost.err, /копия потеряла страж боевых записей \(Р-247\)/);
+});
+
+/**
+ * Шаг 131 (решение владельца 2026-11-15, п. 3.3): учение отката «N → N+1 с миграцией → откат» на базе пилота этого файла, теми же скриптами, что на сервере.
+ * Версия N — миграции репозитория, N+1 — они же и ещё одна. Выкладка N+1: план (scripts/db/migrate.sh --check) называет миграцию, копия снимается до неё
+ * тем же backup-loop с отметкой `.pre-release`, миграция применяется журналом (deploy/pilot/db.sh), после выкладки пишутся данные. Откат: код N к базе после
+ * миграции — отказ «база новее кода» (код 3), а не «миграцию правили»; копия восстанавливается на место живой базы (deploy/pilot/rollback-inner.sh): база снова
+ * на миграции N, страж и регион на месте, записанное до выкладки — на месте, после — только в отложенной прежней базе; выкладка N поверх — без миграций.
+ * Контроли: чужой ключ и копия не той версии — отказ, живая база не тронута. Нужен gpg, как проверке восстановления выше.
+ */
+test('step 131: the rollback drill — N → N+1 with a migration → back to N from the copy taken before the migration', { timeout: 10 * 60_000 }, () => {
+  // База этого файла после прошлого теста — восстановлена из копии со снятым без значения стражем: вернуть его, как вернул бы владелец
+  psql(`ALTER DATABASE ${DB} SET repracer.live_writes = 'forbidden'`);
+  const owner = keyPair('drill');
+  const dir = join(work, 'drill-backups');
+  mkdirSync(dir, { recursive: true });
+  const next = join(work, 'migrations-next');
+  mkdirSync(next, { recursive: true });
+  for (const f of readdirSync(join(root, 'migrations')).filter((x) => /^\d{4}_.*\.sql$/.test(x))) copyFileSync(join(root, 'migrations', f), join(next, f));
+  writeFileSync(join(next, '0900_drill_release.sql'), 'BEGIN;\nCREATE TABLE public.drill_release (id int);\nCOMMIT;\n');
+  const plan = (migrations: string) => sh('scripts/db/migrate.sh', [DB, '--check'], { ...pgEnv(), REPRACER_MIGRATIONS_DIR: migrations });
+  const rollback = (what: string, key: string) => {
+    const r = spawnSync('bash', [join(root, 'deploy/pilot/rollback-inner.sh'), dir, what], {
+      env: { PATH: process.env.PATH ?? '', HOME: work, ...pgEnv(), REPRACER_PILOT_DB: DB, REPRACER_PILOT_REGION: 'US', REPRACER_ROLLBACK_ADMIN_URL: superUrl('postgres'),
+        REPRACER_RESTORE_SECRETS_DIR: secrets }, encoding: 'utf8', input: key });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+  const journal = () => psql(`SELECT current_setting('repracer.migrations', true)`, DB);
+  const journalN = journal();
+  const tenantsN = psql('SELECT count(*) FROM tenant_data.tenant', DB);
+  const N = 'a'.repeat(40);
+
+  // Выкладка N+1: план, копия до миграции с отметкой, миграция, данные после выкладки
+  const p = plan(next);
+  assert.equal(p.code, 0, p.out);
+  assert.match(p.out, /pending 1: 0900/);
+  const copy = backupOnce(dir, owner.publicKey);
+  writeFileSync(join(dir, `${copy}.pre-release`), `${JSON.stringify({ before: N, release: 'b'.repeat(40), migrationsBefore: journalN.slice(0, 4), at: '2026-11-15T10:00:00Z' })}\n`);
+  const up = sh('deploy/pilot/db.sh', [], { ...pgEnv(), REPRACER_PILOT_DB: DB, REPRACER_PILOT_REGION: 'US', REPRACER_PILOT_SECRETS: secrets, REPRACER_MIGRATIONS_DIR: next });
+  assert.equal(up.code, 0, up.out);
+  assert.match(journal(), /^0900:/);
+  psql('INSERT INTO public.drill_release VALUES (1)', DB);
+
+  // Код N к базе N+1 — «база новее кода», код 3: выкладка остановилась бы ДО переключения рабочей копии
+  const ahead = plan(join(root, 'migrations'));
+  assert.equal(ahead.code, 3, ahead.out);
+  assert.match(ahead.out, /is at migration 0900, this code knows migrations only through/);
+
+  // Контроли: чужой ключ, копия не той версии — отказ до того, как тронуть живую базу
+  const wrong = rollback(N, keyPair('drill-stranger').privateKey);
+  assert.equal(wrong.code, 1, wrong.out);
+  assert.match(wrong.err, /не открывается этим ключом — живая база не тронута/);
+  const none = rollback('c'.repeat(40), owner.privateKey);
+  assert.equal(none.code, 1, none.out);
+  assert.match(none.err, /нет копии перед выкладкой, снятой при уходе с версии cccccccccccc/);
+  assert.match(journal(), /^0900:/, 'the live database is untouched after both refusals');
+  assert.equal(psql('SELECT count(*) FROM public.drill_release', DB), '1');
+  // Контроль: провал ПОСЛЕ того, как живая база отложена (копия другого региона) — живая база возвращается на своё имя, «как было»
+  psql(`ALTER DATABASE ${DB} SET repracer.region = 'EU'`);
+  const foreign = backupOnce(dir, owner.publicKey);
+  psql(`ALTER DATABASE ${DB} SET repracer.region = 'US'`);
+  const undone = rollback(foreign, owner.privateKey);
+  assert.equal(undone.code, 1, undone.out);
+  assert.match(undone.err, /регион восстановленной базы EU, а у пилота US/);
+  assert.match(undone.err, /"event":"ROLLBACK_UNDONE"/);
+  assert.match(journal(), /^0900:/, 'the live database is back under its name after a failed restore');
+  assert.equal(psql('SELECT count(*) FROM public.drill_release', DB), '1', 'with what was written after the release');
+  assert.equal(psql(`SELECT count(*) FROM pg_database WHERE datname LIKE '${DB}_rb_%'`), '0', 'nothing is left aside');
+
+  // Откат: копия перед выкладкой — на место живой базы
+  const back = rollback(N, owner.privateKey);
+  assert.equal(back.code, 0, back.err);
+  const done = JSON.parse(back.out.trim().split('\n').at(-1)!) as { event: string; copy: string; aside: string; liveWrites: string; migrationsThrough: string };
+  assert.deepEqual([done.event, done.copy, done.liveWrites, done.migrationsThrough], ['ROLLBACK_RESTORED', copy, 'forbidden', journalN.slice(0, 4)]);
+  assert.equal(journal(), journalN, 'the database is back on the migration journal of N');
+  assert.equal(psql("SELECT to_regclass('public.drill_release') IS NULL", DB), 't', 'the schema of N+1 is gone');
+  assert.equal(psql('SELECT count(*) FROM tenant_data.tenant', DB), tenantsN, 'what was written before the release is there');
+  assert.equal(psql('SELECT security.live_writes_forbidden()', DB), 't', 'the live-writes guard came back with the copy [Р-247]');
+  const n = plan(join(root, 'migrations'));
+  assert.equal(n.code, 0, n.out);
+  assert.match(n.out, /pending 0$/m, 'the code of N fits the database again');
+  // Записанное после выкладки — не потеряно молча: оно в отложенной прежней базе
+  assert.match(done.aside, new RegExp(`^${DB}_rb_\\d{8}t\\d{6}z$`));
+  assert.equal(psql('SELECT count(*) FROM public.drill_release', done.aside), '1', 'what was written after the copy lives on in the database set aside');
+  // Выкладка N поверх — ничего не применяет, страж прежний
+  const deployN = db();
+  assert.equal(deployN.code, 0, deployN.out);
+  assert.match(deployN.out, /applied 0/);
+  assert.ok(!`${back.out}${back.err}`.includes(owner.privateKey.slice(40, 120)), 'the private key is not printed');
+  psql(`DROP DATABASE ${done.aside} WITH (FORCE)`);
 });
