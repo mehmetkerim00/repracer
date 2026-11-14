@@ -61,6 +61,8 @@ vendor/*
 !vendor/zitadel/
 # Шаг 126: страницы Cloudflare R2 — вынос копий пилота (deploy/pilot/offsite-r2.ts)
 !vendor/cloudflare/
+# Шаг 129: страницы UptimeRobot — внешняя проверка /healthz пилота (deploy/pilot/README.md, §9)
+!vendor/uptimerobot/
 
 # --- Infrastructure ---
 .terraform/

@@ -28,6 +28,8 @@ before(() => {
     env: { PATH: process.env.PATH ?? '', HOME: work, REPRACER_PILOT_LOCAL_SECRETS: secrets, REPRACER_AMAZON_PRODUCTION_ENV: join(work, 'amazon-production.env') }, encoding: 'utf8' });
   assert.equal(made.status, 0, `${made.stdout}${made.stderr}`);
   writeFileSync(join(secrets, 'tunnel.env'), 'TUNNEL_TOKEN=syn-tunnel-token\n');
+  // Шаг 129: адреса отметок кладёт scripts/setup-heartbeats.mjs --stand pilot — здесь синтетические
+  for (const f of ['scheduler', 'console', 'operator', 'bulk', 'backup']) writeFileSync(join(secrets, `${f}_heartbeat_url`), `https://hc-ping.invalid/syn-${f}\n`);
   writeFileSync(join(work, 'build.env'), 'REPRACER_BUILD_SHA=0123456789abcdef0123456789abcdef01234567\nREPRACER_BUILD_AT=2026-11-14T12:00:00Z\n');
   const out = execFileSync('docker', ['compose', '-f', join(root, 'deploy/pilot/compose.yaml'), '--env-file', join(root, 'deploy/pilot/pilot.env.example'),
     '--env-file', join(secrets, 'amazon.env'), '--env-file', join(work, 'build.env'), '--profile', 'tools', 'config', '--format', 'json'],
@@ -41,7 +43,8 @@ const read = (path: string) => readFileSync(path.replace('/run/secrets', secrets
 
 test('step 124 [Р-248], step 126: the pilot is the console, scheduler, task worker, operator panel, PostgreSQL with its daily copy, ClickHouse and the tunnel — no broker, no write dispatcher', () => {
   // Шаг 126: копия базы (backup) — всегда; вынос в R2 (backup-offsite) — под профилем r2, здесь его нет (scripts/test/pilot-backup.test.ts)
-  assert.deepEqual(Object.keys(services).sort(), ['backup', 'bulk-worker', 'clickhouse', 'cloudflared', 'console', 'operator', 'postgres', 'scheduler', 'tools']);
+  // Шаг 129: отметки копий шлёт backup-heartbeat (в образе копии нет curl)
+  assert.deepEqual(Object.keys(services).sort(), ['backup', 'backup-heartbeat', 'bulk-worker', 'clickhouse', 'cloudflared', 'console', 'operator', 'postgres', 'scheduler', 'tools']);
   // Наружу — ничего: базы без портов, процессы — только loopback (правило шага 54 смотрит и этот файл)
   assert.equal(services.postgres!.ports, undefined, 'the database publishes no port');
   assert.equal(services.clickhouse!.ports, undefined, 'ClickHouse publishes no port');
@@ -73,4 +76,24 @@ test('step 124 [Р-248]: every process of the pilot accepts its environment and 
   assert.equal(scheduler.channelApps.amazon.draft, true, 'the Draft state is named by pilot.env');
   assert.ok(bulkWorkerFromEnv(envOf('bulk-worker'), read).config);
   assert.equal(loadOperatorConfig(envOf('operator'), read).inviteLinkReveal, true);
+});
+
+test('step 129 [Р-127]: every process of the pilot marks itself in the external service — no heartbeat is off, each address is its own file', async () => {
+  const { loadConsoleConfig } = await import('../../apps/console/server/config.ts');
+  const { loadConfig } = await import('../../services/scheduler/src/config.ts');
+  const { bulkWorkerFromEnv } = await import('../../apps/console/server/bulk-worker.ts');
+  const { loadOperatorConfig } = await import('../../apps/operator/server/config.ts');
+  const wanted: Array<[string, string, string]> = [
+    ['scheduler', 'REPRACER_SCHEDULER_HEARTBEAT', 'scheduler_heartbeat_url'], ['console', 'REPRACER_CONSOLE_HEARTBEAT', 'console_heartbeat_url'],
+    ['operator', 'REPRACER_OPERATOR_HEARTBEAT', 'operator_heartbeat_url'], ['bulk-worker', 'REPRACER_BULK_HEARTBEAT', 'bulk_heartbeat_url'],
+  ];
+  for (const [service, variable, file] of wanted) {
+    assert.notEqual(envOf(service)[variable], 'off', `${service}: the heartbeat is not turned off in the pilot`);
+    assert.equal(envOf(service)[`${variable}_URL_FILE`], `/run/secrets/${file}`, `${service}: the address is the file ${file}`);
+  }
+  // Загрузчики процессов принимают адреса: отметка включена, адрес — из своего файла
+  assert.equal(loadConfig(envOf('scheduler'), read).heartbeatUrl, 'https://hc-ping.invalid/syn-scheduler');
+  assert.equal((loadConsoleConfig(envOf('console'), read) as unknown as { heartbeatUrl: string | null }).heartbeatUrl, 'https://hc-ping.invalid/syn-console');
+  assert.equal(loadOperatorConfig(envOf('operator'), read).heartbeatUrl, 'https://hc-ping.invalid/syn-operator');
+  assert.equal(bulkWorkerFromEnv(envOf('bulk-worker'), read).heartbeatUrl, 'https://hc-ping.invalid/syn-bulk');
 });

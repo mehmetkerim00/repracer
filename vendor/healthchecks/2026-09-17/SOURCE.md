@@ -21,5 +21,20 @@
 
 На этих фактах построен `scripts/setup-heartbeats.mjs`: повторяемость его запуска держится на документированном `unique: ['slug']`, а не на догадке.
 
+## Уведомления новой проверки, бесплатный план (добавлено шагом 129)
+
+Загружено 2026-11-14 (UTC) командой `curl -L`, ответ 200. Страница API с 2026-09-20 изменилась, её новая сумма — в первой строке таблицы.
+
+| Страница | Что взято | SHA-256 |
+|---|---|---|
+| https://healthchecks.io/docs/api/ | у `POST /api/v3/checks/` параметр `channels`: «By default, this API call assigns no integrations to the newly created check», значение `"*"` назначает все существующие интеграции; `timeout` и `grace` — от 60 до 31536000 секунд | `8dbb6fcf946b0bd9afd520ddb5dafd33c8ff1657049f98b9b91527a7a778ab40` |
+| https://healthchecks.io/pricing/ | план Hobbyist: $0, «Monitor 20 jobs»; заводить несколько аккаунтов в обход лимитов нельзя | `4702e466191a3efa8846fc48af3cf12709ab047712c604377bc68b632c28c39d` |
+| https://healthchecks.io/terms/ | об ограничениях бесплатного плана и коммерческого использования в условиях ничего нет; обновлены «May 9, 2018» | `aed9dca94d1f18f31c0ef8fc7b9ecf2d171b7e00e333b163f87f9133bb808c6d` |
+| https://healthchecks.io/docs/http_api/ | сверка прежнего факта об отметке: успех — `GET <ping_url>`, сбой — `GET <ping_url>/fail` | `2ff8b437ab5820f0ec72a6c04c7b4ad277f1a0e3364b63addd38a3ad2caa0474` |
+
+**Находка шага 129.** `setup-heartbeats.mjs` с шага 33 не передавал `channels`. Заведённые им проверки остались бы без единой интеграции:
+пропуск отметки не дал бы ни одного письма. Теперь скрипт передаёт `channels: "*"`, и тест держит это на модели API
+(`scripts/test/pilot-monitoring.test.ts`).
+
 Не проверено (нет аккаунта): что письмо действительно приходит при пропуске отметки и за какое время после Period + Grace Time; что сервис
 принимает отметки с адресов нашего развёртывания. План проверки — docs/evidence/step26-external-control.md.

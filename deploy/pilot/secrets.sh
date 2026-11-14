@@ -89,4 +89,6 @@ fi
 [ ${#kept[@]} -eq 0 ] || echo "оставлено как было: ${#kept[@]} файлов"
 [ -e "${OUT}/backup_public_key.asc" ] || echo "нет backup_public_key.asc — открытый ключ копий (deploy/pilot/README.md, «Копии базы»); без него выкладки нет"
 [ -e "${OUT}/tunnel.env" ] || echo "нет tunnel.env — токен туннеля кладёт владелец при создании туннеля (deploy/pilot/README.md, §3)"
+# Шаг 129 [Р-127]: адреса отметок кладёт не этот скрипт, а scripts/setup-heartbeats.mjs (их выдаёт внешний сервис); без них выкладки нет
+[ -e "${OUT}/scheduler_heartbeat_url" ] || echo "нет *_heartbeat_url — адреса отметок внешнего контроля: scripts/setup-heartbeats.mjs --stand pilot (deploy/pilot/README.md, §9); без них выкладки нет"
 echo "каталог секретов пилота: ${OUT}"

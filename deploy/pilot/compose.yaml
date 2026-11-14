@@ -3,6 +3,7 @@
 #   PostgreSQL (живая база: только новые миграции, страж боевых записей с первого дня) + ClickHouse (история снимков [Р-122], выгрузка обязательна) +
 #   промышленная консоль (вход у поставщика identity [Р-180], подключение Amazon продавцом [Р-175]) + планировщик + исполнитель заданий + панель оператора
 #   (только loopback [Р-165]) + Cloudflare Tunnel на app.<домен>.
+# Внешний контроль [Р-127] обязателен (шаг 129): каждый процесс и копия базы отмечаются в healthchecks.io, адреса — файлами секретов (README, §9).
 # Брокера и диспетчера записей НЕТ: пилот в тени [Р-169] — записи рождаются удержанными, отправлять и подтверждать нечего. Без них бой невозможен и
 # по стражу базы [Р-247], и по устройству: подтверждение принятой записи ведёт только диспетчер (deploy/worker, брокер).
 # Наружу не публикуется ничего: страницу выставляет туннель (исходящее соединение к Cloudflare). Процессы описаны ОДИН раз в своих развёртываниях и
@@ -71,6 +72,8 @@ services:
       <<: [*build, *amazon]
       # Р-180: промышленный профиль — только настоящий поставщик identity (ZITADEL, README §1); без значений compose отказывает до контейнера
       REPRACER_PROFILE: production
+      # Шаг 129 [Р-127]: отметка во внешнем сервисе обязательна; адрес — файл console_heartbeat_url (scripts/setup-heartbeats.mjs --stand pilot)
+      REPRACER_CONSOLE_HEARTBEAT: ${REPRACER_CONSOLE_HEARTBEAT:-}
       REPRACER_CONSOLE_OIDC_ISSUER: ${REPRACER_CONSOLE_OIDC_ISSUER:?set REPRACER_CONSOLE_OIDC_ISSUER (Р-180)}
       REPRACER_CONSOLE_OIDC_AUDIENCE: ${REPRACER_CONSOLE_OIDC_AUDIENCE:?set REPRACER_CONSOLE_OIDC_AUDIENCE (Р-180)}
       REPRACER_CONSOLE_OIDC_JWKS_URL: ${REPRACER_CONSOLE_OIDC_JWKS_URL:?set REPRACER_CONSOLE_OIDC_JWKS_URL (Р-180)}
@@ -92,8 +95,10 @@ services:
     environment:
       <<: [*build, *amazon]
       REPRACER_PROFILE: production
-      # Р-127: отметки внешнего сервиса у проекта нет (OQ-188) — выключено ЯВНО; появится — пусто и файл heartbeat_url
-      REPRACER_SCHEDULER_HEARTBEAT: ${REPRACER_SCHEDULER_HEARTBEAT:-off}
+      # Шаг 129 [Р-127]: отметка обязательна — без адреса процесс не стартует, а выкладка отказывает раньше (deploy/pilot/heartbeat-state.sh).
+      # Имя файла — своё у каждого процесса пилота (у развёртывания планировщика оно общее — heartbeat_url)
+      REPRACER_SCHEDULER_HEARTBEAT: ${REPRACER_SCHEDULER_HEARTBEAT:-}
+      REPRACER_SCHEDULER_HEARTBEAT_URL_FILE: /run/secrets/scheduler_heartbeat_url
       # Роль адаптеров — единственная, что читает шифротекст токенов (0132): без неё планировщик не обменяет токен продавца
       REPRACER_CREDENTIALS_PG_URL_FILE: /run/secrets/credentials_pg_url
     depends_on:
@@ -114,7 +119,7 @@ services:
     environment:
       <<: *build
       REPRACER_BULK_METRICS_PORT: "9473"
-      REPRACER_BULK_HEARTBEAT: ${REPRACER_BULK_HEARTBEAT:-off}
+      REPRACER_BULK_HEARTBEAT: ${REPRACER_BULK_HEARTBEAT:-}
       REPRACER_BULK_HEARTBEAT_URL_FILE: /run/secrets/bulk_heartbeat_url
       REPRACER_BULK_APP_PG_URL_FILE: /run/secrets/console_app_pg_url
       REPRACER_BULK_ADMIN_PG_URL_FILE: /run/secrets/console_admin_pg_url
@@ -147,6 +152,8 @@ services:
       # Р-245: почтового провайдера нет — ссылку приглашения владельца пилота оператор получает один раз в панели (со вторым фактором, в аудите)
       REPRACER_INVITE_LINK_REVEAL: "on"
       REPRACER_OPERATOR_DEFAULT_LOCALE: en
+      # Шаг 129 [Р-127]: отметка обязательна; адрес — файл operator_heartbeat_url
+      REPRACER_OPERATOR_HEARTBEAT: ${REPRACER_OPERATOR_HEARTBEAT:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,6 +195,24 @@ services:
         condition: service_healthy
     restart: unless-stopped
     logging: { driver: json-file, options: { max-size: 50m, max-file: "5" } }
+
+  # Шаг 129 [Р-127]: отметка во внешнем сервисе после каждой готовой копии и «сбой» при BACKUP_FAILED. В образе копии нет curl — отметку шлёт этот
+  # процесс; каталог копий он только читает (deploy/pilot/backup-heartbeat.ts)
+  backup-heartbeat:
+    image: node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+    working_dir: /app
+    command: ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "deploy/pilot/backup-heartbeat.ts"]
+    user: "1000:1000"
+    read_only: true
+    environment:
+      REPRACER_BACKUP_OUT: /backups
+      REPRACER_BACKUP_HEARTBEAT_URL_FILE: /run/secrets/backup_heartbeat_url
+    volumes:
+      - ../..:/app:ro
+      - ${REPRACER_SECRETS_DIR:?set REPRACER_SECRETS_DIR in pilot.env}:/run/secrets:ro
+      - ${REPRACER_BACKUP_DIR:?set REPRACER_BACKUP_DIR in pilot.env}:/backups:ro
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: 20m, max-file: "3" } }
 
   # Шаг 126: вынос копий с сервера в Cloudflare R2 — только при REPRACER_BACKUP_OFFSITE=r2 (обёртка compose.sh включает профиль); при pull копии
   # забирает машина оператора (deploy/pilot/pull-backups.sh). Адрес бакета — без умолчания и без отказа здесь: его спрашивает backup-state.sh --ready

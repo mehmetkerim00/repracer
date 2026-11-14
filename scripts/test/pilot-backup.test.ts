@@ -151,7 +151,8 @@ test('step 126: pull — the operator machine takes every finished copy over SSH
   assert.deepEqual(taken, [yesterday, fresh].sort().flatMap((s) => [`repracer-${s}.dump.gpg`, `repracer-${s}.globals.sql.gpg`, `repracer-${s}.sha256`]),
     'finished copies within 7 days only: no copy still being written, no part, nothing older than the retention');
   assert.equal(readFileSync(join(local, `repracer-${fresh}.dump.gpg`), 'utf8'), `syn-copy-${fresh}-dump`, 'the bytes of the copy');
-  assert.match(readFileSync(join(server, 'OFFSITE_PULLED'), 'utf8'), new RegExp(`^\\{"pulledThrough":"${fresh}","at":"\\d{8}T\\d{6}Z"\\}\\n$`));
+  // Шаг 129: и под внешним ли контролем вынос — здесь адреса отметки нет (scripts/test/pilot-monitoring.test.ts)
+  assert.match(readFileSync(join(server, 'OFFSITE_PULLED'), 'utf8'), new RegExp(`^\\{"pulledThrough":"${fresh}","at":"\\d{8}T\\d{6}Z","monitored":false\\}\\n$`));
   const again = pull();
   assert.match(again.out, /новых копий 0/, 'a second run takes nothing twice');
   // Порча при переносе: сумма не сходится — копия не принимается, частей не остаётся, проход красный
@@ -265,7 +266,9 @@ test('step 126: the smoke verdict — a fresh finished copy, off the server, one
   red('pull', /копии не выносились с сервера — на машине оператора: deploy\/pilot\/pull-backups\.sh/);
   writeFileSync(join(dir, 'OFFSITE_PULLED'), `{"pulledThrough":"${stale}","at":"x"}\n`);
   red('pull', /не вынесено ни одной копии моложе 26 ч/);
-  writeFileSync(join(dir, 'OFFSITE_PULLED'), `{"pulledThrough":"${fresh}","at":"x"}\n`);
+  writeFileSync(join(dir, 'OFFSITE_PULLED'), `{"pulledThrough":"${fresh}","at":"x","monitored":false}\n`);
+  red('pull', /вынос копий не под внешним контролем/);
+  writeFileSync(join(dir, 'OFFSITE_PULLED'), `{"pulledThrough":"${fresh}","at":"x","monitored":true}\n`);
   red('pull', /ни одна из хранимых копий не проверена восстановлением/);
   // Отметка проверки копии, которой уже нет, в счёт не идёт
   writeFileSync(join(dir, `repracer-${stampOf(9 * 24 * HOUR)}.restore-checked`), '{}\n');
