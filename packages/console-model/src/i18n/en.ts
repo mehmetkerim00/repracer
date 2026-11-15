@@ -421,7 +421,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   POSITION_STRATEGY: { what: 'Strategy “position in the ranking”', why: 'Not offered yet: it cannot be drafted or previewed.' },
   OMNIBUS_OUTSIDE_PRICES: { what: 'Prices set outside TMPrice', why: 'The 30-day window is built from our price history. A price set in the channel back office or before the offer was connected is not in it — a window that starts before our first price is “not verifiable”, not “correct”.' },
   OMNIBUS_TIME_ZONE_TO_VERIFY: { what: 'Storefront day boundary', why: 'Days are counted in the time zone of the storefront. For Kaufland de and at it is still being confirmed with Kaufland.' },
-  DANGEROUS_THRESHOLD: { what: 'Why “dangerous”', why: 'A change stopped by the Price Gate that is more than 10% beyond the bound it broke. Smaller ones are “corrected”.' },
+  DANGEROUS_THRESHOLD: { what: 'Why “dangerous”', why: 'A proposal the Price Gate rejected that is more than 10% beyond the bound it broke. A smaller rejection is “Rejected”; a strategy target set to a bound is “Adjusted to limit”.' },
 };
 
 export const en = {
@@ -496,7 +496,7 @@ export const en = {
         trace: 'One decision, step by step: the competitor snapshot, the checks, the strategy, the Price Gate and the update sent to your store.',
         strategies: 'How prices are computed: your strategies, where they apply and a preview before anything is saved.',
         feed: 'Every price sent to a channel or held, and every decision behind it — open one to see why the price is what it is.',
-        rejected: 'Changes your bounds stopped or corrected — dangerous ones are shown separately.',
+        rejected: 'Changes your bounds rejected, blocked or adjusted to a limit — dangerous ones are shown separately.',
         dangerous: 'What your floor and your bounds prevented over a period.',
         bounds: 'Minimum and maximum price of every offer; open an offer to see where its floor comes from.',
         boundsDetail: 'Where the floor of this offer comes from, to the cent.',
@@ -1851,9 +1851,9 @@ export const en = {
       peopleHeadline: (n: number, phrase: string) => n === 0 ? `No price change was stopped by a person ${phrase}` : `People stopped ${n} price ${n === 1 ? 'change' : 'changes'} ${phrase}`,
       peopleNone: 'Nothing here: a change appears when someone stops prices on Stop pricing while a price was on its way.',
       whoStopped: 'Who stopped what — Stop pricing',
-      otherTitle: (phrase: string) => `Also stopped or corrected ${phrase}`,
+      otherTitle: (phrase: string) => `Also rejected, blocked or adjusted to a limit ${phrase}`,
       pageOf: (from: number, to: number, total: number) => `${from}–${to} of ${total}`,
-      rulesNone: (phrase: string) => `Nothing else was stopped or corrected ${phrase}. Every time a bound, the input check or a storefront halt stops or corrects a price, it appears here with the reason.`,
+      rulesNone: (phrase: string) => `Nothing else was rejected, blocked or adjusted to a limit ${phrase}. Every time a bound, the input check or a storefront halt rejects, blocks or adjusts a price, it appears here with the reason.`,
     },
     /** Шаг 96: период экранов — 24 часа, 7 и 30 дней или свой диапазон дат в поясе пространства */
     period: {

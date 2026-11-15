@@ -406,7 +406,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   POSITION_STRATEGY: { what: 'Strategie „Platz im Ranking“', why: 'Noch nicht verfügbar: Sie lässt sich weder entwerfen noch in der Vorschau prüfen.' },
   OMNIBUS_OUTSIDE_PRICES: { what: 'Preise außerhalb von TMPrice', why: 'Der 30-Tage-Zeitraum wird aus unserer Preishistorie gebildet. Ein Preis aus dem Kanal-Backoffice oder vor der Anbindung des Angebots fehlt darin — ein Zeitraum vor unserem ersten Preis ist „nicht prüfbar“, nicht „korrekt“.' },
   OMNIBUS_TIME_ZONE_TO_VERIFY: { what: 'Tagesgrenze der Storefront', why: 'Tage zählen in der Zeitzone der Storefront. Für Kaufland de und at wird sie noch mit Kaufland bestätigt.' },
-  DANGEROUS_THRESHOLD: { what: 'Warum „gefährlich“', why: 'Eine vom Price Gate gestoppte Änderung, die mehr als 10 % jenseits der verletzten Grenze liegt. Kleinere gelten als „korrigiert“.' },
+  DANGEROUS_THRESHOLD: { what: 'Warum „gefährlich“', why: 'Ein vom Price Gate abgelehnter Vorschlag, der mehr als 10 % jenseits der verletzten Grenze liegt. Eine kleinere Ablehnung heißt „Abgelehnt“; ein Strategieziel, das auf eine Grenze gesetzt wurde, heißt „An die Grenze angepasst“.' },
 };
 
 export const de: Messages = {
@@ -473,7 +473,7 @@ export const de: Messages = {
         trace: 'Eine Entscheidung Schritt für Schritt: Wettbewerbsdaten, Prüfungen, Strategie, Price Gate und die Übertragung an Ihren Shop.',
         strategies: 'Wie Preise berechnet werden: Ihre Strategien, wo sie gelten, und eine Vorschau, bevor etwas gespeichert wird.',
         feed: 'Jeder Preis, der an einen Kanal ging oder zurückgehalten wurde, und jede Entscheidung dahinter — öffnen Sie eine, um zu sehen, warum der Preis so ist.',
-        rejected: 'Änderungen, die Ihre Grenzen gestoppt oder korrigiert haben — gefährliche getrennt.',
+        rejected: 'Änderungen, die Ihre Grenzen abgelehnt, blockiert oder an eine Grenze angepasst haben — gefährliche getrennt.',
         dangerous: 'Was Ihre Untergrenze und Ihre Grenzen in einem Zeitraum verhindert haben.',
         bounds: 'Mindest- und Höchstpreis jedes Angebots; öffnen Sie ein Angebot, um zu sehen, woher seine Untergrenze kommt.',
         boundsDetail: 'Woher die Untergrenze dieses Angebots kommt — auf den Cent.',
@@ -1787,9 +1787,9 @@ export const de: Messages = {
       peopleHeadline: (n: number, phrase: string) => n === 0 ? `${phrase[0]!.toUpperCase()}${phrase.slice(1)} hat kein Mensch eine Preisänderung gestoppt` : `Menschen haben ${phrase} ${n} ${n === 1 ? 'Preisänderung' : 'Preisänderungen'} gestoppt`,
       peopleNone: 'Hier ist nichts: Eine Änderung erscheint, wenn jemand unter „Preise stoppen“ Preise stoppt, während ein Preis unterwegs war.',
       whoStopped: 'Wer was gestoppt hat — Preise stoppen',
-      otherTitle: (phrase: string) => `Außerdem ${phrase} gestoppt oder korrigiert`,
+      otherTitle: (phrase: string) => `Außerdem ${phrase} abgelehnt, blockiert oder an eine Grenze angepasst`,
       pageOf: (from: number, to: number, total: number) => `${from}–${to} von ${total}`,
-      rulesNone: (phrase: string) => `Sonst wurde ${phrase} nichts gestoppt oder korrigiert. Jedes Mal, wenn eine Grenze, die Eingangsprüfung oder das Anhalten einer Storefront einen Preis stoppt oder korrigiert, erscheint es hier mit dem Grund.`,
+      rulesNone: (phrase: string) => `Sonst wurde ${phrase} nichts abgelehnt, blockiert oder an eine Grenze angepasst. Jedes Mal, wenn eine Grenze, die Eingangsprüfung oder das Anhalten einer Storefront einen Preis ablehnt, blockiert oder anpasst, erscheint es hier mit dem Grund.`,
     },
     period: {
       label: 'Zeitraum',

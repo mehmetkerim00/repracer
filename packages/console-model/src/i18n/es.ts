@@ -421,7 +421,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   POSITION_STRATEGY: { what: 'Estrategia “posición en el ranking”', why: 'Aún no está disponible: no se puede crear como borrador ni ver en vista previa.' },
   OMNIBUS_OUTSIDE_PRICES: { what: 'Precios definidos fuera de TMPrice', why: 'La ventana de 30 días se construye con nuestro historial de precios. Un precio definido en el panel de vendedor del canal o antes de conectar la oferta no está incluido: una ventana que empieza antes de nuestro primer precio es “no verificable”, no “correcta”.' },
   OMNIBUS_TIME_ZONE_TO_VERIFY: { what: 'Límite del día del sitio', why: 'Los días se cuentan en la zona horaria del sitio. Para Kaufland de y at, todavía se está confirmando con Kaufland.' },
-  DANGEROUS_THRESHOLD: { what: 'Por qué “peligroso”', why: 'Un cambio detenido por el Price Gate que supera en más de un 10% el límite que infringió. Los menores son “corregidos”.' },
+  DANGEROUS_THRESHOLD: { what: 'Por qué “peligroso”', why: 'Una propuesta rechazada por el Price Gate que supera en más de un 10% el límite que infringió. Un rechazo menor es “Rechazado”; un objetivo de la estrategia llevado a un límite es “Ajustado al límite”.' },
 };
 
 export const es: Messages = {
@@ -496,7 +496,7 @@ export const es: Messages = {
         trace: 'Una decisión, paso a paso: los datos de la competencia, las revisiones, la estrategia, el Price Gate y la actualización enviada a su tienda.',
         strategies: 'Cómo se calculan los precios: sus estrategias, dónde se aplican y una vista previa antes de guardar nada.',
         feed: 'Cada precio enviado a un canal o retenido, y cada decisión detrás de él: abra uno para ver por qué el precio es el que es.',
-        rejected: 'Cambios que sus límites detuvieron o corrigieron; los peligrosos se muestran aparte.',
+        rejected: 'Cambios que sus límites rechazaron, bloquearon o ajustaron a un límite; los peligrosos se muestran aparte.',
         dangerous: 'Lo que su piso y sus límites evitaron durante un período.',
         bounds: 'Precio mínimo y máximo de cada oferta; abra una oferta para ver de dónde sale su piso.',
         boundsDetail: 'De dónde sale el piso de esta oferta, al centavo.',
@@ -1845,9 +1845,9 @@ export const es: Messages = {
       peopleHeadline: (n: number, phrase: string) => n === 0 ? `Ninguna persona detuvo un cambio de precio ${phrase}` : `Las personas detuvieron ${n} ${n === 1 ? 'cambio de precio' : 'cambios de precio'} ${phrase}`,
       peopleNone: 'Aquí no hay nada: un cambio aparece cuando alguien detiene los precios en Detener precios mientras un precio iba en camino.',
       whoStopped: 'Quién detuvo qué: Detener precios',
-      otherTitle: (phrase: string) => `También detenido o corregido ${phrase}`,
+      otherTitle: (phrase: string) => `También rechazado, bloqueado o ajustado a un límite ${phrase}`,
       pageOf: (from: number, to: number, total: number) => `${from}–${to} de ${total}`,
-      rulesNone: (phrase: string) => `No se detuvo ni corrigió nada más ${phrase}. Cada vez que un límite, la revisión de datos de entrada o una suspensión del sitio detiene o corrige un precio, aparece aquí con el motivo.`,
+      rulesNone: (phrase: string) => `No se rechazó, bloqueó ni ajustó a un límite nada más ${phrase}. Cada vez que un límite, la revisión de datos de entrada o una suspensión del sitio rechaza, bloquea o ajusta un precio, aparece aquí con el motivo.`,
     },
     /** Шаг 96: период экранов — 24 часа, 7 и 30 дней или свой диапазон дат в поясе пространства */
     period: {

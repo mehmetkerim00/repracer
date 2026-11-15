@@ -332,6 +332,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\brepracer\b/i, use: 'TMPrice' },
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice (PriceTrail is the former name)' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice (the wordmark tmprice is lowercase)' },
+    // Шаг 139 (Р-252): «corrected» — не статус цены: цель на границе — Adjusted to limit, отказ Gate — Rejected (BUG-03)
+    { pattern: /\bcorrected\b/i, use: 'Adjusted to limit (the price became the bound) or Rejected (the price did not change)' },
   ],
   de: [
     { pattern: /\bMandant(en|in)?\b|Mandanten-?[Ss]topp/, use: 'Arbeitsbereich' },
@@ -350,6 +352,7 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\brepracer\b/i, use: 'TMPrice' },
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice (PriceTrail ist der frühere Name)' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice (das Wortzeichen tmprice ist klein geschrieben)' },
+    { pattern: /\bkorrigiert\b/, use: 'An die Grenze angepasst oder Abgelehnt (Р-252)' },
   ],
   // Шаг 98 [Р-223]: испанский и французский — тот же глоссарий (docs/console-glossary.md, раздел «Испанский и французский»)
   es: [
@@ -359,6 +362,7 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\blistados?\b|\blistings?\b/i, use: 'oferta; anuncio de eBay' },
     { pattern: /snapshots?|instant[áa]neas?/i, use: 'datos de la competencia' },
     { pattern: /\bcostes?\b/i, use: 'costo (español de los vendedores de EE. UU.)' },
+    { pattern: /\bcorregid[oa]s?\b|\bcorrigi(?:ó|eron)/i, use: 'Ajustado al límite o Rechazado (Р-252)' },
     { pattern: /\brepracer\b/i, use: 'TMPrice' },
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice' },
@@ -369,6 +373,7 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\barticles?\b/i, use: 'produit' },
     { pattern: /\blistings?\b|\bfiches? produits?\b/i, use: 'offre ; annonce eBay' },
     { pattern: /snapshots?|instantan[ée]s?/i, use: 'données de la concurrence' },
+    { pattern: /\bcorrig(?:ée?s?)(?![a-zà-ÿ])/i, use: 'Ajusté à la limite ou Rejeté (Р-252)' },
     { pattern: /\brepracer\b/i, use: 'TMPrice' },
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice' },
@@ -467,6 +472,15 @@ test('шаг 69 (K9), шаг 98 (Р-223): словари EN, DE, ES и FR гов
   for (const ok of ['todo el espacio de trabajo', 'el sitio amazon.com', 'los datos de la competencia', 'el costo unitario', 'un anuncio de eBay']) assert.equal(es(ok), 0, ok);
   for (const bad of ['tout le locataire', 'la place de marché', 'un article ici', 'le listing du canal', 'un instantané du canal', 'hors de repracer']) assert.equal(fr(bad), 1, bad);
   for (const ok of ['tout l’espace de travail', 'le site amazon.com', 'les données de la concurrence', 'une annonce eBay']) assert.equal(fr(ok), 0, ok);
+  // Шаг 139 (Р-252): «corrected» — не статус цены ни на одном языке; глагол «исправьте» — можно
+  assert.equal(en('Your bounds stopped 0 dangerous changes and corrected 133'), 1);
+  for (const ok of ['correct the stock in the source', 'Correct a column if we got it wrong', 'corrections are marked']) assert.equal(en(ok), 0, ok);
+  assert.equal(de('Kleinere gelten als „korrigiert“'), 1);
+  assert.equal(de('korrigieren Sie ihn in der Quelle'), 0);
+  for (const bad of ['Los menores son “corregidos”', 'No se detuvo ni corrigió nada más']) assert.equal(es(bad), 1, bad);
+  assert.equal(es('corrija el stock en la fuente'), 0);
+  for (const bad of ['Les plus petits sont « corrigés »', 'arrêtés ou corrigés', 'un prix corrigé']) assert.equal(fr(bad), 1, bad);
+  assert.equal(fr('corrigez le stock dans la source'), 0);
   for (const lang of ['en', 'de', 'es', 'fr'] as const) {
     const texts = dictionaryTexts(readFileSync(new URL(`./i18n/${lang}.ts`, import.meta.url), 'utf8'));
     assert.ok(texts.length > 1000, `${lang}: тексты словаря прочитаны — ${texts.length}`);

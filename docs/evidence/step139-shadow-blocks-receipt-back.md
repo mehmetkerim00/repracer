@@ -52,4 +52,18 @@
   Linux решает).
 - Правила репозитория — 28 из 28, импорты страницы — 0 проблем, поля форм — 0 вне поля, типы — 0 ошибок.
 
+## Хвост BUG-03: «corrected» — не статус цены
+
+Сверка текста Issue BUG-03 со словарями нашла хвост шага 137 на том же экране Protections — на всех четырёх языках:
+- подсказка «Why “dangerous”» говорила «Smaller ones are “corrected”», а с шага 137 отказ в пределах 10 % — «Rejected»;
+- заголовок второй части вкладки — «Also stopped or corrected», пустое состояние и подзаголовок экрана — «stopped or corrected».
+
+Тексты переписаны словами словаря статусов: «A smaller rejection is “Rejected”; a strategy target set to a bound is “Adjusted to
+limit”», «Also rejected, blocked or adjusted to a limit». Строка глоссария о пилюлях Protections (шаг 96.2) приведена к словарю.
+
+**Правилом** [Р-146]: в правиле глоссария K9 (`console-model.test.ts`) «corrected», «korrigiert», «corregido/corrigió», «corrigé» —
+запрещённые слова. Положительные контроли — каждое видно, глагол «исправьте» («correct the stock», «korrigieren Sie», «corrigez») —
+можно. На словарях до правки правило красное («en: запрещённые синонимы глоссария»), после — модель 97 из 97, тесты консоли на стенде —
+11 из 11, консоль и смоук — 72 из 73 (тот же «step 85»).
+
 Миграций нет.

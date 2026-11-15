@@ -421,7 +421,7 @@ const gaps: Record<GapCode, { what: string; why: string }> = {
   POSITION_STRATEGY: { what: 'Stratégie « position dans le classement »', why: 'Pas encore proposée : elle ne peut être ni rédigée ni prévisualisée.' },
   OMNIBUS_OUTSIDE_PRICES: { what: 'Prix définis en dehors de TMPrice', why: 'La fenêtre de 30 jours est construite à partir de notre historique des prix. Un prix défini dans l’espace vendeur du canal ou avant la connexion de l’offre n’y figure pas — une fenêtre qui commence avant notre premier prix est « non vérifiable », pas « correcte ».' },
   OMNIBUS_TIME_ZONE_TO_VERIFY: { what: 'Limite de journée du site', why: 'Les jours sont comptés dans le fuseau horaire du site. Pour Kaufland de et at, il est encore en cours de confirmation avec Kaufland.' },
-  DANGEROUS_THRESHOLD: { what: 'Pourquoi « dangereux »', why: 'Un changement arrêté par le Price Gate qui dépasse de plus de 10% la limite enfreinte. Les plus petits sont « corrigés ».' },
+  DANGEROUS_THRESHOLD: { what: 'Pourquoi « dangereux »', why: 'Une proposition rejetée par le Price Gate qui dépasse de plus de 10% la limite enfreinte. Un rejet plus petit est « Rejeté » ; un objectif de la stratégie ramené à une limite est « Ajusté à la limite ».' },
 };
 
 export const fr: Messages = {
@@ -496,7 +496,7 @@ export const fr: Messages = {
         trace: 'Une décision, étape par étape : les données de la concurrence, les contrôles, la stratégie, le Price Gate et la mise à jour envoyée à votre boutique.',
         strategies: 'Comment les prix sont calculés : vos stratégies, où elles s’appliquent et un aperçu avant tout enregistrement.',
         feed: 'Chaque prix envoyé à un canal ou retenu, et chaque décision qui le sous-tend — ouvrez-en une pour voir pourquoi le prix est celui-là.',
-        rejected: 'Les changements que vos limites ont arrêtés ou corrigés — les dangereux sont présentés à part.',
+        rejected: 'Les changements que vos limites ont rejetés, bloqués ou ajustés à une limite — les dangereux sont présentés à part.',
         dangerous: 'Ce que votre plancher et vos limites ont empêché sur une période.',
         bounds: 'Prix minimum et maximum de chaque offre ; ouvrez une offre pour voir d’où vient son plancher.',
         boundsDetail: 'D’où vient le plancher de cette offre, au centime près.',
@@ -1845,9 +1845,9 @@ export const fr: Messages = {
       peopleHeadline: (n: number, phrase: string) => n === 0 ? `Aucun changement de prix n’a été arrêté par une personne ${phrase}` : `Des personnes ont arrêté ${n} ${n === 1 ? 'changement' : 'changements'} de prix ${phrase}`,
       peopleNone: 'Rien ici : un changement apparaît quand quelqu’un arrête les prix depuis Arrêter les prix alors qu’un prix était en cours d’envoi.',
       whoStopped: 'Qui a arrêté quoi — Arrêter les prix',
-      otherTitle: (phrase: string) => `Également arrêtés ou corrigés ${phrase}`,
+      otherTitle: (phrase: string) => `Également rejetés, bloqués ou ajustés à une limite ${phrase}`,
       pageOf: (from: number, to: number, total: number) => `${from}–${to} sur ${total}`,
-      rulesNone: (phrase: string) => `Rien d’autre n’a été arrêté ni corrigé ${phrase}. Chaque fois qu’une limite, le contrôle des entrées ou une suspension de site arrête ou corrige un prix, cela apparaît ici avec la raison.`,
+      rulesNone: (phrase: string) => `Rien d’autre n’a été rejeté, bloqué ni ajusté à une limite ${phrase}. Chaque fois qu’une limite, le contrôle des entrées ou une suspension de site rejette, bloque ou ajuste un prix, cela apparaît ici avec la raison.`,
     },
     /** Шаг 96: период экранов — 24 часа, 7 и 30 дней или свой диапазон дат в поясе пространства */
     period: {
