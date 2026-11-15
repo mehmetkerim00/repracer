@@ -757,6 +757,8 @@ export const de: Messages = {
         managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `verwaltet ${channel} · ${marketplace}: ${n} (${when}) — nur Anzeige, wir ändern es nie`,
         // Шаг 96.1: строка — коротко; что значит состояние и на какой момент — один раз над таблицей
         toPublish: (n: number) => `${n} zu veröffentlichen`,
+        // Шаг 138 (INV-01): к публикации — с расчётом; источник каждой удержанной штуки на строке
+        toPublishCalc: (x: { published: number; available: number; buffer: number; afterBuffer: number; cap: number | null; min: number | null }) => `${x.published} zu veröffentlichen = ${x.available} verfügbar − Puffer ${x.buffer}${x.cap !== null ? `, begrenzt auf höchstens ${x.cap}` : ''}${x.min !== null ? ` = ${x.afterBuffer}, unter dem Mindestbestand zum Listen ${x.min}` : ''}`,
         channelShows: (n: number) => `Kanal zeigt ${n}`,
         managedShort: (channel: string, marketplace: string, n: number) => `${channel} · ${marketplace} — ${n}, verwaltet von ${channel}`,
         asOf: (when: string) => `Kanalzahlen vom ${when}.`,
@@ -818,7 +820,7 @@ export const de: Messages = {
       },
       enable: {
         title: 'Abgleich',
-        buffer: 'Puffer je Kanal', bufferCaption: 'Stück, die jedem Kanal vorenthalten werden.',
+        buffer: 'Puffer je Kanal', bufferCaption: 'Stück, die jedem Kanal vorenthalten werden. Gilt für das Konto, das Sie unten einschalten; der geltende Puffer steht in jeder Zeile oben.',
         maxQuantity: 'Höchstens veröffentlichen', maxQuantityCaption: 'Leer lassen — keine Obergrenze.',
         minToList: 'Mindestens listen', minToListCaption: 'Darunter wird das Angebot mit 0 gelistet.',
         acknowledgeCaption: 'Ohne Ihre Bestätigung startet der Abgleich dieses Kontos nicht.',

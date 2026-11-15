@@ -191,6 +191,9 @@ test('Р-6: правило публикуемого количества в SQL 
   page = await store.stockPage(world.tenantId, { offset: 0, limit: 10 });
   const shown = new Map(page.items.map((r) => [r.sku, r.channels[0]!.published]));
   assert.deepEqual([shown.get('syn-prod-1'), shown.get('syn-prod-2')], [0, 5], 'экран (правило в коде): порог и потолок');
+  // Шаг 138 (INV-01 отчёта Мердана): строка несёт сохранённые настройки аккаунта — экран показывает, откуда удержание, а не только итог
+  assert.deepEqual(page.items.find((r) => r.sku === 'syn-prod-2')!.channels[0]!.allocation, { bufferUnits: 7, maxQuantity: 5, minQuantityToList: 3 },
+    'step 138: the row carries the buffer, cap and listing threshold in force');
   const writes = (await store.recalculate(world.tenantId, null, now())).writes;
   const scopeOf = new Map(page.items.map((r) => [r.channels[0]!.writeScopeId, r.sku]));
   const sent = new Map(writes.map((w) => [scopeOf.get(w.writeScopeId), w.quantity]));

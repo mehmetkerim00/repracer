@@ -356,6 +356,8 @@ export class InMemoryStockStore implements StockStore {
     return {
       writeScopeId: scope.writeScopeId, channelAccountId: scope.offer.channelAccountId, channel: scope.offer.channel, marketplaces: scope.offer.marketplaces,
       syncEnabled: scope.enabled, published: publishedQuantity(this.availableOfProduct(scope.offer.productId).available, allocation),
+      // Шаг 138 (INV-01): настройки аккаунта, по которым посчитано число; без строки настроек — null, как в PostgreSQL
+      allocation: this.allocations.get(scope.offer.channelAccountId) ?? null,
       sent: last ? { quantity: last.quantity, status: last.status, at: last.at, version: last.version } : null,
       confirmed: confirmed ? { quantity: confirmed.quantity, at: confirmed.at } : null,
       divergence: diverged ? { status: diverged.status, since: diverged.at, errorCode: diverged.errorCode } : null,

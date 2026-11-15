@@ -120,7 +120,21 @@ export function stockTraps(world: StandWorld, m: Messages): StockTrap[] {
 const storefronts = (channel: string, marketplaces: readonly string[], m: Messages): string =>
   marketplaces.map((mp) => storefrontName(channel, mp, m)).join(', ');
 
-export function channelCell(c: StockChannelRow, m: Messages, world: Pick<StandWorld, 'accounts'> | null = null): StockChannelCell {
+/**
+ * Шаг 138 (INV-01): к публикации — с расчётом: доступное минус буфер в силе, потолок и порог выставления. Источник каждой удержанной
+ * штуки — на строке; правило то же, что `publishedQuantity` (stock-sync) и SQL хранилища
+ */
+function toPublishWithCalc(c: StockChannelRow, available: number | null, m: Messages): string {
+  const s = m.ui.stock.channel;
+  const a = c.allocation;
+  if (!a || available === null) return s.toPublish(c.published);
+  const afterBuffer = Math.max(0, available - a.bufferUnits);
+  const capped = a.maxQuantity !== null && afterBuffer > a.maxQuantity;
+  const belowMin = !capped && afterBuffer < a.minQuantityToList;
+  return s.toPublishCalc({ published: c.published, available, buffer: a.bufferUnits, afterBuffer, cap: capped ? a.maxQuantity : null, min: belowMin ? a.minQuantityToList : null });
+}
+
+export function channelCell(c: StockChannelRow, m: Messages, world: Pick<StandWorld, 'accounts'> | null = null, available: number | null = null): StockChannelCell {
   const s = m.ui.stock.channel;
   const channelName = (m.values as Record<string, string | undefined>)[c.channel] ?? c.channel;
   const awaitingAck = c.sideEffects.requiresAck && !c.sideEffects.acknowledged;
@@ -141,9 +155,9 @@ export function channelCell(c: StockChannelRow, m: Messages, world: Pick<StandWo
     sentText,
     // Р-190 (находка 9 ревью шага 49): подтверждение только нашей записью у канала названо словами
     confirmedText,
-    toPublishText: c.syncEnabled ? s.toPublish(c.published) : null,
+    toPublishText: c.syncEnabled ? toPublishWithCalc(c, available, m) : null,
     differsText: c.syncEnabled && c.confirmed && c.confirmed.quantity !== c.published ? s.channelShows(c.confirmed.quantity) : null,
-    detailText: [sharedText, c.syncEnabled ? `${s.published(c.published)}; ${sentText}; ${confirmedText}` : awaitingAck ? s.awaitingAck : s.off].filter(Boolean).join('; '),
+    detailText: [sharedText, c.syncEnabled ? `${c.allocation && available !== null ? toPublishWithCalc(c, available, m) : s.published(c.published)}; ${sentText}; ${confirmedText}` : awaitingAck ? s.awaitingAck : s.off].filter(Boolean).join('; '),
     state, at: times.at(-1) ?? null,
     divergedText: c.divergence ? s.diverged(status(c.divergence.status), m.when(c.divergence.since)) : null,
     awaitingAck,
@@ -161,7 +175,7 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
   const search = filter.search?.trim() ?? '';
   const filtered = search !== '' || filter.withReservations === true;
   const channelName = (channel: string) => (m.values as Record<string, string | undefined>)[channel] ?? channel;
-  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m, world)),
+  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m, world, r.available)),
     channelManaged: (r.channelManaged ?? []).map((c) => ({
       text: t.channel.managedShort(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity),
       detail: t.channel.managedByChannel(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity, m.when(c.observedAt)),

@@ -182,6 +182,11 @@ export interface StockChannelRow {
   syncEnabled: boolean;
   /** Что мы посчитали к публикации по правилу буфера — ещё до записи */
   published: number;
+  /**
+   * Шаг 138 (INV-01): сохранённые настройки аккаунта, по которым посчитано `published`, — экран называет источник каждой удержанной
+   * штуки (буфер, потолок, порог выставления). Нет строки настроек — null
+   */
+  allocation?: { bufferUnits: number; maxQuantity: number | null; minQuantityToList: number } | null;
   /** Последняя запись в канал: в полёте или завершённая */
   sent: { quantity: number; status: string; at: Instant; version: number } | null;
   /** Последняя запись, которую канал ПОДТВЕРДИЛ обратным чтением (APPLIED) */

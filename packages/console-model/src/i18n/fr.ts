@@ -788,6 +788,8 @@ export const fr: Messages = {
         managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `géré par ${channel} · ${marketplace} : ${n} (${when}) — affiché seulement, nous ne le modifions jamais`,
         // Шаг 96.1: строка — коротко; что значит состояние и на какой момент — один раз над таблицей
         toPublish: (n: number) => `${n} à publier`,
+        // Шаг 138 (INV-01): к публикации — с расчётом; источник каждой удержанной штуки на строке
+        toPublishCalc: (x: { published: number; available: number; buffer: number; afterBuffer: number; cap: number | null; min: number | null }) => `${x.published} à publier = ${x.available} disponibles − réserve ${x.buffer}${x.cap !== null ? `, plafonné au maximum publié ${x.cap}` : ''}${x.min !== null ? ` = ${x.afterBuffer}, sous le minimum pour publier ${x.min}` : ''}`,
         channelShows: (n: number) => `le canal affiche ${n}`,
         managedShort: (channel: string, marketplace: string, n: number) => `${channel} · ${marketplace} — ${n}, géré par ${channel}`,
         asOf: (when: string) => `Chiffres du canal : ${when}.`,
@@ -852,7 +854,7 @@ export const fr: Messages = {
       enable: {
         title: 'Synchronisation',
         // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
-        buffer: 'Réserve par canal', bufferCaption: 'Pièces non publiées sur chaque canal.',
+        buffer: 'Réserve par canal', bufferCaption: 'Pièces non publiées sur chaque canal. S’applique au compte que vous activez ci-dessous ; la réserve en vigueur figure sur chaque ligne ci-dessus.',
         maxQuantity: 'Maximum publié', maxQuantityCaption: 'Laissez vide pour ne pas plafonner.',
         minToList: 'Minimum pour publier', minToListCaption: 'En dessous de ce nombre, l’offre est publiée avec 0.',
         acknowledgeCaption: 'Sans votre confirmation, la synchronisation de ce compte ne démarre pas.',

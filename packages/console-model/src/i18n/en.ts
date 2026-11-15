@@ -789,6 +789,8 @@ export const en = {
         managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `managed by ${channel} · ${marketplace}: ${n} (${when}) — shown only, we never change it`,
         // Шаг 96.1: строка — коротко; что значит состояние и на какой момент — один раз над таблицей
         toPublish: (n: number) => `${n} to publish`,
+        // Шаг 138 (INV-01): к публикации — с расчётом; источник каждой удержанной штуки на строке
+        toPublishCalc: (x: { published: number; available: number; buffer: number; afterBuffer: number; cap: number | null; min: number | null }) => `${x.published} to publish = ${x.available} available − buffer ${x.buffer}${x.cap !== null ? `, capped at the maximum published ${x.cap}` : ''}${x.min !== null ? ` = ${x.afterBuffer}, below the minimum to list ${x.min}` : ''}`,
         channelShows: (n: number) => `channel shows ${n}`,
         managedShort: (channel: string, marketplace: string, n: number) => `${channel} · ${marketplace} — ${n}, managed by ${channel}`,
         asOf: (when: string) => `Channel figures as of ${when}.`,
@@ -853,7 +855,7 @@ export const en = {
       enable: {
         title: 'Synchronization',
         // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
-        buffer: 'Buffer per channel', bufferCaption: 'Pieces kept back from every channel.',
+        buffer: 'Buffer per channel', bufferCaption: 'Pieces kept back from every channel. Applies to the account you enable below; the buffer in force is shown on every row above.',
         maxQuantity: 'Maximum published', maxQuantityCaption: 'Leave empty for no cap.',
         minToList: 'Minimum to list', minToListCaption: 'Below this number the offer is listed as 0.',
         acknowledgeCaption: 'Without your confirmation synchronization of this account does not start.',

@@ -275,6 +275,30 @@ test('step 64: a stock quantity held by shadow mode is not shown as sent, and no
 });
 
 /**
+ * Шаг 138 (INV-01 отчёта Мердана «QA-A Bug & Findings Report 1.0»): «on-hand 60, reserved 1, available 59, к публикации 57», а форма
+ * Synchronization показывала «Buffer per channel = 0». Арифметика верна — у аккаунта сохранён буфер 2 (демо, `demo-world.ts`), но строка
+ * его не называла, а поле формы — значение по умолчанию, а не сохранённое. Теперь строка называет расчёт: доступное минус буфер, потолок и
+ * порог выставления — источник каждой удержанной штуки на экране
+ */
+test('step 138 (INV-01): the quantity to publish names its calculation — available minus the buffer in force, the cap and the listing threshold', async () => {
+  const { channelCell } = await import('./stock.ts');
+  const row = (allocation: { bufferUnits: number; maxQuantity: number | null; minQuantityToList: number }, published: number) => ({ writeScopeId: 'ws-q', channelAccountId: 'acc',
+    channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'], syncEnabled: true, published, allocation, sent: null, confirmed: null, divergence: null,
+    sideEffects: { requiresAck: false, acknowledged: false, text: null } });
+  const en = messagesFor('en');
+  assert.equal(channelCell(row({ bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 }, 57) as never, en, null, 59).toPublishText,
+    '57 to publish = 59 available − buffer 2', 'the holdback of 2 has its source on the row');
+  assert.equal(channelCell(row({ bufferUnits: 7, maxQuantity: 5, minQuantityToList: 3 }, 5) as never, en, null, 21).toPublishText,
+    '5 to publish = 21 available − buffer 7, capped at the maximum published 5');
+  assert.equal(channelCell(row({ bufferUnits: 7, maxQuantity: 5, minQuantityToList: 3 }, 0) as never, en, null, 9).toPublishText,
+    '0 to publish = 9 available − buffer 7 = 2, below the minimum to list 3');
+  for (const locale of ['de', 'es', 'fr'] as const) {
+    const text = channelCell(row({ bufferUnits: 2, maxQuantity: null, minQuantityToList: 0 }, 57) as never, messagesFor(locale), null, 59).toPublishText ?? '';
+    assert.match(text, /57[^0-9]+59[^0-9]+2/, `${locale}: ${text}`);
+  }
+});
+
+/**
  * Шаг 64 (ревью, мелкая): ловушка остатка Amazon выбирается по витрине аккаунта — продавцу amazon.com нельзя называть amazon.fr, .it, .es,
  * а продавцу amazon.de — Северную Америку. Правило теста консоли принимает оба текста, поэтому неверный выбор ловит только эта проверка
  */

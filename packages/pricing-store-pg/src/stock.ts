@@ -905,6 +905,8 @@ export class PgStockStore implements StockStore {
       writeScopeId: r.write_scope_id, channelAccountId: r.channel_account_id, channel: r.channel, marketplaces: (r.marketplaces ?? []) as string[],
       syncEnabled: r.quantity_sync_enabled === true,
       published: publishedQuantity(availableOf(Number(r.on_hand), Number(r.reserved)), allocation),
+      // Шаг 138 (INV-01): настройки аккаунта, по которым посчитано число, — у строки, чтобы экран показал расчёт
+      allocation: r.buffer_units === null || r.buffer_units === undefined ? null : allocation,
       sent: r.sent_quantity === null || r.sent_quantity === undefined ? null : { quantity: Number(r.sent_quantity), status: r.sent_status, at: iso(r.sent_at), version: Number(r.sent_version) },
       confirmed: r.confirmed_quantity === null || r.confirmed_quantity === undefined ? null
         : { quantity: Number(r.confirmed_quantity), at: iso(r.confirmed_at), ...(r.confirmed_own_record === true ? { ownRecordOnly: true } : {}) },

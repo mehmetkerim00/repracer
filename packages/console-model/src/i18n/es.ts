@@ -788,6 +788,8 @@ export const es: Messages = {
         managedByChannel: (channel: string, marketplace: string, n: number, when: string) => `gestionado por ${channel} · ${marketplace}: ${n} (${when}); solo se muestra, nunca lo cambiamos`,
         // Шаг 96.1: строка — коротко; что значит состояние и на какой момент — один раз над таблицей
         toPublish: (n: number) => `${n} para publicar`,
+        // Шаг 138 (INV-01): к публикации — с расчётом; источник каждой удержанной штуки на строке
+        toPublishCalc: (x: { published: number; available: number; buffer: number; afterBuffer: number; cap: number | null; min: number | null }) => `${x.published} para publicar = ${x.available} disponibles − colchón ${x.buffer}${x.cap !== null ? `, limitado al máximo publicado ${x.cap}` : ''}${x.min !== null ? ` = ${x.afterBuffer}, por debajo del mínimo para publicar ${x.min}` : ''}`,
         channelShows: (n: number) => `el canal muestra ${n}`,
         managedShort: (channel: string, marketplace: string, n: number) => `${channel} · ${marketplace} — ${n}, gestionado por ${channel}`,
         asOf: (when: string) => `Cifras del canal con fecha ${when}.`,
@@ -852,7 +854,7 @@ export const es: Messages = {
       enable: {
         title: 'Sincronización',
         // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
-        buffer: 'Colchón por canal', bufferCaption: 'Unidades que se descuentan de lo publicado en cada canal.',
+        buffer: 'Colchón por canal', bufferCaption: 'Unidades que se descuentan de lo publicado en cada canal. Se aplica a la cuenta que active abajo; el colchón vigente se muestra en cada fila de arriba.',
         maxQuantity: 'Máximo publicado', maxQuantityCaption: 'Déjelo vacío para no poner tope.',
         minToList: 'Mínimo para publicar', minToListCaption: 'Por debajo de esta cifra, la oferta se publica con 0.',
         acknowledgeCaption: 'Sin su confirmación, la sincronización de esta cuenta no empieza.',
