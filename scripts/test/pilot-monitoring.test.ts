@@ -200,24 +200,89 @@ test('step 129: pull — a ping after each pass, /fail when it is red, the addre
   assert.ok(statSync(hb).isFile());
 });
 
-/** Модель API healthchecks.io: POST /api/v3/checks/ с X-Api-Key, upsert по slug (201 — заведена, 200 — обновлена) */
-function modelHealthchecks(): { server: Server; bodies: Array<Record<string, unknown>> } {
+/**
+ * Модель API healthchecks.io (снимок vendor/healthchecks, страница API): POST /api/v3/checks/ с X-Api-Key, upsert по slug (201 — заведена,
+ * 200 — обновлена); `channels: "*"` назначает все СУЩЕСТВУЮЩИЕ интеграции проекта; GET /api/v3/channels/ — интеграции проекта;
+ * GET /api/v3/checks/ — проверки, у каждой `channels` — идентификаторы интеграций через запятую. `ignoreStar` — модель, которая «*» не
+ * назначает: так проверка остаётся без получателя, как бы это ни случилось у настоящего сервиса.
+ */
+function modelHealthchecks(integrations: string[] = ['00000000-0000-4000-8000-00000000e1a1']):
+  { server: Server; bodies: Array<Record<string, unknown>>; integrations: string[]; ignoreStar: { on: boolean } } {
   const bodies: Array<Record<string, unknown>> = [];
-  const known = new Map<string, string>();
+  const known = new Map<string, { ping: string; channels: string }>();
+  const ignoreStar = { on: false };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
-    if (req.method !== 'POST' || req.url !== '/api/v3/checks/' || req.headers['x-api-key'] !== 'syn-hc-api-key') { res.writeHead(401); res.end('{}'); return; }
+    if (req.headers['x-api-key'] !== 'syn-hc-api-key') { res.writeHead(401); res.end('{}'); return; }
+    const json = (code: number, v: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
+    if (req.method === 'GET' && req.url === '/api/v3/channels/') { json(200, { channels: integrations.map((id) => ({ id, name: '', kind: 'email' })) }); return; }
+    if (req.method === 'GET' && req.url === '/api/v3/checks/') {
+      json(200, { checks: [...known].map(([slug, c]) => ({ slug, ping_url: c.ping, channels: c.channels })) });
+      return;
+    }
+    if (req.method !== 'POST' || req.url !== '/api/v3/checks/') { res.writeHead(404); res.end('{}'); return; }
     const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
     bodies.push(body);
     const slug = String(body.slug);
-    const existed = known.has(slug);
-    if (!existed) known.set(slug, `https://hc-ping.invalid/${createHash('sha256').update(slug).digest('hex').slice(0, 32)}`);
-    res.writeHead(existed ? 200 : 201, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ slug, ping_url: known.get(slug) }));
+    const existed = known.get(slug);
+    const ping = existed?.ping ?? `https://hc-ping.invalid/${createHash('sha256').update(slug).digest('hex').slice(0, 32)}`;
+    const channels = body.channels === '*' && !ignoreStar.on ? integrations.join(',') : (existed?.channels ?? '');
+    known.set(slug, { ping, channels });
+    json(existed ? 200 : 201, { slug, ping_url: ping, channels });
   });
-  return { server, bodies };
+  return { server, bodies, integrations, ignoreStar };
 }
+
+/** Асинхронно: модель API живёт в этом же процессе, и spawnSync остановил бы её цикл событий на время запуска скрипта */
+function setupRun(api: string, secrets: string, ...args: string[]): Promise<{ code: number | null; out: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('node', [join(root, 'scripts/setup-heartbeats.mjs'), ...args],
+      { env: { PATH: process.env.PATH ?? '', HOME: work, HC_API_KEY: 'syn-hc-api-key', HC_API_URL: api, REPRACER_PILOT_LOCAL_SECRETS: secrets } });
+    let out = '';
+    child.stdout.on('data', (d) => { out += String(d); });
+    child.stderr.on('data', (d) => { out += String(d); });
+    child.on('close', (code) => resolve({ code, out }));
+  });
+}
+
+test('step 134: setup-heartbeats refuses a project without integrations before it creates anything, and refuses to write addresses of checks left without a recipient', async () => {
+  const model = modelHealthchecks([]);
+  await new Promise<void>((resolve) => model.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const api = `http://127.0.0.1:${(model.server.address() as AddressInfo).port}/api/v3`;
+    const secrets = join(work, 'setup134-secrets', 'pilot');
+    // Проект без интеграций: «*» назначил бы ноль — отказ до первой проверки (так было с первым настоящим заведением пилота 2026-11-15)
+    const empty = await setupRun(api, secrets, '--stand', 'pilot');
+    assert.equal(empty.code, 1, empty.out);
+    assert.match(empty.out, /в проекте healthchecks\.io нет ни одной интеграции/);
+    assert.match(empty.out, /Integrations → Email/);
+    assert.equal(model.bodies.length, 0, 'not one check is created');
+    assert.ok(!existsSync(join(secrets, 'scheduler_heartbeat_url')), 'no address file');
+    // Интеграция есть, но проверки остались без получателя: адреса не записываются, отказ называет проверки
+    model.integrations.push('00000000-0000-4000-8000-00000000e1a1');
+    model.ignoreStar.on = true;
+    const bare = await setupRun(api, secrets, '--stand', 'pilot');
+    assert.equal(bare.code, 1, bare.out);
+    assert.match(bare.out, /без получателя: repracer-pilot-scheduler, /);
+    assert.match(bare.out, /адреса НЕ записаны/);
+    assert.ok(!existsSync(join(secrets, 'scheduler_heartbeat_url')), 'no address of a check without a recipient');
+    // Получатель назначен (upsert обновляет те же проверки) — адреса пишутся, у каждой проверки получатель
+    model.ignoreStar.on = false;
+    const good = await setupRun(api, secrets, '--stand', 'pilot');
+    assert.equal(good.code, 0, good.out);
+    assert.match(good.out, /интеграций в проекте: 1/);
+    assert.match(good.out, /получатель есть у всех 7 проверок/);
+    assert.match(readFileSync(join(secrets, 'scheduler_heartbeat_url'), 'utf8'), /^https:\/\/hc-ping\.invalid\/[0-9a-f]{32}\n$/);
+    // Пробный запуск тоже говорит о проекте без интеграций правду
+    model.integrations.length = 0;
+    const dry = await setupRun(api, secrets, '--stand', 'qa-b', '--dry-run');
+    assert.equal(dry.code, 1, dry.out);
+    assert.match(dry.out, /нет ни одной интеграции/);
+  } finally {
+    model.server.close();
+  }
+});
 
 test('step 129, step 130: setup-heartbeats --stand pilot — seven checks with notifications, address files 600 (the pull one outside the server secrets), nothing printed, a second run changes nothing', async () => {
   const model = modelHealthchecks();
@@ -226,15 +291,7 @@ test('step 129, step 130: setup-heartbeats --stand pilot — seven checks with n
     const api = `http://127.0.0.1:${(model.server.address() as AddressInfo).port}/api/v3`;
     const secrets = join(work, 'setup-secrets', 'pilot');
     mkdirSync(secrets, { recursive: true });
-    // Асинхронно: модель API живёт в этом же процессе, и spawnSync остановил бы её цикл событий на время запуска скрипта
-    const run = (...args: string[]) => new Promise<{ code: number | null; out: string }>((resolve) => {
-      const child = spawn('node', [join(root, 'scripts/setup-heartbeats.mjs'), ...args],
-        { env: { PATH: process.env.PATH ?? '', HOME: work, HC_API_KEY: 'syn-hc-api-key', HC_API_URL: api, REPRACER_PILOT_LOCAL_SECRETS: secrets } });
-      let out = '';
-      child.stdout.on('data', (d) => { out += String(d); });
-      child.stderr.on('data', (d) => { out += String(d); });
-      child.on('close', (code) => resolve({ code, out }));
-    });
+    const run = (...args: string[]) => setupRun(api, secrets, ...args);
     const first = await run('--stand', 'pilot');
     assert.equal(first.code, 0, first.out);
     const bySlug = new Map(model.bodies.map((b) => [b.slug, b]));

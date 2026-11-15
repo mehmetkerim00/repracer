@@ -15,6 +15,10 @@
  * Факты API — снимок vendor/healthchecks/2026-09-17/SOURCE.md:
  *  - `unique: ['slug']` — документированный «upsert»: 201 при создании, 200 при обновлении, поэтому повторный запуск ничего не плодит;
  *  - `channels: '*'` — без него новая проверка не получает НИ ОДНОЙ интеграции, и пропуск отметки не даёт ни одного письма (находка шага 129).
+ *  - Шаг 134: «*» назначает только СУЩЕСТВУЮЩИЕ интеграции проекта. Первое настоящее заведение пилота (2026-11-15) прошло в проекте без
+ *    интеграций: семь проверок «готовы», получателей ноль. Поэтому до заведения скрипт спрашивает интеграции проекта (GET /api/v3/channels/)
+ *    и без них отказывает, ничего не заводя. После заведения он сверяет, что у каждой проверки есть получатель (поле `channels` в
+ *    GET /api/v3/checks/). Проверку без получателя адрес не получает, и запуск красный.
  *
  * Использование:
  *   HC_API_KEY=<ключ проекта> node scripts/setup-heartbeats.mjs --stand pilot [--dry-run]
@@ -73,6 +77,21 @@ async function api(path, init = {}) {
   return response.json();
 }
 
+// Шаг 134: интеграции проекта — до первой проверки, и в пробном запуске тоже (только чтение)
+let integrations;
+try {
+  integrations = (await api('/channels/')).channels;
+} catch (error) {
+  console.error(`не удалось прочитать интеграции проекта: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`);
+  process.exit(1);
+}
+if (!Array.isArray(integrations) || integrations.length === 0) {
+  console.error('в проекте healthchecks.io нет ни одной интеграции — проверки не дали бы ни одного письма («*» назначает только существующие).');
+  console.error('Добавьте в проект получателя: Integrations → Email → адрес (если сервис попросит — подтвердить по ссылке из письма), затем запустите снова. Ничего не заведено.');
+  process.exit(1);
+}
+console.log(`интеграций в проекте: ${integrations.length}`);
+
 const created = [];
 try {
   for (const check of CHECKS) {
@@ -82,6 +101,17 @@ try {
     if (typeof result.ping_url !== 'string' || !result.ping_url.startsWith('https://')) throw new Error(`${check.slug}: в ответе нет адреса https`);
     created.push({ ...check, pingUrl: result.ping_url });
     console.log(`проверка ${check.slug}: готова`);
+  }
+  // Шаг 134: получатель у каждой проверки — по тому, что сервис хранит, а не по тому, что мы попросили
+  if (!dryRun) {
+    const listed = new Map(((await api('/checks/')).checks ?? []).map((c) => [c.slug, c]));
+    const bare = created.filter((c) => !String(listed.get(c.slug)?.channels ?? '').split(',').some((id) => id.trim() !== ''));
+    if (bare.length > 0) {
+      console.error(`проверки без получателя: ${bare.map((c) => c.slug).join(', ')} — пропуск отметки не дал бы письма; адреса НЕ записаны.`);
+      console.error('Проверьте интеграции проекта (Integrations) и запустите снова: тот же запуск обновит эти проверки, а не заведёт новые.');
+      process.exit(1);
+    }
+    console.log(`получатель есть у всех ${created.length} проверок`);
   }
 } catch (error) {
   // Частичный итог называется вслух: иначе часть проверок заведена, а часть адресов не записана, и это незаметно

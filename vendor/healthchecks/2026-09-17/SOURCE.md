@@ -36,5 +36,17 @@
 пропуск отметки не дал бы ни одного письма. Теперь скрипт передаёт `channels: "*"`, и тест держит это на модели API
 (`scripts/test/pilot-monitoring.test.ts`).
 
+## Шаг 134: интеграции проекта
+
+Загружено 2026-11-15 (UTC) командой `curl -L`, ответ 200. Сумма страницы API та же, что в таблице выше (`8dbb6fcf…`): страница не менялась.
+
+| Страница | Что взято |
+|---|---|
+| https://healthchecks.io/docs/api/ | «Set this field to a special value "*" to automatically assign all **existing** integrations» — в проекте без интеграций «*» не назначает никого; «Integrations — List existing integrations — `GET https://healthchecks.io/api/v3/channels/`»; у проверки в ответах API поле `channels` — идентификаторы интеграций через запятую; `unique`: «If Healthchecks.io finds a matching check, it updates the existing check and returns it with HTTP status code 200» |
+
+**Находка шага 134.** Первое настоящее заведение проверок пилота (2026-11-15) прошло в проекте без единой интеграции: семь проверок «готовы»,
+у каждой ноль получателей (`GET /api/v3/channels/` — пустой список, у проверок `channels` пустое). Теперь `setup-heartbeats.mjs` без
+интеграций отказывает до первой проверки и после заведения сверяет получателя у каждой.
+
 Не проверено (нет аккаунта): что письмо действительно приходит при пропуске отметки и за какое время после Period + Grace Time; что сервис
 принимает отметки с адресов нашего развёртывания. План проверки — docs/evidence/step26-external-control.md.
