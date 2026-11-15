@@ -25,6 +25,15 @@ const sh = (script: string, args: string[], env: Record<string, string> = {}, in
   const r = spawnSync('bash', [join(root, script), ...args], { env: { PATH: process.env.PATH ?? '', HOME: work, ...env }, encoding: 'utf8', input });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 };
+/** Шаг 133: каталоги журналов «сервера» рядом с каталогом копий — отметка «выгружено по» и пустой каталог месячных архивов, как после первого захода */
+function serverLogs(server: string): Record<string, string> {
+  const logs = `${server}-logs`;
+  const archive = `${server}-archive`;
+  mkdirSync(join(logs, 'repracer-pilot'), { recursive: true });
+  mkdirSync(join(archive, 'platform=logs', 'repracer-pilot'), { recursive: true });
+  writeFileSync(join(logs, 'repracer-pilot', '.until'), new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'));
+  return { REPRACER_PILOT_REMOTE_LOGS_DIR: logs, REPRACER_PILOT_REMOTE_ARCHIVE_DIR: archive };
+}
 /** Копия так, как её оставляет backup-loop: две части и файл сумм (пишется последним) */
 function copy(dir: string, stamp: string, { sums = true, content = `syn-copy-${stamp}` } = {}): void {
   mkdirSync(dir, { recursive: true });
@@ -143,11 +152,12 @@ test('step 126: pull — the operator machine takes every finished copy over SSH
   copy(server, old);
   copy(server, stampOf(HOUR / 2), { sums: false }); // ещё пишется — без файла сумм
   writeFileSync(join(server, `repracer-${stampOf(HOUR / 2)}.dump.gpg.part`), 'partial');
-  const pull = () => sh('deploy/pilot/pull-backups.sh', ['deploy@server.invalid', local], { PATH: `${bin}:${process.env.PATH ?? ''}`, REPRACER_PILOT_REMOTE_BACKUP_DIR: server });
+  // Шаг 133: тем же проходом выносятся журналы — здесь их ещё нет (scripts/test/pilot-logs.test.ts), только отметка «выгружено по» и каталог архивов
+  const pull = () => sh('deploy/pilot/pull-backups.sh', ['deploy@server.invalid', local], { PATH: `${bin}:${process.env.PATH ?? ''}`, REPRACER_PILOT_REMOTE_BACKUP_DIR: server, ...serverLogs(server) });
   const first = pull();
   assert.equal(first.code, 0, first.out);
   assert.match(first.out, new RegExp(`PULL GREEN: новых копий 2, последняя repracer-${fresh}`));
-  const taken = readdirSync(local).sort();
+  const taken = readdirSync(local).filter((f) => f !== 'logs').sort(); // logs — журналы (шаг 133)
   assert.deepEqual(taken, [yesterday, fresh].sort().flatMap((s) => [`repracer-${s}.dump.gpg`, `repracer-${s}.globals.sql.gpg`, `repracer-${s}.sha256`]),
     'finished copies within 7 days only: no copy still being written, no part, nothing older than the retention');
   assert.equal(readFileSync(join(local, `repracer-${fresh}.dump.gpg`), 'utf8'), `syn-copy-${fresh}-dump`, 'the bytes of the copy');

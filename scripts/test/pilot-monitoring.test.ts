@@ -163,8 +163,13 @@ test('step 129: pull — a ping after each pass, /fail when it is red, the addre
   const hb = join(work, 'pilot-pull-heartbeat-url');
   const fresh = stampOf(HOUR);
   copy(server, fresh);
+  // Шаг 133: тем же проходом выносятся журналы — здесь только отметка «выгружено по» и каталог архивов (сам вынос — scripts/test/pilot-logs.test.ts)
+  const logs = { REPRACER_PILOT_REMOTE_LOGS_DIR: `${server}-logs`, REPRACER_PILOT_REMOTE_ARCHIVE_DIR: `${server}-archive` };
+  mkdirSync(join(logs.REPRACER_PILOT_REMOTE_LOGS_DIR, 'repracer-pilot'), { recursive: true });
+  mkdirSync(join(logs.REPRACER_PILOT_REMOTE_ARCHIVE_DIR, 'platform=logs', 'repracer-pilot'), { recursive: true });
+  writeFileSync(join(logs.REPRACER_PILOT_REMOTE_LOGS_DIR, 'repracer-pilot', '.until'), new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'));
   const pull = (env: Record<string, string> = {}) => sh('deploy/pilot/pull-backups.sh', ['deploy@server.invalid', local],
-    { PATH: `${bin}:${process.env.PATH ?? ''}`, REPRACER_PILOT_REMOTE_BACKUP_DIR: server, REPRACER_PILOT_PULL_HEARTBEAT_URL_FILE: hb, ...env });
+    { PATH: `${bin}:${process.env.PATH ?? ''}`, REPRACER_PILOT_REMOTE_BACKUP_DIR: server, REPRACER_PILOT_PULL_HEARTBEAT_URL_FILE: hb, ...logs, ...env });
   // Без адреса отметки вынос идёт (копии важнее), но отметка говорит «не под контролем», и смоук это назовёт
   const unmonitored = pull();
   assert.equal(unmonitored.code, 0, unmonitored.out);

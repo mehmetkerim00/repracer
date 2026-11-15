@@ -3,7 +3,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { after, before, test } from 'node:test';
 
 /**
@@ -31,7 +32,7 @@ before(() => {
   work = mkdtempSync(join(tmpdir(), 'repracer-pilot-logs-'));
   // Копия нужных файлов репозитория рядом со своим pilot.env (в репозитории его нет: он на сервере)
   repo = join(work, 'repo');
-  for (const f of ['deploy/pilot/logs-archive.sh', 'deploy/pilot/logs-cron.sh', 'deploy/pilot/logs-state.sh', 'deploy/production/logs-archive.sh']) {
+  for (const f of ['deploy/pilot/logs-archive.sh', 'deploy/pilot/logs-cron.sh', 'deploy/pilot/logs-state.sh', 'deploy/production/logs-archive.sh', 'deploy/pilot/pull-backups.sh']) {
     mkdirSync(join(repo, f, '..'), { recursive: true });
     if (existsSync(join(root, f))) copyFileSync(join(root, f), join(repo, f));
   }
@@ -45,7 +46,10 @@ before(() => {
   writeFileSync(join(bin, 'docker'), '#!/bin/bash\nif [ -e "$DOCKER_FAIL" ]; then echo "no such project" >&2; exit 1; fi\necho "$3 $8 .. ${10}"\n');
   writeFileSync(join(bin, 'curl'), `#!/bin/bash\nprintf 'ARGS %s\\n' "$*" >> '${join(work, 'curl.log')}'\nsed 's/^/STDIN /' >> '${join(work, 'curl.log')}'\n`);
   writeFileSync(join(bin, 'crontab'), `#!/bin/bash\nf='${join(work, 'crontab.txt')}'\nif [ "$1" = -l ]; then [ -e "$f" ] && cat "$f" || { echo "no crontab for deploy" >&2; exit 1; }; elif [ "$1" = - ]; then cat > "$f"; fi\n`);
-  for (const c of ['docker', 'curl', 'crontab']) chmodSync(join(bin, c), 0o755);
+  // Шаг 133: `ssh <адрес> <команда>` — та же команда локальной оболочкой: сервер прогона — каталоги рядом. Как настоящий ssh, подмена читает
+  // стандартный ввод до конца: ssh внутри `while read` без </dev/null съел бы строки цикла
+  writeFileSync(join(bin, 'ssh'), '#!/bin/bash\nshift\ncat > /dev/null\nexec bash -c "$*"\n');
+  for (const c of ['docker', 'curl', 'crontab', 'ssh']) chmodSync(join(bin, c), 0o755);
   writeFileSync(join(secrets, 'logs_heartbeat_url'), `${PING}\n`);
 });
 after(() => { if (work) rmSync(work, { recursive: true, force: true }); });
@@ -111,9 +115,102 @@ test('step 130: logs-state.sh — red without the daily run, with a failure mark
   writeFileSync(join(hot, 'LOGS_ARCHIVE_FAILED'), '{"code":"LOGS_ARCHIVE_FAILED","at":"x"}\n');
   red(/выгрузка журналов проваливается/);
   rmSync(join(hot, 'LOGS_ARCHIVE_FAILED'));
+  // Шаг 133: и вынесены с сервера под внешним контролем (отдельный тест ниже)
+  writeFileSync(join(hot, 'LOGS_PULLED'), `{"pulledBefore":"x","at":"${stamp(HOUR)}","monitored":true}\n`);
   const green = state();
   assert.equal(green.code, 0, green.out);
   assert.match(green.out, /LOGS GREEN: /);
+});
+
+const HOUR = 3_600_000;
+const stamp = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+const ymd = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().slice(0, 10);
+const monthAgo = (n: number) => { const d = new Date(); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, 1)).toISOString().slice(0, 7); };
+const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+
+test('step 133: logs-state.sh — red while the logs have not left the server, when the last pull is older than 26 hours or not under external control', () => {
+  const hot = join(work, 'state133-logs');
+  mkdirSync(join(hot, 'repracer-pilot'), { recursive: true });
+  writeFileSync(join(work, 'crontab.txt'), `20 0 * * * cd '${repo}' && deploy/pilot/logs-archive.sh 2>&1 | logger -t repracer-pilot-logs-archive\n`);
+  writeFileSync(join(hot, 'repracer-pilot', '.until'), new Date(Date.now() - HOUR).toISOString().replace(/\.\d{3}Z$/, 'Z'));
+  const state = () => run('deploy/pilot/logs-state.sh', [hot]);
+  const red = (why: RegExp) => { const r = state(); assert.equal(r.code, 1, r.out); assert.match(r.out, /LOGS RED: /); assert.match(r.out, why); };
+  red(/журналы не выносились с сервера — на машине оператора: deploy\/pilot\/pull-backups\.sh/);
+  writeFileSync(join(hot, 'LOGS_PULLED'), `{"pulledBefore":"x","at":"${stamp(30 * HOUR)}","monitored":true}\n`);
+  red(/журналы не выносились с сервера дольше 26 ч/);
+  writeFileSync(join(hot, 'LOGS_PULLED'), `{"pulledBefore":"x","at":"${stamp(HOUR)}","monitored":false}\n`);
+  red(/вынос журналов не под внешним контролем/);
+  writeFileSync(join(hot, 'LOGS_PULLED'), `{"pulledBefore":"x","at":"${stamp(HOUR)}","monitored":true}\n`);
+  const green = state();
+  assert.equal(green.code, 0, green.out);
+  assert.match(green.out, /LOGS GREEN: .*вне сервера — машина оператора/);
+});
+
+test('step 133: pull-backups.sh takes the month archives and the finished days of the pilot logs too — SHA-256 before it accepts, 13 months, LOGS_PULLED on the server', () => {
+  const server = join(work, 'pull133');
+  const backups = join(server, 'backups');
+  const hotP = join(server, 'logs', 'repracer-pilot');
+  const months = join(server, 'archive', 'platform=logs', 'repracer-pilot');
+  const local = join(work, 'pull133-local');
+  const logs = join(local, 'logs');
+  // Копия базы — как её оставляет backup-loop: вынос копий идёт первым и без неё красный
+  mkdirSync(backups, { recursive: true });
+  const s = stamp(HOUR);
+  const dump = Buffer.from('syn-dump');
+  const globals = Buffer.from('syn-globals');
+  writeFileSync(join(backups, `repracer-${s}.dump.gpg`), dump);
+  writeFileSync(join(backups, `repracer-${s}.globals.sql.gpg`), globals);
+  writeFileSync(join(backups, `repracer-${s}.sha256`), `${sha(dump)}\n${sha(globals)}\n`);
+  // Сервер: выгружено по сегодня 09:00 — законченные сутки до сегодняшних; сегодняшние ещё дописываются; рядом — следы оборванного захода
+  const today = ymd(0);
+  const [d1, d2] = [ymd(24 * HOUR), ymd(48 * HOUR)];
+  mkdirSync(hotP, { recursive: true });
+  writeFileSync(join(hotP, '.until'), `${today}T09:00:00Z`);
+  for (const d of [d1, d2, today]) writeFileSync(join(hotP, `${d}.log.gz`), gzipSync(`syn-log ${d}\n`));
+  writeFileSync(join(hotP, `${today}.log.gz.new`), 'partial');
+  writeFileSync(join(hotP, '.until.pending'), 'x');
+  // Месячные архивы — с суммой, как их пишет logs-archive.sh; архив старше 13 месяцев не берётся
+  const month = (m: string, body = gzipSync(`syn-month ${m}\n`), sum = sha(body)) => {
+    mkdirSync(months, { recursive: true });
+    writeFileSync(join(months, `${m}.log.gz`), body);
+    writeFileSync(join(months, `${m}.log.gz.sha256`), `${sum}\n`);
+  };
+  const [m2, m3] = [monthAgo(2), monthAgo(3)];
+  month(m2);
+  month(m3);
+  month(monthAgo(14));
+  // Здесь от прошлых проходов: сутки месяца, который теперь пришёл архивом, и всё старше 13 месяцев — уходят
+  mkdirSync(logs, { recursive: true });
+  writeFileSync(join(logs, `${m2}-10.log.gz`), gzipSync('syn'));
+  writeFileSync(join(logs, `${monthAgo(15)}.log.gz`), gzipSync('syn'));
+  writeFileSync(join(logs, `${monthAgo(15)}.log.gz.sha256`), 'x\n');
+  writeFileSync(join(logs, `${monthAgo(14)}-03.log.gz`), gzipSync('syn'));
+  const pull = () => run('deploy/pilot/pull-backups.sh', ['deploy@server.invalid', local], {
+    REPRACER_PILOT_REMOTE_BACKUP_DIR: backups, REPRACER_PILOT_REMOTE_LOGS_DIR: join(server, 'logs'), REPRACER_PILOT_REMOTE_ARCHIVE_DIR: join(server, 'archive'),
+  });
+  const first = pull();
+  assert.equal(first.code, 0, first.out);
+  assert.match(first.out, /PULL GREEN: .*журналы: новых месяцев 2, суток 2, всё до /);
+  assert.deepEqual(readdirSync(logs).sort(), [`${d1}.log.gz`, `${d2}.log.gz`, `${m2}.log.gz`, `${m2}.log.gz.sha256`, `${m3}.log.gz`, `${m3}.log.gz.sha256`].sort(),
+    'finished days and month archives within 13 months; not the day still being written, not the leftovers, not what a month archive covers');
+  assert.equal(gunzipSync(readFileSync(join(logs, `${d1}.log.gz`))).toString(), `syn-log ${d1}\n`, 'the bytes of the day');
+  assert.match(readFileSync(join(server, 'logs', 'LOGS_PULLED'), 'utf8'),
+    new RegExp(`^\\{"pulledBefore":"${today}T00:00:00Z","at":"\\d{8}T\\d{6}Z","monitored":false\\}\\n$`), 'the server knows what left it');
+  assert.match(pull().out, /журналы: новых месяцев 0, суток 0/, 'a second run takes nothing twice');
+  // Порча при переносе: месяц с несошедшейся суммой не принимается, частей не остаётся
+  const m4 = monthAgo(4);
+  month(m4, gzipSync(`syn-month ${m4}\n`), sha(Buffer.from('other')));
+  const broken = pull();
+  assert.equal(broken.code, 1, broken.out);
+  assert.match(broken.out, new RegExp(`PULL RED: журнал не сошёлся по SHA-256 и не принят: ${m4}`));
+  assert.deepEqual(readdirSync(logs).filter((f) => f.includes(m4)), [], 'nothing of the broken month is kept here');
+  rmSync(join(months, `${m4}.log.gz`));
+  rmSync(join(months, `${m4}.log.gz.sha256`));
+  // Журналы на сервере ещё не выгружались — красный проход, а не «вынесено ничего»
+  rmSync(join(hotP, '.until'));
+  const none = pull();
+  assert.equal(none.code, 1, none.out);
+  assert.match(none.out, /PULL RED: журналы пилота на сервере ещё не выгружались/);
 });
 
 test('step 130: deploy dumps the logs before it recreates containers and after it starts them, installs the daily run; the smoke asks logs-state.sh; pilot.env names the directories', () => {
