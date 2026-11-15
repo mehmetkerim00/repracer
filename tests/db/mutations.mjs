@@ -2932,6 +2932,28 @@ export const STEP128_ROWS = [
 ];
 
 /**
+ * Шаг 136 (отложенное «128», вариант (а) решения владельца 2026-11-15): перевод аккаунта в бой отказывает, пока у него включены предложения с
+ * рамками Amazon Min/Max без прочитанных значений, и называет их (0232). Правило — функция списка; страж журнала режимов — её вызов
+ */
+const R136 = T('live-switch-bounds-step136.pg.test.ts');
+const J136 = 'step 136 (deferred 128): going live is refused while enabled offers have Amazon Min/Max we cannot read';
+const LIST136 = 'tenant_data.live_switch_blocking_offers(uuid,uuid)';
+export const STEP136_ROWS = [
+  {
+    row: 'шаг 136 (отложенное 128, Р-250)', critical: true,
+    invariant: 'перевод аккаунта канала в бой отказывает, пока у него включены предложения с рамками Amazon Min/Max без прочитанных значений в валюте предложения, и называет их; выключенные и с известными значениями бой не держат',
+    mutations: [
+      m(replaceInFunction('tenant_data.channel_write_mode_change_guard()', 'IF blocked_total IS NOT NULL THEN', 'IF false THEN'),
+        node(R136, J136, 'going live is refused while such offers are enabled', '^SWITCHED$')),
+      m(replaceInFunction(LIST136, "AND s.pricing_mode = 'ENGINE'", ''),
+        node(R136, J136, 'two enabled offers block: limits without values and limits in another currency', '^3$')),
+      m(replaceInFunction(LIST136, 'AND o.bounds_currency IS DISTINCT FROM s.currency', 'AND o.bounds_currency IS NULL'),
+        node(R136, J136, 'two enabled offers block: limits without values and limits in another currency', '^1$')),
+    ],
+  },
+];
+
+/**
  * Шаг 109 [Р-234]: цена с купоном у строки картины рынка решения (0207) — целое число центов и строго ниже базовой цены строки. Отрезки
  * держателя из снимков сверки [Р-235] пишет прежнее правило в прежнюю таблицу — её защиты (0188) в каталоге шага 97
  */

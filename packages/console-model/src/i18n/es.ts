@@ -1135,6 +1135,7 @@ export const es: Messages = {
         modeMismatch: 'La cuenta ya está en ese modo: alguien la cambió mientras esta pantalla estaba abierta.',
         /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
         liveWritesForbidden: 'Aquí no se puede activar el envío de precios: este entorno nunca envía nada a un canal; los envíos reales están desactivados en su base de datos. Los espacios de trabajo de demostración son la excepción. El modo sombra sigue funcionando.',
+        boundsUnread: (count: number, offers: string, more: number) => `El envío de precios sigue desactivado: ${count === 1 ? '1 oferta activa tiene' : `${count} ofertas activas tienen`} límites de precio mínimo/máximo de Amazon cuyos valores no podemos leer: ${offers}${more > 0 ? ` y ${more} más` : ''}. En cada una, quite los límites en Seller Central o desactive los precios automáticos (Ofertas → Desactivar) y vuelva a intentarlo. No se cambió nada; el modo sombra sigue funcionando.`,
       },
       noAccounts: 'Todavía no hay ninguna cuenta del canal conectada. Cada cuenta nueva empieza aquí, en modo sombra: verá lo que haría el motor antes de enviar nada a su tienda.',
       noAccess: {

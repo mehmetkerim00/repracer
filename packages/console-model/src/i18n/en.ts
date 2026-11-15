@@ -1138,6 +1138,8 @@ export const en = {
         modeMismatch: 'The account is already in that mode — someone switched it while this screen was open.',
         /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
         liveWritesForbidden: 'Sending prices cannot be switched on here: this environment never sends anything to a channel — live writes are switched off on its database. Demo workspaces are the exception. The shadow keeps working.',
+        // Шаг 136 (отложенное «128»): бой закрыт, пока включены предложения с рамками Amazon без прочитанных значений — список и что сделать
+        boundsUnread: (count: number, offers: string, more: number) => `Sending prices stays off: ${count === 1 ? '1 enabled offer has' : `${count} enabled offers have`} Amazon Min/Max price limits whose values we cannot read: ${offers}${more > 0 ? ` and ${more} more` : ''}. For each of them, remove the limits in Seller Central or turn repricing off (Offers → Turn off), then try again. Nothing was changed; the shadow keeps working.`,
       },
       noAccounts: 'No channel account is connected yet. Every new channel account starts here, in shadow mode: you see what the engine would do before anything is sent to your store.', 
       noAccess: {

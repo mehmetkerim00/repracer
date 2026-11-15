@@ -1,7 +1,7 @@
 # TMPrice — Functional Design Document
 
-Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` at `b249573`
-(step 134). The QA-A stand runs the same build.
+Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 136.
+The QA-A stand runs build `b249573` (step 134); step 136 is not deployed there yet.
 
 ## How to read the labels
 
@@ -31,6 +31,9 @@ The product is built on three promises:
 
 Target users: professional sellers who have been burned by black-box repricers, and agencies that manage several seller businesses
 under one login. Delivery: a web console ("seller console") in English, Spanish and French (German behind the EU profile).
+
+**Scope of the first paid MVP: Amazon US only** (Р-251). The eBay, Walmart and EU code is kept and still runs in CI; new channel
+development is frozen until the owner decides otherwise.
 
 Current status (Nov 16, 2026): pre-launch.
 - The Amazon developer profile is approved and the production app is registered (Draft). No seller has authorized it yet.
@@ -194,8 +197,8 @@ current filters and columns.
 | Amazon connection flow | "Connect Amazon" on Channels → Amazon consent → the app's log-in URI → back to Amazon → our callback. The account is born in shadow and discovery starts by itself | **[QA-B]** |
 | Amazon seller authorization and live calls | The developer profile is approved (public developer; roles: Product Listing, Pricing, Inventory and Order Tracking). The production app is registered (Draft). LWA accepts the credential pair (indirect evidence: a wrong secret is rejected as `invalid_client`); no production seller token yet. Sandbox recon: 32 calls against the static sandbox (20 OK, 9 expected 400s, 3 403s); the adapter parsed every returned shape | **[LIVE]** |
 | Amazon price write and read-back | A price is written with `patchListingsItem` (asynchronous: accepted ≠ applied) and confirmed by reading it back; listing status and issues are read after every write | **[LIVE]** |
-| eBay live adapter | OAuth and core calls proven in the official sandbox; old listings migrate only with the owner's consent. No production keys | **[LIVE]** |
-| Walmart live adapter | Built against a channel model from the owner's description of Walmart's rules; no spec snapshot and no keys yet | **[LIVE]** |
+| eBay live adapter | OAuth and core calls proven in the official sandbox; old listings migrate only with the owner's consent. No production keys. Frozen: not in the first paid MVP (Р-251) | **[LIVE]** |
+| Walmart live adapter | Built against a channel model from the owner's description of Walmart's rules; no spec snapshot and no keys yet. Frozen: not in the first paid MVP (Р-251) | **[LIVE]** |
 
 Amazon specifics:
 
@@ -279,7 +282,7 @@ A new client never flips a switch they haven't watched.
 | Shadow week on the seller's real catalog | The client's account connects; the engine runs fully — snapshots, strategies, gates, journals — but sends nothing. The seller reviews every decision on their own catalog | **[LIVE]** |
 | Day boundary acceptance | Before going live on amazon.com the operator accepts the storefront's day boundary by the worst window after a 7-day shadow run; the database computes the evidence | **[LIVE]** |
 | Go live | Owner or Manager + second factor + typed account name, after the live-write guard is lifted by procedure. Every fence rule applies from the first second | **[LIVE]** |
-| Go-live refusal for offers with unreadable Amazon limits | Going live must be refused while enabled offers have Amazon Min/Max without values, listing them. Mandatory before the first live switch | **[DEFERRED 128]** |
+| Go-live refusal for offers with unreadable Amazon limits | Going live is refused while enabled offers have Amazon Min/Max without read values, and the refusal names them (SKU · storefront, the first 20 and how many more) with what to do: remove the limits in Seller Central or turn repricing off (Offers → Turn off). Nothing is changed silently. Built in step 136; on QA-A and QA-B the live-write guard refuses first, so it shows on the first real live switch | **[LIVE]** |
 | Stay in control | One button stops a channel account, a storefront or the whole workspace instantly, with a note on the permanent record; a single offer is paused by turning its pricing off | **[QA-A]** |
 | Database copies | Daily encrypted copy (owner's public key), pulled to the operator's machine with SHA-256 checks; a restore check at least every 7 days; no deploy without them | **[QA-B]** |
 | External monitoring | Heartbeats from every process, after every copy, log archive and pull (healthchecks.io, e-mail on silence); an external `/healthz` monitor for the pilot. The QA-B `/healthz` is behind Access and has no external monitor (owner decision) | **[QA-B]** |
@@ -299,7 +302,6 @@ Open items on the critical path:
 | Item | Owner | State (Nov 16, 2026) |
 |---|---|---|
 | Amazon grantless scope for notifications (`invalid_scope`) | Amazon support + Merdan (AWS access) | Case 23094609981 closed by Amazon; evidence pack for a new case ready (Nov 15) |
-| Go-live refusal for offers with unreadable Amazon limits | Kerim | Queued, mandatory before the first live switch (0.5–1 day) |
 | QA-B machine | Merdan approves the purchase | Code and runbook ready |
 | Pilot server | At launch | Code and runbook ready |
 | Seller account for QA-B (Amazon, Individual) | Owner with Merdan | Open |
@@ -318,7 +320,7 @@ Honest constraints today:
 - US marketplaces first; the EU is built but frozen.
 - Competitor-following strategies on live Amazon run on polling: a reaction takes up to about 26 minutes per 1,000 competitive offers,
   not 60 s.
-- Amazon Min/Max values are not read live: in live mode such offers cannot be enabled.
+- Amazon Min/Max values are not read live: in live mode such offers cannot be enabled, and going live is refused while they are enabled.
 
 ## 14. Glossary
 
@@ -347,7 +349,6 @@ The rows of [docs/deferred.md](deferred.md) behind each **[DEFERRED]** label (ro
 
 | Label | Row in docs/deferred.md |
 |---|---|
-| 128 | «128 (тень → бой с рамками)» |
 | 135 (guest) | «135 (гость демо)» |
 | 135 (billing) | «135 (биллинг)» |
 | 135 (EU) | «135 (профиль ЕС)» |

@@ -19,6 +19,9 @@ after the pilot.
 > - Amazon notifications part B is blocked by Amazon: the grantless scope answers `invalid_scope`, and a support case is open.
 >   Competitor prices on Amazon therefore come from polling (`getCompetitiveSummary`).
 > - No real seller data exists in tests, fixtures or logs. This is a project rule, not a circumstance.
+>
+> **The first paid MVP is Amazon US only** (owner decision Р-251). The eBay, Walmart and EU code is kept and still runs in CI, but new
+> channel development is frozen.
 
 The repository is **public but not open source** — see [LICENSE](LICENSE). Third-party material — [NOTICE.md](NOTICE.md).
 
@@ -115,7 +118,7 @@ connected: e-mails are built but not sent (`DRY_RUN`).
 | [apps/](apps/) | `console` (seller console and its server), `operator` (operator panel), `landing` (static site) |
 | [packages/](packages/) | 26 packages: decision path (`input-sanity`, `strategy-engine`, `price-gate`, `pricing-pipeline`), storage (`pricing-store-pg`), channel clients and adapters, `stock-sync`, `bulk-jobs`, `identity`, `channel-oauth`, `alert-delivery`, `console-model` |
 | [services/](services/) | `scheduler`, `pricing-worker`, `notification-receiver`, `ebay-account-deletion` |
-| [migrations/](migrations/) | PostgreSQL DDL: 206 migrations, the last one is always a schema check (now `0231`) |
+| [migrations/](migrations/) | PostgreSQL DDL: 207 migrations (last `0232`); schema checks are migrations too (latest `0228`, v68) |
 | [schemas/clickhouse/](schemas/clickhouse/) | ClickHouse DDL |
 | [tests/db/](tests/db/) | Schema smoke tests and the mutation catalog |
 | [tests/contract/](tests/contract/) | Contract stand (record/replay), channel simulators, backtest, chaos and scale runs |
@@ -170,7 +173,7 @@ Product and QA documents are in English; internal engineering documents are in R
 |---|---|
 | [docs/TMPRICE_FDD.md](docs/TMPRICE_FDD.md) | Functional design: what the product does, with a QA-A / QA-B / LIVE / DEFERRED label on every function |
 | [CLAUDE.md](CLAUDE.md) | Project context: step-by-step status, channel constraints, working rules (Russian) |
-| [docs/decisions.md](docs/decisions.md) | Product owner decisions Р-1…Р-250 |
+| [docs/decisions.md](docs/decisions.md) | Product owner decisions Р-1…Р-251 |
 | [docs/adr/](docs/adr/) | 77 architecture decision records |
 | [docs/deferred.md](docs/deferred.md) | What is deferred, why, and when it comes back |
 | [docs/open-questions.md](docs/open-questions.md), [docs/accepted-risks.md](docs/accepted-risks.md) | What is unknown, and what was decided not to close |

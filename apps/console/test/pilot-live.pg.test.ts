@@ -443,6 +443,27 @@ test('Р-179: путь пилота целиком — от оператора �
   });
   assert.equal(port.stats.patchCalls, 1, 'положительный контроль: счётчик записей модели растёт');
 
+  // ---------------------------------------------------------------- шаг 136: бой закрыт, пока включены предложения с рамками Amazon без значений
+  // Отложенное «128», вариант (а): Amazon сообщил рамки Min/Max без значений у одного ВКЛЮЧЁННОГО предложения. Перевод в бой через консоль —
+  // 409 со словами: какие предложения и что сделать; режим и автоцена не меняются, в модель Amazon не уходит ни одной записи. Продавец сам
+  // выключает предложение [Р-242] — и только тогда перевод проходит
+  const boundedSku = skus[1]!;
+  await new PgPricingStore(db.pool('svc_app', 1), { adminPool: db.pool('svc_admin', 1) }).recordOfferChannelPricing(ids.tenantId, ids.accountId,
+    [{ marketplace: AMAZON_DE, externalSku: boundedSku, automatedPricing: false, channelBounds: true, source: 'DISCOVERY', observedAt: clock.iso() as never }]);
+  const refusedLive = await consoleCall<{ error: { code: string; message: string } }>('шаг 136: бой с рамками Amazon без значений', 'POST', api('shadow', 'mode'),
+    { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
+  assert.deepEqual([refusedLive.status, refusedLive.body.error?.code], [409, 'CHANNEL_BOUNDS_UNREAD'], `шаг 136: перевод в бой отказывает: ${JSON.stringify(refusedLive.body)}`);
+  assert.ok(refusedLive.body.error.message.includes(`${boundedSku} · amazon.de`), `отказ называет предложение словами — SKU и витрину: ${refusedLive.body.error.message}`);
+  assert.match(refusedLive.body.error.message, /remove the limits in Seller Central or turn repricing off \(Offers → Turn off\)/, 'и что сделать продавцу');
+  const modeOf = async () => (await observer.query('SELECT write_mode FROM tenant_data.channel_account WHERE channel_account_id = $1', [ids.accountId])).rows[0].write_mode;
+  assert.equal(await modeOf(), 'SHADOW', 'шаг 136: аккаунт остался в тени');
+  assert.equal(port.stats.patchCalls, 1, 'шаг 136: ни одной записи цены до перевода — только положительный контроль выше');
+  const { rows: [bounded] } = await observer.query('SELECT price_write_scope_id AS id FROM tenant_data.offer_mapping WHERE tenant_id = $1 AND external_sku = $2', [ids.tenantId, boundedSku]);
+  const off = await consoleCall('шаг 136: продавец выключает автоцену у предложения', 'POST', api('scopes', `${bounded!.id}/disable`), { note: 'Amazon Min/Max we cannot read' });
+  assert.equal(off.status, 200, JSON.stringify(off.body));
+  const goneLive = await consoleCall<{ mode: string }>('шаг 136: бой после выключения', 'POST', api('shadow', 'mode'), { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
+  assert.deepEqual([goneLive.status, goneLive.body.mode], [200, 'LIVE'], `шаг 136: без таких включённых предложений бой включается: ${JSON.stringify(goneLive.body)}`);
+
   // Р-178: второй продавец не видит мир пилота — ни в списке, ни по прямому адресу
   const created2 = await http<{ tenantId: string }>('панель: второй тенант', panelOrigin, 'POST', '/api/operator/tenants', { name: 'Zweiter Händler', region: 'EU', ownerEmail: 'second@example.test', locale: 'en' }, operator);
   await http('панель: пригласить второго владельца', panelOrigin, 'POST', `/api/operator/tenants/${created2.body.tenantId}/invite`, { email: 'second@example.test' }, operator);

@@ -1089,6 +1089,7 @@ export const de: Messages = {
         modeMismatch: 'Das Konto ist schon in diesem Modus — jemand hat es umgeschaltet, während dieser Bildschirm offen war.',
         /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
         liveWritesForbidden: 'Das Senden der Preise lässt sich hier nicht einschalten: diese Umgebung sendet nie etwas an einen Kanal — Live-Schreibvorgänge sind in ihrer Datenbank abgeschaltet. Ausgenommen sind Demo-Arbeitsbereiche. Der Schattenmodus arbeitet weiter.',
+        boundsUnread: (count: number, offers: string, more: number) => `Das Senden der Preise bleibt aus: ${count === 1 ? '1 aktives Angebot hat' : `${count} aktive Angebote haben`} Amazon-Min/Max-Preisgrenzen, deren Werte wir nicht lesen können: ${offers}${more > 0 ? ` und ${more} weitere` : ''}. Entfernen Sie bei jedem die Grenzen in Seller Central oder schalten Sie das Repricing aus (Angebote → Ausschalten) und versuchen Sie es erneut. Nichts wurde geändert; der Schattenmodus arbeitet weiter.`,
       },
       noAccounts: 'Noch ist kein Kanalkonto verbunden. Jedes neue Kanalkonto beginnt hier, im Schattenmodus: Sie sehen, was die Preisautomatik tun würde, bevor etwas an Ihren Shop gesendet wird.', 
       noAccess: {

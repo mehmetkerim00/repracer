@@ -1135,6 +1135,7 @@ export const fr: Messages = {
         modeMismatch: 'Le compte est déjà dans ce mode — quelqu’un l’a changé pendant que cet écran était ouvert.',
         /** Шаг 119 (P0-09): эта среда не пишет в каналы ничего — база закрыта для боевых записей */
         liveWritesForbidden: 'L’envoi des prix ne peut pas être activé ici : cet environnement n’envoie jamais rien à un canal — les envois réels sont désactivés dans sa base de données. Les espaces de travail de démonstration font exception. Le mode fantôme continue de fonctionner.',
+        boundsUnread: (count: number, offers: string, more: number) => `L’envoi des prix reste désactivé : ${count === 1 ? '1 offre active a' : `${count} offres actives ont`} des limites de prix minimum/maximum Amazon dont nous ne pouvons pas lire les valeurs : ${offers}${more > 0 ? ` et ${more} de plus` : ''}. Pour chacune, retirez les limites dans Seller Central ou désactivez la tarification automatique (Offres → Désactiver), puis réessayez. Rien n’a été modifié ; le mode fantôme continue de fonctionner.`,
       },
       noAccounts: 'Aucun compte du canal n’est encore connecté. Chaque nouveau compte du canal commence ici, en mode fantôme : vous voyez ce que ferait le moteur avant que quoi que ce soit ne soit envoyé à votre boutique.',
       noAccess: {

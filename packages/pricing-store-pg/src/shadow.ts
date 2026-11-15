@@ -148,6 +148,11 @@ export type ShadowModeResult =
   | { status: 'PROPERTY_INVISIBLE'; detail: string }
   /** Шаг 119 (P0-09): база закрыта для боевых записей (QA), тенант не демо — в бой не переводится ни один его аккаунт */
   | { status: 'LIVE_WRITES_FORBIDDEN' }
+  /**
+   * Шаг 136 (отложенное «128»): у аккаунта включены предложения с рамками Amazon Min/Max без прочитанных значений — бой закрыт, пока они
+   * включены. Список — первые 20 из функции базы `tenant_data.live_switch_blocking_offers`, той же, что у стража; `total` — все
+   */
+  | { status: 'CHANNEL_BOUNDS_UNREAD'; total: number; offers: Array<{ externalSku: string; marketplace: string }> }
   | { status: 'FORBIDDEN' };
 
 const num = (v: unknown): number => Number(v ?? 0);
@@ -382,6 +387,17 @@ export class PgShadowStore {
       if (invisible) return { status: 'PROPERTY_INVISIBLE', detail: invisible[1]!.trim() };
       const property = /marketplace property is unknown: ([^—]+)—/.exec(message);
       if (property) return { status: 'PROPERTY_UNKNOWN', detail: property[1]!.trim() };
+      /**
+       * Шаг 136: предложения не разбираются из текста отказа (SKU продавца может содержать что угодно) — их читает та же функция базы, что
+       * спросил страж. Между отказом и чтением продавец мог выключить предложение: список тогда короче, но отказ остаётся отказом
+       */
+      if (/enabled offers have Amazon Min\/Max bounds without read values/.test(message)) {
+        const rows = await inTenant(this.pools.adminPool, tenantId, async (tx) => (await tx.query(
+          'SELECT external_sku, marketplace, total FROM tenant_data.live_switch_blocking_offers($1, $2)', [tenantId, change.channelAccountId])).rows,
+          change.userId, { mfa: change.mfa });
+        return { status: 'CHANNEL_BOUNDS_UNREAD', total: Number(rows[0]?.total ?? 0),
+          offers: rows.map((r) => ({ externalSku: r.external_sku as string, marketplace: r.marketplace as string })) };
+      }
       // Находка 6: режим брался из воздуха — теперь из самого отказа базы, иначе продавец читает «уже в бою» о теневом аккаунте
       const mismatch = /is in (SHADOW|LIVE) mode, not in/.exec(message);
       if (mismatch) return { status: 'MODE_MISMATCH', mode: mismatch[1] as 'SHADOW' | 'LIVE' };

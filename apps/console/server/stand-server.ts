@@ -6,7 +6,7 @@ import { buildInfoFromEnv, ConfigError, createHeartbeat, secretFromEnv, type Bui
 import { fileURLToPath } from 'node:url';
 import {
   boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, noteBlocksPricing, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
-  parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView,
+  parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView, storefrontName,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
@@ -1435,6 +1435,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }
       // Р-172: витрины аккаунта не видны вовсе — это другой отказ, и подставлять в него имя свойства нечего
       if (outcome.status === 'PROPERTY_INVISIBLE') return fail(409, 'PROPERTY_UNKNOWN', e.marketplacesInvisible(outcome.detail));
+      /**
+       * Шаг 136 (отложенное «128»): бой закрыт, пока включены предложения с рамками Amazon без прочитанных значений. Отказ называет их —
+       * «SKU · витрина» словами (K10), первые 20 и сколько ещё — и что сделать продавцу; автоцену консоль сама не выключает
+       */
+      if (outcome.status === 'CHANNEL_BOUNDS_UNREAD') {
+        const channel = live.accounts.find((a) => a.channelAccountId === body.channelAccountId)?.channel ?? 'AMAZON';
+        const named = outcome.offers.map((o) => `${o.externalSku} · ${storefrontName(channel, o.marketplace, m)}`).join(', ');
+        return fail(409, 'CHANNEL_BOUNDS_UNREAD', e.boundsUnread(outcome.total, named, Math.max(0, outcome.total - outcome.offers.length)));
+      }
       return fail(403, 'FORBIDDEN', s.forbidden);
     }
 
