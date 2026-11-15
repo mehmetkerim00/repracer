@@ -197,14 +197,34 @@ test('Р-168, Р-171: экран тени и недельный дайджест
   assert.ok(screen.body.rows.some((r) => r.priceDecisionId !== null), 'у удержанных записей цены есть решение с объяснением');
   Object.assign(numbers, { screenSummary: screen.body.summary, screenSeconds: screen.seconds });
 
+  // Неделя письма — до отправки: та же выборка, из которой письмо собирается
+  const [week] = (await new PgShadowDigestStore(deliveryPool).targets(0)).filter((t) => t.tenantId === demo.live.seeded.tenantId);
+  assert.ok(week, 'у дайджеста есть неделя этого пространства');
   const digest = createShadowDigest({ store: new PgShadowDigestStore(deliveryPool), mail,
     // Прогон идёт на часах ТЕКУЩЕЙ недели: письмо о ней (в работе — о прошлой закрытой, находка 3 ревью шага 43)
     sinceDays: 0, now: () => new Date().toISOString(), log: () => undefined });
   const outcome = await digest.send();
   assert.equal(outcome.letters, 1, `дайджест: ${JSON.stringify(outcome)}`);
   const letter = mail.sent.at(-1)!;
-  // Письмо несёт ТЕ ЖЕ числа, что экран: сверяется удержанными записями
-  assert.ok(letter.text.includes(String(screen.body.summary.heldWrites)), 'в письме то же число удержанных записей, что на экране');
+  /**
+   * Письмо несёт ТЕ ЖЕ числа, что экран. Шаг 137.1: письмо — о неделе в поясе пространства (ISO-неделя с понедельника, удержанные
+   * записи — по времени завершения), экран по умолчанию — о последних 7 днях (по моменту повода, шаг 96.1). Прогон, пересёкший полночь
+   * понедельника в поясе пространства, давал письму только часть записей, и тест краснел час в неделю (полный CI 43771116694: 23:22 UTC
+   * воскресенья — 00:22 понедельника в Берлине). Скрытый вход «время недели» убран: число письма сверяется с его же неделей независимым
+   * запросом всегда, а с экраном — когда все удержанные записи прогона попали в неделю письма; пересечение названо, а не красит прогон
+   */
+  const { rows: [held] } = await observer.query(
+    `SELECT count(*) FILTER (WHERE finished_at >= $2 AND finished_at < $3)::int AS in_week, count(*)::int AS total
+       FROM tenant_data.channel_write_history WHERE tenant_id = $1 AND final_status = 'SHADOW_HELD'`,
+    [demo.live.seeded.tenantId, week.periodStart, week.periodEnd]);
+  assert.equal(week.heldWrites, Number(held!.in_week), `письмо считает удержанные записи своей недели (с ${week.periodStart}, ${week.timeZone})`);
+  assert.ok(letter.text.includes(String(week.heldWrites)), 'в письме — число удержанных записей его недели');
+  if (Number(held!.in_week) === Number(held!.total)) {
+    assert.equal(week.heldWrites, screen.body.summary.heldWrites, 'неделя письма покрывает прогон: в письме то же число удержанных записей, что на экране');
+  } else {
+    // Прогон пересёк начало недели в поясе пространства: письмо — о новой неделе, экран — о 7 днях; это разные периоды, а не расхождение
+    Object.assign(numbers, { digestWeekCrossed: { inWeek: Number(held!.in_week), total: Number(held!.total), weekStart: week.periodStart } });
+  }
   assert.match(letter.subject, /Schattenmodus|getan hätte/, 'письмо на языке тенанта (de)');
   Object.assign(numbers, { digest: outcome, digestSubject: letter.subject });
 });
