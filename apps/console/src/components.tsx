@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type StorefrontChip, type Swatch, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
@@ -14,6 +14,21 @@ export const MarketContext = createContext<{ locales: readonly Locale[]; omnibus
 export const useMessages = (): Messages => useContext(MessagesContext);
 
 export const href = (worldId: string, ...parts: string[]) => `#/w/${[worldId, ...parts].map(encodeURIComponent).join('/')}`;
+
+/**
+ * Шаг 139 (BUG-02): откуда открыли квитанцию решения. «← Price changes» квитанции вёл всегда в журнал решений — открытая из тени
+ * квитанция возвращала на другой экран, где та же ссылка называлась иначе. Теперь «назад» ведёт на экран того же пространства, с
+ * которого квитанцию открыли, и называет его; без такого экрана (ссылка извне, перезагрузка) — в журнал решений, как прежде
+ */
+type HashRoute = { worldId: string | null; screen: string; param: string | null };
+let receiptOrigin: { worldId: string; screen: string; hash: string } | null = null;
+const isReceipt = (r: HashRoute) => r.screen === 'decisions' && r.param !== null;
+export function noteNavigation(from: HashRoute, fromHash: string, to: HashRoute): void {
+  if (isReceipt(to) && !isReceipt(from) && from.worldId !== null && from.worldId === to.worldId) receiptOrigin = { worldId: from.worldId, screen: from.screen, hash: fromHash };
+}
+export function receiptBack(worldId: string): { screen: string; hash: string } | null {
+  return receiptOrigin !== null && receiptOrigin.worldId === worldId ? receiptOrigin : null;
+}
 /** Шаг 111 [Р-237]: адрес списка рабочих пространств — показывается всегда, в отличие от корня `#/` (вход с одним пространством — сразу в него) */
 export const WORKSPACES_HREF = '#/workspaces';
 
@@ -357,6 +372,31 @@ export function NoteConfirm(props: {
  * Р-136 (шаг 29): переключатель страниц списка. Экраны продавца отдают страницу, а не каталог: на 10 000 предложений список
  * товаров весил 10,2 МБ в одном ответе, а экран комплаенса считался 24,8 секунды.
  */
+/**
+ * Шаг 139 (BUG-01): раскрытые и свёрнутые блоки экрана — предпочтение зрителя, а не состояние разметки. Живёт выше загрузки экрана
+ * (листание и смена периода его не сбрасывают) и в браузере (возврат с квитанции — тоже). Хранилище может быть недоступно (приватное
+ * окно) — тогда предпочтение живёт до ухода с экрана, экран работает
+ */
+export function useOpenBlocks(screen: string): { isOpen: (block: string) => boolean; toggle: (block: string) => (e: SyntheticEvent<HTMLDetailsElement>) => void } {
+  const key = `repracer.${screen}.open`;
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    try {
+      const parsed: unknown = JSON.parse(globalThis.localStorage?.getItem(key) ?? '{}');
+      return parsed !== null && typeof parsed === 'object' ? Object.fromEntries(Object.entries(parsed).filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean> : {};
+    } catch { return {}; }
+  });
+  const toggle = (block: string) => (e: SyntheticEvent<HTMLDetailsElement>) => {
+    const now = e.currentTarget.open;
+    setOpen((prev) => {
+      if (prev[block] === now) return prev;
+      const next = { ...prev, [block]: now };
+      try { globalThis.localStorage?.setItem(key, JSON.stringify(next)); } catch { /* живёт до ухода с экрана */ }
+      return next;
+    });
+  };
+  return { isOpen: (block) => open[block] === true, toggle };
+}
+
 export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQuery; onQuery: (q: ListQuery) => void }) {
   const m = useMessages();
   const f = m.ui.feed;

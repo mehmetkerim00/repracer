@@ -1,6 +1,6 @@
 import type { DecisionListItem, DecisionTrace, StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, useMessages, When, WhenHead, UnitName } from '../components.tsx';
+import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, receiptBack, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { CompetitorTable } from './Competition.tsx';
 
@@ -44,9 +44,12 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
   const m = useMessages();
   const t = m.ui.trace;
   const competitors = trace.steps.find((s) => s.competitors)?.competitors ?? null;
+  // Шаг 139 (BUG-02): «назад» — на экран, с которого квитанцию открыли, и его именем; без него — в журнал решений
+  const origin = receiptBack(trace.worldId);
+  const originName = origin ? (m.ui.app.screens as Readonly<Record<string, string | undefined>>)[origin.screen] : undefined;
   return (
     <article className="trace">
-      <p className="back"><a href={href(trace.worldId, 'feed', 'decisions')}>{t.back}</a></p>
+      <p className="back">{origin && originName ? <a href={origin.hash}>{t.backTo(originName)}</a> : <a href={href(trace.worldId, 'feed', 'decisions')}>{t.back}</a>}</p>
       <h2>{t.pageTitle}</h2>
       <p className="subtitle">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}
         {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что

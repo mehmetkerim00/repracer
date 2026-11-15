@@ -98,18 +98,24 @@ export async function requestJson<T>(path: string, init: { method?: 'GET' | 'POS
   }
 }
 
-export function useResource<T>(path: string, locale: Locale): [Resource<T>, () => void] {
+/**
+ * `keepPrevious` (шаг 139, BUG-01): пока грузится новый адрес (следующая страница, другой период), экран показывает прежние данные, а не
+ * скелет — иначе экран собирается заново: свёрнутые блоки и прокрутка сбрасываются при каждом «Older →». Первая загрузка и ошибка — как
+ * прежде
+ */
+export function useResource<T>(path: string, locale: Locale, options: { keepPrevious?: boolean } = {}): [Resource<T>, () => void] {
   const [attempt, setAttempt] = useState(0);
   const [resource, setResource] = useState<Resource<T>>(() => ({ state: 'loading', startedAt: Date.now() }));
+  const keepPrevious = options.keepPrevious === true;
   useEffect(() => {
     const cancel = new AbortController();
-    setResource({ state: 'loading', startedAt: Date.now() });
+    setResource((prev) => (keepPrevious && prev.state === 'ready' ? prev : { state: 'loading', startedAt: Date.now() }));
     requestJson<T>(path, { signal: cancel.signal, locale }).then(
       (data) => { if (!cancel.signal.aborted) setResource({ state: 'ready', data }); },
       (error: unknown) => { if (!cancel.signal.aborted) setResource({ state: 'error', error }); },
     );
     return () => cancel.abort();
-  }, [path, locale, attempt]);
+  }, [path, locale, attempt, keepPrevious]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   return [resource, retry];
 }

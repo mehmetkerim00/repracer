@@ -1511,7 +1511,9 @@ export const en = {
         expired: 'Competitor details: storage period expired (they are kept for 30 days).',
       },
       missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← Price changes', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
-      columns: { when: 'When', unit: 'Offer', outcome: 'Outcome', price: 'Price', reason: 'Reason' }, why: 'Why',
+      columns: { when: 'When', unit: 'Offer', outcome: 'Outcome', price: 'Price', reason: 'Reason' }, why: 'Why this price',
+      // Шаг 139 (BUG-02): «назад» квитанции называет экран, с которого её открыли
+      backTo: (screen: string) => `← ${screen}`,
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'dangerous change', limitNote: (text: string) => `Cannot be explained further: ${text}`,
       status: { OK: 'passed', STOP: 'stopped', WARN: 'with remarks', SKIPPED: 'not needed', UNKNOWN: 'no data' },

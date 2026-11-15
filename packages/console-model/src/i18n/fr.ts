@@ -1507,7 +1507,9 @@ export const fr: Messages = {
         expired: 'Détails des concurrents : durée de conservation expirée (ils sont conservés 30 jours).',
       },
       missingTitle: 'Décision introuvable', missingText: 'Ce lien ne mène à aucune décision de prix de cet espace de travail. La liste montre chaque décision avec son explication.', pageTitle: 'Pourquoi ce prix', back: '← Changements de prix', noDecisions: 'Pas encore de décision de prix. Elles apparaissent dès que la tarification automatique ou le mode fantôme tourne pour une offre.',
-      columns: { when: 'Quand', unit: 'Offre', outcome: 'Résultat', price: 'Prix', reason: 'Raison' }, why: 'Pourquoi',
+      columns: { when: 'Quand', unit: 'Offre', outcome: 'Résultat', price: 'Prix', reason: 'Raison' }, why: 'Pourquoi ce prix',
+      // Шаг 139 (BUG-02): «назад» квитанции называет экран, с которого её открыли
+      backTo: (screen: string) => `← ${screen}`,
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'changement dangereux', limitNote: (text: string) => `Impossible d’expliquer davantage : ${text}`,
       status: { OK: 'réussi', STOP: 'arrêté', WARN: 'avec remarques', SKIPPED: 'non nécessaire', UNKNOWN: 'aucune donnée' },

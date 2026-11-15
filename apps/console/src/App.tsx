@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 import { can, LOCALES, messagesFor, type Locale, type MemberRole } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
-import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, SectionAnchor, useMessages, WORKSPACES_HREF } from './components.tsx';
+import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, noteNavigation, SectionAnchor, useMessages, WORKSPACES_HREF } from './components.tsx';
 import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
 import { ZoneContext } from './date-range.tsx';
@@ -426,7 +426,13 @@ export function App() {
   }, [locale]);
 
   useEffect(() => {
-    const onChange = () => setRoute(parseHash(window.location.hash));
+    // Шаг 139 (BUG-02): прежний адрес — откуда открыли квитанцию решения
+    const onChange = (e: HashChangeEvent) => {
+      const next = parseHash(window.location.hash);
+      const fromHash = e.oldURL ? new URL(e.oldURL).hash : '';
+      noteNavigation(parseHash(fromHash), fromHash, next);
+      setRoute(next);
+    };
     window.addEventListener('hashchange', onChange);
     return () => window.removeEventListener('hashchange', onChange);
   }, []);

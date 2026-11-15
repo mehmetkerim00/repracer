@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { periodSearch, type ListQuery, type Period, type ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, When, WhenHead, UnitName } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, useOpenBlocks, When, WhenHead, UnitName } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { Field, FormActions } from '../forms.tsx';
 import { NextStepCard } from './Onboarding.tsx';
@@ -19,7 +19,10 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
   // Шаг 96 (II): период — пресет или свой диапазон дат в поясе пространства
   const [period, setPeriod] = useState<Period>({ preset: '7d' });
-  const [view, retry] = useResource<ShadowView>(`${worldPath(worldId, 'shadow')}?offset=${query.offset}&limit=${query.limit}&${periodSearch(period)}`, m.locale);
+  // Шаг 139 (BUG-01): «Older →» и смена периода не собирают экран заново — прежние данные видны, пока грузятся новые
+  const [view, retry] = useResource<ShadowView>(`${worldPath(worldId, 'shadow')}?offset=${query.offset}&limit=${query.limit}&${periodSearch(period)}`, m.locale, { keepPrevious: true });
+  // Шаг 139 (BUG-01): раскрытие блоков — предпочтение зрителя: переживает листание и возврат с квитанции
+  const blocks = useOpenBlocks('shadow');
   // Шаг 96 (Б13): имя аккаунта копируется кнопкой, а не перепечатывается
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (id: string) => void navigator.clipboard?.writeText(id).then(() => setCopied(id)).catch(() => setCopied(null));
@@ -114,7 +117,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           </section>
 
           {/* Шаг 96 (В21): «полезно знать» — сводка чисел, что мы ещё проверяем о магазинах и оговорки экрана; данные те же, блок свёрнут */}
-          <details className="card more-block">
+          <details className="card more-block" open={blocks.isOpen('more')} onToggle={blocks.toggle('more')}>
             <summary>{m.ui.shadow.moreTitle}</summary>
             {v.anyShadow ? (
               <div className="summary-list-card">
@@ -147,7 +150,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
 
           {/* Шаг 68 (K7): у демо — то самое недельное письмо, собранное за последние семь суток, с честной пометкой синтетики */}
           {v.digestPreview === null ? null : (
-            <details className="card more-block">
+            <details className="card more-block" open={blocks.isOpen('digest-preview')} onToggle={blocks.toggle('digest-preview')}>
               <summary>{v.digestPreview.title} <Badge tone="warn">{m.ui.app.demoBadge}</Badge></summary>
               <p className="note">{v.digestPreview.synthetic}</p>
               <p><strong>{v.digestPreview.subject}</strong></p>
@@ -157,7 +160,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
 
           {/* Р-174: отчёт, который никто не получил, — не отчёт */}
           {v.digests.length === 0 ? null : (
-            <details className="card more-block">
+            <details className="card more-block" open={blocks.isOpen('digests')} onToggle={blocks.toggle('digests')}>
               <summary>{v.digestsTitle}</summary>
               <table className="cardify">
                 <tbody>
@@ -174,7 +177,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
           )}
 
           {/* Шаг 96 (В21, Б16): удержанное — свёрнутым блоком; у строки — пилюля «цена» или «остаток» */}
-          <details className="card more-block held-block">
+          <details className="card more-block held-block" open={blocks.isOpen('held')} onToggle={blocks.toggle('held')}>
             <summary>{m.ui.shadow.heldTableTitle(v.page.total)}</summary>
             {v.rows.length === 0 ? <p>{v.none}</p> : (
               <table className="cardify">

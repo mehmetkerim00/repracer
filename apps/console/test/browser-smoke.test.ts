@@ -162,6 +162,9 @@ let decisionChip: { chip: string; full: string } | null = null;
 /** Шаг 101 (C): таблица конкурентов квитанции под фильтром — у шага снимка настоящей квитанции (в мире смоука стратегий с фильтром нет) */
 let receiptCompetitors: unknown = null;
 
+/** Шаг 139 (BUG-02): решение мира смоука у удержанных строк тени — только на время своего теста (ссылка «Why this price» из тени) */
+let shadowDecisionId: string | null = null;
+
 /** Синтетическая неделя тени для смоука адаптива: только форма экрана, ничего из базы */
 function syntheticShadow() {
   const page = (now: string, sinceDays = 7): ShadowPage => {
@@ -173,7 +176,7 @@ function syntheticShadow() {
         heldPriceWrites: 515, heldQuantityWrites: 204, wouldSpendBudget: 10, wouldSpendUnconfirmed: 10, floorSavings: [{ currency: 'EUR', minor: 188826 }], floorSavingsHolds: 626 },
       rows: Array.from({ length: 12 }, (_, i) => ({ channelWriteId: `smoke-write-${i}`, writeScopeId: `smoke-scope-${i}`, channel: 'KAUFLAND', channelAccountId: 'smoke-account',
         sku: `syn-smoke-${100 + i}`, title: `Synthetic desk lamp, size ${i + 1}`, marketplace: 'de', field: i % 3 === 0 ? 'QUANTITY' : 'PRICE',
-        amountMinor: i % 3 === 0 ? null : 1838 + i, currency: i % 3 === 0 ? null : 'EUR', quantity: i % 3 === 0 ? 24 : null, priceDecisionId: null,
+        amountMinor: i % 3 === 0 ? null : 1838 + i, currency: i % 3 === 0 ? null : 'EUR', quantity: i % 3 === 0 ? 24 : null, priceDecisionId: i % 3 === 0 ? null : shadowDecisionId,
         wouldSpendBudget: i === 0, finishedAt: at(i * hour) })),
       total: 719,
       accounts: [{ channelAccountId: 'smoke-account', channel: 'KAUFLAND', displayName: 'Kaufland', externalAccountId: 'syn-smoke-account', writeMode: 'SHADOW',
@@ -2655,6 +2658,87 @@ test('step 112 [Р-238]: quiet chips 6 px from the name on the middle of the lin
     currentApi = euApi;
     await b.setColorScheme(null);
     await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 139 (BUG-01, BUG-02 отчёта Мердана «QA-A Bug & Findings Report 1.0»). BUG-01: на Shadow mode свёрнутые блоки — «Good to know»,
+ * письмо, «Every held change» — сворачивались при «Older →»: экран целиком уходил в скелет загрузки и собирался заново. BUG-02: ссылка
+ * удержанной строки «Why this price →» вела на квитанцию, а «← Price changes» квитанции — в журнал решений, где та же ссылка называлась
+ * «Why →». Теперь раскрытие — предпочтение зрителя (переживает листание и возврат), «назад» квитанции ведёт туда, откуда пришли, и
+ * называет этот экран, а ссылка на квитанцию называется одинаково везде
+ */
+test('step 139 (BUG-01, BUG-02): Shadow mode blocks stay open over «Older» and over a visit to a receipt; the receipt leads back where you came from; «Why this price» everywhere', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (path: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${path}`)}, true)`); await settled(b, path); };
+  const blocks = `[...document.querySelectorAll('details.more-block')].map((d) => ({ title: d.querySelector('summary').textContent.trim(), open: d.open }))`;
+  try {
+    // Журнал решений: ссылка на квитанцию — «Why this price», как у Offers и тени; колонка её не обрезает
+    await go('feed/decisions');
+    const link = await b.evaluate<{ text: string; href: string; clipped: boolean } | null>(`(() => { const a = document.querySelector('.world-content tbody tr a.row-link');
+      return a ? { text: a.textContent.trim(), href: a.getAttribute('href'), clipped: a.scrollWidth > a.clientWidth + 1 } : null; })()`);
+    assert.ok(link, 'the decision journal has a receipt link');
+    assert.equal(link.text, en.ui.products.why, 'the decision journal names the receipt link «Why this price», as Offers and Shadow mode do');
+    assert.equal(link.clipped, false, 'the receipt link is not clipped');
+    assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], 'the decision journal: nothing sticks out');
+    // На телефоне таблица — карточками: длинная подпись не выталкивает страницу
+    await b.setViewport(375, 812);
+    await go('feed/decisions');
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), '375: no sideways scroll on the decision journal');
+    assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], '375: the decision journal — nothing sticks out');
+    await b.setViewport(1440, 900);
+    shadowDecisionId = decodeURIComponent(link.href.split('/').pop()!);
+
+    // BUG-01: блоки тени открыты — «Older →» их не сворачивает
+    await go('shadow');
+    await b.evaluate(`([...document.querySelectorAll('details.more-block > summary')].forEach((s) => s.click()), true)`);
+    const opened = await b.evaluate<Array<{ title: string; open: boolean }>>(blocks);
+    assert.ok(opened.length >= 3 && opened.every((x) => x.open), `the blocks are open after a click — ${JSON.stringify(opened)}`);
+    const pageText = await b.evaluate<string>(`document.querySelector('details.held-block .buttons .small').textContent.trim()`);
+    // «Older →» не собирает экран заново: прокрутка у листателя остаётся (скелет загрузки укорачивал страницу и сбрасывал её)
+    const scrolled = await b.evaluate<number>(`(document.querySelector('details.held-block .buttons').scrollIntoView({ block: 'center' }), window.scrollY)`);
+    assert.ok(scrolled > 200, `the pager is far down the page — scrollY ${scrolled}`);
+    await b.click(en.ui.feed.next, 'details.held-block button');
+    for (let i = 0; i < 100 && await b.evaluate<string>(`document.querySelector('details.held-block .buttons .small')?.textContent.trim() ?? ''`) === pageText; i++) await new Promise((r) => setTimeout(r, 100));
+    await settled(b, 'shadow, older');
+    assert.notEqual(await b.evaluate<string>(`document.querySelector('details.held-block .buttons .small').textContent.trim()`), pageText, '«Older →» shows the next page');
+    assert.deepEqual(await b.evaluate(blocks), opened, '«Older →» keeps every block open');
+    assert.ok(Math.abs(await b.evaluate<number>('window.scrollY') - scrolled) <= 2, '«Older →» keeps the scroll position');
+
+    // BUG-02: из удержанной строки — на квитанцию; «назад» называет Shadow mode и ведёт на него
+    const why = await b.evaluate<string>(`document.querySelector('details.held-block tbody a.row-link').textContent.trim()`);
+    assert.equal(why, en.ui.shadow.columns.why, 'the held row links to «Why this price»');
+    await b.click(why, 'details.held-block tbody a.row-link');
+    await settled(b, 'receipt from shadow');
+    const back = await b.evaluate<{ text: string; href: string }>(`(() => { const a = document.querySelector('.trace .back a'); return { text: a.textContent.trim(), href: a.getAttribute('href') }; })()`);
+    assert.deepEqual(back, { text: en.ui.trace.backTo(en.ui.app.screens.shadow), href: `#/w/${world}/shadow` }, 'the receipt leads back to Shadow mode and names it');
+    await b.click(back.text, '.trace .back a');
+    await settled(b, 'back to shadow');
+    assert.deepEqual((await b.evaluate<Array<{ title: string; open: boolean }>>(blocks)).map((x) => x.open), opened.map(() => true), 'after the receipt the blocks are still open');
+    assert.equal(await b.evaluate<string>(`document.querySelector('details.held-block tbody a.row-link').textContent.trim()`), en.ui.shadow.columns.why, 'the link keeps its words after the return');
+
+    // Из журнала записей «назад» ведёт в журнал записей, а не в журнал решений
+    await go('feed');
+    const fromFeed = await b.evaluate<string | null>(`document.querySelector('.world-content tbody tr a.row-link')?.getAttribute('href') ?? null`);
+    assert.ok(fromFeed, 'the price journal has a receipt link');
+    await b.evaluate(`(location.hash = ${JSON.stringify(fromFeed)}, true)`);
+    await settled(b, 'receipt from the price journal');
+    assert.deepEqual(await b.evaluate(`(() => { const a = document.querySelector('.trace .back a'); return { text: a.textContent.trim(), href: a.getAttribute('href') }; })()`),
+      { text: en.ui.trace.backTo(en.ui.app.screens.feed), href: `#/w/${world}/feed` }, 'the receipt leads back to the price journal it was opened from');
+  } finally {
+    shadowDecisionId = null;
+    await b.evaluate(`(localStorage.removeItem('repracer.shadow.open'), true)`);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

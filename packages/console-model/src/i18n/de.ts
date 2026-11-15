@@ -1452,7 +1452,9 @@ export const de: Messages = {
         expired: 'Details der Wettbewerber: Aufbewahrungsfrist abgelaufen (sie werden 30 Tage aufbewahrt).',
       },
       missingTitle: 'Entscheidung nicht gefunden', missingText: 'Dieser Link führt zu keiner Preisentscheidung dieses Arbeitsbereichs. Die Liste zeigt jede Entscheidung mit ihrer Begründung.', pageTitle: 'Warum dieser Preis', back: '← Preisänderungen', noDecisions: 'Noch keine Preisentscheidungen. Sie erscheinen, sobald Repricing oder der Schattenmodus für ein Angebot läuft.',
-      columns: { when: 'Wann', unit: 'Angebot', outcome: 'Ergebnis', price: 'Preis', reason: 'Grund' }, why: 'Warum',
+      columns: { when: 'Wann', unit: 'Angebot', outcome: 'Ergebnis', price: 'Preis', reason: 'Grund' }, why: 'Warum dieser Preis',
+      // Шаг 139 (BUG-02): «назад» квитанции называет экран, с которого её открыли
+      backTo: (screen: string) => `← ${screen}`,
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'gefährliche Änderung', limitNote: (text: string) => `Nicht weiter erklärbar: ${text}`,
       status: { OK: 'bestanden', STOP: 'gestoppt', WARN: 'mit Hinweisen', SKIPPED: 'nicht nötig', UNKNOWN: 'keine Daten' },

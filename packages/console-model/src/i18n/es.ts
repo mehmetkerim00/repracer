@@ -1507,7 +1507,9 @@ export const es: Messages = {
         expired: 'Detalles de los competidores: venció el plazo de conservación (se guardan 30 días).',
       },
       missingTitle: 'Decisión no encontrada', missingText: 'Este enlace no lleva a una decisión de precio de este espacio de trabajo. La lista muestra cada decisión con su explicación.', pageTitle: 'Por qué este precio', back: '← Cambios de precio', noDecisions: 'Todavía no hay decisiones de precio. Aparecen cuando los precios automáticos o el modo sombra funcionan para una oferta.',
-      columns: { when: 'Cuándo', unit: 'Oferta', outcome: 'Resultado', price: 'Precio', reason: 'Motivo' }, why: 'Por qué',
+      columns: { when: 'Cuándo', unit: 'Oferta', outcome: 'Resultado', price: 'Precio', reason: 'Motivo' }, why: 'Por qué este precio',
+      // Шаг 139 (BUG-02): «назад» квитанции называет экран, с которого её открыли
+      backTo: (screen: string) => `← ${screen}`,
       meta: (unit: string, _id: string, when: string) => `${unit} · ${when}`,
       dangerousBadge: 'cambio peligroso', limitNote: (text: string) => `No se puede explicar más: ${text}`,
       status: { OK: 'superado', STOP: 'detenido', WARN: 'con observaciones', SKIPPED: 'no necesario', UNKNOWN: 'sin datos' },
