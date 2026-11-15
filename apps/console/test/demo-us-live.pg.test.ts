@@ -142,7 +142,8 @@ test('шаг 68: демо США — решения в долларах, «по�
     let changed: { trace: DecisionTrace; price: string } | null = null;
     for (const unit of found.body.items) {
       const list = await call<DecisionListView>('GET', `/api/worlds/${w}/decisions?writeScopeId=${unit.writeScopeId}`, guest);
-      const item = list.body.items.find((d) => d.outcome === en.ui.outcomes.APPROVED);
+      // Шаг 137 [Р-252] (INV-02): одобренное решение аккаунта в тени — «Held in shadow mode», а не «Approved», будто цена ушла
+      const item = list.body.items.find((d) => d.outcome === en.ui.statuses.HELD_IN_SHADOW);
       if (!item) continue;
       changed = { trace: (await call<DecisionTrace>('GET', `/api/worlds/${w}/decisions/${item.decisionId}`, guest)).body, price: item.price };
       break;
