@@ -1339,6 +1339,8 @@ export interface ConsoleDecisionRow extends PriceDecisionDraft, ExplanationInten
   competitorView?: CompetitorView | null;
   /** Шаг 116 [Р-241]: у последней строки единицы — сколько раз с тех пор проверено то же состояние и когда в последний раз */
   noChangeLive?: { repeats: number; lastEvaluatedAt: Instant } | null;
+  /** Шаг 137 (BUG-03, INV-02): решение принято у аккаунта в тени — в канал не ушло ничего [Р-169]; у хранилища без тени — нет поля */
+  shadow?: boolean;
 }
 
 /** Остановки и системные остановки в журнале аудита [Р-76]; с шага 88 [Р-213] — и смены ролей участников */

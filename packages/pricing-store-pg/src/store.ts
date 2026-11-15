@@ -371,6 +371,8 @@ function decisionRow(r: Row): ConsoleDecisionRow {
     proposedMinor: r.proposed_amount_minor,
     snapshotRef: r.competitor_snapshot_id ? { competitorSnapshotId: r.competitor_snapshot_id, source: r.ref_source, observedAt: iso(r.ref_observed_at) } : null,
     competitorView: r.competitor_view ?? null,
+    // Шаг 137 (BUG-03, INV-02): журнал решений называет одобренное в тени «Held in shadow mode», а не «Approved», будто цена ушла
+    shadow: r.shadow === true,
     // Шаг 102 [Р-227]: решение в режиме распродажи называет строку включения
     clearanceChangeId: r.clearance_change_id ?? null,
   };

@@ -173,7 +173,7 @@ Product and QA documents are in English; internal engineering documents are in R
 |---|---|
 | [docs/TMPRICE_FDD.md](docs/TMPRICE_FDD.md) | Functional design: what the product does, with a QA-A / QA-B / LIVE / DEFERRED label on every function |
 | [CLAUDE.md](CLAUDE.md) | Project context: step-by-step status, channel constraints, working rules (Russian) |
-| [docs/decisions.md](docs/decisions.md) | Product owner decisions Р-1…Р-251 |
+| [docs/decisions.md](docs/decisions.md) | Product owner decisions Р-1…Р-252 |
 | [docs/adr/](docs/adr/) | 77 architecture decision records |
 | [docs/deferred.md](docs/deferred.md) | What is deferred, why, and when it comes back |
 | [docs/open-questions.md](docs/open-questions.md), [docs/accepted-risks.md](docs/accepted-risks.md) | What is unknown, and what was decided not to close |

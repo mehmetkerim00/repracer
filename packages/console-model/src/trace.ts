@@ -9,6 +9,7 @@ import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { strategyLabel } from './products.ts';
 import { channelBoundsFacts } from './channel-bounds.ts';
 import { accountLabel } from './strategies.ts';
+import { decisionStatus, PRICE_STATUS_TONE, type PriceStatus } from './statuses.ts';
 import { channelOf, gap, scopeById, unitOf, uniqueGaps, type ConsoleDecision, type ConsoleWrite, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
@@ -67,6 +68,8 @@ export interface DecisionTrace {
   unit: UnitRef | null;
   decidedAt: string;
   headline: string;
+  /** Шаг 137 (BUG-03): статус решения тем же словарём, что Protections и журнал решений — одно слово для одного случая */
+  status: { code: PriceStatus; label: string; tone: Tone };
   /** Шаг 81: итоговая цена одобренного решения — та же сумма, что во фразе итога; экран показывает её крупно. У остальных — null */
   headlinePrice: string | null;
   tone: Tone;
@@ -338,7 +341,10 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
         ...assignedByRule(detail, def, world, m),
         { label: t.trigger, value: (m.ui.triggers as Record<string, string | undefined>)[st.trigger] ?? st.trigger },
         { label: t.before, value: money(st.currentMinor) },
-        { label: t.boundsAtStrategy, value: `${money(st.boundsAtStrategy.minMinor)} – ${money(st.boundsAtStrategy.maxMinor)}` },
+        // Шаг 137 (INV-03): в распродаже пол распродажи заменяет нижнюю границу — строка называет его, иначе $14–$50 здесь и $10–$50 у Gate
+        // читаются как противоречие
+        { label: t.boundsAtStrategy, value: ((range: string, cl) => (cl ? t.boundsInClearance(range, money(Number(cl.params.floorMinor))) : range))(
+          `${money(st.boundsAtStrategy.minMinor)} – ${money(st.boundsAtStrategy.maxMinor)}`, st.steps.find((r) => r.code === 'CLEARANCE_FLOOR') ?? null) },
         ...st.steps.map((r): TraceItem => ({ label: t.step, outcome: 'INFO', reason: say(r) })),
       ],
       gaps: withheldSomewhere([st.reason, ...st.steps]) ? [gap(m, 'CHANNEL_VALUES_WITHHELD')] : [],
@@ -391,8 +397,10 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
     pill: t.clearancePill,
     line: [clearanceStep ? say(clearanceStep).text : null, cl ? `${t.clearanceBy(clWho!, m.when(cl.enabledAt), cl.note)}.` : null].filter((x): x is string => x !== null).join(' '),
   } : null;
+  const statusCode = decisionStatus(d, last?.status ?? null);
   return {
     worldId: world.id, decisionId: d.decisionId, unit: scope ? unitOf(world, scope, m) : null, decidedAt: m.when(d.decidedAt), headline,
+    status: { code: statusCode, label: m.ui.statuses[statusCode], tone: PRICE_STATUS_TONE[statusCode] },
     headlinePrice: d.outcome === 'APPROVED' ? money(d.finalMinor) : null, clearance,
     tone: last?.status === 'APPLIED' ? 'ok' : last?.status === 'SHADOW_HELD' ? 'warn' : OUTCOME_TONE[d.outcome] ?? 'unknown', dangerous: isDangerous(d), steps,
     gaps: uniqueGaps([...gaps, ...steps.flatMap((s) => s.gaps)]),
@@ -467,7 +475,8 @@ export function decisionItems(world: StandWorld, decisions: readonly ConsoleDeci
     const kept = !e ? noChangeTitle(d, m) : null;
     return {
       decisionId: d.decisionId, unit: scope ? unitOf(world, scope, m) : null, decidedAt: m.when(d.decidedAt),
-      outcome: (m.ui.outcomes as Record<string, string | undefined>)[d.outcome] ?? d.outcome, tone: OUTCOME_TONE[d.outcome] ?? 'unknown',
+      // Шаг 137 (BUG-03, INV-02): статус строки — словарём статусов; одобренное в тени — «Held in shadow mode», а не «Approved», будто цена ушла
+      outcome: m.ui.statuses[decisionStatus(d)], tone: PRICE_STATUS_TONE[decisionStatus(d)],
       // Находка 15: у NO_OP нет слепка — цена из столбца решения (предложенная цена intent) [Р-80]
       price: m.money(d.finalMinor ?? d.proposedMinor, d.currency), reason: kept ?? describe(reason, m).text, dangerous: isDangerous(d),
       trigger: triggerChip(d.competitorView, d.currency, m),

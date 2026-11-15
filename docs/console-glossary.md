@@ -79,6 +79,7 @@ XLSX). Одно понятие — одно слово по всему прод�
 | Пол маржи | margin floor | **piso de margen** | **plancher de marge** |
 | Стратегия | strategy | **estrategia** | **stratégie** |
 | Удержано тенью | Held back | **Retenido** | **Retenu** |
+| Статусы цены (шаг 137, Р-252) | Adjusted to limit · Rejected · Blocked · Held in shadow mode · Approved for sending · No change | **Ajustado al límite** · **Rechazado** · **Bloqueado** · **Retenido en modo sombra** · **Aprobado para enviar** · **Sin cambio** | **Ajusté à la limite** · **Rejeté** · **Bloqué** · **Retenu en mode fantôme** · **Approuvé pour l’envoi** · **Aucun changement** |
 | Включить отправку | Start sending prices | **Empezar a enviar precios** | **Commencer à envoyer les prix** |
 | Квитанция решения | Why this price | **Por qué este precio** | **Pourquoi ce prix** |
 | Остановка всего | stop of the whole workspace | **detención de todo el espacio de trabajo** | **arrêt de tout l’espace de travail** |

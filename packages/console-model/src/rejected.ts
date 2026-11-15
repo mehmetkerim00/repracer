@@ -1,14 +1,17 @@
-import { classifyBoundIntervention, type BoundIntervention } from '@repracer/pricing-model';
+import { classifyBoundIntervention } from '@repracer/pricing-model';
 import type { InterventionSlice } from '@repracer/pricing-pipeline';
 import { describe, type HumanReason } from './explain.ts';
 import type { Messages } from './i18n/index.ts';
 import type { ExportRef } from './export-ref.ts';
 import { explanationOf } from './trace.ts';
+import type { PriceStatus } from './statuses.ts';
 import { gap, scopeById, unitOf, type Gap, type StandWorld, type Tone, type UnitRef } from './world.ts';
 
 /**
- * Экран C: что остановили границы и другие рубежи. Р-73: «опасное» — отклонённое Gate с отклонением от границы больше 10 %;
- * остальное вмешательство границы — «скорректировано» (отказ Gate до 10 % и цель стратегии, поставленная на границу).
+ * Экран C: что остановили границы и другие рубежи. Р-73: «опасное» — отклонённое Gate с отклонением от границы больше 10 %.
+ * Шаг 137 (BUG-03): статус строки — из одного словаря (`statuses.ts`). «Adjusted to limit» — только цель стратегии, поставленная на
+ * границу (цена стала равна ей); отказ Gate — «Rejected» при любом отклонении (до шага отказ до 10 % назывался «corrected», и сводка его
+ * так считала, хотя цена не менялась); паузы, остановки, перепроверка при отправке и отклонённые снимки — «Blocked».
  */
 
 export type RejectedKind = 'GATE' | 'STRATEGY_CAP' | 'WRITE_RECHECK' | 'STOP' | 'INPUT' | 'HALT';
@@ -29,7 +32,10 @@ export interface RejectedItem {
    */
   set: string | null;
   deviation: string | null;
-  intervention: BoundIntervention | null;
+  /** Шаг 137: статус строки — тем же словарём, что журнал решений и квитанция */
+  status: PriceStatus;
+  /** Р-73: отказ Gate больше 10 % за границей — опасное изменение (только у REJECTED) */
+  dangerous: boolean;
   reason: HumanReason;
   decisionId: string | null;
   /** Шаг 102 [Р-227]: пол (безубыточность или пол маржи) выше потолка — цены предложения заморожены; своя категория счётчиков */
@@ -41,7 +47,7 @@ export interface RejectedItem {
 export interface RejectedView {
   worldId: string;
   headline: string;
-  summary: { dangerous: number; corrected: number; unresolvable: number; floorAboveCeiling: number; limiterHolds: number; stops: number; inputRejects: number; halts: number };
+  summary: { dangerous: number; adjusted: number; rejected: number; unresolvable: number; floorAboveCeiling: number; limiterHolds: number; stops: number; inputRejects: number; halts: number };
   groups: Array<{ code: string; title: string; count: number }>;
   items: RejectedItem[];
   gaps: Gap[];
@@ -69,7 +75,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     const unit = scope ? unitOf(world, scope, m) : null;
     const money = (v: number | null | undefined) => m.money(v ?? null, d.currency);
     const e = explanationOf(world, d)?.value ?? null;
-    // Цель стратегии поставлена на границу — скорректировано границей [Р-73]. Цель выводит цену конкурента и в слепке не хранится
+    // Цель стратегии поставлена на границу — «Adjusted to limit» (шаг 137). Цель выводит цену конкурента и в слепке не хранится
     // [Р-85]: берётся из горячего intent (3 дня, данные канала); intent уже удалён — цели нет, экран это показывает
     const hot = hotIntents.get(d.intentId) ?? null;
     for (const step of e?.strategy.steps ?? []) {
@@ -82,7 +88,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
         proposed: money(target), current: money(e!.strategy.currentMinor), change: target === null ? null : m.change(e!.strategy.currentMinor, target),
         limit: step.code === 'CAPPED_AT_MIN_PRICE' ? r.limitMin(money(bound)) : step.code === 'CAPPED_AT_MARGIN_FLOOR' ? r.limitFloor(money(bound))
           : step.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? r.limitClearance(money(bound)) : r.limitMax(money(bound)),
-        set: money(bound), deviation: null, intervention: 'CORRECTED', reason: describe(step, m), decisionId: d.decisionId,
+        set: money(bound), deviation: null, status: 'ADJUSTED_TO_LIMIT', dangerous: false, reason: describe(step, m), decisionId: d.decisionId,
         ...ref({ at: d.decidedAt, currency: d.currency, was: e!.strategy.currentMinor, wanted: target, set: bound, bound, deviationBp: null }),
       });
     }
@@ -92,10 +98,11 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     const proposed = d.proposedMinor ?? e?.strategy.proposedMinor ?? null;
     const params = d.reason.params;
     const isBound = BOUND_REJECTIONS.has(code);
-    const intervention = isBound && d.boundDeviationBp !== null ? classifyBoundIntervention(d.boundDeviationBp) : null;
+    // Р-73: опасное — отказ Gate больше 10 % за границей. Шаг 137: отказ в пределах 10 % — тоже «Rejected», а не поправка: цена не менялась
+    const dangerous = d.outcome === 'REJECTED' && isBound && d.boundDeviationBp !== null && classifyBoundIntervention(d.boundDeviationBp) === 'DANGEROUS';
     rows.push({
       kind: code === 'PRICING_STOPPED' ? 'STOP' : 'GATE',
-      tone: intervention === 'DANGEROUS' ? 'stop' : d.outcome === 'HELD' ? 'warn' : isBound ? 'progress' : 'stop',
+      tone: dangerous ? 'stop' : d.outcome === 'HELD' ? 'warn' : isBound ? 'progress' : 'stop',
       at: m.when(d.decidedAt), sortAt: d.decidedAt, unit, productRef: null,
       proposed: proposed === null ? null : money(proposed), current: e ? money(e.strategy.currentMinor) : null,
       change: e && proposed !== null ? m.change(e.strategy.currentMinor, proposed) : null,
@@ -107,7 +114,8 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       ...(code === 'BOUND_UNRESOLVABLE' && params.cause === 'MARGIN_FLOOR_ABOVE_MAX_PRICE' ? { floorAboveCeiling: true } : {}),
       deviation: d.boundDeviationBp === null ? null : m.percentBp(d.boundDeviationBp),
       // Ревью шага 68, находка 1: причина Gate — из строки решения (полные параметры, 30 суток), а не из слепка без сумм
-      intervention, reason: describe(!e || e.gate.reason.code === d.reason.code ? d.reason : e.gate.reason, m), decisionId: d.decisionId,
+      status: d.outcome === 'HELD' ? 'BLOCKED' : 'REJECTED', dangerous,
+      reason: describe(!e || e.gate.reason.code === d.reason.code ? d.reason : e.gate.reason, m), decisionId: d.decisionId,
       ...ref({ at: d.decidedAt, currency: d.currency, was: e ? e.strategy.currentMinor : null, wanted: proposed, set: e ? e.strategy.currentMinor : null,
         bound: Number.isSafeInteger(code === 'BELOW_MIN_PRICE' ? params.minMinor : code === 'BELOW_MARGIN_FLOOR' ? params.floorMinor : code === 'ABOVE_MAX_PRICE' ? params.maxMinor : null)
           ? Number(code === 'BELOW_MIN_PRICE' ? params.minMinor : code === 'BELOW_MARGIN_FLOOR' ? params.floorMinor : params.maxMinor) : null,
@@ -121,7 +129,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
       kind: w.endReason === 'PRICING_STOPPED' ? 'STOP' : 'WRITE_RECHECK', tone: 'stop', at: m.when(w.createdAt), sortAt: w.createdAt,
       unit: scope ? unitOf(world, scope, m) : null, productRef: null, proposed: m.money(w.amountMinor, w.currency),
       current: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, change: scope ? m.change(scope.currentPriceMinor, w.amountMinor) : null,
-      limit: null, set: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, deviation: null, intervention: null,
+      limit: null, set: scope ? m.money(scope.currentPriceMinor, scope.currency) : null, deviation: null, status: 'BLOCKED', dangerous: false,
       reason: describe({ code: w.endReason!, params: w.endParams }, m), decisionId: w.decisionId,
       ...ref({ at: w.createdAt, currency: w.currency, was: scope ? scope.currentPriceMinor : null, wanted: w.amountMinor, set: scope ? scope.currentPriceMinor : null, bound: null, deviationBp: null }),
     });
@@ -136,7 +144,7 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
     rows.push({
       kind: s.verdict === 'HALT_CHANNEL' ? 'HALT' : 'INPUT', tone: 'stop', at: m.when(s.receivedAt), sortAt: s.receivedAt,
       unit: scope ? unitOf(world, scope, m) : null, productRef: r.productRef(s.key.marketplace, s.key.channelProductRef),
-      proposed: null, current: null, change: null, limit: null, set: null, deviation: null, intervention: null,
+      proposed: null, current: null, change: null, limit: null, set: null, deviation: null, status: 'BLOCKED', dangerous: false,
       reason: describe({ code: s.reasonCode, params: s.details }, m), decisionId: null,
       ...ref({ at: s.receivedAt, currency: null, was: null, wanted: null, set: null, bound: null, deviationBp: null }),
     });
@@ -144,16 +152,17 @@ export function rejectedView(world: StandWorld, slice: InterventionSlice, m: Mes
 
   rows.sort((a, b) => Date.parse(b.sortAt) - Date.parse(a.sortAt));
   const items: RejectedItem[] = rows.map(({ sortAt: _sortAt, ...item }) => item);
-  const dangerous = items.filter((i) => i.intervention === 'DANGEROUS').length;
-  const corrected = items.filter((i) => i.intervention === 'CORRECTED').length;
+  const dangerous = items.filter((i) => i.dangerous).length;
+  const adjusted = items.filter((i) => i.status === 'ADJUSTED_TO_LIMIT').length;
+  const rejected = items.filter((i) => i.status === 'REJECTED').length;
   const counts = new Map<string, number>();
   for (const i of items) counts.set(i.reason.code, (counts.get(i.reason.code) ?? 0) + 1);
 
   return {
     worldId: world.id,
-    headline: r.headline(dangerous, corrected),
+    headline: r.headline(adjusted, rejected, dangerous),
     summary: {
-      dangerous, corrected,
+      dangerous, adjusted, rejected,
       unresolvable: items.filter((i) => i.reason.code === 'BOUND_UNRESOLVABLE' && !i.floorAboveCeiling).length,
       // Шаг 102 [Р-227]: пол выше потолка — цены заморожены законно, но продавцу видно и названо отдельно, а не «границы не вычисляются»
       floorAboveCeiling: items.filter((i) => i.floorAboveCeiling).length,

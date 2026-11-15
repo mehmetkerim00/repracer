@@ -1409,6 +1409,8 @@ export const en = {
       },
     },
     outcomes: { APPROVED: 'Approved', NO_CHANGE: 'No change', REJECTED: 'Rejected', HELD: 'Held' },
+    // Шаг 137 (BUG-03): один словарь статусов цены у Protections, журнала решений и квитанции
+    statuses: { APPROVED_LIVE: 'Approved for sending', HELD_IN_SHADOW: 'Held in shadow mode', NO_CHANGE: 'No change', ADJUSTED_TO_LIMIT: 'Adjusted to limit', REJECTED: 'Rejected', BLOCKED: 'Blocked' },
     rules: {
       CHANNEL_HALTED: 'Storefront not halted', STRUCTURE: 'Snapshot structure: amounts, currency, price basis', FRESHNESS: 'Freshness and order',
       CHANNEL_MASS_SHIFT: 'Mass price shift on the storefront', UNIT_SCALE: 'Decimal-point error (exactly ×100 or ×0.01)',
@@ -1524,7 +1526,7 @@ export const en = {
       sourceUnnamed: 'Competitor data from the channel',
       source: 'Source', observed: 'Observed', readingAge: 'Age at the decision', ageValue: (min: number) => (min < 1 ? 'under a minute' : `${min} min`),
       ageQuiet: (min: number) => `${min} min — older than 15 minutes: such a reading serves only a raise step while the Buy Box is yours`,
-      snapshotRef: 'Full snapshot', refUntil: (when: string) => `available until ${when}`, refExpired: 'reference expired',
+      snapshotRef: 'Full market snapshot (kept 18 months)', refUntil: (when: string) => `kept until ${when}`, refExpired: 'reference expired',
       sanityMissing: 'The input check result was not stored with the snapshot',
       warning: 'Warning',
       sanityTitle: (_ruleset: string) => 'Input check',
@@ -1538,7 +1540,9 @@ export const en = {
       strategy: 'Strategy', trigger: 'Trigger', before: 'Price before', boundsAtStrategy: 'Bounds at calculation', step: 'Calculation step', notRun: 'not checked: decided earlier',
       gateOrderUnknown: 'Order of Gate checks unknown: the profile is not in the dictionary',
       floor: 'Floor', ceiling: 'Ceiling', minMargin: 'Minimum margin', fx: 'Exchange rate of the cost', deviation: 'Distance from the bound',
-      deviationValue: (pct: string, dangerous: boolean) => `${pct} — ${dangerous ? 'dangerous change' : 'corrected'}`,
+      deviationValue: (pct: string, dangerous: boolean) => `${pct} beyond the bound — ${dangerous ? 'rejected, a dangerous change (over 10%)' : 'rejected; the price did not change'}`,
+      // Шаг 137 (INV-03): в распродаже нижнюю границу заменяет пол распродажи
+      boundsInClearance: (range: string, floor: string) => `${range}; in clearance mode the clearance floor ${floor} replaces the lower bound`,
       priceStop: 'Pricing stop', priceStopValue: (scope: string, when: string) => `${scope} since ${when}`,
       channelHalt: 'Storefront halt', channelHaltValue: (when: string) => `since ${when}`,
       headlineApplied: (price: string) => `The price ${price} was set and applied by the channel`,
@@ -1559,16 +1563,16 @@ export const en = {
     },
     rejected: {
       pageTitle: 'Stopped changes',
-      headline: (dangerous: number, corrected: number) => `Your bounds stopped ${dangerous} dangerous ${dangerous === 1 ? 'change' : 'changes'} and corrected ${corrected}`,
-      summary: (s: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
-        `Dangerous (over 10% beyond a bound): ${s.dangerous} · corrected: ${s.corrected} · bound not computable: ${s.unresolvable} · step and frequency limits: ${s.limiterHolds} · stopped by a person: ${s.stops} · rejected snapshots: ${s.inputRejects} · storefront halts: ${s.halts}`,
+      headline: (adjusted: number, rejected: number, dangerous: number) => `Your bounds adjusted ${adjusted} ${adjusted === 1 ? 'price' : 'prices'} to a limit and rejected ${rejected} ${rejected === 1 ? 'proposal' : 'proposals'}${dangerous > 0 ? `, ${dangerous} of them dangerous` : ''}`,
+      summary: (s: { dangerous: number; adjusted: number; rejected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
+        `Adjusted to limit: ${s.adjusted} · rejected: ${s.rejected} (dangerous, over 10% beyond a bound: ${s.dangerous}) · bound not computable: ${s.unresolvable} · step and frequency limits: ${s.limiterHolds} · stopped by a person: ${s.stops} · rejected snapshots: ${s.inputRejects} · storefront halts: ${s.halts}`,
       // Шаг 68 (K10): пустой экран объясняет, что значит пустота и когда здесь что-то появится
-      none: 'Nothing was stopped or corrected in the last 7 days. Every time a bound, a person or the input check stops or corrects a price, it appears here with the reason.',
+      none: 'Nothing was adjusted, rejected or blocked in the last 7 days. Every time a bound, a person or the input check adjusts, rejects or blocks a price, it appears here with the reason.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Strategy capped at a bound', WRITE_RECHECK: 'Recheck at dispatch', STOP: 'Stopped by a person', INPUT: 'Input check', HALT: 'Storefront halt' },
-      interventions: { DANGEROUS: 'dangerous', CORRECTED: 'corrected' },
+      dangerousMark: 'dangerous',
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
-      stateStopped: 'stopped', stateColumn: 'State', historyColumn: 'Price', historyLegend: 'was → wanted → set',
-      stats: { dangerous: 'Dangerous', corrected: 'Corrected', unresolvable: 'Bound not computable', floorAboveCeiling: 'Floor above ceiling', limiterHolds: 'Step and frequency limits', stops: 'Stopped by a person', inputRejects: 'Rejected snapshots', halts: 'Storefront halts' },
+      stateColumn: 'State', historyColumn: 'Price', historyLegend: 'was → wanted → set',
+      stats: { dangerous: 'Dangerous', adjusted: 'Adjusted to limit', rejected: 'Rejected', unresolvable: 'Bound not computable', floorAboveCeiling: 'Floor above ceiling', limiterHolds: 'Step and frequency limits', stops: 'Stopped by a person', inputRejects: 'Rejected snapshots', halts: 'Storefront halts' },
       statsLabel: 'This period by category',
       filters: { label: 'Show one reason only', clear: 'Show all reasons' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -2013,7 +2017,7 @@ export const en = {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
       kind: { label: 'Kind', writes: 'Prices sent', decisions: 'All decisions', writesCaption: 'Prices sent to a store or held back.', decisionsCaption: 'Every decision, with or without a price sent. Status belongs to sent prices only.' },
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
-      outcome: { label: 'Outcome', all: 'all', CHANGED: 'price changed', NO_CHANGE: 'no change', REJECTED: 'rejected or held' },
+      outcome: { label: 'Outcome', all: 'all', CHANGED: 'approved (sent, or held in shadow mode)', NO_CHANGE: 'no change', REJECTED: 'rejected or blocked' },
       // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
       trialWeek: 'Trial week: prices were computed but nothing was sent to your stores.',
       // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит

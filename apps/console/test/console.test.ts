@@ -232,7 +232,8 @@ test('screens render from the dictionary: sign-in, products with the effective f
   assert.ok(!products.includes('unit 4101'), 'номер единицы канала не подпись предложения');
 
   const decisions = (await get<DecisionListView>(auth, api(id, 'decisions'))).items;
-  const approved = decisions.find((d) => d.outcome === 'Approved')!;
+  // Шаг 137 (BUG-03): статус строки — словарём статусов; у аккаунта в бою одобренное — «Approved for sending»
+  const approved = decisions.find((d) => d.outcome === 'Approved for sending')!;
   const trace = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: await get<DecisionTrace>(auth, api(id, 'decisions', approved.decisionId)) });
   for (const text of ['Why this price', 'Competitor snapshot', 'Input check', 'Plausibility anchors', 'Strategy', 'Price Gate', 'Sending to your store', 'Channel confirmation']) {
     assert.ok(trace.includes(text), text);
@@ -245,7 +246,8 @@ test('screens render from the dictionary: sign-in, products with the effective f
 
   const rejected = await html('/src/screens/Rejected.tsx', 'RejectedScreenView', { view: await get<RejectedView>(auth, api('kaufland/pipeline/above-max-price', 'rejected')) });
   // Шаг 102 [Р-227]: себестоимость сценария «выше max_price» выросла до €15.00 — отклонение цели от потолка 14.92 %
-  for (const text of ['Your bounds stopped 1 dangerous change', 'dangerous', '14.92%']) assert.ok(rejected.includes(text), text);
+  // Шаг 137 (BUG-03): отказ Gate — «Rejected», опасный — с пометкой «dangerous»
+  for (const text of ['rejected 1 proposal, 1 of them dangerous', 'Rejected · dangerous', '14.92%']) assert.ok(rejected.includes(text), text);
 
   const usd = (await get<BoundsIndexView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds'))).items.find((b) => b.label.includes('amazon.com'))!;
   const bounds = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: await get<BoundsView>(auth, api('kaufland/pipeline/fx-usd-floor-eur-cost', 'bounds', usd.writeScopeId)) });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
 import {
-  boundsView, decisionTrace, LOCALES, messagesFor, planStop, productList,
+  boundsView, decisionItems, decisionTrace, LOCALES, messagesFor, planStop, productList, rejectedView,
   type HumanReason, type Messages, type StandWorld, type Viewer,
 } from '@repracer/console-model';
 import { decisionsOf, rejectedOf, stopOf, traceOf } from './console/streams.ts';
@@ -211,15 +211,49 @@ test('Р-73, C: a Gate rejection more than 10 % beyond the bound is dangerous; t
   const view = await rejectedOf(w.store, world, en);
   const item = view.items.find((i) => i.kind === 'GATE')!;
   // Шаг 102 [Р-227]: себестоимость сценария выросла до €15.00 (а не €20.00 — безубыточность осталась ниже потолка), цель — €28.73
-  assert.deepEqual([item.proposed, item.limit, item.intervention], ['€28.73', 'your maximum price €25.00', 'DANGEROUS']);
+  assert.deepEqual([item.proposed, item.limit, item.status, item.dangerous], ['€28.73', 'your maximum price €25.00', 'REJECTED', true]);
   assert.equal(view.summary.dangerous, 1);
-  assert.match(view.headline, /^Your bounds stopped 1 dangerous change and corrected \d+$/);
+  assert.match(view.headline, /^Your bounds adjusted \d+ prices? to a limit and rejected 1 proposal, 1 of them dangerous$/);
   assert.equal(item.deviation, '14.92%');
   assert.equal((await rejectedOf(w.store, world, de)).items.find((i) => i.kind === 'GATE')!.deviation, '14,92 %');
   const shiftWorld = live('kaufland/pipeline/mass-shift-halt');
   const shift = await rejectedOf(shiftWorld.store, await shiftWorld.view(user('OWNER')), en);
   assert.ok(shift.items.some((i) => i.kind === 'HALT' && i.reason.code === 'CHANNEL_MASS_SHIFT'));
   assert.equal(shift.summary.dangerous, 0, 'a channel halt is not a bound intervention');
+});
+
+/**
+ * Шаг 137 (BUG-03 отчёта Мердана «QA-A Bug & Findings Report 1.0», UX-08): один словарь статусов цены у Protections, квитанции и журнала
+ * решений. Отказ Gate в пределах 10 % от границы — «Rejected» (цена не менялась), а не «corrected»; «Adjusted to limit» — только цель
+ * стратегии, поставленная на границу (цена стала равна ей). Сводка «adjusted» отказы не считает. Случай Мердана: Desk lamp · ebay.com,
+ * предложено $11.99 при минимуме $12.00 — 0.09 %. Здесь — настоящий отказ Gate сценария, отклонение уменьшено до того же 0.09 %
+ */
+test('step 137 (BUG-03): one status vocabulary — a Gate rejection within 10 % of a bound is Rejected, not adjusted; the receipt and the decision list say the same', async () => {
+  const w = live('kaufland/pipeline/above-max-price');
+  const world = await w.view(user('OWNER'));
+  const slice = await w.store.interventions(world.tenantId, new Date(Date.parse(world.now) - 7 * 86_400_000).toISOString() as never, world.now as never);
+  const rejectedDecision = slice.decisions.find((d) => d.outcome === 'REJECTED' && d.rejectionReason === 'ABOVE_MAX_PRICE')!;
+  const near = { ...slice, decisions: slice.decisions.map((d) => (d.decisionId === rejectedDecision.decisionId ? { ...d, boundDeviationBp: 9 } : d)) };
+  const view = rejectedView(world, near, en);
+  const gate = view.items.find((i) => i.decisionId === rejectedDecision.decisionId && i.kind === 'GATE')!;
+  assert.deepEqual([gate.status, gate.dangerous, gate.set], ['REJECTED', false, gate.current], 'a rejection within 10 % is Rejected and the price stayed');
+  const caps = view.items.filter((i) => i.kind === 'STRATEGY_CAP');
+  assert.ok(caps.every((i) => i.status === 'ADJUSTED_TO_LIMIT'), 'a target set to a bound is Adjusted to limit');
+  assert.equal(view.summary.adjusted, caps.length, 'the adjusted count is the bound adjustments only — no rejections in it');
+  assert.equal(view.summary.rejected, view.items.filter((i) => i.status === 'REJECTED').length);
+  assert.doesNotMatch(view.headline, /corrected/i, 'the word that hid the rejection is gone');
+  // Квитанция того же решения — то же слово, и строка отклонения не говорит «corrected»
+  const detail = (await w.store.decisionDetail(world.tenantId, rejectedDecision.decisionId))!;
+  const trace = decisionTrace(world, { ...detail, decision: { ...detail.decision, boundDeviationBp: 9 } }, en);
+  assert.equal(trace.status.label, en.ui.statuses.REJECTED, 'the receipt names the decision with the word Protections uses');
+  const deviation = trace.steps.find((s) => s.key === 'GATE')!.items.find((i) => i.label === en.ui.trace.deviation)!;
+  assert.doesNotMatch(deviation.value ?? '', /corrected/i, 'the deviation line does not call a rejection corrected');
+  // Журнал решений: одобренное в тени — «Held in shadow mode», а не «Approved», будто цена ушла
+  const approved = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items.find((d) => d.outcome === 'APPROVED');
+  if (approved) {
+    assert.equal(decisionItems(world, [{ ...approved, shadow: true }], en)[0]!.outcome, en.ui.statuses.HELD_IN_SHADOW, 'an approved decision in shadow is held, not sent');
+    assert.equal(decisionItems(world, [{ ...approved, shadow: false }], en)[0]!.outcome, en.ui.statuses.APPROVED_LIVE);
+  }
 });
 
 test('D, F: the product list shows the effective floor with min_price as its part; the floor is broken down to the cent and matches the Gate', async () => {

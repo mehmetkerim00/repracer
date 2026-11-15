@@ -1405,6 +1405,8 @@ export const es: Messages = {
       },
     },
     outcomes: { APPROVED: 'Aprobado', NO_CHANGE: 'Sin cambio', REJECTED: 'Rechazado', HELD: 'Retenido' },
+    // Шаг 137 (BUG-03): один словарь статусов цены у Protections, журнала решений и квитанции
+    statuses: { APPROVED_LIVE: 'Aprobado para enviar', HELD_IN_SHADOW: 'Retenido en modo sombra', NO_CHANGE: 'Sin cambio', ADJUSTED_TO_LIMIT: 'Ajustado al límite', REJECTED: 'Rechazado', BLOCKED: 'Bloqueado' },
     rules: {
       CHANNEL_HALTED: 'Sitio no suspendido', STRUCTURE: 'Estructura de los datos de la competencia: importes, moneda, base de precio', FRESHNESS: 'Actualidad y orden',
       CHANNEL_MASS_SHIFT: 'Cambio masivo de precios en el sitio', UNIT_SCALE: 'Error en el punto decimal (exactamente ×100 o ×0.01)',
@@ -1520,7 +1522,7 @@ export const es: Messages = {
       sourceUnnamed: 'Datos de la competencia del canal',
       source: 'Fuente', observed: 'Observado', readingAge: 'Antigüedad al decidir', ageValue: (min: number) => (min < 1 ? 'menos de un minuto' : `${min} min`),
       ageQuiet: (min: number) => `${min} min: más de 15 minutos; una lectura así solo sirve para un paso de subida mientras la Buy Box es suya`,
-      snapshotRef: 'Datos completos de la competencia', refUntil: (when: string) => `disponibles hasta ${when}`, refExpired: 'referencia vencida',
+      snapshotRef: 'Datos completos de la competencia (se guardan 18 meses)', refUntil: (when: string) => `se guardan hasta ${when}`, refExpired: 'referencia vencida',
       sanityMissing: 'El resultado de la revisión de datos de entrada no se guardó con los datos de la competencia',
       warning: 'Advertencia',
       sanityTitle: (_ruleset: string) => 'Revisión de datos de entrada',
@@ -1534,7 +1536,9 @@ export const es: Messages = {
       strategy: 'Estrategia', trigger: 'Desencadenante', before: 'Precio anterior', boundsAtStrategy: 'Límites al calcular', step: 'Paso del cálculo', notRun: 'no revisado: se decidió antes',
       gateOrderUnknown: 'Orden de las revisiones del Gate desconocido: el perfil no está en el diccionario',
       floor: 'Piso', ceiling: 'Techo', minMargin: 'Margen mínimo', fx: 'Tipo de cambio del costo', deviation: 'Distancia al límite',
-      deviationValue: (pct: string, dangerous: boolean) => `${pct} — ${dangerous ? 'cambio peligroso' : 'corregido'}`,
+      deviationValue: (pct: string, dangerous: boolean) => `${pct} más allá del límite — ${dangerous ? 'rechazado, un cambio peligroso (más de un 10%)' : 'rechazado; el precio no cambió'}`,
+      // Шаг 137 (INV-03): в распродаже нижнюю границу заменяет пол распродажи
+      boundsInClearance: (range: string, floor: string) => `${range}; en modo liquidación el piso de liquidación ${floor} sustituye al límite inferior`,
       priceStop: 'Detención de precios', priceStopValue: (scope: string, when: string) => `${scope} desde ${when}`,
       channelHalt: 'Suspensión del sitio', channelHaltValue: (when: string) => `desde ${when}`,
       headlineApplied: (price: string) => `Se fijó el precio ${price} y el canal lo aplicó`,
@@ -1554,16 +1558,16 @@ export const es: Messages = {
     },
     rejected: {
       pageTitle: 'Cambios detenidos',
-      headline: (dangerous: number, corrected: number) => `Sus límites detuvieron ${dangerous} ${dangerous === 1 ? 'cambio peligroso' : 'cambios peligrosos'} y corrigieron ${corrected}`,
-      summary: (s: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
-        `Peligrosos (más de un 10% más allá de un límite): ${s.dangerous} · corregidos: ${s.corrected} · límite no calculable: ${s.unresolvable} · límites de paso y frecuencia: ${s.limiterHolds} · detenidos por una persona: ${s.stops} · datos de la competencia rechazados: ${s.inputRejects} · suspensiones de sitios: ${s.halts}`,
+      headline: (adjusted: number, rejected: number, dangerous: number) => `Sus límites ajustaron ${adjusted} ${adjusted === 1 ? 'precio' : 'precios'} al límite y rechazaron ${rejected} ${rejected === 1 ? 'propuesta' : 'propuestas'}${dangerous > 0 ? `, ${dangerous} de ellas peligrosas` : ''}`,
+      summary: (s: { dangerous: number; adjusted: number; rejected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
+        `Ajustados al límite: ${s.adjusted} · rechazados: ${s.rejected} (peligrosos, más de un 10% más allá de un límite: ${s.dangerous}) · límite no calculable: ${s.unresolvable} · límites de paso y frecuencia: ${s.limiterHolds} · detenidos por una persona: ${s.stops} · datos de la competencia rechazados: ${s.inputRejects} · suspensiones de sitios: ${s.halts}`,
       // Шаг 68 (K10): пустой экран объясняет, что значит пустота и когда здесь что-то появится
-      none: 'No se detuvo ni corrigió nada en los últimos 7 días. Cada vez que un límite, una persona o la revisión de datos de entrada detiene o corrige un precio, aparece aquí con el motivo.',
+      none: 'En los últimos 7 días no se ajustó, rechazó ni bloqueó nada. Cada vez que un límite, una persona o la comprobación de datos ajusta, rechaza o bloquea un precio, aparece aquí con el motivo.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Estrategia ajustada a un límite', WRITE_RECHECK: 'Revisión al enviar', STOP: 'Detenido por una persona', INPUT: 'Revisión de datos de entrada', HALT: 'Suspensión del sitio' },
-      interventions: { DANGEROUS: 'peligroso', CORRECTED: 'corregido' },
+      dangerousMark: 'peligroso',
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
-      stateStopped: 'detenido', stateColumn: 'Estado', historyColumn: 'Precio', historyLegend: 'antes → deseado → fijado',
-      stats: { dangerous: 'Peligrosos', corrected: 'Corregidos', unresolvable: 'Límite no calculable', floorAboveCeiling: 'Piso por encima del techo', limiterHolds: 'Límites de paso y frecuencia', stops: 'Detenidos por una persona', inputRejects: 'Datos de la competencia rechazados', halts: 'Suspensiones de sitios' },
+      stateColumn: 'Estado', historyColumn: 'Precio', historyLegend: 'antes → deseado → fijado',
+      stats: { dangerous: 'Peligrosos', adjusted: 'Ajustados al límite', rejected: 'Rechazados', unresolvable: 'Límite no calculable', floorAboveCeiling: 'Piso por encima del techo', limiterHolds: 'Límites de paso y frecuencia', stops: 'Detenidos por una persona', inputRejects: 'Datos de la competencia rechazados', halts: 'Suspensiones de sitios' },
       statsLabel: 'Este período por categoría',
       filters: { label: 'Mostrar solo un motivo', clear: 'Mostrar todos los motivos' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -2004,7 +2008,7 @@ export const es: Messages = {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
       kind: { label: 'Tipo', writes: 'Precios enviados', decisions: 'Todas las decisiones', writesCaption: 'Precios enviados a una tienda o retenidos.', decisionsCaption: 'Todas las decisiones, con o sin precio enviado. El estado solo corresponde a los precios enviados.' },
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
-      outcome: { label: 'Resultado', all: 'todos', CHANGED: 'precio cambiado', NO_CHANGE: 'sin cambio', REJECTED: 'rechazado o retenido' },
+      outcome: { label: 'Resultado', all: 'todos', CHANGED: 'aprobado (enviado o retenido en modo sombra)', NO_CHANGE: 'sin cambio', REJECTED: 'rechazado o bloqueado' },
       // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
       trialWeek: 'Semana de prueba: los precios se calcularon, pero no se envió nada a sus tiendas.',
       // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит

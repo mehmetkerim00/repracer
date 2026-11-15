@@ -1405,6 +1405,8 @@ export const fr: Messages = {
       },
     },
     outcomes: { APPROVED: 'Approuvé', NO_CHANGE: 'Aucun changement', REJECTED: 'Rejeté', HELD: 'Retenu' },
+    // Шаг 137 (BUG-03): один словарь статусов цены у Protections, журнала решений и квитанции
+    statuses: { APPROVED_LIVE: 'Approuvé pour l’envoi', HELD_IN_SHADOW: 'Retenu en mode fantôme', NO_CHANGE: 'Aucun changement', ADJUSTED_TO_LIMIT: 'Ajusté à la limite', REJECTED: 'Rejeté', BLOCKED: 'Bloqué' },
     rules: {
       CHANNEL_HALTED: 'Site non suspendu', STRUCTURE: 'Structure des données de la concurrence : montants, devise, base de prix', FRESHNESS: 'Fraîcheur et ordre',
       CHANNEL_MASS_SHIFT: 'Variation massive des prix sur le site', UNIT_SCALE: 'Erreur de virgule (exactement ×100 ou ×0.01)',
@@ -1520,7 +1522,7 @@ export const fr: Messages = {
       sourceUnnamed: 'Données de la concurrence du canal',
       source: 'Source', observed: 'Observé', readingAge: 'Âge lors de la décision', ageValue: (min: number) => (min < 1 ? 'moins d’une minute' : `${min} min`),
       ageQuiet: (min: number) => `${min} min — plus de 15 minutes : une lecture aussi ancienne ne sert qu’à un palier de hausse tant que la Buy Box est à vous`,
-      snapshotRef: 'Données de la concurrence complètes', refUntil: (when: string) => `disponibles jusqu’à ${when}`, refExpired: 'lien expiré',
+      snapshotRef: 'Données de la concurrence complètes (conservées 18 mois)', refUntil: (when: string) => `conservées jusqu’au ${when}`, refExpired: 'lien expiré',
       sanityMissing: 'Le résultat du contrôle des entrées n’a pas été enregistré avec les données de la concurrence',
       warning: 'Avertissement',
       sanityTitle: (_ruleset: string) => 'Contrôle des entrées',
@@ -1534,7 +1536,9 @@ export const fr: Messages = {
       strategy: 'Stratégie', trigger: 'Déclencheur', before: 'Prix avant', boundsAtStrategy: 'Limites au moment du calcul', step: 'Étape du calcul', notRun: 'non vérifié : décidé avant',
       gateOrderUnknown: 'Ordre des contrôles du Price Gate inconnu : le profil ne figure pas dans le dictionnaire',
       floor: 'Plancher', ceiling: 'Plafond', minMargin: 'Marge minimale', fx: 'Taux de change du coût', deviation: 'Écart par rapport à la limite',
-      deviationValue: (pct: string, dangerous: boolean) => `${pct} — ${dangerous ? 'changement dangereux' : 'corrigé'}`,
+      deviationValue: (pct: string, dangerous: boolean) => `${pct} au-delà de la limite — ${dangerous ? 'rejeté, un changement dangereux (plus de 10%)' : 'rejeté ; le prix n’a pas changé'}`,
+      // Шаг 137 (INV-03): в распродаже нижнюю границу заменяет пол распродажи
+      boundsInClearance: (range: string, floor: string) => `${range} ; en mode déstockage, le plancher de déstockage ${floor} remplace la limite inférieure`,
       priceStop: 'Arrêt de la tarification', priceStopValue: (scope: string, when: string) => `${scope} depuis ${when}`,
       channelHalt: 'Suspension du site', channelHaltValue: (when: string) => `depuis ${when}`,
       headlineApplied: (price: string) => `Le prix ${price} a été fixé et appliqué par le canal`,
@@ -1554,16 +1558,16 @@ export const fr: Messages = {
     },
     rejected: {
       pageTitle: 'Changements arrêtés',
-      headline: (dangerous: number, corrected: number) => `Vos limites ont arrêté ${dangerous} ${dangerous === 1 ? 'changement dangereux' : 'changements dangereux'} et en ont corrigé ${corrected}`,
-      summary: (s: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
-        `Dangereux (plus de 10% au-delà d’une limite) : ${s.dangerous} · corrigés : ${s.corrected} · limite impossible à calculer : ${s.unresolvable} · limites de palier et de fréquence : ${s.limiterHolds} · arrêtés par une personne : ${s.stops} · données de la concurrence rejetées : ${s.inputRejects} · suspensions de site : ${s.halts}`,
+      headline: (adjusted: number, rejected: number, dangerous: number) => `Vos limites ont ajusté ${adjusted} ${adjusted === 1 ? 'prix' : 'prix'} à la limite et rejeté ${rejected} ${rejected === 1 ? 'proposition' : 'propositions'}${dangerous > 0 ? `, dont ${dangerous} dangereuses` : ''}`,
+      summary: (s: { dangerous: number; adjusted: number; rejected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
+        `Ajustés à la limite : ${s.adjusted} · rejetés : ${s.rejected} (dangereux, plus de 10% au-delà d’une limite : ${s.dangerous}) · limite impossible à calculer : ${s.unresolvable} · limites de palier et de fréquence : ${s.limiterHolds} · arrêtés par une personne : ${s.stops} · données de la concurrence rejetées : ${s.inputRejects} · suspensions de site : ${s.halts}`,
       // Шаг 68 (K10): пустой экран объясняет, что значит пустота и когда здесь что-то появится
-      none: 'Rien n’a été arrêté ni corrigé au cours des 7 derniers jours. Chaque fois qu’une limite, une personne ou le contrôle des entrées arrête ou corrige un prix, cela apparaît ici avec la raison.',
+      none: 'Rien n’a été ajusté, rejeté ni bloqué ces 7 derniers jours. Chaque fois qu’une limite, une personne ou la vérification des données ajuste, rejette ou bloque un prix, il apparaît ici avec la raison.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Stratégie ramenée à une limite', WRITE_RECHECK: 'Nouveau contrôle à l’envoi', STOP: 'Arrêté par une personne', INPUT: 'Contrôle des entrées', HALT: 'Suspension du site' },
-      interventions: { DANGEROUS: 'dangereux', CORRECTED: 'corrigé' },
+      dangerousMark: 'dangereux',
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
-      stateStopped: 'arrêté', stateColumn: 'État', historyColumn: 'Prix', historyLegend: 'avant → voulu → fixé',
-      stats: { dangerous: 'Dangereux', corrected: 'Corrigés', unresolvable: 'Limite non calculable', floorAboveCeiling: 'Plancher au-dessus du plafond', limiterHolds: 'Limites de palier et de fréquence', stops: 'Arrêtés par une personne', inputRejects: 'Données de la concurrence rejetées', halts: 'Suspensions de site' },
+      stateColumn: 'État', historyColumn: 'Prix', historyLegend: 'avant → voulu → fixé',
+      stats: { dangerous: 'Dangereux', adjusted: 'Ajustés à la limite', rejected: 'Rejetés', unresolvable: 'Limite non calculable', floorAboveCeiling: 'Plancher au-dessus du plafond', limiterHolds: 'Limites de palier et de fréquence', stops: 'Arrêtés par une personne', inputRejects: 'Données de la concurrence rejetées', halts: 'Suspensions de site' },
       statsLabel: 'Cette période par catégorie',
       filters: { label: 'Afficher une seule raison', clear: 'Afficher toutes les raisons' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -2004,7 +2008,7 @@ export const fr: Messages = {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
       kind: { label: 'Type', writes: 'Prix envoyés', decisions: 'Toutes les décisions', writesCaption: 'Prix envoyés à une boutique ou retenus.', decisionsCaption: 'Chaque décision, avec ou sans prix envoyé. Le statut ne concerne que les prix envoyés.' },
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
-      outcome: { label: 'Résultat', all: 'tous', CHANGED: 'prix modifié', NO_CHANGE: 'aucun changement', REJECTED: 'rejeté ou retenu' },
+      outcome: { label: 'Résultat', all: 'tous', CHANGED: 'approuvé (envoyé ou retenu en mode fantôme)', NO_CHANGE: 'aucun changement', REJECTED: 'rejeté ou bloqué' },
       // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
       trialWeek: 'Semaine d’essai : les prix ont été calculés, mais rien n’a été envoyé à vos boutiques.',
       // Шаг 96 (Б11): поиск фильтрует таблицу по первым найденным предложениям — если нашлось больше, экран это говорит

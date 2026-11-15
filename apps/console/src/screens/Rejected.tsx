@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { periodPhrase, periodSearch, type Messages, type Period, type RejectedItem, type RejectedView } from '@repracer/console-model';
+import { periodPhrase, periodSearch, PRICE_STATUS_TONE, type Messages, type Period, type RejectedItem, type RejectedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { Badge, collapseRepeats, commonZone, Gaps, href, Load, LocalPager, REPORT_PAGE_SIZE, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { rangeText } from '../date-range.tsx';
@@ -54,16 +54,18 @@ function PriceHistory({ item }: { item: RejectedItem }) {
 }
 
 /** Шаг 96.2 (E): счётчики периода — по чипу на категорию; ненулевые — акцентом, нулевые — приглушённо, но видны все */
-const STAT_KEYS = ['dangerous', 'corrected', 'unresolvable', 'floorAboveCeiling', 'limiterHolds', 'stops', 'inputRejects', 'halts'] as const;
+const STAT_KEYS = ['adjusted', 'rejected', 'dangerous', 'unresolvable', 'floorAboveCeiling', 'limiterHolds', 'stops', 'inputRejects', 'halts'] as const;
 
 /**
  * Экран C: опасные изменения (отклонение от границы больше 10 %) отдельно от скорректированных [Р-73].
  * Шаг 95 [Р-217]: страницы «Stopped changes» нет — список делится вкладками Protections: `only="STOP"` — то, что остановил человек,
  * `only="RULES"` — всё остальное (границы, проверка входов, перепроверка при отправке, остановка витрины). Окно — та же неделя целиком
  * (список не постраничный), поэтому деление на экране ничего не теряет.
- * Шаг 96.2: одна пилюля состояния на строку (corrected / dangerous / stopped), история цены одной колонкой, «Beyond bound» — только если в
+ * Шаг 96.2: одна пилюля состояния на строку, история цены одной колонкой, «Beyond bound» — только если в
  * периоде есть опасный случай, причина — категорией и чипом «×N»; группы причин — фильтры таблицы (новый период сбрасывает фильтр:
- * компонент пересоздаётся по ключу периода)
+ * компонент пересоздаётся по ключу периода).
+ * Шаг 137 (BUG-03): пилюля — словарём статусов цены (Adjusted to limit / Rejected / Blocked), тем же, что журнал решений и квитанция;
+ * отказ Gate больше 10 % за границей — «Rejected · dangerous» [Р-73]
  */
 export function RejectedScreenView({ view, only = null, period = { preset: '7d' }, reason, onReason }: {
   view: RejectedView; only?: 'STOP' | 'RULES' | null; period?: Period;
@@ -82,13 +84,13 @@ export function RejectedScreenView({ view, only = null, period = { preset: '7d' 
   const choose = (code: string | null) => { (onReason ?? setOwn)(code); setOffset(0); };
   const filtered = filter ? items.filter((i) => i.reason.code === filter) : items;
   // Шаг 96 (Б12): повторы — строкой «×N» (то же предложение, тот же вид, та же причина), страницы по 50
-  const groups = collapseRepeats(filtered, (i) => `${i.unit?.writeScopeId ?? i.productRef ?? ''}|${i.kind}|${i.reason.code}|${i.intervention ?? ''}`);
+  const groups = collapseRepeats(filtered, (i) => `${i.unit?.writeScopeId ?? i.productRef ?? ''}|${i.kind}|${i.reason.code}|${i.status}|${i.dangerous ? 'd' : ''}`);
   const shown = groups.slice(offset, offset + REPORT_PAGE_SIZE);
   const zone = commonZone(shown.map((g) => g.item.at));
   // A: колонка «Beyond bound» — только когда в периоде есть хотя бы один опасный случай
-  const beyond = items.some((i) => i.intervention === 'DANGEROUS');
-  const state = (i: RejectedItem): [string, string] => i.intervention === 'DANGEROUS' ? ['stop', r.interventions.DANGEROUS]
-    : i.intervention === 'CORRECTED' ? ['warn', r.interventions.CORRECTED] : ['off', r.stateStopped];
+  const beyond = items.some((i) => i.dangerous);
+  const state = (i: RejectedItem): [string, string] => i.dangerous ? ['stop', `${m.ui.statuses.REJECTED} · ${r.dangerousMark}`]
+    : [PRICE_STATUS_TONE[i.status], m.ui.statuses[i.status]];
   // решение по G2: одно состояние у всей страницы — пилюлей в подписи; одна причина — фразой в подписи
   const oneState = uniformOf(shown, (g) => state(g.item)[1]);
   const stateOf = oneState === null ? null : state(shown[0]!.item);
@@ -143,7 +145,7 @@ export function RejectedScreenView({ view, only = null, period = { preset: '7d' 
               {shown.map(({ item, count }, i) => {
                 const [tone, text] = state(item);
                 return (
-                  <tr key={i} className={item.intervention === 'DANGEROUS' ? 'dangerous' : ''}>
+                  <tr key={i} className={item.dangerous ? 'dangerous' : ''}>
                     <td className="nowrap" data-label={`${c.when}${zone ? ` · ${zone}` : ''}`}><When value={item.at} zone={!zone} /></td>
                     <td className="offer card-title">{item.unit ? <UnitName unit={item.unit} /> : item.productRef ?? m.ui.common.noValue}</td>
                     {stateOf ? null : <td className="state card-status"><Badge tone={tone}>{text}</Badge></td>}

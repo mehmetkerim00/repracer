@@ -1351,6 +1351,8 @@ export const de: Messages = {
       },
     },
     outcomes: { APPROVED: 'Freigegeben', NO_CHANGE: 'Keine Änderung', REJECTED: 'Abgelehnt', HELD: 'Zurückgehalten' },
+    // Шаг 137 (BUG-03): один словарь статусов цены у Protections, журнала решений и квитанции
+    statuses: { APPROVED_LIVE: 'Zum Senden freigegeben', HELD_IN_SHADOW: 'Im Schattenmodus zurückgehalten', NO_CHANGE: 'Keine Änderung', ADJUSTED_TO_LIMIT: 'An die Grenze angepasst', REJECTED: 'Abgelehnt', BLOCKED: 'Blockiert' },
     rules: {
       CHANNEL_HALTED: 'Storefront nicht angehalten', STRUCTURE: 'Aufbau der Wettbewerbsdaten: Beträge, Währung, Preisbasis', FRESHNESS: 'Aktualität und Reihenfolge',
       CHANNEL_MASS_SHIFT: 'Massenhafte Preisverschiebung auf der Storefront', UNIT_SCALE: 'Einheitenfehler (genau ×100 oder ×0,01)',
@@ -1465,7 +1467,7 @@ export const de: Messages = {
       sourceUnnamed: 'Wettbewerbsdaten des Kanals',
       source: 'Quelle', observed: 'Beobachtet', readingAge: 'Alter bei der Entscheidung', ageValue: (min: number) => (min < 1 ? 'unter einer Minute' : `${min} Min.`),
       ageQuiet: (min: number) => `${min} Min. — älter als 15 Minuten: solche Wettbewerbsdaten dienen nur einem Anhebungsschritt, solange die Buy Box Ihnen gehört`,
-      snapshotRef: 'Vollständige Wettbewerbsdaten', refUntil: (when: string) => `verfügbar bis ${when}`, refExpired: 'Verweis abgelaufen',
+      snapshotRef: 'Vollständige Wettbewerbsdaten (18 Monate aufbewahrt)', refUntil: (when: string) => `aufbewahrt bis ${when}`, refExpired: 'Verweis abgelaufen',
       sanityMissing: 'Das Ergebnis der Eingangsprüfung wurde nicht mit den Wettbewerbsdaten gespeichert',
       warning: 'Hinweis',
       sanityTitle: (_ruleset: string) => 'Eingangsprüfung',
@@ -1479,7 +1481,9 @@ export const de: Messages = {
       strategy: 'Strategie', trigger: 'Auslöser', before: 'Preis vorher', boundsAtStrategy: 'Grenzen bei der Berechnung', step: 'Berechnungsschritt', notRun: 'nicht geprüft: vorher entschieden',
       gateOrderUnknown: 'Reihenfolge der Gate-Prüfungen unbekannt: Das Profil fehlt im Verzeichnis',
       floor: 'Untergrenze', ceiling: 'Obergrenze', minMargin: 'Mindestmarge', fx: 'Wechselkurs der Kosten', deviation: 'Abstand zur Grenze',
-      deviationValue: (pct: string, dangerous: boolean) => `${pct} — ${dangerous ? 'gefährliche Änderung' : 'korrigiert'}`,
+      deviationValue: (pct: string, dangerous: boolean) => `${pct} jenseits der Grenze — ${dangerous ? 'abgelehnt, eine gefährliche Änderung (mehr als 10 %)' : 'abgelehnt; der Preis blieb unverändert'}`,
+      // Шаг 137 (INV-03): в распродаже нижнюю границу заменяет пол распродажи
+      boundsInClearance: (range: string, floor: string) => `${range}; im Abverkauf ersetzt die Abverkaufs-Untergrenze ${floor} die untere Grenze`,
       priceStop: 'Preisstopp', priceStopValue: (scope: string, when: string) => `${scope} seit ${when}`,
       channelHalt: 'Anhalten der Storefront', channelHaltValue: (when: string) => `seit ${when}`,
       headlineApplied: (price: string) => `Der Preis ${price} wurde gesetzt und vom Kanal übernommen`,
@@ -1499,15 +1503,15 @@ export const de: Messages = {
     },
     rejected: {
       pageTitle: 'Gestoppte Änderungen',
-      headline: (dangerous: number, corrected: number) => `Ihre Grenzen haben ${dangerous} gefährliche ${dangerous === 1 ? 'Änderung' : 'Änderungen'} gestoppt und ${corrected} korrigiert`,
-      summary: (s: { dangerous: number; corrected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
-        `Gefährlich (mehr als 10 % jenseits einer Grenze): ${s.dangerous} · korrigiert: ${s.corrected} · Grenze nicht berechenbar: ${s.unresolvable} · Schritt- und Häufigkeitsgrenzen: ${s.limiterHolds} · von einer Person gestoppt: ${s.stops} · abgelehnte Wettbewerbsdaten: ${s.inputRejects} · Anhaltungen von Storefronts: ${s.halts}`,
-      none: 'In den letzten 7 Tagen wurde nichts gestoppt oder korrigiert. Jedes Mal, wenn eine Grenze, eine Person oder die Eingangsprüfung einen Preis stoppt oder korrigiert, erscheint er hier mit dem Grund.',
+      headline: (adjusted: number, rejected: number, dangerous: number) => `Ihre Grenzen haben ${adjusted} ${adjusted === 1 ? 'Preis' : 'Preise'} an eine Grenze angepasst und ${rejected} ${rejected === 1 ? 'Vorschlag' : 'Vorschläge'} abgelehnt${dangerous > 0 ? `, davon ${dangerous} gefährlich` : ''}`,
+      summary: (s: { dangerous: number; adjusted: number; rejected: number; unresolvable: number; limiterHolds: number; stops: number; inputRejects: number; halts: number }) =>
+        `An die Grenze angepasst: ${s.adjusted} · abgelehnt: ${s.rejected} (gefährlich, mehr als 10 % jenseits einer Grenze: ${s.dangerous}) · Grenze nicht berechenbar: ${s.unresolvable} · Schritt- und Häufigkeitsgrenzen: ${s.limiterHolds} · von einer Person gestoppt: ${s.stops} · abgelehnte Wettbewerbsdaten: ${s.inputRejects} · Anhaltungen von Storefronts: ${s.halts}`,
+      none: 'In den letzten 7 Tagen wurde nichts angepasst, abgelehnt oder blockiert. Jedes Mal, wenn eine Grenze, eine Person oder die Eingabeprüfung einen Preis anpasst, ablehnt oder blockiert, erscheint er hier mit dem Grund.',
       kinds: { GATE: 'Price Gate', STRATEGY_CAP: 'Strategie an Grenze begrenzt', WRITE_RECHECK: 'Prüfung beim Versand', STOP: 'Von einer Person gestoppt', INPUT: 'Eingangsprüfung', HALT: 'Anhalten der Storefront' },
-      interventions: { DANGEROUS: 'gefährlich', CORRECTED: 'korrigiert' },
+      dangerousMark: 'gefährlich',
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
-      stateStopped: 'gestoppt', stateColumn: 'Zustand', historyColumn: 'Preis', historyLegend: 'vorher → gewollt → gesetzt',
-      stats: { dangerous: 'Gefährlich', corrected: 'Korrigiert', unresolvable: 'Grenze nicht berechenbar', floorAboveCeiling: 'Untergrenze über Höchstpreis', limiterHolds: 'Schritt- und Häufigkeitsgrenzen', stops: 'Von einer Person gestoppt', inputRejects: 'Abgelehnte Wettbewerbsdaten', halts: 'Anhaltungen von Storefronts' },
+      stateColumn: 'Zustand', historyColumn: 'Preis', historyLegend: 'vorher → gewollt → gesetzt',
+      stats: { dangerous: 'Gefährlich', adjusted: 'An die Grenze angepasst', rejected: 'Abgelehnt', unresolvable: 'Grenze nicht berechenbar', floorAboveCeiling: 'Untergrenze über Höchstpreis', limiterHolds: 'Schritt- und Häufigkeitsgrenzen', stops: 'Von einer Person gestoppt', inputRejects: 'Abgelehnte Wettbewerbsdaten', halts: 'Anhaltungen von Storefronts' },
       statsLabel: 'Dieser Zeitraum nach Kategorie',
       filters: { label: 'Nur einen Grund zeigen', clear: 'Alle Gründe zeigen' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
@@ -1943,7 +1947,7 @@ export const de: Messages = {
     },
     feed: {
       kind: { label: 'Art', writes: 'Gesendete Preise', decisions: 'Alle Entscheidungen', writesCaption: 'Preise, die an einen Shop gingen oder zurückgehalten wurden.', decisionsCaption: 'Jede Entscheidung, mit oder ohne gesendeten Preis. Den Status gibt es nur bei gesendeten Preisen.' },
-      outcome: { label: 'Ergebnis', all: 'alle', CHANGED: 'Preis geändert', NO_CHANGE: 'keine Änderung', REJECTED: 'abgelehnt oder gehalten' },
+      outcome: { label: 'Ergebnis', all: 'alle', CHANGED: 'freigegeben (gesendet oder im Schattenmodus zurückgehalten)', NO_CHANGE: 'keine Änderung', REJECTED: 'abgelehnt oder blockiert' },
       trialWeek: 'Probewoche: Preise wurden berechnet, aber nichts wurde an Ihre Shops gesendet.',
       searchLimited: (shown: number, total: number) => `${total} Angebote passen — die Liste zeigt die ersten ${shown} davon.`,
       pageTitle: 'Preisänderungen', empty: 'Noch keine Preisänderungen. Sie erscheinen, sobald Repricing eingeschaltet ist und ein Preis an einen Kanal gesendet wird.',

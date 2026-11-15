@@ -136,20 +136,23 @@ function demoLikeFloorReport(worldId: string) {
 function demoLikeRejected(worldId: string, dangerous = false) {
   const capped = { code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', text: 'The target from competitor prices was below your minimum price — capped at €14.00.', problems: [], limit: null, withheld: [] };
   const below = { code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', text: 'The price €12.20 is below your minimum price €14.00 — the Price Gate refused it.', problems: [], limit: null, withheld: [] };
+  // Шаг 137 (BUG-03): отказ Gate — «Rejected», а не поправка; одно состояние у страницы теперь — две причины подтягивания к границе
+  const margin = { code: 'CAPPED_AT_MARGIN_FLOOR', title: 'Target capped at the margin floor', text: 'The target from competitor prices was below your margin floor — capped at €15.00.', problems: [], limit: null, withheld: [] };
   const unit = (i: number) => ({ writeScopeId: `smoke-like-${i}`, channel: 'KAUFLAND', marketplace: 'de', externalUnitId: `l-${i}`, channelProductRef: `lp-${i}`, condition: 'NEW', gtin: null, label: `Synthetic clock ${i} · kaufland.de`, name: `Synthetic clock ${i}`, storefront: { channel: 'KAUFLAND', letter: 'k', full: 'kaufland.de', short: null } });
   const at = (i: number) => `Oct 15, ${String(12 - Math.floor(i / 12)).padStart(2, '0')}:${String(59 - (i % 12) * 4).padStart(2, '0')}`;
   const items = [
     ...Array.from({ length: 132 }, (_, n) => ({ kind: 'STRATEGY_CAP', tone: 'progress', at: at(n), unit: unit(n % 12), productRef: null, proposed: '€12.49', current: '€18.50', change: '−32.5%',
-      limit: 'your minimum price €14.00', set: '€14.00', deviation: null, intervention: 'CORRECTED', reason: capped, decisionId: null })),
-    ...Array.from({ length: 12 }, (_, n) => ({ kind: 'GATE', tone: 'progress', at: at(n), unit: unit(n), productRef: null, proposed: '€12.20', current: '€18.50', change: '−34.1%',
-      limit: 'your minimum price €14.00', set: '€18.50', deviation: '−12.9%', intervention: 'CORRECTED', reason: below, decisionId: null })),
+      limit: 'your minimum price €14.00', set: '€14.00', deviation: null, status: 'ADJUSTED_TO_LIMIT', dangerous: false, reason: capped, decisionId: null })),
+    ...Array.from({ length: 12 }, (_, n) => ({ kind: 'STRATEGY_CAP', tone: 'progress', at: at(n), unit: unit(n), productRef: null, proposed: '€12.20', current: '€18.50', change: '−34.1%',
+      limit: 'minimum-margin floor €15.00', set: '€15.00', deviation: null, status: 'ADJUSTED_TO_LIMIT', dangerous: false, reason: margin, decisionId: null })),
     ...(dangerous ? [{ kind: 'GATE', tone: 'stop', at: at(0), unit: unit(0), productRef: null, proposed: '€3.00', current: '€18.50', change: '−83.8%',
-      limit: 'your minimum price €14.00', set: '€18.50', deviation: '−78.6%', intervention: 'DANGEROUS', reason: below, decisionId: null }] : []),
+      limit: 'your minimum price €14.00', set: '€18.50', deviation: '−78.6%', status: 'REJECTED', dangerous: true, reason: below, decisionId: null }] : []),
   ];
   return {
-    worldId, headline: `Your bounds stopped ${dangerous ? 1 : 0} dangerous changes and corrected 144`,
-    summary: { dangerous: dangerous ? 1 : 0, corrected: 144, unresolvable: 0, floorAboveCeiling: 0, limiterHolds: 0, stops: 0, inputRejects: 0, halts: 0 },
-    groups: [{ code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', count: 132 }, { code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', count: 12 + (dangerous ? 1 : 0) }],
+    worldId, headline: `Your bounds adjusted 144 prices to a limit and rejected ${dangerous ? 1 : 0} proposals`,
+    summary: { dangerous: dangerous ? 1 : 0, adjusted: 144, rejected: dangerous ? 1 : 0, unresolvable: 0, floorAboveCeiling: 0, limiterHolds: 0, stops: 0, inputRejects: 0, halts: 0 },
+    groups: [{ code: 'CAPPED_AT_MIN_PRICE', title: 'Target capped at your minimum price', count: 132 }, { code: 'CAPPED_AT_MARGIN_FLOOR', title: 'Target capped at the margin floor', count: 12 },
+      ...(dangerous ? [{ code: 'BELOW_MIN_PRICE', title: 'Below your minimum price', count: 1 }] : [])],
     items, gaps: [],
   };
 }
@@ -1128,30 +1131,31 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
       state: c?.querySelector('.uniform-state .badge')?.textContent.trim() ?? null, reason: c?.querySelector('.uniform-reason')?.textContent.trim() ?? null }; })()`);
     const heads = () => b.evaluate<string[]>(`[...document.querySelectorAll('table.also-stopped thead th')].map((th) => th.innerText.trim().replace(/\\s+/g, ' '))`);
     let rows = await also();
-    assert.equal(rows.length, 24, 'the 144 corrections collapse into 24 rows (12 offers, two reasons)');
-    // C: все строки «corrected» — состояние одной пилюлей в подписи, колонки и пилюль в строках нет
-    assert.deepEqual([(await caption()).state, rows.every((x) => x.pills.length === 0), (await heads()).includes(r.stateColumn)], [r.interventions.CORRECTED, true, false],
+    assert.equal(rows.length, 24, 'the 144 adjustments collapse into 24 rows (12 offers, two reasons)');
+    // C: все строки «Adjusted to limit» — состояние одной пилюлей в подписи, колонки и пилюль в строках нет (шаг 137: словарь статусов)
+    assert.deepEqual([(await caption()).state, rows.every((x) => x.pills.length === 0), (await heads()).includes(r.stateColumn)], [en.ui.statuses.ADJUSTED_TO_LIMIT, true, false],
       'C: one state for every row — a pill in the caption, not a column of identical pills');
     assert.deepEqual([rows[0]!.history, rows[0]!.wanted, rows[0]!.set], ['€18.50 → €12.49 → €14.00', '€12.49', '€14.00'], 'A: one price history, the refused target struck, the result bold');
     assert.ok((await heads()).some((h) => h.includes(r.historyLegend)), `A: the legend once in the head — ${JSON.stringify(await heads())}`);
     assert.ok(!(await heads()).includes(r.columns.deviation), 'A: no «Beyond bound» column without a dangerous case');
     // B: две причины на странице — категория и чип в строке; полного предложения в строках нет
-    assert.ok(rows.every((x) => x.reason !== null && !x.reason.includes('The target from competitor prices') && !x.reason.includes('the Price Gate refused')), 'B: the full sentence is not in the rows');
+    assert.ok(rows.every((x) => x.reason !== null && !x.reason.includes('The target from competitor prices')), 'B: the full sentence is not in the rows');
     assert.match(rows[0]!.reason!, /^Target capped at your minimum price\s*×11 · 7d$/, `B: a short category and a ×N chip — ${rows[0]!.reason}`);
-    assert.equal(rows[23]!.reason, 'Below your minimum price', 'B: a single occurrence has no chip');
+    assert.equal(rows[23]!.reason, 'Target capped at the margin floor', 'B: a single occurrence has no chip');
     // E: счётчики периода — чипами, все категории видны, ненулевые — акцентом
     const chips = await b.evaluate<Array<{ text: string; on: boolean }>>(`[...document.querySelectorAll('.stat-chips .stat-chip')].map((c) => ({ text: c.innerText.replace(/\\s+/g, ' ').trim(), on: c.classList.contains('on') }))`);
-    // Шаг 102: восьмая категория — «пол выше потолка» (уточнение владельца: замороженный товар виден, а не прячется в «границу не вычислить»)
-    assert.equal(chips.length, 8, `E: eight categories, zeros too — ${JSON.stringify(chips)}`);
+    // Шаг 102: категория «пол выше потолка» (уточнение владельца: замороженный товар виден, а не прячется в «границу не вычислить»);
+    // шаг 137: «corrected» разделён на «Adjusted to limit» и «Rejected» — девять категорий
+    assert.equal(chips.length, 9, `E: nine categories, zeros too — ${JSON.stringify(chips)}`);
     assert.ok(chips.every((c) => /\s\d+$/.test(c.text)), `E: every category carries its number — ${JSON.stringify(chips)}`);
-    assert.deepEqual(chips.filter((c) => c.on).map((c) => c.text), [`${r.stats.corrected} 144`], 'E: only non-zero chips are accented');
+    assert.deepEqual(chips.filter((c) => c.on).map((c) => c.text), [`${r.stats.adjusted} 144`], 'E: only non-zero chips are accented');
     // F: группы причин — фильтры таблицы
     const filters = () => b.evaluate<Array<{ text: string; pressed: string | null }>>(`[...document.querySelectorAll('.reason-filters button.reason-filter')].map((x) => ({ text: x.innerText.replace(/\\s+/g, ' ').trim(), pressed: x.getAttribute('aria-pressed') }))`);
     const press = (i: number) => b.evaluate(`(document.querySelectorAll('.reason-filters button.reason-filter')[${i}].click(), true)`);
     assert.deepEqual((await filters()).map((f) => f.pressed), ['false', 'false']);
     await press(1);
     rows = await also();
-    assert.deepEqual([rows.length, (await caption()).reason, rows.every((x) => x.reason === null)], [12, r.uniformReason('Below your minimum price'), true],
+    assert.deepEqual([rows.length, (await caption()).reason, rows.every((x) => x.reason === null)], [12, r.uniformReason('Target capped at the margin floor'), true],
       'F: a click shows only that reason — and one reason for the page goes to the caption');
     assert.deepEqual((await filters()).map((f) => f.pressed), ['false', 'true'], 'F: the active filter is visible');
     await press(1);
@@ -1201,7 +1205,7 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
     rows = await also();
     assert.ok((await heads()).includes(r.columns.deviation), 'A: a dangerous case brings the «Beyond bound» column');
     assert.ok(rows.every((x) => x.pills.length === 1), 'C: states differ — one state pill per row');
-    assert.deepEqual(rows.filter((x) => x.pills[0] === r.interventions.DANGEROUS).length, 1, 'the dangerous row has its own red pill');
+    assert.deepEqual(rows.filter((x) => x.pills[0] === `${en.ui.statuses.REJECTED} · ${r.dangerousMark}`).length, 1, 'the dangerous row has its own red pill: Rejected · dangerous');
     assert.deepEqual(await b.evaluate<string[]>(CONSTANT_COLUMNS), [], 'with a dangerous case no column is one value');
   } finally {
     syntheticDangerous = null;

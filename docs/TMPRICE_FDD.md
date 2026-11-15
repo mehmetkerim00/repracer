@@ -93,7 +93,7 @@ Every data screen shares the same conventions:
 | Strategies | Strategies in plain words, their versions, which offers each prices, a preview before saving | Creates new versions, assigns offers, previews | **[QA-A]** |
 | Default strategy for new offers | Per channel account (on Channels): "None" or an active strategy available on that channel | Sets it. It assigns the latest active version to newly discovered offers, but never enables sending; every auto-assignment traces back to the person who set the default | **[QA-A]** |
 | Costs & floors | Unit costs, min/max prices, margin floor, break-even, clearance; the marketplace's own Min/Max next to ours with conflict warnings (where the values are known) | Edits costs and bounds (second factor for many offers); sees which floor is effective and why | **[QA-A]** |
-| Protections | What stopped or prevented changes: floor holds ("the floor held the price 120 times, worth $589.70"), stops by people, rules | Reviews what the fence earned; opens each hold's receipt | **[QA-A]** |
+| Protections | What stopped or prevented changes: floor holds ("the floor held the price 120 times, worth $589.70"), stops by people, rules. Each row has one status from the shared vocabulary: Adjusted to limit, Rejected (dangerous when over 10% beyond a bound), Blocked | Reviews what the fence earned; opens each hold's receipt | **[QA-A]** |
 | Offers | Every offer: status, current price, strategy, effective floor, color; optional Buy Box columns (holder, price, gap, share 7d); "Repricing: On / Off" filter | Filters, sorts, bulk edits, exports offers and competitors | **[QA-A]** |
 | Turn off one offer | "Turn off" / "Enable" per offer (Owner or Manager, no second factor, optional note); "Turned off by …" on the row. A turned-off offer is not evaluated, and its queued writes are not sent | Pauses one SKU without stopping anything else | **[QA-A]** |
 | Competition | Per offer: Buy Box holder, place and gap, Buy Box share 24h / 7d / 30d by snapshots, "Why not in the Buy Box", the Amazon competitive summary with coupons and buyer-segment groups | Understands the market around one offer | **[QA-A]** |
@@ -339,6 +339,7 @@ Honest constraints today:
 | Clearance | Deliberate below-cost selling, signed and journaled, per offer |
 | Shadow mode | Engine computes everything, sends nothing |
 | Decision record | The permanent receipt of one price decision (seven stations) |
+| Price statuses | One vocabulary on Protections, Price changes and the receipt: **Adjusted to limit** (the strategy target was set to a bound), **Rejected** (the Price Gate refused, the price stayed; dangerous when over 10% beyond a bound), **Blocked** (a pause: a person's stop, an inactive offer, step and frequency limits, a write stopped at sending, a rejected snapshot), **Held in shadow mode** (approved, nothing sent), **Approved for sending** (approved on a live account), **No change** |
 | Price gate | The 13 final checks between a proposal and the store |
 | Floor hold | A moment the floor overrode the strategy — counted and valued on Protections |
 | Journal | An append-only log; nothing in it can be rewritten by anyone |
