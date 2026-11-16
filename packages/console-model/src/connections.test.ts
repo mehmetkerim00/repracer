@@ -138,8 +138,8 @@ test('Р-190: a write confirmed by our own offer record is named so on the price
     sideEffects: { requiresAck: false, acknowledged: false, text: null } });
   for (const locale of ['de', 'en'] as const) {
     const m = messagesFor(locale);
-    assert.equal(feedItemOf(world, m, { write: write(true), decision: null, intentCurrentMinor: null }).confirmation, expected[locale]);
-    assert.equal(feedItemOf(world, m, { write: write(false), decision: null, intentCurrentMinor: null }).confirmation, null, 'the live listing confirmed it — no remark');
+    assert.equal(feedItemOf(world, m, { write: write(true), decision: null, intentCurrentMinor: null, at: NOW }).confirmation, expected[locale]);
+    assert.equal(feedItemOf(world, m, { write: write(false), decision: null, intentCurrentMinor: null, at: NOW }).confirmation, null, 'the live listing confirmed it — no remark');
     assert.ok(channelCell(cell(true) as never, m).confirmedText.endsWith(expected[locale]), channelCell(cell(true) as never, m).confirmedText);
     assert.ok(!channelCell(cell(false) as never, m).confirmedText.includes('E-21'));
   }

@@ -502,7 +502,7 @@ export const fr: Messages = {
         boundsDetail: 'D’où vient le plancher de cette offre, au centime près.',
         'cost-import': 'Importez les coûts unitaires depuis votre fichier d’export : d’abord un aperçu, puis tout d’un coup.',
         jobs: 'Opérations groupées de cet espace de travail : avancement, résultat et fichiers à télécharger.',
-        stop: 'Arrêtez les changements de prix de tout l’espace de travail, d’un compte du canal ou d’un site — et voyez qui a arrêté quoi.',
+        stop: 'Vos offres restent en vente. Arrêtez les changements de prix de tout l’espace de travail, d’un compte du canal ou d’un site — et voyez qui a arrêté quoi.',
         costs: 'Prix minimum et maximum de chaque offre et coûts unitaires derrière son plancher ; ouvrez une offre pour voir d’où vient son plancher.',
         protections: 'Ce qui a arrêté ou empêché un changement de prix : les personnes qui ont arrêté les prix, et les règles — votre plancher, vos limites et le contrôle des entrées.',
         channels: 'Vos comptes des canaux — connexion, mises à jour du stock, langue et fuseau horaire — et la liste de configuration tant qu’elle n’est pas terminée.',
@@ -1105,6 +1105,7 @@ export const fr: Messages = {
       },
       // Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили в магазин
       stats: { decisions: 'Décisions', decisionsSub: 'fois où le moteur a vérifié les prix', changes: 'Le prix aurait changé', changesSub: 'fois où le prix aurait bougé', held: 'Retenu', heldSub: 'changements de prix que nous n’avons PAS envoyés à votre boutique', savings: 'Baisses de prix évitées par votre plancher', notForecast: 'pas un bénéfice réalisé',
+        caption: (phrase: string) => `Chiffres ${phrase}. Cliquez sur un chiffre pour ouvrir la liste dont il est tiré.`,
         savingsSub: (events: number, skus: number) => `en écarts de prix proposés · ${events} ${events === 1 ? 'événement' : 'événements'} · ${skus} ${skus === 1 ? 'SKU unique' : 'SKU uniques'} — pas un bénéfice réalisé` },
       // Шаг 96 (Б13, Б16, В21): копирование имени аккаунта, вид удержанного, сворачиваемые блоки
       copy: 'Copier', copied: 'Copié', copyHint: 'Copiez le nom du compte, puis collez-le dans le champ.',
@@ -1515,8 +1516,8 @@ export const fr: Messages = {
         },
         moved: { UP: 'hausse', DOWN: 'baisse', APPEARED: 'nouveau', GONE: 'parti' },
         was: (from: string, to: string) => `${from} → ${to}`,
-        kept: 'Les détails des concurrents sont conservés 30 jours avec la décision.',
-        expired: 'Détails des concurrents : durée de conservation expirée (ils sont conservés 30 jours).',
+        kept: 'Ce tableau reste avec la décision pendant 30 jours ; les données de la concurrence complètes dont il provient sont conservées 18 mois — le maximum autorisé pour les données du canal.',
+        expired: 'Ce tableau n’est plus conservé : il reste 30 jours avec une décision. Les données de la concurrence complètes sont conservées 18 mois.',
       },
       missingTitle: 'Décision introuvable', missingText: 'Ce lien ne mène à aucune décision de prix de cet espace de travail. La liste montre chaque décision avec son explication.', pageTitle: 'Pourquoi ce prix', back: '← Changements de prix', noDecisions: 'Pas encore de décision de prix. Elles apparaissent dès que la tarification automatique ou le mode fantôme tourne pour une offre.',
       columns: { when: 'Quand', unit: 'Offre', outcome: 'Résultat', price: 'Prix', reason: 'Raison' }, why: 'Pourquoi ce prix',
@@ -1584,7 +1585,7 @@ export const fr: Messages = {
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
       stateColumn: 'État', historyColumn: 'Prix', historyLegend: 'avant → voulu → fixé',
       stats: { dangerous: 'Dangereux', adjusted: 'Ajustés à la limite', rejected: 'Rejetés', unresolvable: 'Limite non calculable', floorAboveCeiling: 'Plancher au-dessus du plafond', limiterHolds: 'Limites de palier et de fréquence', stops: 'Arrêtés par une personne', inputRejects: 'Données de la concurrence rejetées', halts: 'Suspensions de site' },
-      statsLabel: 'Cette période par catégorie',
+      statsLabel: 'Décisions de cette période, par catégorie',
       filters: { label: 'Afficher une seule raison', clear: 'Afficher toutes les raisons' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
       // решение владельца по G2: одно значение у всех строк страницы — фразой в подписи таблицы, а не колонкой
@@ -2022,7 +2023,8 @@ export const fr: Messages = {
     },
     feed: {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
-      kind: { label: 'Type', writes: 'Prix envoyés', decisions: 'Toutes les décisions', writesCaption: 'Prix envoyés à une boutique ou retenus.', decisionsCaption: 'Chaque décision, avec ou sans prix envoyé. Le statut ne concerne que les prix envoyés.' },
+      kind: { label: 'Type', writes: 'Changements proposés', decisions: 'Décisions de prix', writesCaption: 'Changements de prix proposés par le moteur : envoyés à une boutique, retenus en mode fantôme ou arrêtés.', decisionsCaption: 'Chaque décision de prix, avec ou sans changement proposé. Le statut ne concerne que les changements.' },
+      countsLead: (phrase: string) => `Changements ${phrase}, par statut :`,
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
       outcome: { label: 'Résultat', all: 'tous', CHANGED: 'approuvé (envoyé ou retenu en mode fantôme)', NO_CHANGE: 'aucun changement', REJECTED: 'rejeté ou bloqué' },
       // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
@@ -2045,6 +2047,7 @@ export const fr: Messages = {
         ? `Le plancher n’a eu à retenir aucun prix ${phrase}`
         : `Votre plancher a évité ${n} ${n === 1 ? 'baisse' : 'baisses'} de prix ${phrase}${amounts.length ? ` ; ${amounts.join(' + ')} d’écarts de prix proposés au total` : ''}`,
       floorNote: 'Pas un bénéfice réalisé ; plusieurs événements peuvent concerner le même SKU. Un événement est un maintien, quel que soit le nombre de vérifications du prix pendant sa durée.',
+      floorShadowOnly: 'Uniquement les maintiens des comptes du canal en mode fantôme, comme sur l’écran Mode fantôme.', floorShowAll: 'Afficher tous les comptes du canal',
       floorStats: { events: 'Événements', eventsSub: 'maintiens par votre plancher', skus: 'SKU uniques', skusSub: 'parmi ces événements', sum: 'Somme', sumSub: 'écarts de prix proposés, pas un bénéfice' },
       floorDetailsGone: 'Les détails de ce maintien ne sont plus conservés.',
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»

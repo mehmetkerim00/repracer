@@ -194,7 +194,7 @@ psql -d repracer_demo -c "SELECT final_status, count(*) AS writes, count(dispatc
 ## б. «Почему эта цена» (2 мин)
 
 Пункта меню «Why this price» нет (шаг 95): квитанция решения — своя страница, пункт меню над ней — Price changes. Короче всего —
-**Price changes** → **Kind: All decisions** → **Outcome: price changed** (шаг 96: у решений есть период и фильтр исхода) → поле **Offer**:
+**Price changes** → **Kind: Price decisions** (шаг 145; вид записей — «Proposed updates») → **Outcome: price changed** (шаг 96: у решений есть период и фильтр исхода) → поле **Offer**:
 начните набирать «plant pot» — таблица фильтруется по мере ввода (шаг 96, Б11) → нажмите на строку amazon.com (шаг 111: витрина в таблице — оранжевый чип «a», полное имя — подсказкой): строка кликабельна
 целиком (Б17) и ведёт на квитанцию. Второй путь — на экране тени раскрыть «Every held change, one by one» и нажать «Why this price».
 

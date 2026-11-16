@@ -107,6 +107,8 @@ export function RejectedScreenView({ view, only = null, period = { preset: '7d' 
       ) : (
         <section className="card summary-card">
           <p className="headline">{view.headline}</p>
+          {/* Шаг 145 (аудит UX, 1.2): эти числа — решения, подписью у чисел (у удержаний пола выше — события) */}
+          <p className="muted small stats-label">{r.statsLabel}</p>
           <ul className="stat-chips" aria-label={r.statsLabel}>
             {STAT_KEYS.map((k) => (
               <li key={k} className={`stat-chip${view.summary[k] > 0 ? ' on' : ''}`}><span>{r.stats[k]}</span> <strong>{view.summary[k]}</strong></li>

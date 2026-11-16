@@ -42,6 +42,8 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
           </dl>
         ) : null}
         {view.floorNote ? <p className="muted small floor-note">{view.floorNote}</p> : null}
+        {/* Шаг 145: пришли с денежной плитки тени — удержания только аккаунтов в тени, как там; одна ссылка возвращает все аккаунты */}
+        {view.floorShadowOnly ? <p className="small floor-scope">{d.floorShadowOnly} <a href={href(view.worldId, 'protections', 'rules', periodSearch(period))}>{d.floorShowAll}</a></p> : null}
         {/* Шаг 102 [Р-227]: пол распродажи — намеренный убыток, отдельной строкой; в «без пола … дешевле» не входит */}
         {view.clearanceHeadline ? <p className="clearance-line">{view.clearanceHeadline}</p> : null}
         <p className="muted small">{view.from} – {view.to}</p>
@@ -109,8 +111,8 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
   );
 }
 
-export function DangerousScreen({ worldId, period }: { worldId: string; period: Period }) {
+export function DangerousScreen({ worldId, period, floorShadowOnly = false }: { worldId: string; period: Period; floorShadowOnly?: boolean }) {
   const m = useMessages();
-  const [resource, retry] = useResource<DangerousReportView>(`${worldPath(worldId, 'dangerous')}?${periodSearch(period)}`, m.locale);
+  const [resource, retry] = useResource<DangerousReportView>(`${worldPath(worldId, 'dangerous')}?${periodSearch(period)}${floorShadowOnly ? '&mode=shadow' : ''}`, m.locale);
   return <Load shape="table" resource={resource} retry={retry}>{(view) => <DangerousScreenView view={view} embedded period={period} />}</Load>;
 }

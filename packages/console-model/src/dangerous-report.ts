@@ -80,6 +80,8 @@ export interface DangerousReportView {
   headline: string;
   /** Шаг 144: «не полученная прибыль; несколько событий могут быть одним SKU»; удержаний нет — null */
   floorNote: string | null;
+  /** Шаг 145: удержания пола только аккаунтов в тени — выборка денежной плитки экрана тени (переход по клику) */
+  floorShadowOnly: boolean;
   /** Шаг 102 [Р-227]: «пол распродажи удержал цену N раз — намеренный убыток, выше не учтён»; удержаний нет — null */
   clearanceHeadline: string | null;
   floorHolds: FloorHoldsView;
@@ -138,7 +140,7 @@ function floorHolds(world: StandWorld, slice: InterventionSlice, m: Messages, re
 }
 
 /** Р-154: отчёт строится по срезу вмешательств окна — «без изменения» в него не попадают ещё в базе */
-export function dangerousReport(world: StandWorld, slice: InterventionSlice, range: PeriodRange, phrase: string, m: Messages, opts: { refs?: boolean } = {}): DangerousReportView {
+export function dangerousReport(world: StandWorld, slice: InterventionSlice, range: PeriodRange, phrase: string, m: Messages, opts: { refs?: boolean; floorShadowOnly?: boolean } = {}): DangerousReportView {
   const r = m.ui.dangerous;
   const to = Date.parse(range.until);
   const from = Date.parse(range.since);
@@ -168,6 +170,7 @@ export function dangerousReport(world: StandWorld, slice: InterventionSlice, ran
   return {
     worldId: world.id, phrase, from: m.when(range.since), to: m.when(range.until), clipped: range.clipped,
     headline: r.floorHeadline(floor.count, phrase, floor.withoutFloor.map((x) => x.amount)), floorNote: floor.count > 0 ? r.floorNote : null, floorHolds: floor,
+    floorShadowOnly: opts.floorShadowOnly === true,
     clearanceHeadline: floor.clearanceCount > 0 ? r.clearanceHeld(floor.clearanceCount, phrase) : null,
     gateHeadline: r.headline(items.length, phrase), count: items.length,
     prevented: [...prevented].map(([currency, minor]) => ({ currency, minor, amount: m.money(minor, currency) })),

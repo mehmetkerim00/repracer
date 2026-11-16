@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import { can, LOCALES, messagesFor, type Locale, type MemberRole } from '@repracer/console-model';
+import { can, LOCALES, messagesFor, parsePeriod, type Locale, type MemberRole, type Period } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, noteNavigation, SectionAnchor, useMessages, WORKSPACES_HREF } from './components.tsx';
@@ -36,8 +36,16 @@ export interface Route {
   worldId: string | null;
   screen: string;
   param: string | null;
-  /** Шаг 95: второй параметр — период вкладки «Prevented by rules» (`protections/rules/30`) */
+  /** Шаг 95: второй параметр — период вкладки «Prevented by rules» (`protections/rules/30`); шаг 145 — и период строкой `period=7d` */
   param2?: string | null;
+  /** Шаг 145: третий — `shadow`: удержания пола только аккаунтов в тени (клик по денежной плитке тени) */
+  param3?: string | null;
+}
+
+/** Шаг 145: период из части адреса — строкой `period=7d` или `from=…&to=…` (`periodSearch`); иного — нет */
+export function periodOfPath(part: string | null | undefined): Period | undefined {
+  if (!part || !part.includes('=')) return undefined;
+  return parsePeriod(new URLSearchParams(part)) ?? undefined;
 }
 
 export function parseHash(hash: string): Route {
@@ -45,7 +53,7 @@ export function parseHash(hash: string): Route {
   // Шаг 111 [Р-237]: у списка пространств свой адрес — по нему список показывается всегда, даже с одной карточкой; корень — вход
   if (parts[0] === 'workspaces') return { worldId: null, screen: 'workspaces', param: null };
   if (parts[0] !== 'w' || !parts[1]) return { worldId: null, screen: 'worlds', param: null };
-  return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null, param2: parts[4] ?? null };
+  return { worldId: parts[1], screen: parts[2] ?? 'products', param: parts[3] ?? null, param2: parts[4] ?? null, param3: parts[5] ?? null };
 }
 
 /**
@@ -285,13 +293,17 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       <div className="world-content">
       {redirectTo ? null
         : route.screen === 'shadow' ? <ShadowScreen worldId={world.id} />
-        : route.screen === 'feed' ? <FeedScreen worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'} />
+        // Шаг 145: `feed/held/<период>` — клик по плитке «Held back» тени: журнал с группой «Held by shadow mode» и тем же периодом
+        : route.screen === 'feed' ? <FeedScreen key={`${route.param}|${route.param2}`} worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'}
+            initialStatus={route.param === 'held' ? 'SHADOW_HELD' : undefined} initialPeriod={periodOfPath(route.param2)} />
         : route.screen === 'decisions' && route.param ? <TraceScreen worldId={world.id} decisionId={route.param} />
         : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
         : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} target={route.param2 ?? null} />
         : route.screen === 'bounds' && route.param ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
         : route.screen === 'competition' && route.param ? <CompetitionScreen worldId={world.id} writeScopeId={route.param} />
-        : route.screen === 'protections' ? <ProtectionsScreen worldId={world.id} tab={route.param === 'people' ? 'people' : 'rules'} days={[1, 7, 30].includes(Number(route.param2)) ? Number(route.param2) : 7} />
+        // Шаг 145: `protections/rules/<период>/shadow` — клик по денежной плитке тени: тот же период, удержания пола аккаунтов в тени
+        : route.screen === 'protections' ? <ProtectionsScreen key={`${route.param}|${route.param2}|${route.param3}`} worldId={world.id} tab={route.param === 'people' ? 'people' : 'rules'}
+            days={[1, 7, 30].includes(Number(route.param2)) ? Number(route.param2) : 7} initialPeriod={periodOfPath(route.param2)} floorShadowOnly={route.param3 === 'shadow'} />
         : route.screen === 'products' && route.param === 'bulk'
           ? <><p className="back"><a href={href(world.id, 'products')}>{m.ui.jobs.back}</a></p><h2>{m.ui.jobs.pageTitle}</h2><p className="subtitle">{m.ui.app.subtitles.jobs}</p>
             {/* Шаг 96 (решение по варианту шага 95): кнопка с Offers — «Bulk operations»; отсюда — к трём массовым правкам */}

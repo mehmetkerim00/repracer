@@ -502,7 +502,7 @@ export const es: Messages = {
         boundsDetail: 'De dónde sale el piso de esta oferta, al centavo.',
         'cost-import': 'Importe los costos unitarios desde su archivo de exportación: primero una vista previa y luego todo a la vez.',
         jobs: 'Operaciones masivas de este espacio de trabajo: avance, resultado y archivos para descargar.',
-        stop: 'Detenga los cambios de precio de todo el espacio de trabajo, de una cuenta del canal o de un sitio, y vea quién detuvo qué.',
+        stop: 'Sus ofertas siguen a la venta. Detenga los cambios de precio de todo el espacio de trabajo, de una cuenta del canal o de un sitio, y vea quién detuvo qué.',
         costs: 'Precio mínimo y máximo de cada oferta y los costos unitarios detrás de su piso; abra una oferta para ver de dónde sale su piso.',
         protections: 'Qué detuvo o evitó un cambio de precio: las personas que detuvieron precios y las reglas (su piso, sus límites y la revisión de datos de entrada).',
         channels: 'Sus cuentas de canal (conexión, actualizaciones de inventario, idioma y zona horaria) y la lista de configuración inicial hasta completarla.',
@@ -1105,6 +1105,7 @@ export const es: Messages = {
       },
       // Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили в магазин
       stats: { decisions: 'Decisiones', decisionsSub: 'veces que el motor revisó precios', changes: 'El precio cambiaría', changesSub: 'veces que el precio se habría movido', held: 'Retenido', heldSub: 'cambios de precio que NO enviamos a su tienda', savings: 'Bajadas de precio que evitó su piso', notForecast: 'no es ganancia realizada',
+        caption: (phrase: string) => `Cifras ${phrase}. Haga clic en una cifra para abrir la lista de la que se contó.`,
         savingsSub: (events: number, skus: number) => `en diferencias de precios propuestos · ${events} ${events === 1 ? 'evento' : 'eventos'} · ${skus} ${skus === 1 ? 'SKU único' : 'SKU únicos'}; no es ganancia realizada` },
       // Шаг 96 (Б13, Б16, В21): копирование имени аккаунта, вид удержанного, сворачиваемые блоки
       copy: 'Copiar', copied: 'Copiado', copyHint: 'Copie el nombre de la cuenta y péguelo en el campo.',
@@ -1515,8 +1516,8 @@ export const es: Messages = {
         },
         moved: { UP: 'subió', DOWN: 'bajó', APPEARED: 'nuevo', GONE: 'salió' },
         was: (from: string, to: string) => `${from} → ${to}`,
-        kept: 'Los detalles de los competidores se conservan 30 días con la decisión.',
-        expired: 'Detalles de los competidores: venció el plazo de conservación (se guardan 30 días).',
+        kept: 'Esta tabla se conserva 30 días con la decisión; los datos completos de la competencia de los que proviene se guardan 18 meses, el máximo que podemos guardar datos del canal.',
+        expired: 'Esta tabla ya no se conserva: se guarda 30 días con cada decisión. Los datos completos de la competencia se guardan 18 meses.',
       },
       missingTitle: 'Decisión no encontrada', missingText: 'Este enlace no lleva a una decisión de precio de este espacio de trabajo. La lista muestra cada decisión con su explicación.', pageTitle: 'Por qué este precio', back: '← Cambios de precio', noDecisions: 'Todavía no hay decisiones de precio. Aparecen cuando los precios automáticos o el modo sombra funcionan para una oferta.',
       columns: { when: 'Cuándo', unit: 'Oferta', outcome: 'Resultado', price: 'Precio', reason: 'Motivo' }, why: 'Por qué este precio',
@@ -1584,7 +1585,7 @@ export const es: Messages = {
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
       stateColumn: 'Estado', historyColumn: 'Precio', historyLegend: 'antes → deseado → fijado',
       stats: { dangerous: 'Peligrosos', adjusted: 'Ajustados al límite', rejected: 'Rechazados', unresolvable: 'Límite no calculable', floorAboveCeiling: 'Piso por encima del techo', limiterHolds: 'Límites de paso y frecuencia', stops: 'Detenidos por una persona', inputRejects: 'Datos de la competencia rechazados', halts: 'Suspensiones de sitios' },
-      statsLabel: 'Este período por categoría',
+      statsLabel: 'Decisiones de este período, por categoría',
       filters: { label: 'Mostrar solo un motivo', clear: 'Mostrar todos los motivos' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
       // решение владельца по G2: одно значение у всех строк страницы — фразой в подписи таблицы, а не колонкой
@@ -2022,7 +2023,8 @@ export const es: Messages = {
     },
     feed: {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
-      kind: { label: 'Tipo', writes: 'Precios enviados', decisions: 'Todas las decisiones', writesCaption: 'Precios enviados a una tienda o retenidos.', decisionsCaption: 'Todas las decisiones, con o sin precio enviado. El estado solo corresponde a los precios enviados.' },
+      kind: { label: 'Tipo', writes: 'Cambios propuestos', decisions: 'Decisiones de precio', writesCaption: 'Cambios de precio que propuso el motor: enviados a una tienda, retenidos en modo sombra o detenidos.', decisionsCaption: 'Todas las decisiones de precio, con o sin cambio propuesto. El estado solo corresponde a los cambios.' },
+      countsLead: (phrase: string) => `Cambios ${phrase}, por estado:`,
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
       outcome: { label: 'Resultado', all: 'todos', CHANGED: 'aprobado (enviado o retenido en modo sombra)', NO_CHANGE: 'sin cambio', REJECTED: 'rechazado o bloqueado' },
       // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
@@ -2045,6 +2047,7 @@ export const es: Messages = {
         ? `El piso no tuvo que contener ningún precio ${phrase}`
         : `Su piso evitó ${n} ${n === 1 ? 'bajada' : 'bajadas'} de precio ${phrase}${amounts.length ? `; ${amounts.join(' + ')} en diferencias de precios propuestos en total` : ''}`,
       floorNote: 'No es ganancia realizada; varios eventos pueden ser el mismo SKU. Un evento es una retención, sin importar cuántas veces se revisó el precio mientras duró.',
+      floorShadowOnly: 'Solo retenciones en cuentas del canal en modo sombra, como en la pantalla Modo sombra.', floorShowAll: 'Mostrar todas las cuentas del canal',
       floorStats: { events: 'Eventos', eventsSub: 'retenciones de su piso', skus: 'SKU únicos', skusSub: 'entre estos eventos', sum: 'Suma', sumSub: 'diferencias de precios propuestos, no ganancia' },
       floorDetailsGone: 'Los detalles de esta retención ya no se conservan.',
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»

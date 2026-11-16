@@ -160,7 +160,8 @@ export function feedExportRows(world: StandWorld, m: Messages, timeZone: string 
     const i = feedItemOf(world, m, item);
     const w = item.write;
     const from = item.intentCurrentMinor ?? (item.decision ? explanationOf(world, item.decision)?.value.strategy.currentMinor ?? null : null);
-    return [isoInZone(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt, timeZone), w.channelWriteId, w.decisionId ?? '', ...unitCells(i.unit, m),
+    // Шаг 145: что видишь — то и выгружаешь: момент строки — тот же, что на экране (у удержанной тенью — повод)
+    return [isoInZone(item.at, timeZone), w.channelWriteId, w.decisionId ?? '', ...unitCells(i.unit, m),
       amountText(from, w.currency), amountText(w.amountMinor, w.currency), w.currency, changePercent(from, w.amountMinor), w.status, i.source, i.reason?.text ?? ''];
   });
 }

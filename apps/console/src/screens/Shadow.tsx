@@ -58,7 +58,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
               </div>
             );
             // Шаг 96 (В21): на виду — плитки, график и карточки каналов с действием; остальное — сворачиваемыми блоками ниже
-            return v.anyShadow ? <ShadowHero view={v} periods={periods} /> : (
+            return v.anyShadow ? <ShadowHero view={v} periods={periods} period={period} /> : (
               <section className="card">
                 {periods}
                 <p>{v.none}</p>

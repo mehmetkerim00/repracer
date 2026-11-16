@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { existsSync } from 'node:fs';
-import { messagesFor, type BoundsView, type ConnectionsView, type DecisionListView, type DecisionTrace, type PriceFeedView, type ShadowView, type UnitRef } from '@repracer/console-model';
+import { messagesFor, type BoundsView, type ConnectionsView, type DangerousReportView, type DecisionListView, type DecisionTrace, type PriceFeedView, type ShadowView, type UnitRef } from '@repracer/console-model';
 import type { StandToken, WorldSummary } from '../src/api-types.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { startConsole, type RunningConsole } from '../server/console-service.ts';
@@ -338,6 +338,39 @@ test('шаг 64: перезапуск консоли на той же базе �
   const screen = await call<ConnectionsView>('GET', `/api/worlds/${encodeURIComponent(demo.id)}/connections`, guest);
   const us = screen.body.accounts.filter((a) => a.marketplaces.includes('EBAY_US') || a.marketplaces.includes('ATVPDKIKX0DER'));
   assert.deepEqual(us.map((a) => [a.channel, a.offers]).sort(), [['AMAZON', 12 + NEW_AMAZON_OFFERS], ['EBAY', 12]], 'у нового демо свои аккаунты США со своим каталогом');
+});
+
+/**
+ * Шаг 145 (внешний аудит UX, 1.2): число плитки тени — ровно выборка, которую открывает клик. «Held back» = группа «Held by shadow mode»
+ * журнала цен за тот же период; деньги пола = Protections «только тень» за тот же период — события, уникальные SKU и суммы. Через
+ * консоль как браузер на прожатой неделе демо; сутки — вчерашние (закрытый диапазон): демо живёт настоящим временем, а прошедшие сутки
+ * больше не меняются
+ */
+test('step 145: the Shadow tiles open exactly the lists they were counted from — held updates and floor holds over the same closed day', async () => {
+  const token = ((await (await fetch(`${origin}/api/demo/guest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json()) as StandToken).accessToken;
+  const demo = (await call<WorldSummary[]>('GET', '/api/worlds', token)).body.find((w) => w.demo)!;
+  const w = encodeURIComponent(demo.id);
+  const get = async <T>(path: string): Promise<T> => {
+    const r = await call<T>('GET', `/api/worlds/${w}/${path}`, token);
+    assert.equal(r.status, 200, `${path}: ${JSON.stringify(r.body).slice(0, 300)}`);
+    return r.body;
+  };
+  const week = (await get<ShadowView>('shadow?offset=0&limit=5&period=7d')).summary;
+  const dateOf = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+  const yesterday = dateOf(Date.parse(week.until) - 86_400_000);
+  const q = `from=${yesterday}&to=${yesterday}`;
+  const s = (await get<ShadowView>(`shadow?offset=0&limit=5&${q}`)).summary;
+  const feed = await get<PriceFeedView>(`feed?status=SHADOW_HELD&${q}`);
+  assert.ok(s.heldPriceWrites > 0, `вчера тень удержала цены: ${s.heldPriceWrites}`);
+  assert.equal(`${s.heldPriceWrites} = ${feed.counts.shadowHeld}`, `${s.heldPriceWrites} = ${s.heldPriceWrites}`, '«Held back» = «Held by shadow mode» of Price changes, the same day');
+  const holds = await get<DangerousReportView>(`dangerous?${q}&mode=shadow`);
+  assert.ok(s.floorSavingsHolds > 0, `вчера пол удерживал цену: ${s.floorSavingsHolds}`);
+  assert.equal(JSON.stringify([s.floorSavingsHolds, s.floorHoldSkus, s.floorSavings.map((x) => `${x.currency} ${x.minor}`)]),
+    JSON.stringify([holds.floorHolds.count, holds.floorHolds.skus, holds.floorHolds.withoutFloor.map((x) => `${x.currency} ${x.minor}`)]),
+    'the floor money tile = Protections, shadow accounts only, the same day: events, unique SKUs, sums');
+  // Строка таблицы Protections — одно удержание: строк без распродажи ровно столько, сколько событий
+  assert.equal(holds.floorHolds.items.filter((i) => i.clearance === null).length, holds.floorHolds.count, 'one row per hold');
+  assert.equal(holds.floorShadowOnly, true);
 });
 
 /**

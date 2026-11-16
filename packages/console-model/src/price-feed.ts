@@ -156,7 +156,8 @@ export function feedItemOf(world: StandWorld, m: Messages, item: FeedPageItem): 
       : strategy ? strategyLabel(strategy, w.currency, m).label : f.sourceRule(decision.ruleCode);
   const ended = w.endReason ? describe({ code: w.endReason, params: w.endParams }, m) : null;
   return {
-    at: m.when(w.acceptedAt ?? w.dispatchedAt ?? w.createdAt), unit: scope ? unitOf(world, scope, m) : null,
+    // Шаг 145: момент строки — тот, по которому её отобрало окно (у удержанной тенью — повод)
+    at: m.when(item.at), unit: scope ? unitOf(world, scope, m) : null,
     from: from === null ? null : m.money(from, w.currency), to: m.money(w.amountMinor, w.currency), change: m.change(from, w.amountMinor),
     status: f.statuses[w.status as keyof typeof f.statuses] ?? w.status, tone: STATUS_TONE[w.status] ?? 'unknown', source,
     reason: ended ?? (decision ? describe(decision.reason, m) : null), decisionId: w.decisionId,

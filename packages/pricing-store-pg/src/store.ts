@@ -342,8 +342,14 @@ const WRITE_HOT_COLUMNS = `w.channel_write_id, w.write_scope_id, w.price_decisio
 const WRITE_HISTORY_COLUMNS = `h.channel_write_id, h.write_scope_id, h.price_decision_id, h.amount_minor, h.currency, h.price_basis, h.version, h.final_status AS status,
   h.attempt_count, h.created_at, h.dispatched_at, h.accepted_at, NULL::timestamptz AS next_attempt_at, h.last_error_code, h.end_reason, h.end_params,
   h.superseded_by_write_id, coalesce(d.competitor_derived, false) AS competitor_derived, h.confirmed_by_own_record`;
-/** Момент записи для ленты: применена → отправлена → создана; по нему же построен индекс истории (0117) */
+/** Момент записи для ленты: применена → отправлена → создана */
 const WRITE_AT = (alias: string) => `coalesce(${alias}.accepted_at, ${alias}.dispatched_at, ${alias}.created_at)`;
+/**
+ * Шаг 145 (аудит UX, 1.2): у истории удержанная тенью запись стоит в момент своего повода, как на экране тени; по этому выражению
+ * построены индексы ленты истории (0235). В горячей очереди удержанных нет — они рождаются завершёнными
+ */
+const WRITE_AT_HISTORY = (alias: string) =>
+  `coalesce(${alias}.accepted_at, ${alias}.dispatched_at, CASE WHEN ${alias}.final_status = 'SHADOW_HELD' THEN ${alias}.trigger_received_at END, ${alias}.created_at)`;
 
 function intentRow(r: Row): ConsoleIntentRow {
   return {
@@ -3365,7 +3371,7 @@ export class PgPricingStore implements PricingStore {
     });
   }
 
-  async interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
+  async interventions(tenantId: string, from: Instant, to: Instant, options: { floorShadowOnly?: boolean } = {}): Promise<InterventionSlice> {
     return inTenant(this.admin('interventions'), tenantId, async (tx) => {
       const params = [tenantId, from, to];
       const limit = INTERVENTION_SLICE_LIMIT;
@@ -3410,10 +3416,10 @@ export class PgPricingStore implements PricingStore {
          * уникальному ключу (тенант, момент намерения, намерение)
          */
         tx.query(`SELECT e.write_scope_id, e.currency, e.clearance, e.shadow, e.started_at, e.below_minor, e.kept_minor, e.hold_reason, d.price_decision_id
-                    FROM platform.floor_hold_episodes($1, $2::timestamptz, $3::timestamptz, false) e
+                    FROM platform.floor_hold_episodes($1, $2::timestamptz, $3::timestamptz, $4) e
                     LEFT JOIN channel_data.price_decision d ON d.tenant_id = $1 AND d.intent_created_at = e.intent_created_at AND d.price_intent_id = e.price_intent_id
-                   ORDER BY e.started_at DESC, e.write_scope_id LIMIT ${limit + 1}`, params),
-        tx.query(`SELECT savings, events, skus, clearance_events FROM platform.floor_hold_totals($1, $2::timestamptz, $3::timestamptz, false)`, params),
+                   ORDER BY e.started_at DESC, e.write_scope_id LIMIT ${limit + 1}`, [...params, options.floorShadowOnly === true]),
+        tx.query(`SELECT savings, events, skus, clearance_events FROM platform.floor_hold_totals($1, $2::timestamptz, $3::timestamptz, $4)`, [...params, options.floorShadowOnly === true]),
       ]);
       const truncated = [decisions.rows, intents.rows, ended.rows, rejected.rows, holds.rows].some((r) => r.length > limit);
       const t = totals.rows[0] ?? {};
@@ -3451,10 +3457,10 @@ export class PgPricingStore implements PricingStore {
            WHERE w.tenant_id = $1 AND w.field = 'PRICE' AND ($2::uuid IS NULL OR w.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('w')} >= $3)
              AND ($4::timestamptz IS NULL OR ${WRITE_AT('w')} < $4) AND ($5::uuid[] IS NULL OR w.write_scope_id = ANY($5))
           UNION ALL
-          SELECT ${WRITE_HISTORY_COLUMNS}, ${WRITE_AT('h')} FROM tenant_data.channel_write_history h
+          SELECT ${WRITE_HISTORY_COLUMNS}, ${WRITE_AT_HISTORY('h')} FROM tenant_data.channel_write_history h
             LEFT JOIN channel_data.price_decision d ON d.tenant_id = h.tenant_id AND d.price_decision_id = h.price_decision_id
-           WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT('h')} >= $3)
-             AND ($4::timestamptz IS NULL OR ${WRITE_AT('h')} < $4) AND ($5::uuid[] IS NULL OR h.write_scope_id = ANY($5)))`;
+           WHERE h.tenant_id = $1 AND h.field = 'PRICE' AND ($2::uuid IS NULL OR h.write_scope_id = $2) AND ($3::timestamptz IS NULL OR ${WRITE_AT_HISTORY('h')} >= $3)
+             AND ($4::timestamptz IS NULL OR ${WRITE_AT_HISTORY('h')} < $4) AND ($5::uuid[] IS NULL OR h.write_scope_id = ANY($5)))`;
       const base: unknown[] = [tenantId, query.writeScopeId ?? null, since, until, query.writeScopeIds ? [...query.writeScopeIds] : null];
       const groups: Record<FeedStatusGroup, number> = { APPLIED: 0, IN_FLIGHT: 0, NOT_SENT: 0, SUPERSEDED: 0, SHADOW_HELD: 0 };
       const [counted, { rows }] = await Promise.all([
@@ -3480,7 +3486,7 @@ export class PgPricingStore implements PricingStore {
       return {
         items: rows.map((r): FeedPageItem => {
           const decision = r.price_decision_id ? decisions.get(r.price_decision_id) ?? null : null;
-          return { write: writeRow(r), decision, intentCurrentMinor: decision ? currentByIntent.get(decision.intentId) ?? null : null };
+          return { write: writeRow(r), decision, intentCurrentMinor: decision ? currentByIntent.get(decision.intentId) ?? null : null, at: iso(r.at) as Instant };
         }),
         total, counts: groups,
       };

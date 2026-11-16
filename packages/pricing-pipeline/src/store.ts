@@ -1137,7 +1137,8 @@ export interface PricingStore {
    */
   competitionData(tenantId: string, writeScopeIds: readonly string[], from: Instant, to: Instant): Promise<CompetitionDataRow[]>;
   scopeDecisionStats(tenantId: string, writeScopeIds: readonly string[]): Promise<ScopeDecisionStats[]>;
-  interventions(tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice>;
+  /** Шаг 145: `floorShadowOnly` — удержания пола (`floorHolds`, `floorTotals`) только аккаунтов в тени, как у экрана тени */
+  interventions(tenantId: string, from: Instant, to: Instant, options?: { floorShadowOnly?: boolean }): Promise<InterventionSlice>;
   feedPage(tenantId: string, now: Instant, query: FeedPageQuery): Promise<FeedPage>;
   /** Последние события аудита остановок [Р-76] и смен ролей [Р-213], свежие первыми */
   auditRecent(tenantId: string, limit: number): Promise<ConsoleAuditRow[]>;
@@ -1732,6 +1733,11 @@ export interface FeedPageItem {
   decision: ConsoleDecisionRow | null;
   /** «Было» из горячего намерения (3 дня), если оно ещё есть */
   intentCurrentMinor: number | null;
+  /**
+   * Шаг 145 (аудит UX, 1.2): момент строки в журнале — тот, по которому её отбирает и упорядочивает окно: применена → отправлена →
+   * повод удержанной тенью → создана. Удержанная запись стоит в момент повода, как на экране тени
+   */
+  at: Instant;
 }
 
 export interface FeedPage {

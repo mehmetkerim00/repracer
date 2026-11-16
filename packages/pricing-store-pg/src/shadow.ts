@@ -226,7 +226,8 @@ export class PgShadowStore {
            * `channel_write_history_shadow_idx`
            */
           `SELECT count(*)::int AS held,
-                  count(*) FILTER (WHERE h.field <> 'QUANTITY')::int AS held_price,
+                  -- Шаг 145: цены — поле PRICE, как группа «Held by shadow mode» журнала цен (клик по плитке открывает её)
+                  count(*) FILTER (WHERE h.field = 'PRICE')::int AS held_price,
                   count(*) FILTER (WHERE h.field = 'QUANTITY')::int AS held_quantity,
                   count(*) FILTER (WHERE h.would_spend_budget)::int AS would_spend
              FROM tenant_data.channel_write_history h

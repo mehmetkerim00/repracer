@@ -2823,7 +2823,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     });
   }
 
-  async interventions(_tenantId: string, from: Instant, to: Instant): Promise<InterventionSlice> {
+  async interventions(_tenantId: string, from: Instant, to: Instant, options: { floorShadowOnly?: boolean } = {}): Promise<InterventionSlice> {
     const within = (at: string) => Date.parse(at) > Date.parse(from) && Date.parse(at) <= Date.parse(to);
     const capped = (i: ConsoleIntentRow) => i.reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD'
       || i.explanation.some((x) => x.code === 'CAPPED_AT_MIN_PRICE' || x.code === 'CAPPED_AT_MAX_PRICE' || x.code === 'CAPPED_AT_MARGIN_FLOOR' || x.code === 'CAPPED_AT_CLEARANCE_FLOOR');
@@ -2840,7 +2840,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       previousCapped.set(i.writeScopeId, isCapped);
     }
     const decisions = this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && within(d.decidedAt)).sort(InMemoryPricingStore.newestFirst);
-    const floor = this.floorHoldEpisodes(from, to);
+    const floor = this.floorHoldEpisodes(from, to, options.floorShadowOnly === true);
     return {
       from, to, truncated: decisions.length > INTERVENTION_SLICE_LIMIT || intents.length > INTERVENTION_SLICE_LIMIT || floor.episodes.length > INTERVENTION_SLICE_LIMIT,
       floorHolds: floor.episodes.slice(0, INTERVENTION_SLICE_LIMIT), floorTotals: floor.totals,
@@ -2857,7 +2857,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
    * эпизоды и итог — как `platform.floor_hold_episodes` и `platform.floor_hold_totals`. Режим аккаунта — нынешний (у базы — в момент
    * намерения): мир в памяти режим аккаунта не переключает
    */
-  private floorHoldEpisodes(from: Instant, to: Instant): { episodes: FloorHoldEpisodeRow[]; totals: FloorHoldTotals } {
+  private floorHoldEpisodes(from: Instant, to: Instant, shadowOnly: boolean): { episodes: FloorHoldEpisodeRow[]; totals: FloorHoldTotals } {
     type Hold = FloorHoldEpisodeRow & { at: number; intentId: string; episode: string; productId: string | null };
     const HOLD_CODES = ['CAPPED_AT_MIN_PRICE', 'CAPPED_AT_MARGIN_FLOOR', 'CAPPED_AT_CLEARANCE_FLOOR', 'TARGET_OUTSIDE_BOUNDS_HOLD'];
     const last = new Map<string, Hold | null>();
@@ -2882,7 +2882,7 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       last.set(i.writeScopeId, hold);
     }
     const byEpisode = new Map<string, { top: Hold; startedAt: number }>();
-    for (const h of holds.filter((x) => x.at >= Date.parse(from) && x.at < Date.parse(to))) {
+    for (const h of holds.filter((x) => x.at >= Date.parse(from) && x.at < Date.parse(to) && (x.shadow || !shadowOnly))) {
       const key = `${h.writeScopeId}|${h.episode}`;
       const e = byEpisode.get(key);
       if (!e) byEpisode.set(key, { top: h, startedAt: h.at });
@@ -2916,7 +2916,8 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     const items = rows.slice(query.offset, query.offset + query.limit).map((w): FeedPageItem => {
       const decision = w.decisionId ? this.decisions.find((d) => d.decisionId === w.decisionId) ?? null : null;
       const intent = decision ? this.intents.find((i) => i.intentId === decision.intentId) ?? null : null;
-      return { write: this.consoleWrite(w), decision: decision ? { ...decision } : null, intentCurrentMinor: intent?.currentMinor ?? null };
+      // Шаг 145: в памяти момент создания — часы приложения, он и есть момент повода
+      return { write: this.consoleWrite(w), decision: decision ? { ...decision } : null, intentCurrentMinor: intent?.currentMinor ?? null, at: new Date(at(w)).toISOString() as Instant };
     });
     return { items, total: rows.length, counts };
   }

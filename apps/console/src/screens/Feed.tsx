@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodSearch, type DecisionListView, type FeedQuery, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
+import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodPhrase, periodSearch, type DecisionListView, type FeedQuery, type FeedStatusGroup, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
 import { Badge, commonZone, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead, UnitName } from '../components.tsx';
@@ -42,6 +42,9 @@ export function feedPath(worldId: string, q: FeedQuery): string {
   return `${worldPath(worldId, 'feed')}${query ? `?${query}` : ''}`;
 }
 
+/** Шаг 145: группы журнала в полосе итогов — порядок прежней фразы; число группы — её фильтр */
+const FEED_COUNT_ORDER = [['SHADOW_HELD', 'shadowHeld'], ['APPLIED', 'applied'], ['IN_FLIGHT', 'inFlight'], ['NOT_SENT', 'notSent'], ['SUPERSEDED', 'superseded']] as const;
+
 /** Таблица ленты, выгрузка и страницы. Шаг 96 (Б17): строка ведёт на квитанцию решения целиком, а не только ссылкой в конце */
 export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedView; onQuery?: (q: FeedQuery) => void; query?: FeedQuery }) {
   const m = useMessages();
@@ -70,7 +73,12 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
       {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
         <div className="table-wrap">
           {/* Шаг 104 [Р-229]: выгрузка — кнопкой «Export» в ряду фильтров (прежняя «All N entries as a file» заменена) */}
-          <div className="table-head"><span>{f.counts(view.counts)}</span>
+          {/* Шаг 145 (аудит UX, 1.2): у чисел — период и что они считают; число группы — фильтр ровно этой группы */}
+          <div className="table-head">{onQuery ? <span className="feed-counts">{f.countsLead(periodPhrase(query.period ?? { preset: '7d' }, m))}{' '}
+            {FEED_COUNT_ORDER.filter(([group, key]) => group !== 'SHADOW_HELD' || view.counts[key] > 0).map(([group, key]) => (
+              <button key={group} type="button" className={`reason-filter${q.status === group ? ' on' : ''}`} aria-pressed={q.status === group}
+                onClick={() => onQuery({ ...current, status: q.status === group ? undefined : group, offset: 0 })}>{f.statusGroups[group]} <span className="count">{view.counts[key]}</span></button>
+            ))}</span> : <span>{f.counts(view.counts)}</span>}
             {shared.map((text) => <span key={text} className="head-note">{text}</span>)}</div>
           <table className="feed dense sticky-end cardify clickable-rows">
             <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
@@ -109,11 +117,11 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
   );
 }
 
-export function FeedScreen({ worldId, kind }: { worldId: string; kind: FeedKind }) {
+export function FeedScreen({ worldId, kind, initialStatus, initialPeriod }: { worldId: string; kind: FeedKind; initialStatus?: FeedStatusGroup; initialPeriod?: Period }) {
   const m = useMessages();
   const f = m.ui.feed;
-  // Шаг 96: период и поиск — общие для обоих видов журнала: переключение вида их не сбрасывает
-  const [period, setPeriod] = useState<Period>({ preset: '7d' });
+  // Шаг 96: период и поиск — общие для обоих видов журнала: переключение вида их не сбрасывает. Шаг 145: клик по плитке тени задаёт оба
+  const [period, setPeriod] = useState<Period>(initialPeriod ?? { preset: '7d' });
   const [search, setSearch] = useState('');
   const onKind = (next: FeedKind) => { window.location.hash = next === 'decisions' ? href(worldId, 'feed', 'decisions') : href(worldId, 'feed'); };
   return (
@@ -122,7 +130,7 @@ export function FeedScreen({ worldId, kind }: { worldId: string; kind: FeedKind 
       <p className="subtitle">{m.ui.app.subtitles.feed}</p>
       {kind === 'decisions'
         ? <DecisionJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} />
-        : <WriteJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} />}
+        : <WriteJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} initialStatus={initialStatus} />}
     </section>
   );
 }
@@ -136,10 +144,10 @@ interface JournalProps {
   onSearch: (text: string) => void;
 }
 
-function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch }: JournalProps) {
+function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch, initialStatus }: JournalProps & { initialStatus?: FeedStatusGroup }) {
   const m = useMessages();
   const f = m.ui.feed;
-  const [query, setQuery] = useState<FeedQuery>({});
+  const [query, setQuery] = useState<FeedQuery>(initialStatus ? { status: initialStatus } : {});
   const [pickerCount, setPickerCount] = useState<string | null>(null);
   const full: FeedQuery = { ...query, period, ...(search ? { q: search } : {}) };
   const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, full), m.locale);

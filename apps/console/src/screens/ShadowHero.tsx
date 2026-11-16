@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { ShadowChartView, ShadowView } from '@repracer/console-model';
+import { periodSearch, type Period, type ShadowChartView, type ShadowView } from '@repracer/console-model';
 import { barValuesFit, dayLabelled, dayLabelStep } from '../chart.ts';
-import { useMessages } from '../components.tsx';
+import { href, useMessages } from '../components.tsx';
 
 /**
  * Шаг 82: сводка экрана тени — метрики и график решений по суткам. Шаг 83 (облик по Primer): без тёмной панели, градиентов и
@@ -72,18 +72,19 @@ function DayChart({ chart }: { chart: ShadowChartView }) {
   );
 }
 
-function Metric({ label, value, sub }: { label: string; value: ReactNode; sub?: string }) {
+function Metric({ label, value, sub, to }: { label: string; value: ReactNode; sub?: string; to?: string }) {
   return (
     <div className="card stat">
       <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
+      {/* Шаг 145 (аудит UX, 1.2): число — ссылка на ровно ту выборку, из которой оно посчитано */}
+      <div className="stat-value">{to ? <a href={to}>{value}</a> : value}</div>
       {/* Шаг 84: строка подписи — у каждой плитки (пустая — неразрывным пробелом): числа плиток стоят на одной высоте */}
       <div className="stat-sub">{sub ?? '\u00a0'}</div>
     </div>
   );
 }
 
-export function ShadowHero({ view, periods }: { view: ShadowView; periods: ReactNode }) {
+export function ShadowHero({ view, periods, period }: { view: ShadowView; periods: ReactNode; period: Period }) {
   const m = useMessages();
   const st = m.ui.shadow.stats;
   const nf = new Intl.NumberFormat(m.locale === 'de' ? 'de-DE' : 'en-US');
@@ -91,14 +92,16 @@ export function ShadowHero({ view, periods }: { view: ShadowView; periods: React
   return (
     <section className="shadow-summary">
       <div className="summary-head">{periods}</div>
+      {/* Шаг 145 (аудит UX, 1.2): период у чисел; число — ссылка на свою выборку */}
+      <p className="note stats-caption">{st.caption(view.phrase)}</p>
       <div className="stats">
         {/* Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили (остатки — в сводке ниже) */}
         <Metric label={st.decisions} value={nf.format(s.decisions)} sub={st.decisionsSub} />
         <Metric label={st.changes} value={nf.format(s.changes)} sub={st.changesSub} />
-        <Metric label={st.held} value={nf.format(s.heldPriceWrites)} sub={st.heldSub} />
+        <Metric label={st.held} value={nf.format(s.heldPriceWrites)} sub={st.heldSub} to={href(view.worldId, 'feed', 'held', periodSearch(period))} />
         {s.floorSavings.length > 0 ? (
           // Шаг 144 (аудит UX, 1.2–1.3): сумма разниц предложенных цен — с числом событий и уникальных SKU, тем же определением, что у Protections
-          <Metric label={st.savings} sub={st.savingsSub(s.floorSavingsHolds, s.floorHoldSkus)}
+          <Metric label={st.savings} sub={st.savingsSub(s.floorSavingsHolds, s.floorHoldSkus)} to={href(view.worldId, 'protections', 'rules', periodSearch(period), 'shadow')}
             value={s.floorSavings.map((f) => <span key={f.currency} className="money-line">{m.money(f.minor, f.currency)}</span>)} />
         ) : null}
       </div>

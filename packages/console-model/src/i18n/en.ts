@@ -502,7 +502,8 @@ export const en = {
         boundsDetail: 'Where the floor of this offer comes from, to the cent.',
         'cost-import': 'Import unit costs from your export file: a preview first, then everything at once.',
         jobs: 'Bulk operations of this workspace: progress, result and files to download.',
-        stop: 'Stop price changes of the whole workspace, a channel account or a storefront — and see who stopped what.',
+        // Шаг 145 (решение владельца по аудиту UX, «Your listings remain for sale»): что остановка НЕ делает — предложения продаются дальше по нынешним ценам; «listing» вне eBay запрещён глоссарием (K9) — «offers»
+        stop: 'Your offers remain for sale. Stop price changes of the whole workspace, a channel account or a storefront — and see who stopped what.',
         costs: 'Minimum and maximum price of every offer and the unit costs behind its floor; open an offer to see where its floor comes from.',
         protections: 'What stopped or prevented a price change: people who stopped prices, and the rules — your floor, your bounds and the input check.',
         channels: 'Your channel accounts — connection, stock updates, language and time zone — and the setup checklist until it is done.',
@@ -1109,6 +1110,8 @@ export const en = {
       },
       // Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили в магазин
       stats: { decisions: 'Decisions', decisionsSub: 'times the engine checked prices', changes: 'Price would change', changesSub: 'times the price would have moved', held: 'Held back', heldSub: 'price changes we did NOT send to your store', savings: 'Price reductions your floor prevented', notForecast: 'not realized profit',
+        // Шаг 145 (аудит UX, 1.2): период у чисел, и что число — ссылка на свою выборку
+        caption: (phrase: string) => `Counts ${phrase}. Click a number to open the list it was counted from.`,
         savingsSub: (events: number, skus: number) => `in proposed price differences · ${events} ${events === 1 ? 'event' : 'events'} · ${skus} unique ${skus === 1 ? 'SKU' : 'SKUs'} — not realized profit` },
       // Шаг 96 (Б13, Б16, В21): копирование имени аккаунта, вид удержанного, сворачиваемые блоки
       copy: 'Copy', copied: 'Copied', copyHint: 'Copy the account name, then paste it into the field.',
@@ -1522,8 +1525,9 @@ export const en = {
         },
         moved: { UP: 'up', DOWN: 'down', APPEARED: 'new', GONE: 'left' },
         was: (from: string, to: string) => `${from} → ${to}`,
-        kept: 'Competitor details are kept for 30 days with the decision.',
-        expired: 'Competitor details: storage period expired (they are kept for 30 days).',
+        // Шаг 145 (аудит UX, 1.4): рядом два срока — что хранится сколько, одной фразой
+        kept: 'This table stays with the decision for 30 days; the full market snapshot it was taken from is kept for 18 months — the longest we may keep channel data.',
+        expired: 'This table is no longer kept: it stays with a decision for 30 days. The full market snapshot is kept for 18 months.',
       },
       missingTitle: 'Decision not found', missingText: 'This link does not lead to a price decision of this workspace. The list shows every decision with its explanation.', pageTitle: 'Why this price', back: '← Price changes', noDecisions: 'No pricing decisions yet. They appear once repricing or Shadow mode runs for an offer.',
       columns: { when: 'When', unit: 'Offer', outcome: 'Outcome', price: 'Price', reason: 'Reason' }, why: 'Why this price',
@@ -1592,7 +1596,8 @@ export const en = {
       // Шаг 96.2: одна пилюля состояния, одна история цены, короткая причина с чипом «×N · период», счётчики чипами, фильтр по причине
       stateColumn: 'State', historyColumn: 'Price', historyLegend: 'was → wanted → set',
       stats: { dangerous: 'Dangerous', adjusted: 'Adjusted to limit', rejected: 'Rejected', unresolvable: 'Bound not computable', floorAboveCeiling: 'Floor above ceiling', limiterHolds: 'Step and frequency limits', stops: 'Stopped by a person', inputRejects: 'Rejected snapshots', halts: 'Storefront halts' },
-      statsLabel: 'This period by category',
+      // Шаг 145 (аудит UX, 1.2): эти числа — решения (у удержаний пола — события), подпись у чисел
+      statsLabel: 'Decisions in this period, by category',
       filters: { label: 'Show one reason only', clear: 'Show all reasons' },
       repeat: (n: number, period: string) => `×${n} · ${period}`,
       // решение владельца по G2: одно значение у всех строк страницы — фразой в подписи таблицы, а не колонкой
@@ -2034,7 +2039,9 @@ export const en = {
     },
     feed: {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
-      kind: { label: 'Kind', writes: 'Prices sent', decisions: 'All decisions', writesCaption: 'Prices sent to a store or held back.', decisionsCaption: 'Every decision, with or without a price sent. Status belongs to sent prices only.' },
+      // Шаг 145 (аудит UX): «sent» — только о настоящих отправках; в тени цены не уходят
+      kind: { label: 'Kind', writes: 'Proposed updates', decisions: 'Price decisions', writesCaption: 'Price updates the engine proposed: sent to a store, held back in shadow mode, or stopped.', decisionsCaption: 'Every price decision, with or without a proposed update. Status belongs to updates only.' },
+      countsLead: (phrase: string) => `Updates ${phrase}, by status:`,
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)
       outcome: { label: 'Outcome', all: 'all', CHANGED: 'approved (sent, or held in shadow mode)', NO_CHANGE: 'no change', REJECTED: 'rejected or blocked' },
       // Шаг 96 (А5): в тени нули сводки объясняет фраза над ней
@@ -2058,6 +2065,7 @@ export const en = {
         ? `The floor did not have to hold a price ${phrase}`
         : `${n} price ${n === 1 ? 'reduction' : 'reductions'} prevented by your floor ${phrase}${amounts.length ? `; ${amounts.join(' + ')} in aggregate proposed price differences` : ''}`,
       floorNote: 'Not realized profit; several events may be the same SKU. One event is one hold, however many times the price was re-checked while it lasted.',
+      floorShadowOnly: 'Holds on channel accounts in shadow mode only, as on the Shadow mode screen.', floorShowAll: 'Show all channel accounts',
       floorStats: { events: 'Events', eventsSub: 'holds by your floor', skus: 'Unique SKUs', skusSub: 'among these events', sum: 'Sum', sumSub: 'proposed price differences, not profit' },
       floorDetailsGone: 'The details of this hold are no longer kept.',
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»

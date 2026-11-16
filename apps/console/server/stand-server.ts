@@ -1138,9 +1138,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Шаг 96: период — пресет или свой диапазон; прежнее `days=1|7|30` по-прежнему понимается (сверяется как строка, без разбора числа)
           const period = periodOf(url.searchParams, { '1': '24h', '7': '7d', '30': '30d' });
           if (period === null) return fail(400, 'BAD_PERIOD', s.badRequest);
+          // Шаг 145 (аудит UX, 1.2): `mode=shadow` — удержания пола только аккаунтов в тени: ровно выборка денежной плитки экрана тени
+          const mode = url.searchParams.get('mode');
+          if (mode !== null && mode !== 'shadow') return fail(400, 'BAD_MODE', s.badRequest);
           const range = periodRange(period, live.clock.iso(), display?.timeZone ?? null, HOT_DECISIONS_DAYS);
-          const slice = await live.store.interventions(live.tenantId, range.since as never, range.until as never);
-          return ok(dangerousReport(await load(sliceScopeIds(slice)), slice, range, periodPhrase(period, m), m));
+          const slice = await live.store.interventions(live.tenantId, range.since as never, range.until as never, { floorShadowOnly: mode === 'shadow' });
+          return ok(dangerousReport(await load(sliceScopeIds(slice)), slice, range, periodPhrase(period, m), m, { floorShadowOnly: mode === 'shadow' }));
         }
         // Р-123: отчёт по объявленным скидкам — каждая проверяется заново по текущей истории цен (исправления свёртки, поздние цены)
         case 'compliance': {

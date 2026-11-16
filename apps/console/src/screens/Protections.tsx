@@ -15,11 +15,12 @@ export type ProtectionsTab = 'people' | 'rules';
  * неделю остановили или поправили правила (границы, проверка входов, перепроверка при отправке, остановка витрины). Прежний список
  * «Stopped changes» делил одно и другое только пилюлей «Stopped by»; ничего не пропало — разошлось по вкладкам
  */
-export function ProtectionsScreen({ worldId, tab, days }: { worldId: string; tab: ProtectionsTab; days: number }) {
+export function ProtectionsScreen({ worldId, tab, days, initialPeriod, floorShadowOnly = false }: { worldId: string; tab: ProtectionsTab; days: number; initialPeriod?: Period; floorShadowOnly?: boolean }) {
   const m = useMessages();
   const p = m.ui.protections;
   // Шаг 96 (II): период — общий на обе вкладки; прежний адрес `protections/rules/<1|7|30>` задаёт начальный пресет
-  const [period, setPeriod] = useState<Period>({ preset: days === 1 ? '24h' : days === 30 ? '30d' : '7d' });
+  // Шаг 145: клик по денежной плитке тени приносит её период
+  const [period, setPeriod] = useState<Period>(initialPeriod ?? { preset: days === 1 ? '24h' : days === 30 ? '30d' : '7d' });
   // Шаг 104 [Р-229]: фильтр причины списка — здесь, чтобы выгрузка вкладки видела тот же фильтр; новый период его сбрасывает
   const [reason, setReason] = useState<string | null>(null);
   const choosePeriod = (p: Period) => { setPeriod(p); setReason(null); };
@@ -40,7 +41,7 @@ export function ProtectionsScreen({ worldId, tab, days }: { worldId: string; tab
       {/* ключ — период: смена периода начинает списки с первой страницы */}
       {tab === 'people' ? <RejectedScreen key={periodSearch(period)} worldId={worldId} only="STOP" period={period} reason={reason} onReason={setReason} /> : (
         <>
-          <DangerousScreen key={`d-${periodSearch(period)}`} worldId={worldId} period={period} />
+          <DangerousScreen key={`d-${periodSearch(period)}`} worldId={worldId} period={period} floorShadowOnly={floorShadowOnly} />
           <RejectedScreen key={`r-${periodSearch(period)}`} worldId={worldId} only="RULES" period={period} reason={reason} onReason={setReason} />
         </>
       )}
