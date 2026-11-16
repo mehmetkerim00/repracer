@@ -11,7 +11,7 @@ import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleW
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type DiscoveryCatalogNote, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
 import type { CrossChannelReference, DailyRange, SanityContext } from '@repracer/input-sanity';
-import { assertWriteWithinBounds, NO_GUARDRAILS, type GuardrailSet } from '@repracer/price-gate';
+import { assertWriteWithinBounds, NO_GUARDRAILS, resolveMarginFloor, type GuardrailSet } from '@repracer/price-gate';
 import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, strategyAvailability, type CreepState } from '@repracer/strategy-engine';
 import {
   BOUND_CAUSES,
@@ -659,6 +659,9 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     }
     const now = systemClock.now();
     if (input.endsAt !== null && Date.parse(input.endsAt) <= Date.parse(now)) return { status: 'INVALID', cause: 'ENDS_IN_PAST' };
+    // Шаг 140 [Р-227]: безубыточность посчитана — тем же расчётом, что у пути решения (маржа 0), как страж базы 0233
+    const ctx = this.scopeEvaluationContext(row, now);
+    if (resolveMarginFloor(ctx.cost, 0, row.currency, ctx.costUnavailableCause ?? null).kind !== 'OK') return { status: 'INVALID', cause: 'BREAK_EVEN_UNKNOWN' };
     const seq = ++this.clearanceSeq;
     const changeId = `clearance-${seq}`;
     this.clearanceLog.push({ changeId, seq, writeScopeId: input.writeScopeId, action: 'ENABLE', floorMinor: input.floorMinor,

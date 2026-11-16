@@ -3991,6 +3991,8 @@ export class PgPricingStore implements PricingStore {
       if (/priced in/.test(m)) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
       if (/must be positive and not above/.test(m)) return { status: 'INVALID', cause: 'FLOOR_INVALID' };
       if (/not in the future/.test(m)) return { status: 'INVALID', cause: 'ENDS_IN_PAST' };
+      // Шаг 140 [Р-227]: безубыточность не посчитана — убыток на штуку не назвать (0233)
+      if (/needs a computed break-even/.test(m)) return { status: 'INVALID', cause: 'BREAK_EVEN_UNKNOWN' };
       if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }

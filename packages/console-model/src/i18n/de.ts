@@ -1604,7 +1604,7 @@ export const de: Messages = {
         ackWithChannel: (breakEven: string, min: string) => `Ich verstehe: Jeder Verkauf unter ${breakEven} bringt Verlust, und unter ${min} deaktiviert der Kanal dieses Angebot`,
         note: 'Warum', noteHint: 'Pflicht — bleibt mit Ihrem Namen im Audit-Protokoll.', notePlaceholder: 'Sommerware abverkaufen',
         endsAt: 'Automatisch beenden', endsAtHint: 'Optional — nach diesem Datum ist die Untergrenze wieder die berechnete.',
-        enable: 'Abverkauf einschalten', mfaHint: 'Verschiebt die Untergrenze: braucht einen zweiten Faktor.', readOnly: 'Nur der Inhaber oder ein Manager kann den Abverkauf einschalten.',
+        enable: 'Abverkauf einschalten', addCosts: 'Stückkosten und Gebühren erfassen', mfaHint: 'Verschiebt die Untergrenze: braucht einen zweiten Faktor.', readOnly: 'Nur der Inhaber oder ein Manager kann den Abverkauf einschalten.',
         on: 'Abverkauf läuft', onBy: (who: string, when: string) => `Eingeschaltet von ${who}, ${when}`, onNote: (note: string) => `Notiz: „${note}“`, onEnds: (when: string) => `Endet automatisch ${when}`,
         disable: 'Abverkauf ausschalten',
         returns: (floor: string, steps: number, minutes: number) => (steps === 0
@@ -1616,7 +1616,7 @@ export const de: Messages = {
         causes: {
           ACK_REQUIRED: 'Setzen Sie das Häkchen: Jeder Verkauf unter der Gewinnschwelle ist ein Verlust.', NOTE_REQUIRED: 'Schreiben Sie, warum das Angebot abverkauft wird.',
           FLOOR_INVALID: 'Die Abverkaufs-Untergrenze muss über null und nicht über Ihrem Höchstpreis liegen.', CURRENCY_MISMATCH: 'Die Abverkaufs-Untergrenze muss in der Währung des Angebots sein.',
-          ENDS_IN_PAST: 'Das Enddatum muss in der Zukunft liegen.', MFA_REQUIRED: 'Der Abverkauf verschiebt die Untergrenze: Melden Sie sich mit einem zweiten Faktor an und versuchen Sie es erneut.',
+          ENDS_IN_PAST: 'Das Enddatum muss in der Zukunft liegen.', BREAK_EVEN_UNKNOWN: 'Der Verlust lässt sich nicht berechnen — erfassen Sie zuerst Stückkosten und Gebühren.', MFA_REQUIRED: 'Der Abverkauf verschiebt die Untergrenze: Melden Sie sich mit einem zweiten Faktor an und versuchen Sie es erneut.',
           NOT_ACTIVE: 'Für dieses Angebot läuft kein Abverkauf.',
         },
       },

@@ -1662,7 +1662,7 @@ export const es: Messages = {
         ackWithChannel: (breakEven: string, min: string) => `Entiendo: cada venta por debajo de ${breakEven} pierde dinero, y por debajo de ${min} el canal desactiva esta oferta`,
         note: 'Por qué', noteHint: 'Obligatorio — queda en el registro de auditoría con su nombre.', notePlaceholder: 'Liquidar el inventario de verano',
         endsAt: 'Terminar automáticamente', endsAtHint: 'Opcional — después de esta fecha el piso vuelve a ser el calculado.',
-        enable: 'Activar la liquidación', mfaHint: 'Mueve el piso: requiere un segundo factor.', readOnly: 'Solo el propietario o un gerente puede activar la liquidación.',
+        enable: 'Activar la liquidación', addCosts: 'Agregar costo unitario y comisiones', mfaHint: 'Mueve el piso: requiere un segundo factor.', readOnly: 'Solo el propietario o un gerente puede activar la liquidación.',
         on: 'La liquidación está activa', onBy: (who: string, when: string) => `Activada por ${who}, ${when}`, onNote: (note: string) => `Nota: “${note}”`, onEnds: (when: string) => `Termina automáticamente ${when}`,
         disable: 'Desactivar la liquidación',
         returns: (floor: string, steps: number, minutes: number) => (steps === 0
@@ -1674,7 +1674,7 @@ export const es: Messages = {
         causes: {
           ACK_REQUIRED: 'Marque la casilla: cada venta por debajo del punto de equilibrio pierde dinero.', NOTE_REQUIRED: 'Escriba por qué se liquida la oferta.',
           FLOOR_INVALID: 'El piso de liquidación debe ser mayor que cero y no superar su precio máximo.', CURRENCY_MISMATCH: 'El piso de liquidación debe estar en la moneda de la oferta.',
-          ENDS_IN_PAST: 'La fecha de fin debe ser futura.', MFA_REQUIRED: 'La liquidación mueve el piso: inicie sesión con un segundo factor e inténtelo de nuevo.',
+          ENDS_IN_PAST: 'La fecha de fin debe ser futura.', BREAK_EVEN_UNKNOWN: 'No se puede calcular la pérdida: agregue primero el costo unitario y las comisiones.', MFA_REQUIRED: 'La liquidación mueve el piso: inicie sesión con un segundo factor e inténtelo de nuevo.',
           NOT_ACTIVE: 'La liquidación no está activa para esta oferta.',
         },
       },

@@ -1662,7 +1662,7 @@ export const fr: Messages = {
         ackWithChannel: (breakEven: string, min: string) => `Je comprends : chaque vente sous ${breakEven} fait perdre de l’argent, et sous ${min} le canal désactive cette offre`,
         note: 'Pourquoi', noteHint: 'Obligatoire — conservé dans le journal d’audit avec votre nom.', notePlaceholder: 'Écouler le stock d’été',
         endsAt: 'Terminer automatiquement', endsAtHint: 'Facultatif — après cette date, le plancher redevient le plancher calculé.',
-        enable: 'Activer le déstockage', mfaHint: 'Déplace le plancher : un second facteur est requis.', readOnly: 'Seul le propriétaire ou un responsable peut activer le déstockage.',
+        enable: 'Activer le déstockage', addCosts: 'Ajouter le coût unitaire et les commissions', mfaHint: 'Déplace le plancher : un second facteur est requis.', readOnly: 'Seul le propriétaire ou un responsable peut activer le déstockage.',
         on: 'Le déstockage est actif', onBy: (who: string, when: string) => `Activé par ${who}, ${when}`, onNote: (note: string) => `Note : « ${note} »`, onEnds: (when: string) => `Se termine automatiquement ${when}`,
         disable: 'Désactiver le déstockage',
         returns: (floor: string, steps: number, minutes: number) => (steps === 0
@@ -1674,7 +1674,7 @@ export const fr: Messages = {
         causes: {
           ACK_REQUIRED: 'Cochez la case : chaque vente sous le seuil de rentabilité fait perdre de l’argent.', NOTE_REQUIRED: 'Indiquez pourquoi l’offre est déstockée.',
           FLOOR_INVALID: 'Le plancher de déstockage doit être supérieur à zéro et ne pas dépasser votre prix maximum.', CURRENCY_MISMATCH: 'Le plancher de déstockage doit être dans la devise de l’offre.',
-          ENDS_IN_PAST: 'La date de fin doit être dans le futur.', MFA_REQUIRED: 'Le déstockage déplace le plancher : connectez-vous avec un second facteur et réessayez.',
+          ENDS_IN_PAST: 'La date de fin doit être dans le futur.', BREAK_EVEN_UNKNOWN: 'La perte ne peut pas être calculée : ajoutez d’abord le coût unitaire et les commissions.', MFA_REQUIRED: 'Le déstockage déplace le plancher : connectez-vous avec un second facteur et réessayez.',
           NOT_ACTIVE: 'Le déstockage n’est pas actif pour cette offre.',
         },
       },

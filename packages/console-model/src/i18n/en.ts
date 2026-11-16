@@ -1667,7 +1667,7 @@ export const en = {
         ackWithChannel: (breakEven: string, min: string) => `I understand: every sale below ${breakEven} loses money, and the channel deactivates this offer below ${min}`,
         note: 'Why', noteHint: 'Required — it is kept in the audit log with your name.', notePlaceholder: 'Clearing summer stock',
         endsAt: 'End automatically', endsAtHint: 'Optional — after this date the floor is the computed one again.',
-        enable: 'Enable clearance', mfaHint: 'Moves the floor: needs a second factor.', readOnly: 'Only the owner or a manager can enable clearance.',
+        enable: 'Enable clearance', addCosts: 'Add unit cost and fees', mfaHint: 'Moves the floor: needs a second factor.', readOnly: 'Only the owner or a manager can enable clearance.',
         on: 'Clearance is on', onBy: (who: string, when: string) => `Enabled by ${who}, ${when}`, onNote: (note: string) => `Note: “${note}”`, onEnds: (when: string) => `Ends automatically ${when}`,
         disable: 'Turn clearance off',
         returns: (floor: string, steps: number, minutes: number) => (steps === 0
@@ -1679,7 +1679,7 @@ export const en = {
         causes: {
           ACK_REQUIRED: 'Tick the box: every sale below break-even loses money.', NOTE_REQUIRED: 'Write why the offer is cleared.',
           FLOOR_INVALID: 'The clearance floor must be above zero and not above your maximum price.', CURRENCY_MISMATCH: 'The clearance floor must be in the currency of the offer.',
-          ENDS_IN_PAST: 'The end date must be in the future.', MFA_REQUIRED: 'Enabling clearance moves the floor: sign in with a second factor and try again.',
+          ENDS_IN_PAST: 'The end date must be in the future.', BREAK_EVEN_UNKNOWN: 'Loss cannot be calculated — add unit cost and fees first.', MFA_REQUIRED: 'Enabling clearance moves the floor: sign in with a second factor and try again.',
           NOT_ACTIVE: 'Clearance is not on for this offer.',
         },
       },

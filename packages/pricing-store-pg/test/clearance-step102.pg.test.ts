@@ -46,7 +46,9 @@ before(async () => {
   admin = db.pool('svc_admin', 2);
   world = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin,
     fixtureTenantId: '10000000-0000-4000-8000-000000000102', fixtureChannelAccountId: ACCOUNT, marketplaces: ['de'], clock: now(),
-    seed: { scopes: [scope(1, FIXED), scope(2, BEAT, { guardrails: { maxStepChangeBp: 1000 }, currentPriceMinor: 1050 }), scope(3, FIXED), scope(4, FIXED), scope(7, BEAT, { currentPriceMinor: 1500 })] } });
+    seed: { scopes: [scope(1, FIXED), scope(2, BEAT, { guardrails: { maxStepChangeBp: 1000 }, currentPriceMinor: 1050 }), scope(3, FIXED), scope(4, FIXED), scope(7, BEAT, { currentPriceMinor: 1500 }),
+      // Шаг 140: ws-8 — себестоимость объявлена, оценка комиссии истечёт в тесте; ws-9 — себестоимости нет вовсе
+      scope(8, BEAT, { guardrails: { maxStepChangeBp: 1000 }, currentPriceMinor: 1100 }), scope(9, FIXED, { pricingMode: 'OFF', cost: null })] } });
   shadow = await seedPricingWorld(pool, { provisioningPool: db.pool('svc_provisioning', 1), adminPool: admin, writeMode: 'SHADOW',
     fixtureTenantId: '10000000-0000-4000-8000-000000000112', fixtureChannelAccountId: SHADOW_ACCOUNT, marketplaces: ['de'], clock: now(),
     seed: { scopes: [scope(5, BEAT, {}, SHADOW_ACCOUNT), scope(6, BEAT, {}, SHADOW_ACCOUNT)] } });
@@ -259,4 +261,65 @@ test('step 102 [Р-227]: clearance ends by its date — the database writes EXPI
   assert.equal(audit.n, 1, 'the expiry is a system event in the audit log');
   // Второй заход ничего не пишет: режим уже закончен
   assert.equal(JSON.stringify(await store.expireClearances(world.tenantId, world.ids.dbId(ACCOUNT))), '[]', 'an expiry is written once');
+});
+
+/**
+ * Шаг 140 (решение владельца по #27, вариант (а)) [Р-227]: распродажа не включается, пока безубыточность не посчитана — убыток на штуку
+ * не назвать, подтверждение «каждая продажа ниже безубыточности — убыток» ни о чём. До шага в базе включению это не мешало: пол
+ * распродажи заменяет весь пол раньше, чем считается безубыточность, — и у предложения в бою с объявленной себестоимостью, но без
+ * действующей оценки комиссии (истекла через 90 суток, Р-244) вне распродажи цена не уходит (пол не вычислить), а в распродаже —
+ * уходила на пол распродажи. Отказывает база: страж журнала считает безубыточность тем же расчётом, что пол перед отправкой (Р-83)
+ */
+test('step 140 [Р-227]: clearance does not turn on while break-even is not computed — and no price reaches the channel', async () => {
+  // Что ушло в канал, видно у адаптера: запись, которую он получил, — запрос к витрине в бою
+  const sent: Array<[string, number]> = [];
+  const recording = { ...adapter, async dispatch(ctx: unknown, batch: { batchId: string; items: FieldWrite[] }) {
+    for (const w of batch.items) if (w.value.field === 'PRICE') sent.push([w.writeScope.writeScopeId, w.value.price.amountMinor]);
+    return (adapter as unknown as { dispatch: (c: unknown, b: unknown) => Promise<unknown> }).dispatch(ctx, batch);
+  } } as unknown as ChannelAdapter;
+  const p = createPricingPipeline({ store, adapter: recording, alerts: { raise: async () => undefined }, logger: { log: () => undefined }, now: () => now() as never });
+  const ws8 = world.ids.dbId('ws-8');
+  const ws9 = world.ids.dbId('ws-9');
+  // Оценка комиссии ws-8 истекла — как через 90 суток после импорта себестоимости
+  await db.superuser(`UPDATE channel_data.fee_estimate SET computed_at = now() - interval '91 days', valid_until = now() - interval '1 day'
+                       WHERE tenant_id = $1 AND write_scope_id = $2`, [world.tenantId, ws8]);
+  const { rows: [regular] } = await inTenant(pool, world.tenantId, (tx) => tx.query(
+    'SELECT floor_minor, cause FROM tenant_data.effective_price_floor($1, $2, now())', [world.tenantId, ws8]));
+  assert.deepEqual([regular.floor_minor, regular.cause], [null, 'FEE_ESTIMATE_MISSING'], 'outside clearance the floor of ws-8 cannot be computed');
+  const input = (writeScopeId: string) => ({ writeScopeId, floorMinor: 1000, currency: 'EUR', endsAt: null, note: 'Clearing summer stock', acknowledged: true });
+  const refused = JSON.stringify({ status: 'INVALID', cause: 'BREAK_EVEN_UNKNOWN' });
+  assert.equal(JSON.stringify(await store.enableClearance(world.tenantId, input(ws8), actor(world, true))), refused, 'no fee estimate — clearance is refused');
+  assert.equal(JSON.stringify(await store.enableClearance(world.tenantId, input(ws9), actor(world, true))), refused, 'no unit cost — clearance is refused');
+  // Последнее слово — за базой, а не за хранилищем
+  assert.match(await outcome(inTenant(admin, world.tenantId, (tx) => tx.query(
+    `INSERT INTO tenant_data.clearance_change (tenant_id, write_scope_id, action, floor_minor, currency, note, acknowledged, created_by_membership_id)
+     VALUES ($1, $2, 'ENABLE', 1000, 'EUR', 'Clearing summer stock', true, $3)`, [world.tenantId, ws8, world.ownerMembershipId]), world.userId, { mfa: true })),
+  /needs a computed break-even.*FEE_ESTIMATE_MISSING/, 'the database refuses clearance without break-even and names the cause');
+  // Путь к реальной записи: аккаунт в бою, конкурент €9.00 — без распродажи цена не уходит ни на пол распродажи, ни куда-либо ещё.
+  // На коде до шага распродажа включалась, и адаптер получал цену €10.00 (пол распродажи)
+  await p.processSnapshot(ctxOf(world, ACCOUNT), market(8, 900, 1100));
+  assert.equal(JSON.stringify(sent.filter(([ws]) => ws === ws8)), '[]', 'no price of ws-8 reaches the live channel');
+  // Положительный контроль: действующая оценка комиссии — безубыточность посчитана, распродажа включается, и тот же снимок
+  // ведёт цену на пол распродажи в канал (адаптер видит запись — проверка выше не пустая)
+  await db.superuser(`UPDATE channel_data.fee_estimate SET computed_at = now(), valid_until = now() + interval '90 days'
+                       WHERE tenant_id = $1 AND write_scope_id = $2`, [world.tenantId, ws8]);
+  assert.equal((await store.enableClearance(world.tenantId, input(ws8), actor(world, true))).status, 'ENABLED', 'with break-even computed clearance turns on');
+  await p.processSnapshot(ctxOf(world, ACCOUNT), market(8, 900, 1100));
+  assert.equal(JSON.stringify(sent.filter(([ws]) => ws === ws8)), JSON.stringify([[ws8, 1000]]), 'in clearance with break-even the price goes to the clearance floor');
+  assert.equal((await store.disableClearance(world.tenantId, { writeScopeId: ws8, note: null }, actor(world, false))).status, 'DISABLED');
+  // База и путь решения считают безубыточность одинаково: тот же расчёт, что у Gate (маржа 0)
+  const { rows: [be] } = await inTenant(pool, world.tenantId, (tx) => tx.query(
+    'SELECT margin_floor_minor FROM tenant_data.break_even_floor($1, $2, now())', [world.tenantId, ws8]));
+  assert.equal(Number(be.margin_floor_minor), BREAK_EVEN, 'the database break-even is the engine break-even');
+  // Правилом [Р-146]: безубыточность базы выведена из пола перед отправкой (0233) — пол изменился без повторного вывода
+  // (`EXECUTE maintenance.derive_break_even_floor()` в той же миграции) — красная сборка, второго правила пола нет
+  const derived = () => outcome(db.superuser(`DO $d$ BEGIN
+      IF pg_get_functiondef('tenant_data.break_even_floor(uuid,uuid,timestamptz)'::regprocedure) IS DISTINCT FROM maintenance.derive_break_even_floor() THEN
+        RAISE EXCEPTION 'tenant_data.break_even_floor drifted from tenant_data.effective_price_floor: re-derive it';
+      END IF; END $d$`));
+  assert.equal(await derived(), 'accepted', 'break_even_floor is derived from the current effective_price_floor');
+  // Положительный контроль: определение, разошедшееся с выводом, правило видит
+  await db.superuser(`DO $d$ BEGIN EXECUTE replace(maintenance.derive_break_even_floor(), 'min_margin_bp := NULL;', 'min_margin_bp := NULL; -- drift'); END $d$`);
+  assert.match(await derived(), /drifted/, 'control: a definition that drifted is caught');
+  await db.superuser(`DO $d$ BEGIN EXECUTE maintenance.derive_break_even_floor(); END $d$`);
 });

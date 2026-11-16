@@ -45,7 +45,9 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
   const enable = () => void post(['clearance'], {
     floorMinor, acknowledged: ack, note, endsAt: endsAt === '' ? null : new Date(endsAt).toISOString(),
   });
-  const why = floorMinor === null ? t.causes.FLOOR_INVALID : !ack ? t.causes.ACK_REQUIRED : note.trim() === '' ? t.causes.NOTE_REQUIRED : null;
+  // Шаг 140 [Р-227]: без посчитанной безубыточности убыток не назвать — включение закрыто, путь к себестоимости и комиссии — ссылкой
+  const noBreakEven = c.breakEvenMinor === null;
+  const why = noBreakEven ? t.causes.BREAK_EVEN_UNKNOWN : floorMinor === null ? t.causes.FLOOR_INVALID : !ack ? t.causes.ACK_REQUIRED : note.trim() === '' ? t.causes.NOTE_REQUIRED : null;
   return (
     <section className="card clearance">
       <h3>{t.title}{c.pill ? <> <Badge tone="warn">{c.pill}</Badge></> : null}</h3>
@@ -88,6 +90,7 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
           </FieldGrid>
           <FormActions hint={why ?? t.mfaHint}>
             <button type="button" className="primary" disabled={busy || why !== null} title={why ?? undefined} onClick={enable}>{t.enable}</button>
+            {noBreakEven ? <a className="break-even-fill" href={href(view.worldId, 'cost-import')}>{t.addCosts}</a> : null}
           </FormActions>
         </FieldGroup>
       ) : <p className="muted">{t.readOnly}</p>}

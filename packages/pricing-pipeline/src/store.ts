@@ -197,7 +197,8 @@ export interface ClearanceEnableInput {
   note: string;
   acknowledged: boolean;
 }
-export type ClearanceInvalidCause = 'ACK_REQUIRED' | 'NOTE_REQUIRED' | 'FLOOR_INVALID' | 'CURRENCY_MISMATCH' | 'ENDS_IN_PAST';
+/** BREAK_EVEN_UNKNOWN — шаг 140 [Р-227]: безубыточность не посчитана (нет себестоимости, действующей оценки комиссии, курса или НДС) */
+export type ClearanceInvalidCause = 'ACK_REQUIRED' | 'NOTE_REQUIRED' | 'FLOOR_INVALID' | 'CURRENCY_MISMATCH' | 'ENDS_IN_PAST' | 'BREAK_EVEN_UNKNOWN';
 export type ClearanceEnableResult =
   | { status: 'ENABLED'; changeId: string }
   | { status: 'INVALID'; cause: ClearanceInvalidCause }

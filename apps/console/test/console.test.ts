@@ -1229,6 +1229,34 @@ test('step 102 (D1) [Р-227]: the console refuses clearance without the acknowle
 });
 
 /**
+ * Шаг 140 (решение владельца по #27, вариант (а)) [Р-227] через консоль: без посчитанной безубыточности распродажа не включается — сервер
+ * отвечает причиной и текстом «Loss cannot be calculated — add unit cost and fees first», а страница пола не предлагает включение и ведёт к
+ * импорту себестоимости. Предложение стенда без себестоимости (у второго в том же мире сценарий её объявляет).
+ * На PostgreSQL отказывает база (clearance-step102.pg.test.ts, «step 140»)
+ */
+test('step 140 [Р-227]: the console refuses clearance while break-even is not computed and links to the unit cost import', async () => {
+  const owner = await login('OWNER');
+  const base = { floorMinor: 100, acknowledged: true, note: 'Clearing summer stock', endsAt: null };
+  {
+    const id = 'kaufland/pipeline/enable-margin-without-cost';
+    const ws = 'ws-price-de-4702';
+    const view = await get<BoundsView>(owner, api(id, 'bounds', ws));
+    assert.equal(view.clearance.breakEvenMinor, null, `${id}: break-even is not computed`);
+    const r = await call(owner, 'POST', api(id, 'bounds', ws, 'clearance'), base);
+    const error = (r.body as { error?: { code: string; message: string } }).error;
+    assert.equal(JSON.stringify([r.status, error?.code, error?.message]), JSON.stringify([400, 'BREAK_EVEN_UNKNOWN', messagesFor('en').ui.bounds.clearance.causes.BREAK_EVEN_UNKNOWN]),
+      `${id}: clearance is refused with its cause`);
+    assert.equal((await get<BoundsView>(owner, api(id, 'bounds', ws))).clearance.pill, null, `${id}: nothing was enabled`);
+    for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+      const t = messagesFor(locale).ui.bounds.clearance;
+      const markup = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: await get<BoundsView>(await login('OWNER', locale), api(id, 'bounds', ws)) }, locale);
+      assert.ok(markup.includes(t.causes.BREAK_EVEN_UNKNOWN), `${locale}: the floor page says why clearance cannot be enabled`);
+      assert.ok(markup.includes(`href="#/w/${encodeURIComponent(id)}/cost-import"`) && markup.includes(t.addCosts), `${locale}: the floor page links to the unit cost import`);
+    }
+  }
+});
+
+/**
  * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — маршрутом экрана Channels. Задаёт тот, кто назначает стратегии
  * (владелец, менеджер); недоступная на канале стратегия — отказ с причиной словами [Р-39]; неверный запрос — 400, чужой аккаунт — 404
  */

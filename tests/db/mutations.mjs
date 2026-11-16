@@ -2748,6 +2748,16 @@ export const STEP102_ROWS = [
         node(R102, D3_102, 'every decision in clearance names its clearance', 'false')),
     ],
   },
+  // Шаг 140 (решение владельца по #27, вариант (а)): без посчитанной безубыточности распродажа не включается — иначе у предложения в бою без
+  // действующей оценки комиссии цена уходила в канал на пол распродажи, хотя вне режима пол не вычислить. Критичная: это пол цены
+  {
+    row: 'шаг 140 (Р-227, Р-83)', critical: true,
+    invariant: 'режим распродажи включается только при посчитанной безубыточности — тем же расчётом, что пол перед отправкой, при марже 0 и без распродажи; без себестоимости, действующей оценки комиссии, курса или НДС — отказ базы с причиной',
+    mutations: [
+      m(replaceInFunction('tenant_data.clearance_change_guard()', 'IF be.margin_floor_minor IS NULL THEN', 'IF false THEN'),
+        node(R102, 'clearance does not turn on while break-even is not computed', 'no fee estimate — clearance is refused', 'ENABLED')),
+    ],
+  },
   {
     row: 'шаг 102 (Р-227, Р-117, Р-208)', critical: false,
     invariant: 'удержание пола распродажи помечено и в «пол удержал» не входит; конец распродажи — запрос на переоценку, по дате — строкой EXPIRE системы с событием аудита',
