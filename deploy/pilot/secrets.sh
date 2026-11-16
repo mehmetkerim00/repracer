@@ -16,10 +16,10 @@ command -v openssl > /dev/null || { echo "нужен openssl" >&2; exit 2; }
 mkdir -p "${OUT}/channels"
 chmod 700 "${OUT}" "${OUT}/channels"
 
-# Роли подключения процессов пилота [Р-90]: по паролю на роль. Остальные роли входа (ретранслятор, приёмники) в пилоте не работают и пароля не получают —
-# войти ими по сети нельзя
+# Роли подключения процессов пилота [Р-90]: по паролю на роль. Остальные роли входа (приёмники) в пилоте не работают и пароля не получают —
+# войти ими по сети нельзя. Шаг 141: svc_relay — ретранслятор outbox процесса пути решения (путь записи, профиль live)
 ROLES=(svc_app svc_admin svc_authenticator svc_onboarding svc_provisioning svc_dispatcher svc_stock svc_scheduler svc_exporter svc_fx_loader
-  svc_bulk_worker svc_alert_delivery svc_credentials svc_operator)
+  svc_bulk_worker svc_alert_delivery svc_credentials svc_operator svc_relay)
 
 made=()
 kept=()
@@ -38,7 +38,16 @@ else
   kept+=(pg_role_passwords)
 fi
 pw() { awk -v r="$1" '$1 == r { print $2 }' "${OUT}/pg_role_passwords"; }
-for r in "${ROLES[@]}"; do [ -n "$(pw "$r")" ] || { echo "в pg_role_passwords нет роли $r — допишите строку «$r <пароль>» или удалите файл" >&2; exit 1; }; done
+# Шаг 141: роль, которой не было, когда файл создавался (новая версия пилота), дописывается своим паролем; прежние пароли не меняются.
+# db.sh задаёт пароли ролей при каждой выкладке, поэтому новая роль начинает работать со следующей
+added=()
+for r in "${ROLES[@]}"; do
+  [ -n "$(pw "$r")" ] && continue
+  printf '%s %s
+' "$r" "$(secret)" >> "${OUT}/pg_role_passwords"
+  added+=("$r")
+done
+[ ${#added[@]} -eq 0 ] || echo "добавлены роли: ${added[*]} (пароль — в pg_role_passwords; на сервер — push-secrets.sh, задаст выкладка)"
 url() { printf 'postgres://%s:%s@postgres:5432/%s' "$1" "$(pw "$1")" "${DB}"; }
 # Консоль: файл на роль (apps/console/server/config.ts, CONSOLE_ROLES)
 for role in app admin authenticator onboarding provisioning dispatcher stock scheduler exporter fx_loader bulk_worker; do
@@ -52,6 +61,9 @@ url svc_exporter | put exporter_pg_url
 url svc_alert_delivery | put alert_delivery_pg_url
 url svc_credentials | put credentials_pg_url
 url svc_operator | put operator_pg_url
+# Шаг 141: процесс пути решения (deploy/worker, профиль live) — диспетчер записей и ретранслятор outbox; svc_app — тот же app_pg_url
+url svc_dispatcher | put dispatcher_pg_url
+url svc_relay | put relay_pg_url
 # Шаг 126: копия базы — суперпользователем (pg_dump всей базы под FORCE RLS и роли кластера без паролей, deploy/production/backup-loop.sh)
 printf 'postgres://postgres:%s@postgres:5432/%s' "$(cat "${OUT}/postgres_password")" "${DB}" | put backup_pg_url
 

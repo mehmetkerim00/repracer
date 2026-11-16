@@ -63,6 +63,8 @@ vendor/*
 !vendor/cloudflare/
 # Шаг 129: страницы UptimeRobot — внешняя проверка /healthz пилота (deploy/pilot/README.md, §9)
 !vendor/uptimerobot/
+# Шаг 141: конфигурация ClickHouse закреплённого выпуска — потолок памяти пилота и QA-B держится на ней; тест шага читает снимок
+!vendor/clickhouse/
 
 # --- Infrastructure ---
 .terraform/

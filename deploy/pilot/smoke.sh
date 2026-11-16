@@ -39,7 +39,14 @@ done
 "${here}/logs-state.sh" "${REPRACER_LOGS_HOT_DIR}" || fail "архив журналов не в порядке — строка LOGS RED выше"
 tables="$("${C}" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database = 'repracer_analytics'")"
 [ "${tables}" -gt 0 ] || fail "в ClickHouse нет таблиц repracer_analytics — DDL не применён"
-"${C}" ps --services --status running | grep -qE '^(worker|redpanda|kafka)$' && fail "в пилоте поднят брокер или диспетчер — пилот в тени, их здесь нет"
+# Шаг 141: путь записи (брокер и процесс пути решения) — только при REPRACER_PILOT_WRITE_PATH=on, в день перевода в бой (README, §6)
+if [ "${REPRACER_PILOT_WRITE_PATH:-off}" = on ]; then
+  "${C}" ps --services --status running | grep -qx redpanda || fail "путь записи включён, а брокер redpanda не работает"
+  grep -q "^build ${want} " <<< "$(health 9465 процесс-пути-решения)" || fail "процесс пути решения работает не той сборкой"
+  echo "путь записи: брокер и процесс пути решения работают (README, §6)"
+else
+  "${C}" ps --services --status running | grep -qE '^(worker|redpanda|kafka)$' && fail "в пилоте поднят брокер или диспетчер при REPRACER_PILOT_WRITE_PATH=off — пилот в тени, их здесь нет"
+fi
 code="$(curl -s -o /dev/null -w '%{http_code}' "https://${REPRACER_PILOT_HOST}/healthz")"
 [ "${code}" = 200 ] || fail "https://${REPRACER_PILOT_HOST}/healthz снаружи отвечает ${code} — туннель или DNS (README, §3)"
 echo "PILOT SMOKE GREEN: сборка ${want}, снаружи — https://${REPRACER_PILOT_HOST}"

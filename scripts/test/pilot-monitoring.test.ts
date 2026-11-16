@@ -327,3 +327,31 @@ test('step 129, step 130: setup-heartbeats --stand pilot — seven checks with n
     model.server.close();
   }
 });
+
+/**
+ * Шаг 141 (решение владельца 2026-11-16, п. 3): путь записи пилота (брокер и процесс пути решения) поднимается в день перевода в бой. Его проверку
+ * заводит тот же скрипт флагом --write-path: восьмая проверка — процесс пути решения. Без флага — прежние семь: проверку процесса, которого ещё нет,
+ * не заводят (молчит ли новая проверка до первой отметки, снимок healthchecks.io не говорит)
+ */
+test('step 141: setup-heartbeats --stand pilot --write-path — the eighth check is the pricing worker; without the flag the seven stay seven', async () => {
+  const model = modelHealthchecks();
+  await new Promise<void>((resolve) => model.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const api = `http://127.0.0.1:${(model.server.address() as AddressInfo).port}/api/v3`;
+    const secrets = join(work, 'setup-secrets-141', 'pilot');
+    mkdirSync(secrets, { recursive: true });
+    const plain = await setupRun(api, secrets, '--stand', 'pilot');
+    assert.equal(plain.code, 0, plain.out);
+    assert.ok(!model.bodies.some((b) => b.slug === 'repracer-pilot-worker'), 'no worker check before the write path');
+    assert.ok(!existsSync(join(secrets, 'worker_heartbeat_url')));
+    const live = await setupRun(api, secrets, '--stand', 'pilot', '--write-path');
+    assert.equal(live.code, 0, live.out);
+    const worker = model.bodies.find((b) => b.slug === 'repracer-pilot-worker');
+    assert.deepEqual(worker ? [worker.timeout, worker.grace, worker.channels] : null, [120, 180, '*'], 'a process check: silent 5 minutes — an email');
+    assert.match(readFileSync(join(secrets, 'worker_heartbeat_url'), 'utf8'), /^https:\/\/hc-ping\.invalid\/[0-9a-f]{32}\n$/);
+    assert.equal(statSync(join(secrets, 'worker_heartbeat_url')).mode & 0o777, 0o600);
+    assert.match(live.out, /получатель есть у всех 8 проверок/);
+  } finally {
+    model.server.close();
+  }
+});

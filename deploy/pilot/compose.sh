@@ -11,4 +11,11 @@ secrets="$(sed -n 's/^REPRACER_SECRETS_DIR=//p' "${here}/pilot.env")"
 # Шаг 126: вынос копий в R2 — свой сервис под профилем r2; при pull его нет (копии забирает машина оператора)
 profile=()
 [ "$(sed -n 's/^REPRACER_BACKUP_OFFSITE=//p' "${here}/pilot.env")" = r2 ] && profile=(--profile r2)
+# Шаг 141: путь записи (брокер и процесс пути решения) — профиль live, только в день перевода в бой (README, §6). Без строки — off
+write_path="$(sed -n 's/^REPRACER_PILOT_WRITE_PATH=//p' "${here}/pilot.env")"
+case "${write_path:-off}" in
+  off) ;;
+  on) profile+=(--profile live) ;;
+  *) echo "REPRACER_PILOT_WRITE_PATH — on или off, а в pilot.env «${write_path}» (README, §6)" >&2; exit 2 ;;
+esac
 exec docker compose -f "${here}/compose.yaml" --env-file "${here}/pilot.env" --env-file "${secrets}/amazon.env" --env-file "${here}/build.env" ${profile[@]+"${profile[@]}"} "$@"

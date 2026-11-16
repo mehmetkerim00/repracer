@@ -21,7 +21,8 @@
  *    GET /api/v3/checks/). Проверку без получателя адрес не получает, и запуск красный.
  *
  * Использование:
- *   HC_API_KEY=<ключ проекта> node scripts/setup-heartbeats.mjs --stand pilot [--dry-run]
+ *   HC_API_KEY=<ключ проекта> node scripts/setup-heartbeats.mjs --stand pilot [--write-path] [--dry-run]
+ *     --write-path (шаг 141) — ещё и проверка процесса пути решения (deploy/pilot, профиль live): в день перевода в бой, deploy/pilot/README.md, §6
  *   HC_API_KEY=<ключ проекта> node scripts/setup-heartbeats.mjs [--dry-run]
  */
 import { execFileSync } from 'node:child_process';
@@ -32,10 +33,16 @@ const API = process.env.HC_API_URL ?? 'https://healthchecks.io/api/v3';
 const key = process.env.HC_API_KEY;
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
+// Шаг 141: путь записи пилота (брокер и процесс пути решения, профиль live) — в день перевода в бой; его проверку заводит этот флаг
+const writePath = args.includes('--write-path');
 const standAt = args.indexOf('--stand');
 const stand = standAt >= 0 ? args[standAt + 1] ?? '' : null;
 if (stand !== null && !/^[a-z][a-z0-9-]{0,30}$/.test(stand)) {
   console.error('--stand <имя>: строчные буквы, цифры и дефис, например pilot или qa-b');
+  process.exit(2);
+}
+if (writePath && stand === null) {
+  console.error('--write-path — только со --stand: путь записи пилота (deploy/pilot, профиль live)');
   process.exit(2);
 }
 if (!key) {
@@ -61,6 +68,8 @@ const CHECKS = stand
     { proc: 'logs', what: 'архив журналов ≥ 12 месяцев: отметка после каждого захода deploy/pilot/logs-archive.sh', ...DAILY, file: join(standSecrets, 'logs_heartbeat_url') },
     { proc: 'pull', what: 'вынос копий на машину оператора: отметка после каждого прохода pull-backups.sh', ...DAILY,
       file: process.env.REPRACER_PILOT_PULL_HEARTBEAT_URL_FILE ?? join(home, '.config', 'repracer', 'secrets', `${stand}-pull-heartbeat-url`) },
+    // Шаг 141: процесс пути решения — только с --write-path (день перевода в бой): проверку процесса, которого ещё нет, не заводим
+    ...(writePath ? [{ proc: 'worker', what: 'путь записи: диспетчер записей и ретранслятор outbox за брокером (профиль live)', ...PROCESS, file: join(standSecrets, 'worker_heartbeat_url') }] : []),
   ].map((c) => ({ ...c, slug: `repracer-${stand}-${c.proc}`, name: `repracer · ${stand} · ${c.proc}`, desc: c.what }))
   : [
     { slug: 'repracer-scheduler', name: 'repracer · планировщик', secret: 'HC_URL_SCHEDULER', desc: 'Периодические работы [Р-126]: опрос конкурентов, выгрузка суток, закрытие суток, удаление по сроку' },
