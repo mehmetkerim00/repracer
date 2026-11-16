@@ -1,7 +1,8 @@
 # TMPrice — Functional Design Document
 
-Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 139.
-The QA-A stand runs build `3c3bc57` (step 139), deployed on Nov 15, 2026 (America/New_York); it carries the fixes of GitHub issues #30–#33.
+Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 141.
+The QA-A stand runs build `5f361d6` (steps 140–141), deployed on Nov 16, 2026 (America/New_York). It carries the fixes of GitHub issues #30–#33 and
+the clearance rule of #27: clearance turns on only when break-even is computed.
 
 ## How to read the labels
 
@@ -146,7 +147,7 @@ Special cases, handled honestly:
 
 | Function | Behavior | Label |
 |---|---|---|
-| Clearance (deliberate loss) | Replaces the whole floor with a clearance floor; second factor + note + checkbox; the loss per piece and the largest total loss are shown before confirming; outside clearance the floor always includes break-even; turning it off returns to the floor by a step ladder | **[QA-A]** |
+| Clearance (deliberate loss) | Replaces the whole floor with a clearance floor; second factor + note + checkbox; the loss per piece and the largest total loss are shown before confirming; turns on only when break-even is computed — otherwise «Loss cannot be calculated — add unit cost and fees first» with a link to the unit cost import, refused by the database (step 140); outside clearance the floor always includes break-even; turning it off returns to the floor by a step ladder | **[QA-A]** |
 | Raise toward the floor | When the floor rises (cost, fee, min price, margin), a price below it climbs in steps no larger than the step limit, at most one step per scheduled period, with "about N steps left"; the owner is notified once per ladder. The ladder is driven by the scheduled recompute, which the demo runs every 15 minutes for its ebay.com and walmart.com offers | **[QA-A]** |
 | Floor above ceiling | When break-even exceeds the maximum price, prices freeze and the screen says "raise the maximum price or enable clearance" | **[QA-A]** |
 | Fee estimate expiry | A seller-declared fee estimate lives 90 days. A warning goes out 14 days before it ends; at expiry prices freeze with a critical alert. The alerts are raised by the scheduler | **[QA-B]** |
@@ -302,10 +303,10 @@ Open items on the critical path:
 | Item | Owner | State (Nov 16, 2026) |
 |---|---|---|
 | Amazon grantless scope for notifications (`invalid_scope`) | Amazon support + Merdan (AWS access) | Case 23094609981 closed by Amazon; evidence pack for a new case ready (Nov 15) |
-| QA-B machine | Merdan approves the purchase | Code and runbook ready |
-| Pilot server | At launch | Code and runbook ready |
+| QA-B machine | Merdan approves the purchase | Code and runbook ready. Machine: 4 vCPU / 8 GB / 80 GB SSD. The kit has a ClickHouse memory ceiling and your SSH gate (`logs`, `reset`, `version`), as on QA-A |
+| Pilot server | At launch | Code and runbook ready. The write path (Redpanda broker and pricing worker) is in the kit and is switched on on the go-live day, together with the removal of the live-writes guard |
 | Seller account for QA-B (Amazon, Individual) | Owner with Merdan | Open |
-| Mail provider | Owner | Deferred until chosen |
+| Mail provider | Owner and Merdan | Resend chosen. CRITICAL alerts go to both of us through one shared `ops@tmprice.com` address (Cloudflare Email Routing); no code change. Not connected until you approve |
 | Publish tmprice.com + support@ mailbox; client CSV request letter; pilot paperwork | Kerim | As of Nov 6; not tracked in the repository |
 
 Deliberately out of scope for the pilot (manual or deferred, none block a client):
