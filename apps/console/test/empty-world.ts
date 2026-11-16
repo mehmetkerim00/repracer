@@ -25,7 +25,7 @@ export function emptyWorld(clock: LiveWorld['clock'], tenantId = 'gallery-empty-
     shadow: {
       shadowPage: async (_tenantId, now) => ({
         summary: { since: now, until: now, decisions: 0, changes: 0, floorHeld: 0, ceilingHeld: 0, heldWrites: 0, heldPriceWrites: 0,
-          heldQuantityWrites: 0, wouldSpendBudget: 0, wouldSpendUnconfirmed: 0, floorSavings: [], floorSavingsHolds: 0 },
+          heldQuantityWrites: 0, wouldSpendBudget: 0, wouldSpendUnconfirmed: 0, floorSavings: [], floorSavingsHolds: 0, floorHoldSkus: 0 },
         rows: [], total: 0, accounts: [], properties: [], digests: [], decisionsByHour: [],
       }) as never,
       switchWriteMode: async () => { throw new Error('the empty workspace has no channel account to switch'); },

@@ -97,7 +97,8 @@ export function ShadowHero({ view, periods }: { view: ShadowView; periods: React
         <Metric label={st.changes} value={nf.format(s.changes)} sub={st.changesSub} />
         <Metric label={st.held} value={nf.format(s.heldPriceWrites)} sub={st.heldSub} />
         {s.floorSavings.length > 0 ? (
-          <Metric label={st.savings} sub={st.notForecast}
+          // Шаг 144 (аудит UX, 1.2–1.3): сумма разниц предложенных цен — с числом событий и уникальных SKU, тем же определением, что у Protections
+          <Metric label={st.savings} sub={st.savingsSub(s.floorSavingsHolds, s.floorHoldSkus)}
             value={s.floorSavings.map((f) => <span key={f.currency} className="money-line">{m.money(f.minor, f.currency)}</span>)} />
         ) : null}
       </div>

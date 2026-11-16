@@ -1104,10 +1104,12 @@ export const en = {
         heldSplit: (all: number, prices: number, stock: number) => `${all} — prices ${prices}, stock ${stock}`,
         budget: 'Would have used the external edit budget of the channel', about: (n: number) => `about ${n}`,
         budgetNote: 'Approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day.',
-        savings: 'Without the floor you would have sold cheaper by', savingsHolds: (holds: number) => `counted on the ${holds} holds where we still keep what the strategy wanted`,
+        // Шаг 144 (аудит UX, 1.2–1.3): событие — одно удержание (эпизод); сумма — разница предложенных цен, не прибыль
+        savings: 'Proposed price differences held by your floor', savingsHolds: (events: number, skus: number) => `${events} ${events === 1 ? 'event' : 'events'}, ${skus} unique ${skus === 1 ? 'SKU' : 'SKUs'} — one event per hold`,
       },
       // Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили в магазин
-      stats: { decisions: 'Decisions', decisionsSub: 'times the engine checked prices', changes: 'Price would change', changesSub: 'times the price would have moved', held: 'Held back', heldSub: 'price changes we did NOT send to your store', savings: 'Your floor saved you from selling cheaper by', notForecast: 'protection, not profit' },
+      stats: { decisions: 'Decisions', decisionsSub: 'times the engine checked prices', changes: 'Price would change', changesSub: 'times the price would have moved', held: 'Held back', heldSub: 'price changes we did NOT send to your store', savings: 'Price reductions your floor prevented', notForecast: 'not realized profit',
+        savingsSub: (events: number, skus: number) => `in proposed price differences · ${events} ${events === 1 ? 'event' : 'events'} · ${skus} unique ${skus === 1 ? 'SKU' : 'SKUs'} — not realized profit` },
       // Шаг 96 (Б13, Б16, В21): копирование имени аккаунта, вид удержанного, сворачиваемые блоки
       copy: 'Copy', copied: 'Copied', copyHint: 'Copy the account name, then paste it into the field.',
       kinds: { PRICE: 'price', QUANTITY: 'stock' } as Record<string, string | undefined>,
@@ -1227,8 +1229,8 @@ export const en = {
         budget: (n: number, approximate = false) => approximate
           ? `Of them about ${n} would have used the external edit budget of the channel — approximate: the day boundary of the storefront is not confirmed, so the budget cannot be split by day`
           : `Of them ${n} would have used the external edit budget of the channel`,
-        savings: (money: string, holds: number) => `Without the floor you would have sold ${money} cheaper in total — counted on the ${holds} holds where we still keep what the strategy wanted`,
-        savingsNote: 'That number is the difference between your floor and what the strategy wanted — not a forecast of revenue: whether a buyer would have bought at the lower price is not something we know. Holds older than three days are counted but not priced: what the strategy wanted came from a competitor price, and we do not keep it longer.',
+        savings: (money: string, events: number) => `Your floor prevented ${events} price ${events === 1 ? 'reduction' : 'reductions'}: ${money} in aggregate proposed price differences`,
+        savingsNote: 'Not realized profit: whether a buyer would have bought at the lower price is something we do not know. One event is one hold, however many times the price was re-checked while it lasted; several events may be the same SKU.',
       },
     },
     alerts: {
@@ -2051,9 +2053,13 @@ export const en = {
       previous: '← Newer', next: 'Older →',
     },
     dangerous: {
-      floorHeadline: (n: number, phrase: string, amounts: string[], unknown: number) => n === 0
+      // Шаг 144 (аудит UX, 1.3): честная формулировка — снижения, которые предотвратил пол, и сумма разниц предложенных цен, а не «продали бы дешевле»
+      floorHeadline: (n: number, phrase: string, amounts: string[]) => n === 0
         ? `The floor did not have to hold a price ${phrase}`
-        : `The floor held the price ${n} ${n === 1 ? 'time' : 'times'} ${phrase}${amounts.length ? `; without it you would have sold ${amounts.join(' + ')} cheaper` : ''}${unknown ? ` (amount unknown for ${unknown})` : ''}`,
+        : `${n} price ${n === 1 ? 'reduction' : 'reductions'} prevented by your floor ${phrase}${amounts.length ? `; ${amounts.join(' + ')} in aggregate proposed price differences` : ''}`,
+      floorNote: 'Not realized profit; several events may be the same SKU. One event is one hold, however many times the price was re-checked while it lasted.',
+      floorStats: { events: 'Events', eventsSub: 'holds by your floor', skus: 'Unique SKUs', skusSub: 'among these events', sum: 'Sum', sumSub: 'proposed price differences, not profit' },
+      floorDetailsGone: 'The details of this hold are no longer kept.',
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
       // Шаг 102 [Р-227]: удержания пола распродажи — отдельной строкой, в «пол удержал» не входят

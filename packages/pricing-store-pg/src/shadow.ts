@@ -45,10 +45,12 @@ export interface ShadowSummary {
    */
   floorSavings: Array<{ currency: string; minor: number }>;
   /**
-   * Сколько удержаний пола попало в сумму. Меньше `floorHeld` — и это срок, а не потеря: цель стратегии выведена из цены
-   * конкурента и хранится три суток [Р-85, Р-28]. Экран и письмо говорят оба числа, а не делят одно на другое.
+   * Шаг 144 (аудит UX, 1.2–1.3): удержаний пола в сумме — СОБЫТИЙ: эпизодов (`platform.floor_hold_episodes`), а не записанных
+   * намерений; одно удержание с повторами — одно событие. Тот же счёт у Protections и письма
    */
   floorSavingsHolds: number;
+  /** Шаг 144: уникальных SKU продавца среди этих событий */
+  floorHoldSkus: number;
 }
 
 /** Р-172: свойство витрины, его значение, статус и чем закрывается */
@@ -275,9 +277,9 @@ export class PgShadowStore {
          */
         // Окно — ТО ЖЕ, что у остальных счётчиков экрана, и от часов консоли: у живых прогонов они виртуальные [Р-128]
         // Шаг 96: свой диапазон — та же сумма с верхней границей (функция окна дайджеста, 0132); у пресета — прежняя, до часов базы
-        query.until === undefined
-          ? tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings($1, $2::timestamptz)`, [tenantId, since])
-          : tx.query(`SELECT savings, priced FROM platform.shadow_floor_savings_between($1, $2::timestamptz, $3::timestamptz)`, [tenantId, since, until]),
+        // Шаг 144: события пола — эпизоды одной функцией базы с Protections и письмом (сумма письма — `shadow_floor_savings_between` по ним же)
+        tx.query(`SELECT savings, events, skus FROM platform.floor_hold_totals($1, $2::timestamptz, coalesce($3::timestamptz, now()), true)`,
+          [tenantId, since, query.until ?? null]),
         /**
          * Р-172: свойства витрин аккаунтов тенанта — значение, статус и чем закрывается. Экран показывает их рядом с
          * кнопкой «включить бой», потому что именно они её и держат.
@@ -311,7 +313,7 @@ export class PgShadowStore {
           decisions: num(d.decisions), changes: num(d.changes), floorHeld: num(d.floor_held), ceilingHeld: num(d.ceiling_held),
           heldWrites: num(h.held), heldPriceWrites: num(h.held_price), heldQuantityWrites: num(h.held_quantity),
           wouldSpendBudget: num(h.would_spend), wouldSpendUnconfirmed: num(unconfirmed.rows[0]?.n),
-          floorSavings: moneyList(savings.rows[0]?.savings), floorSavingsHolds: num(savings.rows[0]?.priced),
+          floorSavings: moneyList(savings.rows[0]?.savings), floorSavingsHolds: num(savings.rows[0]?.events), floorHoldSkus: num(savings.rows[0]?.skus),
         },
         total: num(h.held),
         rows: list.rows.map((r) => ({

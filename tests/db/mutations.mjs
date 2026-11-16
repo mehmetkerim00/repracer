@@ -2759,6 +2759,16 @@ export const STEP102_ROWS = [
     ],
   },
   {
+    row: 'шаг 144 (аудит UX, 1.2–1.3)', critical: false,
+    invariant: 'удержание пола — эпизод: повторы одного удержания (одобренное решение и «уже предложено в тени») — одно событие с наибольшей разницей; одно определение у тени, письма и Protections',
+    mutations: [
+      m(replaceInFunction('channel_data.price_intent_record_floor_hold()', 'coalesce(episode, NEW.price_intent_id), held, hold)', 'NEW.price_intent_id, held, hold)'),
+        node(T('floor-hold-episodes-step144.pg.test.ts'), 'one floor hold in shadow is ONE event', 'one hold, priced once', '^2: ')),
+      m(replaceInFunction('platform.floor_hold_episodes(uuid,timestamptz,timestamptz,boolean)', 'coalesce(fh.episode_intent_id, fh.price_intent_id) AS episode', 'fh.price_intent_id AS episode'),
+        node(T('floor-hold-episodes-step144.pg.test.ts'), 'one floor hold in shadow is ONE event', 'one hold, priced once', '^2: ')),
+    ],
+  },
+  {
     row: 'шаг 102 (Р-227, Р-117, Р-208)', critical: false,
     invariant: 'удержание пола распродажи помечено и в «пол удержал» не входит; конец распродажи — запрос на переоценку, по дате — строкой EXPIRE системы с событием аудита',
     mutations: [
@@ -2767,7 +2777,8 @@ export const STEP102_ROWS = [
         node(R102, D5_102, 'the clearance hold is marked', 'false\\]\\]$')),
       m(replaceInFunction('channel_data.price_intent_record_floor_hold()', "'CAPPED_AT_MARGIN_FLOOR', 'CAPPED_AT_CLEARANCE_FLOOR', 'TARGET_OUTSIDE_BOUNDS_HOLD'", "'CAPPED_AT_MARGIN_FLOOR', 'TARGET_OUTSIDE_BOUNDS_HOLD'"),
         node(R102, D5_102, 'the clearance hold is marked', 'false\\]\\]$')),
-      m(replaceInFunction('platform.shadow_floor_savings_between(uuid,timestamptz,timestamptz)', 'AND fh.shadow AND NOT fh.clearance', 'AND fh.shadow'),
+      // Шаг 144: исключение распродажи — в сумме по эпизодам (0234)
+      m(replaceInFunction('platform.shadow_floor_savings_between(uuid,timestamptz,timestamptz)', 'true) e WHERE NOT e.clearance)', 'true) e)'),
         node(R102, D5_102, '«saved you» counts only the regular floor', '^\\[2,')),
       m(replaceInFunction('tenant_data.request_floor_raise()', "    why := 'CLEARANCE_ENDED';", '    RETURN NULL;'),
         node(R102, D3_102, 'switching off asks for a re-evaluation', '^\\[\\]$')),

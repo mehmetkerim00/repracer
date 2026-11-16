@@ -1059,9 +1059,10 @@ export const de: Messages = {
         heldSplit: (all: number, prices: number, stock: number) => `${all} — Preise ${prices}, Bestand ${stock}`,
         budget: 'Hätten das externe Änderungsbudget des Kanals verbraucht', about: (n: number) => `etwa ${n}`,
         budgetNote: 'Ungefähr: die Tagesgrenze der Storefront ist nicht bestätigt, das Budget lässt sich nicht nach Tagen aufteilen.',
-        savings: 'Ohne die Untergrenze hätten Sie billiger verkauft um', savingsHolds: (holds: number) => `gerechnet auf die ${holds} Haltevorgänge, deren Strategieziel wir noch haben`,
+        savings: 'Von Ihrer Untergrenze gehaltene Differenz der vorgeschlagenen Preise', savingsHolds: (events: number, skus: number) => `${events} ${events === 1 ? 'Ereignis' : 'Ereignisse'}, ${skus} eindeutige ${skus === 1 ? 'SKU' : 'SKUs'} — ein Ereignis je Haltevorgang`,
       },
-      stats: { decisions: 'Entscheidungen', decisionsSub: 'so oft hat die Engine Preise geprüft', changes: 'Preis würde sich ändern', changesSub: 'so oft hätte sich der Preis bewegt', held: 'Zurückgehalten', heldSub: 'Preisänderungen, die wir NICHT an Ihren Shop gesendet haben', savings: 'Ihre Untergrenze hat Sie davor bewahrt, billiger zu verkaufen um', notForecast: 'Schutz, kein Gewinn' },
+      stats: { decisions: 'Entscheidungen', decisionsSub: 'so oft hat die Engine Preise geprüft', changes: 'Preis würde sich ändern', changesSub: 'so oft hätte sich der Preis bewegt', held: 'Zurückgehalten', heldSub: 'Preisänderungen, die wir NICHT an Ihren Shop gesendet haben', savings: 'Preissenkungen, die Ihre Untergrenze verhindert hat', notForecast: 'kein realisierter Gewinn',
+        savingsSub: (events: number, skus: number) => `Differenz vorgeschlagener Preise · ${events} ${events === 1 ? 'Ereignis' : 'Ereignisse'} · ${skus} eindeutige ${skus === 1 ? 'SKU' : 'SKUs'} — kein realisierter Gewinn` },
       copy: 'Kopieren', copied: 'Kopiert', copyHint: 'Kopieren Sie den Kontonamen und fügen Sie ihn in das Feld ein.',
       kinds: { PRICE: 'Preis', QUANTITY: 'Bestand' } as Record<string, string | undefined>,
       heldTableTitle: (n: number) => `Jede zurückgehaltene Änderung einzeln (${n})`,
@@ -1172,8 +1173,8 @@ export const de: Messages = {
         budget: (n: number, approximate = false) => approximate
           ? `Davon hätten etwa ${n} das externe Änderungsbudget des Kanals verbraucht — ungefähr: die Tagesgrenze der Storefront ist nicht bestätigt, das Budget lässt sich nicht nach Tagen aufteilen`
           : `Davon hätten ${n} das externe Änderungsbudget des Kanals verbraucht`,
-        savings: (money: string, holds: number) => `Ohne die Untergrenze hätten Sie insgesamt ${money} billiger verkauft — gerechnet auf die ${holds} Haltevorgänge, deren Strategieziel wir noch haben`,
-        savingsNote: 'Diese Zahl ist die Differenz zwischen Ihrer Untergrenze und dem, was die Strategie wollte — keine Umsatzprognose: ob ein Käufer zum niedrigeren Preis gekauft hätte, wissen wir nicht. Haltevorgänge, die älter als drei Tage sind, werden gezählt, aber nicht bewertet: das Ziel der Strategie stammt aus einem Wettbewerberpreis, und den behalten wir nicht länger.',
+        savings: (money: string, events: number) => `Ihre Untergrenze hat ${events} ${events === 1 ? 'Preissenkung' : 'Preissenkungen'} verhindert: ${money} Differenz der vorgeschlagenen Preise insgesamt`,
+        savingsNote: 'Kein realisierter Gewinn: ob ein Käufer zum niedrigeren Preis gekauft hätte, wissen wir nicht. Ein Ereignis ist ein Haltevorgang, egal wie oft der Preis währenddessen geprüft wurde; mehrere Ereignisse können dieselbe SKU betreffen.',
       },
     },
     alerts: {
@@ -1978,9 +1979,12 @@ export const de: Messages = {
       previous: '← Neuere', next: 'Ältere →',
     },
     dangerous: {
-      floorHeadline: (n: number, phrase: string, amounts: string[], unknown: number) => n === 0
+      floorHeadline: (n: number, phrase: string, amounts: string[]) => n === 0
         ? `Die Untergrenze musste ${phrase} keinen Preis halten`
-        : `Die Untergrenze hat den Preis ${phrase} ${n}-mal gehalten${amounts.length ? `; ohne sie hätten Sie ${amounts.join(' + ')} billiger verkauft` : ''}${unknown ? ` (Betrag bei ${unknown} unbekannt)` : ''}`,
+        : `Ihre Untergrenze hat ${phrase} ${n} ${n === 1 ? 'Preissenkung' : 'Preissenkungen'} verhindert${amounts.length ? `; ${amounts.join(' + ')} Differenz der vorgeschlagenen Preise insgesamt` : ''}`,
+      floorNote: 'Kein realisierter Gewinn; mehrere Ereignisse können dieselbe SKU betreffen. Ein Ereignis ist ein Haltevorgang, egal wie oft der Preis währenddessen geprüft wurde.',
+      floorStats: { events: 'Ereignisse', eventsSub: 'Haltevorgänge Ihrer Untergrenze', skus: 'Eindeutige SKUs', skusSub: 'unter diesen Ereignissen', sum: 'Summe', sumSub: 'Differenz vorgeschlagener Preise, kein Gewinn' },
+      floorDetailsGone: 'Die Einzelheiten dieses Haltevorgangs werden nicht mehr aufbewahrt.',
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
       // Шаг 102 [Р-227]: удержания пола распродажи — отдельной строкой, в «пол удержал» не входят
       clearanceHeld: (n: number, phrase: string) => `Die Abverkaufs-Untergrenze hat den Preis ${n}-mal ${phrase} gehalten — ein bewusster Verlust, oben nicht mitgezählt`, clearanceKind: 'Abverkaufs-Untergrenze',

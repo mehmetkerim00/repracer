@@ -112,7 +112,7 @@ function syntheticFloorReport(worldId: string) {
   ];
   return {
     worldId, phrase: 'in the last 7 days', from: at(130), to: at(0), clipped: false,
-    headline: 'The floor held the price 107 times in the last 7 days', floorHolds: { count: 130, withoutFloor: [], unknownAmount: 0, items },
+    headline: '107 price reductions prevented by your floor in the last 7 days', floorNote: null, floorHolds: { count: 130, skus: 107, clearanceCount: 0, withoutFloor: [], items },
     gateHeadline: 'Your bounds stopped 0 dangerous changes in the last 7 days', count: 0, prevented: [], worst: null, byUnit: [], byBound: [], items: [], truncated: false, gaps: [],
   };
 }
@@ -129,7 +129,7 @@ function demoLikeFloorReport(worldId: string) {
   const items = Array.from({ length: 132 }, (_, n) => ({ at: at(n), unit: unit(n % 12), kind: 'CAPPED', target: `€${(8.99 + (n % 12) * 0.5).toFixed(2)}`, floor: `€${(14 + (n % 3)).toFixed(2)}`, below: `€${(5.01 - (n % 12) * 0.5 + (n % 3)).toFixed(2)}`, reason, decisionId: null }));
   return {
     worldId, phrase: 'in the last 7 days', from: at(132), to: at(0), clipped: false,
-    headline: 'The floor held the price 132 times in the last 7 days', floorHolds: { count: 132, withoutFloor: [], unknownAmount: 0, items },
+    headline: '132 price reductions prevented by your floor in the last 7 days', floorNote: null, floorHolds: { count: 132, skus: 12, clearanceCount: 0, withoutFloor: [], items },
     gateHeadline: 'Your bounds stopped 0 dangerous changes in the last 7 days', count: 0, prevented: [], worst: null, byUnit: [], byBound: [], items: [], truncated: false, gaps: [],
   };
 }
@@ -173,7 +173,7 @@ function syntheticShadow() {
     const hour = 3_600_000;
     return {
       summary: { since: at(sinceDays * 24 * hour), until: at(0), decisions: 3070, changes: 505, floorHeld: 131, ceilingHeld: 0, heldWrites: 719,
-        heldPriceWrites: 515, heldQuantityWrites: 204, wouldSpendBudget: 10, wouldSpendUnconfirmed: 10, floorSavings: [{ currency: 'EUR', minor: 188826 }], floorSavingsHolds: 626 },
+        heldPriceWrites: 515, heldQuantityWrites: 204, wouldSpendBudget: 10, wouldSpendUnconfirmed: 10, floorSavings: [{ currency: 'EUR', minor: 188826 }], floorSavingsHolds: 626, floorHoldSkus: 18 },
       rows: Array.from({ length: 12 }, (_, i) => ({ channelWriteId: `smoke-write-${i}`, writeScopeId: `smoke-scope-${i}`, channel: 'KAUFLAND', channelAccountId: 'smoke-account',
         sku: `syn-smoke-${100 + i}`, title: `Synthetic desk lamp, size ${i + 1}`, marketplace: 'de', field: i % 3 === 0 ? 'QUANTITY' : 'PRICE',
         amountMinor: i % 3 === 0 ? null : 1838 + i, currency: i % 3 === 0 ? null : 'EUR', quantity: i % 3 === 0 ? 24 : null, priceDecisionId: i % 3 === 0 ? null : shadowDecisionId,

@@ -140,7 +140,7 @@ export function shadowSummaryList(summary: ShadowSummary, m: Messages): { rows: 
     { label: t.held, value: t.heldSplit(summary.heldWrites, summary.heldPriceWrites, summary.heldQuantityWrites), hint: null },
     { label: t.budget, value: approximate ? t.about(summary.wouldSpendBudget) : n(summary.wouldSpendBudget), hint: null },
     ...(summary.floorSavings.length > 0
-      ? [{ label: t.savings, value: summary.floorSavings.map((x) => m.money(x.minor, x.currency)).join(', '), hint: t.savingsHolds(summary.floorSavingsHolds) }]
+      ? [{ label: t.savings, value: summary.floorSavings.map((x) => m.money(x.minor, x.currency)).join(', '), hint: t.savingsHolds(summary.floorSavingsHolds, summary.floorHoldSkus) }]
       : []),
   ];
   const notes = [

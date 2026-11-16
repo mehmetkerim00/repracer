@@ -33,6 +33,15 @@ export function DangerousScreenView({ view, embedded = false, period = { preset:
       {/* Шаг 79: итог периода — карточкой-сводкой */}
       <section className="card summary-card">
         <p className="headline">{view.headline}</p>
+        {/* Шаг 144 (аудит UX, 1.2–1.3): три показателя одного определения с экраном тени — события, уникальные SKU, сумма; что это не прибыль — сноской */}
+        {view.floorHolds.count > 0 ? (
+          <dl className="floor-stats">
+            <div><dt>{d.floorStats.events}</dt><dd className="num">{view.floorHolds.count}</dd><dd className="muted small">{d.floorStats.eventsSub}</dd></div>
+            <div><dt>{d.floorStats.skus}</dt><dd className="num">{view.floorHolds.skus}</dd><dd className="muted small">{d.floorStats.skusSub}</dd></div>
+            <div><dt>{d.floorStats.sum}</dt><dd className="num cur">{view.floorHolds.withoutFloor.map((x) => x.amount).join(' + ')}</dd><dd className="muted small">{d.floorStats.sumSub}</dd></div>
+          </dl>
+        ) : null}
+        {view.floorNote ? <p className="muted small floor-note">{view.floorNote}</p> : null}
         {/* Шаг 102 [Р-227]: пол распродажи — намеренный убыток, отдельной строкой; в «без пола … дешевле» не входит */}
         {view.clearanceHeadline ? <p className="clearance-line">{view.clearanceHeadline}</p> : null}
         <p className="muted small">{view.from} – {view.to}</p>

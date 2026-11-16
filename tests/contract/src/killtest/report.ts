@@ -285,7 +285,8 @@ export async function collectReport(catalog: Catalog, world: KilltestWorld, opti
         + (marginRefused > 0 ? `, and ${marginRefused} times a price below your margin floor was refused, so the price stayed as it was. ` : '. ')
         + 'The floor is the higher of the minimum price (assumed in this run) and your margin floor (unit cost + assumed Amazon referral fee + minimum margin). '
         + 'It does not include FBA fees, per-item minimum fees, closing fees or shipping: if they apply to you, your real break-even is higher.'
-        + (savings ? ` Without the floor the engine would have priced ${savings} lower in total in this simulation — the amount depends on how far we let the simulated competitor drop; it is not a forecast.` : '') });
+        // Шаг 144 (аудит UX, 1.3): та же честная формулировка, что у консоли, — снижения, которые предотвратил пол, и сумма разниц предложенных цен
+        + (savings ? ` In this simulation the floor prevented ${s.floorSavingsHolds} price ${s.floorSavingsHolds === 1 ? 'reduction' : 'reductions'}: ${savings} in aggregate proposed price differences — the amount depends on how far we let the simulated competitor drop; it is not realized profit.` : '') });
     if (s.ceilingHeld > 0) notDone.push({ title: 'The price never went above the ceiling', text: `The price landed on the ceiling (assumed in this run) ${s.ceilingHeld} times.` });
   }
   const reasonCounts = new Map<string, number>();

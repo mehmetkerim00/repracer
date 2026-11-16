@@ -3370,7 +3370,7 @@ export class PgPricingStore implements PricingStore {
       const params = [tenantId, from, to];
       const limit = INTERVENTION_SLICE_LIMIT;
       // Частичные индексы 0117 отсекают «без изменения» и обычные намерения ещё в индексе — обходятся только вмешательства
-      const [decisions, intents, ended, rejected] = await Promise.all([
+      const [decisions, intents, ended, rejected, holds, totals] = await Promise.all([
         // Свежие первыми и не больше предела: отчёт за 30 суток на живом каталоге иначе тянул бы сотни тысяч слепков
         tx.query(`SELECT ${DECISION_COLUMNS} ${DECISION_FROM}
                    WHERE d.tenant_id = $1 AND d.outcome <> 'NO_CHANGE' AND d.decided_at > $2::timestamptz AND d.decided_at <= $3::timestamptz
@@ -3405,14 +3405,33 @@ export class PgPricingStore implements PricingStore {
                          observed_at, received_at, verdict, reason_code, alarm_class, details, ruleset_version
                     FROM channel_data.rejected_competitor_snapshot
                    WHERE tenant_id = $1 AND received_at > $2::timestamptz AND received_at <= $3::timestamptz ORDER BY received_at DESC LIMIT ${limit + 1}`, params),
+        /**
+         * Шаг 144: удержания пола — эпизоды той же функцией, что экран тени и письмо; решение строки с наибольшей разницей — по
+         * уникальному ключу (тенант, момент намерения, намерение)
+         */
+        tx.query(`SELECT e.write_scope_id, e.currency, e.clearance, e.shadow, e.started_at, e.below_minor, e.kept_minor, e.hold_reason, d.price_decision_id
+                    FROM platform.floor_hold_episodes($1, $2::timestamptz, $3::timestamptz, false) e
+                    LEFT JOIN channel_data.price_decision d ON d.tenant_id = $1 AND d.intent_created_at = e.intent_created_at AND d.price_intent_id = e.price_intent_id
+                   ORDER BY e.started_at DESC, e.write_scope_id LIMIT ${limit + 1}`, params),
+        tx.query(`SELECT savings, events, skus, clearance_events FROM platform.floor_hold_totals($1, $2::timestamptz, $3::timestamptz, false)`, params),
       ]);
-      const truncated = [decisions.rows, intents.rows, ended.rows, rejected.rows].some((r) => r.length > limit);
+      const truncated = [decisions.rows, intents.rows, ended.rows, rejected.rows, holds.rows].some((r) => r.length > limit);
+      const t = totals.rows[0] ?? {};
       return {
         from, to, truncated,
         decisions: decisions.rows.slice(0, limit).map(decisionRow),
         intents: intents.rows.slice(0, limit).map((r) => ({ ...intentRow(r), episodeStart: r.prev_capped !== true })),
         endedWrites: ended.rows.slice(0, limit).map(writeRow),
         rejectedSnapshots: rejected.rows.slice(0, limit).map(rejectedSnapshotRow),
+        floorHolds: holds.rows.slice(0, limit).map((r) => ({
+          writeScopeId: r.write_scope_id as string, currency: r.currency as string, clearance: r.clearance === true, shadow: r.shadow === true,
+          startedAt: iso(r.started_at) as Instant, belowMinor: Number(r.below_minor), keptMinor: r.kept_minor === null ? null : Number(r.kept_minor),
+          holdReason: (r.hold_reason as { code: string; params: Record<string, unknown> } | null) ?? null, decisionId: (r.price_decision_id as string | null) ?? null,
+        })),
+        floorTotals: {
+          savings: ((t.savings ?? []) as Array<{ currency: string; minor: number | string }>).map((x) => ({ currency: x.currency, minor: Number(x.minor) })),
+          events: Number(t.events ?? 0), skus: Number(t.skus ?? 0), clearanceEvents: Number(t.clearance_events ?? 0),
+        },
       };
     });
   }

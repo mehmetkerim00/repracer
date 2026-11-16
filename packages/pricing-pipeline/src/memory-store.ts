@@ -6,7 +6,7 @@ import { prioritizedWindow } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, FeeExpiryNotice, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
-import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
+import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FloorHoldEpisodeRow, type FloorHoldTotals, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type DiscoveryCatalogNote, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
@@ -2840,13 +2840,67 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       previousCapped.set(i.writeScopeId, isCapped);
     }
     const decisions = this.decisions.filter((d) => d.outcome !== 'NO_CHANGE' && within(d.decidedAt)).sort(InMemoryPricingStore.newestFirst);
+    const floor = this.floorHoldEpisodes(from, to);
     return {
-      from, to, truncated: decisions.length > INTERVENTION_SLICE_LIMIT || intents.length > INTERVENTION_SLICE_LIMIT,
+      from, to, truncated: decisions.length > INTERVENTION_SLICE_LIMIT || intents.length > INTERVENTION_SLICE_LIMIT || floor.episodes.length > INTERVENTION_SLICE_LIMIT,
+      floorHolds: floor.episodes.slice(0, INTERVENTION_SLICE_LIMIT), floorTotals: floor.totals,
       decisions: decisions.slice(0, INTERVENTION_SLICE_LIMIT).map((d) => ({ ...d })),
       intents: intents.slice(0, INTERVENTION_SLICE_LIMIT),
       endedWrites: this.writes.filter((w) => within(w.createdAt) && (w.endReason === 'WRITE_BLOCKED_BY_BOUND_RECHECK' || w.endReason === 'PRICING_STOPPED'))
         .map((w) => this.consoleWrite(w)),
       rejectedSnapshots: this.rejectedSnapshots.filter((r) => within(r.receivedAt)).map((r) => ({ ...r })),
+    };
+  }
+
+  /**
+   * Шаг 144: удержания пола окна [from, to) по эпизодам — зеркало базы: строка удержания на намерение — как триггер намерения (0234),
+   * эпизоды и итог — как `platform.floor_hold_episodes` и `platform.floor_hold_totals`. Режим аккаунта — нынешний (у базы — в момент
+   * намерения): мир в памяти режим аккаунта не переключает
+   */
+  private floorHoldEpisodes(from: Instant, to: Instant): { episodes: FloorHoldEpisodeRow[]; totals: FloorHoldTotals } {
+    type Hold = FloorHoldEpisodeRow & { at: number; intentId: string; episode: string; productId: string | null };
+    const HOLD_CODES = ['CAPPED_AT_MIN_PRICE', 'CAPPED_AT_MARGIN_FLOOR', 'CAPPED_AT_CLEARANCE_FLOOR', 'TARGET_OUTSIDE_BOUNDS_HOLD'];
+    const last = new Map<string, Hold | null>();
+    const holds: Hold[] = [];
+    for (const i of [...this.intents].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
+      const x = i.explanation.find((step) => HOLD_CODES.includes(step.code) && 'targetMinor' in step.params);
+      const target = Number(x?.params.targetMinor);
+      let held = x?.code === 'CAPPED_AT_MIN_PRICE' ? Number(x.params.minMinor)
+        : x?.code === 'CAPPED_AT_MARGIN_FLOOR' || x?.code === 'CAPPED_AT_CLEARANCE_FLOOR' ? Number(x.params.floorMinor) : i.proposedMinor;
+      if (i.explanation.some((step) => step.code === 'RAISED_TOWARD_FLOOR') || !Number.isSafeInteger(held)) held = i.proposedMinor;
+      if (!x || !Number.isSafeInteger(target) || !(target < held)) { last.set(i.writeScopeId, null); continue; }
+      const clearance = i.explanation.some((step) => step.code === 'CLEARANCE_FLOOR');
+      const prev = last.get(i.writeScopeId);
+      const row = this.scopes.get(i.writeScopeId);
+      const hold: Hold = {
+        writeScopeId: i.writeScopeId, currency: i.currency, clearance, shadow: this.seedAccounts.find((a) => a.channelAccountId === row?.channelAccountId)?.writeMode === 'SHADOW',
+        startedAt: i.createdAt, belowMinor: held - target, keptMinor: held, holdReason: { code: x.code, params: { ...x.params } },
+        decisionId: this.decisions.find((d) => d.intentId === i.intentId)?.decisionId ?? null,
+        at: Date.parse(i.createdAt), intentId: i.intentId, episode: prev && prev.clearance === clearance ? prev.episode : i.intentId, productId: row?.productId ?? null,
+      };
+      holds.push(hold);
+      last.set(i.writeScopeId, hold);
+    }
+    const byEpisode = new Map<string, { top: Hold; startedAt: number }>();
+    for (const h of holds.filter((x) => x.at >= Date.parse(from) && x.at < Date.parse(to))) {
+      const key = `${h.writeScopeId}|${h.episode}`;
+      const e = byEpisode.get(key);
+      if (!e) byEpisode.set(key, { top: h, startedAt: h.at });
+      else byEpisode.set(key, { top: h.belowMinor > e.top.belowMinor ? h : e.top, startedAt: Math.min(e.startedAt, h.at) });
+    }
+    const all = [...byEpisode.values()];
+    const regular = all.filter((e) => !e.top.clearance);
+    const savings = new Map<string, number>();
+    for (const e of regular) savings.set(e.top.currency, (savings.get(e.top.currency) ?? 0) + e.top.belowMinor);
+    return {
+      episodes: all.sort((a, b) => b.startedAt - a.startedAt || a.top.writeScopeId.localeCompare(b.top.writeScopeId)).map(({ top, startedAt }) => ({
+        writeScopeId: top.writeScopeId, currency: top.currency, clearance: top.clearance, shadow: top.shadow, startedAt: new Date(startedAt).toISOString() as Instant,
+        belowMinor: top.belowMinor, keptMinor: top.keptMinor, holdReason: top.holdReason, decisionId: top.decisionId,
+      })),
+      totals: {
+        savings: [...savings].sort(([a], [b]) => a.localeCompare(b)).map(([currency, minor]) => ({ currency, minor })),
+        events: regular.length, skus: new Set(regular.map((e) => e.top.productId ?? e.top.writeScopeId)).size, clearanceEvents: all.length - regular.length,
+      },
     };
   }
 

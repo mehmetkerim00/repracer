@@ -64,7 +64,9 @@ test('шаг 41: письмо несёт ТЕ ЖЕ числа, что экран
   assert.match(letter.text, /45,00\s?€/, 'сумма «на сколько дешевле» названа с валютой [Р-71]');
   assert.equal(letter.text.match(/€/g)?.length, 1, 'в письме РОВНО одна сумма: цен предложений в нём нет');
   assert.doesNotMatch(letter.text, /verdient|Gewinn von|hätten Sie verdient/, 'заработка письмо не обещает');
-  assert.match(letter.text, /keine Umsatzprognose/, 'рядом с числом стоит оговорка: это не прогноз выручки');
+  // Шаг 144 (аудит UX, 1.3): оговорка — «не полученная прибыль», и событие — одно удержание
+  assert.match(letter.text, /Kein realisierter Gewinn/, 'рядом с числом стоит оговорка: это не прогноз выручки');
+  assert.match(letter.text, /Ihre Untergrenze hat 30 Preissenkungen verhindert: 45,00\s?€ Differenz der vorgeschlagenen Preise insgesamt/, 'события и сумма — честной фразой');
   assert.match(letter.text, /Schattenmodus/, 'письмо говорит, о каком режиме речь');
 });
 

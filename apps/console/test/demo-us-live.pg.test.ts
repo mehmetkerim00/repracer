@@ -175,7 +175,9 @@ test('шаг 68: демо США — решения в долларах, «по�
   const preview = shadow.body.digestPreview;
   assert.ok(preview, 'у демо есть предпросмотр недельного письма');
   assert.equal(preview.synthetic, en.ui.shadow.digest.previewSynthetic);
-  assert.match(preview.text, /without the floor you would have sold \$[\d,]+\.\d{2} cheaper/i, `письмо говорит деньгами в долларах: ${preview.text}`);
+  // Шаг 144 (аудит UX, 1.3): письмо говорит деньгами честно — снижения, которые предотвратил пол, и сумма разниц предложенных цен
+  assert.match(preview.text, /your floor prevented \d+ price reductions?: \$[\d,]+\.\d{2} in aggregate proposed price differences/i, `письмо говорит деньгами в долларах: ${preview.text}`);
+  assert.ok(preview.text.includes(en.ui.shadow.summary.savingsNote), 'и что это не полученная прибыль');
   // Шаг 76 (предполётный прогон демо): письмо называет магазин так же, как карточка в списке миров, а не служебным заголовком стенда
   assert.ok(preview.text.includes(`"${en.ui.app.demoWorldTitle}"`) && !preview.text.includes('Kaufland (Simulator)'), `имя магазина в письме: ${preview.text.slice(0, 160)}`);
   assert.ok(shadow.body.summary.decisions > 100, `неделя тени: ${shadow.body.summary.decisions} решений`);

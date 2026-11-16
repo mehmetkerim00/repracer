@@ -1101,10 +1101,11 @@ export const fr: Messages = {
         heldSplit: (all: number, prices: number, stock: number) => `${all} — prix ${prices}, stock ${stock}`,
         budget: 'Aurait consommé le budget de modifications externe du canal', about: (n: number) => `environ ${n}`,
         budgetNote: 'Approximatif : la limite de journée du site n’est pas confirmée ; le budget ne peut donc pas être réparti par jour.',
-        savings: 'Sans le plancher, vous auriez vendu moins cher de', savingsHolds: (holds: number) => `calculé sur les ${holds} maintiens au plancher pour lesquels nous conservons encore ce que voulait la stratégie`,
+        savings: 'Écarts de prix proposés retenus par votre plancher', savingsHolds: (events: number, skus: number) => `${events} ${events === 1 ? 'événement' : 'événements'}, ${skus} ${skus === 1 ? 'SKU unique' : 'SKU uniques'} — un événement par maintien`,
       },
       // Шаг 96 (аудит А1–А3): у каждой плитки — подпись, что значит число; «удержано» — цены, которые мы НЕ отправили в магазин
-      stats: { decisions: 'Décisions', decisionsSub: 'fois où le moteur a vérifié les prix', changes: 'Le prix aurait changé', changesSub: 'fois où le prix aurait bougé', held: 'Retenu', heldSub: 'changements de prix que nous n’avons PAS envoyés à votre boutique', savings: 'Votre plancher vous a évité de vendre moins cher de', notForecast: 'une protection, pas un bénéfice' },
+      stats: { decisions: 'Décisions', decisionsSub: 'fois où le moteur a vérifié les prix', changes: 'Le prix aurait changé', changesSub: 'fois où le prix aurait bougé', held: 'Retenu', heldSub: 'changements de prix que nous n’avons PAS envoyés à votre boutique', savings: 'Baisses de prix évitées par votre plancher', notForecast: 'pas un bénéfice réalisé',
+        savingsSub: (events: number, skus: number) => `en écarts de prix proposés · ${events} ${events === 1 ? 'événement' : 'événements'} · ${skus} ${skus === 1 ? 'SKU unique' : 'SKU uniques'} — pas un bénéfice réalisé` },
       // Шаг 96 (Б13, Б16, В21): копирование имени аккаунта, вид удержанного, сворачиваемые блоки
       copy: 'Copier', copied: 'Copié', copyHint: 'Copiez le nom du compte, puis collez-le dans le champ.',
       kinds: { PRICE: 'prix', QUANTITY: 'stock' } as Record<string, string | undefined>,
@@ -1223,8 +1224,8 @@ export const fr: Messages = {
         budget: (n: number, approximate = false) => approximate
           ? `Dont environ ${n} auraient consommé le budget de modifications externe du canal — approximatif : la limite de journée du site n’est pas confirmée ; le budget ne peut donc pas être réparti par jour`
           : `Dont ${n} auraient consommé le budget de modifications externe du canal`,
-        savings: (money: string, holds: number) => `Sans le plancher, vous auriez vendu ${money} moins cher au total — calculé sur les ${holds} maintiens au plancher pour lesquels nous conservons encore ce que voulait la stratégie`,
-        savingsNote: 'Ce chiffre est la différence entre votre plancher et ce que voulait la stratégie — pas une prévision de chiffre d’affaires : nous ne savons pas si un acheteur aurait acheté au prix inférieur. Les maintiens de plus de trois jours sont comptés, mais pas chiffrés : ce que voulait la stratégie venait d’un prix concurrent, et nous ne le conservons pas plus longtemps.',
+        savings: (money: string, events: number) => `Votre plancher a évité ${events} ${events === 1 ? 'baisse' : 'baisses'} de prix : ${money} d’écarts de prix proposés au total`,
+        savingsNote: 'Pas un bénéfice réalisé : nous ne savons pas si un acheteur aurait acheté au prix inférieur. Un événement est un maintien, quel que soit le nombre de vérifications du prix pendant sa durée ; plusieurs événements peuvent concerner le même SKU.',
       },
     },
     alerts: {
@@ -2040,9 +2041,12 @@ export const fr: Messages = {
       previous: '← Plus récents', next: 'Plus anciens →',
     },
     dangerous: {
-      floorHeadline: (n: number, phrase: string, amounts: string[], unknown: number) => n === 0
+      floorHeadline: (n: number, phrase: string, amounts: string[]) => n === 0
         ? `Le plancher n’a eu à retenir aucun prix ${phrase}`
-        : `Le plancher a retenu le prix ${n} fois ${phrase}${amounts.length ? ` ; sans lui, vous auriez vendu ${amounts.join(' + ')} moins cher` : ''}${unknown ? ` (montant inconnu pour ${unknown})` : ''}`,
+        : `Votre plancher a évité ${n} ${n === 1 ? 'baisse' : 'baisses'} de prix ${phrase}${amounts.length ? ` ; ${amounts.join(' + ')} d’écarts de prix proposés au total` : ''}`,
+      floorNote: 'Pas un bénéfice réalisé ; plusieurs événements peuvent concerner le même SKU. Un événement est un maintien, quel que soit le nombre de vérifications du prix pendant sa durée.',
+      floorStats: { events: 'Événements', eventsSub: 'maintiens par votre plancher', skus: 'SKU uniques', skusSub: 'parmi ces événements', sum: 'Somme', sumSub: 'écarts de prix proposés, pas un bénéfice' },
+      floorDetailsGone: 'Les détails de ce maintien ne sont plus conservés.',
       // Шаг 96 (Б12): одинаковые удержания одного предложения — одной строкой «×N»
       repeated: (n: number, phrase: string) => `×${n} ${phrase}`,
       // Шаг 102 [Р-227]: удержания пола распродажи — отдельной строкой, в «пол удержал» не входят

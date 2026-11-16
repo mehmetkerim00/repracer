@@ -122,8 +122,10 @@ test('unknown codes and optional parameters: problems only where the registry is
 test('Р-117: the report counts the floor holding a strategy, not Gate rejections; the amount is the distance from the kept price to the strategy target', async () => {
   const { dangerousReport } = await import('./index.ts');
   const scope = { writeScopeId: 'ws-1', productId: 'p-1', channelAccountId: 'acc-1', marketplace: 'de', externalUnitId: '4101', channelProductRef: '3621', condition: 'new', gtin: null, currency: 'EUR' };
+  // Шаг 144: намерение — как у пути решения: у удержания без изменения цена предложения = текущая, и шаг удержания стоит в объяснении
   const intent = (intentId: string, createdAt: string, reason: { code: string; params: Record<string, unknown> }, explanation: unknown[], currentMinor: number) => ({
-    intentId, writeScopeId: 'ws-1', createdAt, currency: 'EUR', currentMinor, reason, explanation,
+    intentId, writeScopeId: 'ws-1', createdAt, currency: 'EUR', currentMinor, proposedMinor: currentMinor, reason,
+    explanation: reason.code === 'TARGET_OUTSIDE_BOUNDS_HOLD' ? [...explanation, reason] : explanation,
   });
   const world = {
     id: 'w', title: 'w', description: '', tenantId: 't', now: '2026-09-17T12:00:00.000Z', viewer: {},
@@ -163,7 +165,7 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
   // Шаг 96: период — пресетом 24h / 7d от того же «сейчас», фраза периода — словарём
   const rangeOf = (preset: PeriodPreset) => periodRange({ preset }, '2026-09-17T12:00:00.000Z', 'UTC', 30);
   const day = dangerousReport(world, await sliceOf(intents, 1), rangeOf('24h'), en.ui.period.phrase['24h'], en);
-  assert.equal(day.headline, 'The floor held the price 2 times in the last 24 hours; without it you would have sold €7.55 cheaper');
+  assert.equal(day.headline, '2 price reductions prevented by your floor in the last 24 hours; €7.55 in aggregate proposed price differences');
   assert.deepEqual(day.floorHolds.items.map((i) => [i.kind, i.target, i.floor, i.below]), [['HELD', '€14.00', '€15.00', '€4.50'], ['CAPPED', '€11.95', '€15.00', '€3.05']]);
   assert.equal(day.gateHeadline, 'Your bounds stopped 0 dangerous changes in the last 24 hours');
   // За 7 дней оценка 15.09 и 17.09 10:00 идут подряд без оценки вне пола — одно удержание; вместе с удержанием после 10:30 — два
@@ -171,9 +173,9 @@ test('Р-117: the report counts the floor holding a strategy, not Gate rejection
   // Ревью шага 22, находка 4: цена стоит на полу, стратегия оценивается 12 раз подряд — одно удержание, а не двенадцать
   const repeated = Array.from({ length: 12 }, (_, n) =>
     intent(`r-${n}`, `2026-09-17T11:${String(n * 5).padStart(2, '0')}:00.000Z`, { code: 'ALREADY_AT_TARGET', params: {} }, [{ code: 'CAPPED_AT_MIN_PRICE', params: { targetMinor: 1195, minMinor: 1500, currency: 'EUR' } }], 1500));
-  assert.equal(dangerousReport(world, await sliceOf(repeated, 1), rangeOf('24h'), en.ui.period.phrase['24h'], en).headline, 'The floor held the price 1 time in the last 24 hours; without it you would have sold €3.05 cheaper');
+  assert.equal(dangerousReport(world, await sliceOf(repeated, 1), rangeOf('24h'), en.ui.period.phrase['24h'], en).headline, '1 price reduction prevented by your floor in the last 24 hours; €3.05 in aggregate proposed price differences');
   const de = messagesFor('de');
-  assert.equal(dangerousReport(world, await sliceOf(intents, 1), rangeOf('24h'), de.ui.period.phrase['24h'], de).headline, 'Die Untergrenze hat den Preis in den letzten 24 Stunden 2-mal gehalten; ohne sie hätten Sie 7,55 € billiger verkauft');
+  assert.equal(dangerousReport(world, await sliceOf(intents, 1), rangeOf('24h'), de.ui.period.phrase['24h'], de).headline, 'Ihre Untergrenze hat in den letzten 24 Stunden 2 Preissenkungen verhindert; 7,55 € Differenz der vorgeschlagenen Preise insgesamt');
 });
 
 test('step 23: a person enters amounts and percentages, not cents and basis points; anything else is refused, not guessed', () => {
@@ -577,7 +579,7 @@ test('step 84: the shadow summary as «metric — value» says what the sentence
   const en = messagesFor('en');
   const base = { since: '2026-10-06T07:00:00Z', until: '2026-10-13T07:00:00Z', decisions: 1669, changes: 503, floorHeld: 131, ceilingHeld: 0,
     heldWrites: 722, heldPriceWrites: 517, heldQuantityWrites: 205, wouldSpendBudget: 10, wouldSpendUnconfirmed: 3,
-    floorSavings: [{ currency: 'USD', minor: 188325 }], floorSavingsHolds: 625 };
+    floorSavings: [{ currency: 'USD', minor: 188325 }], floorSavingsHolds: 625, floorHoldSkus: 14 };
   const full = shadowSummaryList(base, en);
   assert.deepEqual(full.rows.map((r) => [r.label, r.value]), [
     ['Period', `${en.when(base.since)} — ${en.when(base.until)}`],
@@ -585,13 +587,15 @@ test('step 84: the shadow summary as «metric — value» says what the sentence
     ['Price landed exactly on the ceiling', '0 times'],
     ['Updates held back by the shadow', '722 — prices 517, stock 205'],
     ['Would have used the external edit budget of the channel', 'about 10'],
-    ['Without the floor you would have sold cheaper by', '$1,883.25'],
+    ['Proposed price differences held by your floor', '$1,883.25'],
   ]);
+  // Шаг 144 (аудит UX, 1.2–1.3): у суммы — число событий и уникальных SKU, тем же определением, что у Protections
+  assert.equal(full.rows.at(-1)!.hint, '625 events, 14 unique SKUs — one event per hold');
   assert.deepEqual(full.notes, [en.ui.shadow.list.budgetNote, en.ui.shadow.summary.savingsNote], 'approximate budget and «not a forecast» — footnotes');
   // Control: confirmed day boundary and no floor holds — exact number, no money row, no footnotes
   const quiet = shadowSummaryList({ ...base, wouldSpendUnconfirmed: 0, floorSavings: [] }, en);
   assert.equal(quiet.rows.find((r) => r.label === 'Would have used the external edit budget of the channel')!.value, '10');
-  assert.ok(!quiet.rows.some((r) => r.label === 'Without the floor you would have sold cheaper by'));
+  assert.ok(!quiet.rows.some((r) => r.label === 'Proposed price differences held by your floor'));
   assert.deepEqual(quiet.notes, []);
 });
 

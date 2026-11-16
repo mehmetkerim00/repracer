@@ -1663,9 +1663,41 @@ export interface InterventionSlice {
    * удержания, разделённые оценкой без удержания, слиплись бы в одно (ревью шага 22, находка 4).
    */
   intents: Array<ConsoleIntentRow & { episodeStart: boolean }>;
+  /**
+   * Шаг 144 (аудит UX, 1.2–1.3): удержания пола окна — по эпизодам, тем же определением, что экран тени и недельное письмо
+   * (`platform.floor_hold_episodes`): строка на удержание с его наибольшей разницей; деньги — 18 месяцев, не 3 суток горячих намерений
+   */
+  floorHolds: FloorHoldEpisodeRow[];
+  /** Шаг 144: итог окна той же функцией — события, уникальные SKU, суммы по валюте, удержания распродажи */
+  floorTotals: FloorHoldTotals;
   /** Записи, завершённые перепроверкой границ или остановкой человеком */
   endedWrites: ConsoleWriteRow[];
   rejectedSnapshots: ConsoleRejectedSnapshotRow[];
+}
+
+/** Шаг 144: одно удержание пола (эпизод) — наибольшая разница эпизода и строка, на которой она была */
+export interface FloorHoldEpisodeRow {
+  writeScopeId: string;
+  currency: string;
+  clearance: boolean;
+  shadow: boolean;
+  /** Первая строка эпизода в окне */
+  startedAt: Instant;
+  /** Цена, которую удержал пол, минус то, что хотела стратегия (> 0) */
+  belowMinor: number;
+  /** Удержанная цена; null — строка до шага 144 (подробности не записаны) */
+  keptMinor: number | null;
+  /** Шаг объяснения, на котором пол удержал цену; null — строка до шага 144 */
+  holdReason: { code: string; params: Record<string, unknown> } | null;
+  /** Решение строки с наибольшей разницей — пока решения хранятся (30 суток) */
+  decisionId: string | null;
+}
+
+export interface FloorHoldTotals {
+  savings: Array<{ currency: string; minor: number }>;
+  events: number;
+  skus: number;
+  clearanceEvents: number;
 }
 
 // Шаг 78 (п. 16): удержанное тенью — своя группа: «заменено новой ценой» о нём неправда, а это экран сценария показа

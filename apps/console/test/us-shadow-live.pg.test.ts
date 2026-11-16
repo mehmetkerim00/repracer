@@ -301,7 +301,9 @@ test('Р-173: недельный дайджест по-английски нес
   assert.doesNotMatch(letter.text, /€/, 'евро в письме витрины США нет');
   const savings = /\$\d+[.,]\d{2}/.exec(letter.text);
   assert.ok(savings, `в письме есть сумма в долларах: ${letter.text}`);
-  assert.match(letter.text, /not a forecast of revenue/, 'рядом с суммой — оговорка: это не прогноз выручки');
+  // Шаг 144 (аудит UX, 1.3): оговорка — «не полученная прибыль», сумма — разница предложенных цен по событиям удержания
+  assert.match(letter.text, /Not realized profit/, 'рядом с суммой — оговорка: это не прогноз выручки');
+  assert.match(letter.text, /Your floor prevented \d+ price reductions?: \$[\d,]+\.\d{2} in aggregate proposed price differences/, 'события и сумма — честной фразой');
 
   // Р-174: у письма есть отметка доставки, и второй раз оно не уходит
   const { rows: [row] } = await observer.query(

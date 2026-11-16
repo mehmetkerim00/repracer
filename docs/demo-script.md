@@ -133,7 +133,7 @@ pricing. У раздела из одного пункта заголовка н�
   экран с одним месяцем. По умолчанию — Last 7 days. Тот же контрол — на Protections и Price changes.
 - **Четыре плитки** (шаг 96, А1–А3 — у каждой подпись, что значит число): **Decisions** — «times the engine checked prices»; **Price would
   change** — «times the price would have moved»; **Held back** — «price changes we did NOT send to your store» (плитка считает только цены,
-  остатки — в блоке «Good to know»); **Your floor saved you from selling cheaper by** — «$…», подпись «protection, not profit».
+  остатки — в блоке «Good to know»); **Price reductions your floor prevented** — «$…», подпись «in proposed price differences · N events · K unique SKUs — not realized profit» (шаг 144).
   Под ними — карточка с графиком **«Decisions per day»**: зелёные столбики решений тени по суткам в поясе магазина, ось значений слева,
   подписи дней снизу. Последний столбик — сегодняшние сутки, они не кончились: приглушённый тон, подпись **«Today»**, подсказка при
   наведении «partial day» (шаг 96.1). У Last 7 days на графике восемь календарных суток: окно «последние 7 дней» начинается внутри первых
@@ -156,7 +156,7 @@ pricing. У раздела из одного пункта заголовка н�
 - **Свёрнутый блок «Good to know»** (шаг 96, А4): сводка «показатель — значение» (Period; Price landed exactly on the floor — «K times»;
   Price landed exactly on the ceiling — «0 times»; **Updates held back by the shadow** — «X — prices P, stock S»; Would have used the
   external edit budget of the channel — «about N»: бюджет правок есть у eBay, а граница его суток не подтверждена, поэтому «примерно»
-  [Р-188]; Without the floor you would have sold cheaper by — «$…»), сноски и раздел **«What we are still checking about your stores»**:
+  [Р-188]; Proposed price differences held by your floor — «$…», «N events, K unique SKUs — one event per hold»), сноски и раздел **«What we are still checking about your stores»**:
   первой строкой **«Nothing is needed from you.»**, затем по строке на витрину и свойство людскими словами — например «amazon.com — When
   the store’s day starts — it decides which day a price belongs to and when the daily edit limit resets. Not known yet — prices are not sent
   to this store until it is. Our team confirms it from the trial week.»
@@ -435,8 +435,8 @@ does not change the price for you here.» — событие канала ряд
    «Demo store (simulator)» · Owner, «Blue Ridge Trading» · Manager, «Lakeside Home Goods» · Manager (числа — прожатая неделя, порядок
    замера шага 91: Offers 12, Decisions 24h ~80, Interventions 7d ~260 у Blue Ridge; 10, ~65, ~220 у Lakeside).
 2. Нажать **Blue Ridge Trading** → сразу **Shadow mode** этого продавца: в шапке меню «Blue Ridge Trading», аккаунты
-   **Amazon · A1SYNSELLER…** и **eBay · syn_demo_ebay_us_…** в тени, плитки недели (Decisions, Price would change, Held back, Your floor
-   saved you from selling cheaper by) и график «Decisions per day». Здесь вы менеджер — и можете всё, что владелец пространства, кроме
+   **Amazon · A1SYNSELLER…** и **eBay · syn_demo_ebay_us_…** в тени, плитки недели (Decisions, Price would change, Held back, Price reductions
+   your floor prevented — шаг 144) и график «Decisions per day». Здесь вы менеджер — и можете всё, что владелец пространства, кроме
    роли владельца (шаг 98, Р-222), в том числе включить отправку цен; бой база откроет только по готовой витрине [Р-172].
 3. **«← All workspaces»** → снова три карточки.
 

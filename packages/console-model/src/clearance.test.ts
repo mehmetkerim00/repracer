@@ -78,7 +78,7 @@ test('step 102 (D5) [Р-117, Р-227]: holds of the clearance floor are a separat
     { code: 'CAPPED_AT_CLEARANCE_FLOOR', params: { targetMinor: 899, floorMinor: 1000, currency: 'USD' } }]) as never);
   const slice = await store.interventions('t', '2026-10-17T12:00:00.000Z', '2026-10-18T12:00:00.000Z');
   const report = dangerousReport(world, slice as never, periodRange({ preset: '24h' }, '2026-10-18T12:00:00.000Z', 'UTC', 30), en.ui.period.phrase['24h'], en);
-  assert.equal(report.headline, 'The floor held the price 1 time in the last 24 hours; without it you would have sold $3.05 cheaper');
+  assert.equal(report.headline, '1 price reduction prevented by your floor in the last 24 hours; $3.05 in aggregate proposed price differences');
   assert.equal(report.clearanceHeadline, 'The clearance floor held the price 1 time in the last 24 hours — an intentional loss, not counted above');
   assert.equal(JSON.stringify(report.floorHolds.items.map((i) => [i.floor, i.clearance])), JSON.stringify([['$10.00', 'Clearance'], ['$15.00', null]]));
 });
