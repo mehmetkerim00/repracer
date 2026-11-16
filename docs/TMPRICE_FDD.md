@@ -1,7 +1,7 @@
 # TMPrice — Functional Design Document
 
-Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 136.
-The QA-A stand runs build `b249573` (step 134); step 136 is not deployed there yet.
+Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 139.
+The QA-A stand runs build `3c3bc57` (step 139), deployed on Nov 15, 2026 (America/New_York); it carries the fixes of GitHub issues #30–#33.
 
 ## How to read the labels
 
@@ -97,7 +97,7 @@ Every data screen shares the same conventions:
 | Offers | Every offer: status, current price, strategy, effective floor, color; optional Buy Box columns (holder, price, gap, share 7d); "Repricing: On / Off" filter | Filters, sorts, bulk edits, exports offers and competitors | **[QA-A]** |
 | Turn off one offer | "Turn off" / "Enable" per offer (Owner or Manager, no second factor, optional note); "Turned off by …" on the row. A turned-off offer is not evaluated, and its queued writes are not sent | Pauses one SKU without stopping anything else | **[QA-A]** |
 | Competition | Per offer: Buy Box holder, place and gap, Buy Box share 24h / 7d / 30d by snapshots, "Why not in the Buy Box", the Amazon competitive summary with coupons and buyer-segment groups | Understands the market around one offer | **[QA-A]** |
-| Inventory | One shared stock pool per product, minus a safety buffer, fed to every channel; reservations; what was published and confirmed; divergence; returns to decide on | Sets buffers, imports stock, accepts or rejects returns | **[QA-A]** |
+| Inventory | One shared stock pool per product, minus a safety buffer, fed to every channel; each channel line names its calculation with the saved buffer, cap and minimum to list (e.g. "58 to publish = 60 available − buffer 2"); reservations; what was published and confirmed; divergence; returns to decide on | Sets buffers, imports stock, accepts or rejects returns | **[QA-A]** |
 | Channels | Channel accounts, shadow/live state, "other tools" question, external edits counter, default strategy | Watches sync health | **[QA-A]** |
 | Stop pricing | The emergency brake and the audit log (stops, roles, channel events, exports) | Stops a channel account, a storefront or the whole workspace with a note; resumes | **[QA-A]** |
 | Omnibus | Lowest prior price per EU storefront (30 days) as evidence for discounts | — (EU profile only) | **[DEFERRED 135 (EU)]** |
