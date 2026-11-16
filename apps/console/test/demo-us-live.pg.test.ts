@@ -161,6 +161,12 @@ test('шаг 68: демо США — решения в долларах, «по�
     if (channel === 'AMAZON') {
       // Цена из данных конкурента: подрез и цена конкурента названы суммами — горячее намерение решения ещё хранит их [Р-28]
       assert.ok(strategy.items.some((i) => i.reason && /\$\d+\.\d{2} by \$0\.01/.test(i.reason.text)), `amazon.com: шаг подреза с суммами — ${JSON.stringify(strategy.items)}`);
+      // Шаг 143 (аудит UX, 1.1): снимок демо пришёл от симулятора, а не уведомлением Amazon — так и сказано, через консоль как браузер
+      const source = changed.trace.steps.find((st) => st.key === 'SNAPSHOT')!.items.find((i) => i.label === en.ui.trace.source)?.value ?? '';
+      assert.equal(source, en.ui.sourceDelivery.line(en.ui.sources.AMAZON_ANY_OFFER_CHANGED, en.ui.sourceDelivery.SIMULATOR), `amazon.com: источник снимка демо — ${source}`);
+      // Та же строка на странице Competition этого предложения
+      const page = (await call<{ observed: { source: string } | null }>('GET', `/api/worlds/${w}/competition/${changed.trace.unit!.writeScopeId}?period=7d`, guest)).body;
+      assert.ok(page.observed?.source.endsWith(en.ui.sourceDelivery.SIMULATOR), `amazon.com: Competition называет симулятор — ${JSON.stringify(page.observed)}`);
     }
   }
   // K7: недельное письмо тени — то же письмо, что уходит продавцу, собранное за семь суток прожатой недели, с пометкой синтетики

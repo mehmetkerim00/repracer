@@ -1435,10 +1435,17 @@ export const en = {
       DIVERGENCE_REASSERT: 'restoring the price after a divergence',
     },
     sources: {
-      KAUFLAND_BUYBOX: 'Kaufland, Buy Box request', KAUFLAND_BUY_BOX_CHANGED: 'Kaufland, notification of a Buy Box change', KAUFLAND_COMPETITORS_COMPARER: 'Kaufland, competitors comparer (reconciliation)',
-      AMAZON_ANY_OFFER_CHANGED: 'Amazon, notification of a competitor price change', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, competitive summary',
+      // Шаг 143: ЧТО прочитано; КАК пришло (уведомление, опрос, отчёт, симулятор демо) — sourceDelivery, не в этих словах
+      KAUFLAND_BUYBOX: 'Kaufland, Buy Box', KAUFLAND_BUY_BOX_CHANGED: 'Kaufland, Buy Box change', KAUFLAND_COMPETITORS_COMPARER: 'Kaufland, competitors comparer (reconciliation)',
+      AMAZON_ANY_OFFER_CHANGED: 'Amazon, competitor price change', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, competitive summary',
       // шаг 93: опрос Buy Box Walmart (Р-215) — словами, как у Kaufland; код источника на экран не выходит
-      WALMART_BUY_BOX: 'Walmart, Buy Box request',
+      WALMART_BUY_BOX: 'Walmart, Buy Box',
+    },
+    /** Шаг 143 (аудит UX, 1.1): как пришёл снимок конкурентов — фактический способ, у демо — симулятор */
+    sourceDelivery: {
+      NOTIFICATION: 'notification from the channel', POLLING: 'polling (our request to the channel)', REPORT: 'report from the channel',
+      SIMULATOR: 'simulator (demo data, not read from the channel)',
+      line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
     competition: {

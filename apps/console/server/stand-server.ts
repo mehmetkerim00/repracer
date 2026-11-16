@@ -1085,7 +1085,6 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const sources = (descriptorOf(channelOf(world, scope.channelAccountId)).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE');
           const view = competitionView(world, param, {
             snapshot, spans, range, sources, floorMinor: effectiveFloor(scope, world).minor, period, summary,
-            sourceText: (source) => (m.ui.sources as Record<string, string | undefined>)[source] ?? m.ui.trace.sourceUnnamed,
           }, m);
           return view ? ok(view) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
         }

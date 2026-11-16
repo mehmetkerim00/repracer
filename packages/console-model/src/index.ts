@@ -56,4 +56,5 @@ export {
 export type { ExportRef } from './export-ref.ts';
 export { auditCards } from './stop.ts';
 export { sellerLink, type SellerLinkInput } from './seller-link.ts';
+export { snapshotSourceText, sourceDelivery, SOURCE_KIND, type SourceDelivery } from './snapshot-source.ts';
 export { channelBoundsConflicts, channelBoundsFacts, channelBoundsPill, channelBoundsView, channelBoundsUnread, channelPricingBlocks, type ChannelBoundsConflict, type ChannelBoundsFacts, type ChannelBoundsState, type ChannelBoundsView } from './channel-bounds.ts';

@@ -1431,10 +1431,15 @@ export const es: Messages = {
       DIVERGENCE_REASSERT: 'restablecer el precio tras una discrepancia',
     },
     sources: {
-      KAUFLAND_BUYBOX: 'Kaufland, consulta de la Buy Box', KAUFLAND_BUY_BOX_CHANGED: 'Kaufland, aviso de cambio de la Buy Box', KAUFLAND_COMPETITORS_COMPARER: 'Kaufland, comparador de competidores (conciliación)',
-      AMAZON_ANY_OFFER_CHANGED: 'Amazon, aviso de cambio de precio de la competencia', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, resumen competitivo',
+      KAUFLAND_BUYBOX: 'Kaufland, Buy Box', KAUFLAND_BUY_BOX_CHANGED: 'Kaufland, cambio de la Buy Box', KAUFLAND_COMPETITORS_COMPARER: 'Kaufland, comparador de competidores (conciliación)',
+      AMAZON_ANY_OFFER_CHANGED: 'Amazon, cambio de precio de la competencia', AMAZON_COMPETITIVE_SUMMARY: 'Amazon, resumen competitivo',
       // шаг 93: опрос Buy Box Walmart (Р-215) — словами, как у Kaufland; код источника на экран не выходит
-      WALMART_BUY_BOX: 'Walmart, consulta de la Buy Box',
+      WALMART_BUY_BOX: 'Walmart, Buy Box',
+    },
+    sourceDelivery: {
+      NOTIFICATION: 'aviso del canal', POLLING: 'sondeo (nuestra consulta al canal)', REPORT: 'informe del canal',
+      SIMULATOR: 'simulador (datos de demostración, no leídos del canal)',
+      line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
     competition: {

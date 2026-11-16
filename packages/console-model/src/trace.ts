@@ -1,4 +1,5 @@
 import { sellerLink } from './seller-link.ts';
+import { snapshotSourceText } from './snapshot-source.ts';
 import type { DecisionDetail, DecisionPage } from '@repracer/pricing-pipeline';
 import type { CompetitorView, ExpandedExplanation, ExpandedReason, ExplanationGap, Reason, StrategyDefinition, StrategyParams } from '@repracer/pricing-model';
 import { classifyBoundIntervention, expandExplanation, explanationRowOf, STRATEGY_STALENESS_SECONDS } from '@repracer/pricing-model';
@@ -271,8 +272,9 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
     if (!e.snapshot) {
       steps.push({ key: 'SNAPSHOT', title: t.titles.SNAPSHOT, status: 'SKIPPED', summary: t.snapshotNotUsed, items: [], gaps: [] });
     } else {
-      // Шаг 93: источник — словами словаря; неизвестный — общими словами «данные конкурентов канала», код источника на экран не выходит
-      const source = (m.ui.sources as Record<string, string | undefined>)[e.snapshot.source] ?? t.sourceUnnamed;
+      // Шаг 93: источник — словами словаря; неизвестный — общими словами «данные конкурентов канала», код источника на экран не выходит.
+      // Шаг 143: и КАК пришёл снимок — уведомление, опрос, отчёт канала; у демо — симулятор
+      const source = snapshotSourceText(e.snapshot.source, world.state.demo === true, m);
       const ref = d.snapshotRef;
       // Шаг 97 [Р-218]: картина рынка решения живёт с ним 30 суток — тогда пробела «предложения того момента» нет
       const competitors = traceCompetitors(d, world, m);

@@ -49,7 +49,7 @@ Buy Box раз в два часа на товар): подготовка дол�
 главного демо 56,7 с и продавцы 27,8 с, интерфейс 1 с).
 
 Ключей каналов не нужно: аккаунты eBay US и Amazon US записаны функцией обнаружения каталога; конкуренты amazon.com —
-модель порта Amazon (уведомления о смене цены конкурента — на экране «Amazon, notification of a competitor price change»; конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
+модель порта Amazon (смена цены конкурента — на экране «Amazon, competitor price change · simulator (demo data, not read from the channel)», шаг 143; конкурент сползает ниже пола и возвращается), у eBay US стратегия от себестоимости:
 конкурентов eBay в бою мы не видим [Р-190]. Walmart (шаг 89) — HTTP-модель канала по правилам настоящего Walmart (ключей Walmart у
 платформы нет, [docs/channels/walmart.md](channels/walmart.md)): конкуренты Buy Box — три поведения, как у amazon.com (дрейф, подрезчик,
 волна), квоты — корзиной токенов с заголовками настоящего Walmart, и правило неконкурентной цены — у двух товаров цена на walmart.com
@@ -220,7 +220,7 @@ are always in English.» Нажатие — фоновое задание, по�
 - **Итог** (шаг 83 — плашка янтарного фона, цена крупно): **$14.00**, под ней «The price $14.00 was approved; sending to your store:
   held by shadow mode (not sent)». У отказа — плашка красного фона, без цены, причина крупно одной фразой. Шаги расчёта — номера в цветных кружках
   (зелёный — пройден, красный — остановлен, серый — не нужен) на тонкой линии.
-- **Competitor snapshot:** «Amazon, notification of a competitor price change», время наблюдения.
+- **Competitor snapshot:** «Amazon, competitor price change · simulator (demo data, not read from the channel)», время наблюдения. Честно: снимки демо даёт симулятор; у настоящего продавца на этом месте — «notification from the channel» или «polling (our request to the channel)» (шаг 143).
 - **Strategy:** «Proposed $14.00 (−24.3%): Target $12.49 is below your minimum price — capped at $14.00.»; шаги расчёта («Calculation
   step») — «Undercut the lowest price $12.50 by $0.01: $12.49.» и «Target $12.49 is below your minimum price — capped at $14.00.»;
   стратегия — «Beat the lowest: undercut by $0.01, against visible offers; outside bounds — use the bound (version 1)».

@@ -129,7 +129,7 @@
 
 | Вопрос | Ответ и где он |
 |---|---|
-| «Откуда вы берёте цену конкурента?» | Шаг «Competitor snapshot»: источник (у amazon.com — «Amazon, notification of a competitor price change», у Kaufland в европейском профиле — «Kaufland, Buy Box request»), время наблюдения, «Full snapshot: available until …» — полный снимок хранится 18 месяцев |
+| «Откуда вы берёте цену конкурента?» | Шаг «Competitor snapshot»: источник и способ, которым пришёл снимок (в демо — «… · simulator (demo data, not read from the channel)»: данные демо синтетические; у настоящего продавца amazon.com — «Amazon, competitive summary · polling (our request to the channel)», шаг 143), время наблюдения, «Full snapshot: available until …» — полный снимок хранится 18 месяцев |
 | «Что помешает продать ниже себестоимости?» | Шаг «Price Gate»: «Not below the floor», пол и минимальная маржа; пол — наибольшее из минимальной цены («Minimum price») и пола маржи («Minimum margin») от себестоимости, комиссии и налога; разбивка пола до цента — ссылка «Bounds and floor» рядом с подписью предложения на экране решения (экран «Bounds and price floor»). У amazon.com — пол маржи $6.85, маржа на полу +$6.90, комиссия «fee schedule: 15% + $0.00 (2026-10)». Перед каждой отправкой база считает пол заново |
 | «А если конкурент или канал покажет мусор — цену ×100?» | Шаг «Input check»: проверки «Decimal-point error (exactly ×100 or ×0.01)», «Mass price shift on the storefront», якоря правдоподобия; испорченный снимок отклоняется до движка, массовый сдвиг — остановка витрины (Stop pricing → «Storefront halt») |
 

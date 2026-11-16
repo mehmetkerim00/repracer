@@ -138,7 +138,8 @@ test('step 93: the snapshot source on «Why this price» is words in both langua
       const words = (m.ui.sources as Record<string, string | undefined>)[source];
       assert.ok(words !== undefined && words !== source, `${lang} ${source}: у источника есть слова в словаре`);
       const step = snapshotStep(source, m);
-      assert.equal(step.items.find((i) => i.label === m.ui.trace.source)?.value, words, `${lang} ${source}: строка «источник» — словами`);
+      // Шаг 143: за словами источника — способ доставки (уведомление, опрос, отчёт); его проверяет тест шага 143
+      assert.ok(step.items.find((i) => i.label === m.ui.trace.source)?.value?.startsWith(words), `${lang} ${source}: строка «источник» — словами`);
       assert.ok(step.summary.startsWith(words), `${lang} ${source}: итог шага начинается со слов: ${step.summary}`);
       assert.ok(!JSON.stringify(step).includes(source), `${lang} ${source}: кода источника на экране нет`);
     }
@@ -147,6 +148,41 @@ test('step 93: the snapshot source on «Why this price» is words in both langua
     assert.equal(unnamed.steps.find((s) => s.key === 'SNAPSHOT')!.items.find((i) => i.label === m.ui.trace.source)?.value, m.ui.trace.sourceUnnamed);
     assert.ok(!JSON.stringify(unnamed).includes('SYN_UNNAMED_SOURCE'), `${lang}: неизвестный источник не выходит кодом`);
   }
+});
+
+/**
+ * Шаг 143 (внешний аудит UX, корзина 1.1): квитанция называет, КАК пришёл снимок, — уведомление канала, наш опрос, отчёт канала или
+ * симулятор демо. Было: демо США подаёт снимки модели amazon.com прямо в путь решения (приёмника уведомлений нет — Channels честно
+ * пишет «polling only»), а квитанция говорила «Amazon, notification of a competitor price change». Признак симулятора — тенант демо из
+ * БАЗЫ (`tenant.demo`, Р-151): данные демо синтетические целиком. У настоящего продавца способ — свойство источника в описании канала
+ */
+test('step 143: the receipt names how the competitor reading arrived — notification, polling, report, or the demo simulator', async () => {
+  const w = live('kaufland/pipeline/happy-path');
+  const world = await w.view(user('OWNER'));
+  const approved = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items.find((d) => d.outcome === 'APPROVED')!;
+  const detail = (await w.store.decisionDetail(world.tenantId, approved.decisionId))!;
+  const withSource = (source: string) => ({ ...detail, decision: { ...detail.decision, explanation: { ...detail.decision.explanation!, snapshot: { source } } } });
+  const demo: StandWorld = { ...world, state: { ...world.state, demo: true } };
+  const shown = (wd: StandWorld, source: string, m: Messages) => decisionTrace(wd, withSource(source), m).steps.find((s) => s.key === 'SNAPSHOT')!.items.find((i) => i.label === m.ui.trace.source)?.value;
+  // Демо: снимок пришёл от симулятора, а не уведомлением Amazon
+  assert.equal(shown(demo, 'AMAZON_ANY_OFFER_CHANGED', en), 'Amazon, competitor price change · simulator (demo data, not read from the channel)');
+  // Настоящий продавец: способ — свойство источника канала
+  assert.equal(shown(world, 'AMAZON_ANY_OFFER_CHANGED', en), 'Amazon, competitor price change · notification from the channel');
+  assert.equal(shown(world, 'AMAZON_COMPETITIVE_SUMMARY', en), 'Amazon, competitive summary · polling (our request to the channel)');
+  assert.equal(shown(world, 'KAUFLAND_BUYBOX', en), 'Kaufland, Buy Box · polling (our request to the channel)');
+  assert.equal(shown(world, 'KAUFLAND_COMPETITORS_COMPARER', en), 'Kaufland, competitors comparer (reconciliation) · report from the channel');
+  // Способ в консоли = `kind` описания канала у каждого объявленного источника; демо — симулятор у всех, на всех языках
+  const declared = [KAUFLAND_DESCRIPTOR, AMAZON_DESCRIPTOR, EBAY_DESCRIPTOR, WALMART_DESCRIPTOR].flatMap((d) => d.competitorSources ?? []);
+  assert.ok(declared.length >= 6, 'правило не зеленеет на пустом списке');
+  const how = { PUSH: 'NOTIFICATION', PULL: 'POLLING', REPORT: 'REPORT' } as const;
+  for (const m of LOCALES.map((l) => messagesFor(l))) {
+    for (const s of declared) {
+      assert.ok(shown(world, s.source, m)!.endsWith(m.ui.sourceDelivery[how[s.kind]]), `${m.locale} ${s.source}: способ доставки — ${s.kind}`);
+      assert.ok(shown(demo, s.source, m)!.endsWith(m.ui.sourceDelivery.SIMULATOR), `${m.locale} ${s.source}: демо — симулятор`);
+    }
+  }
+  // Контроль: источник без слов и без способа — общими словами, без придуманного способа доставки
+  assert.equal(shown(world, 'SYN_UNNAMED_SOURCE', en), en.ui.trace.sourceUnnamed);
 });
 
 test('B: the happy path decision shows the whole way from snapshot to channel confirmation, in both languages', async () => {

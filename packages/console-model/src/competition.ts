@@ -1,4 +1,5 @@
 import { sellerLink } from './seller-link.ts';
+import { snapshotSourceText } from './snapshot-source.ts';
 import type { CompetitorOffer, CompetitorSnapshot } from '@repracer/channel-port';
 import { fulfilmentKind, sellerViewShares, holderByViewShare } from '@repracer/pricing-model';
 import type { Messages } from './i18n/index.ts';
@@ -298,7 +299,6 @@ export interface CompetitionInput {
   summary?: { snapshot: CompetitorSnapshot; source: string; observedAt: string } | null;
   floorMinor: number | null;
   period: Period;
-  sourceText: (source: string) => string;
 }
 
 const NO_COLUMNS: CompetitionView['columns'] = { fulfilment: false, rating: false, buyBox: false, landedKnown: true, uniform: [], shipping: false };
@@ -360,7 +360,7 @@ export function competitionView(world: StandWorld, writeScopeId: string, input: 
   const reasons = holder.kind === 'OTHER' ? buyboxDiagnosis(snap, input.floorMinor) : null;
   return {
     worldId: world.id, unit, state: 'OK', stateText: null, holder,
-    observed: { at: input.snapshot.observedAt, when: m.when(input.snapshot.observedAt), source: input.sourceText(input.snapshot.source) },
+    observed: { at: input.snapshot.observedAt, when: m.when(input.snapshot.observedAt), source: snapshotSourceText(input.snapshot.source, world.state.demo === true, m) },
     rows,
     columns,
     /**
