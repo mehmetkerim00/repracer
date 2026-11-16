@@ -1277,6 +1277,12 @@ export const fr: Messages = {
           step: 'Avant la date, importez de nouveau votre fichier de coûts unitaires avec les colonnes fee_percent et fixed_fee (Coûts et planchers) : une nouvelle estimation dure 90 jours.',
           detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offre' : 'offres'} ; la première se termine dans ${Number(d.days)} ${Number(d.days) === 1 ? 'jour' : 'jours'} : ${String(d.offer)}.`,
         },
+        // Шаг 142: в распродаже цена не замерзает — продажа идёт на пол распродажи, убыток мог устареть
+        FEE_ESTIMATE_CLEARANCE: {
+          what: 'l’estimation des frais de certaines offres en déstockage se termine bientôt ou est terminée — elles continuent de se vendre à votre plancher de déstockage, mais la perte par unité que vous avez confirmée n’est peut-être plus exacte',
+          step: 'Pour voir la perte par unité actuelle, importez de nouveau votre fichier de coûts unitaires avec les colonnes fee_percent et fixed_fee (Coûts et planchers). Si le déstockage se termine alors que l’estimation est périmée, ces prix ne changent plus.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offre' : 'offres'} en déstockage ; ${Number(d.days) === 0 ? 'la première est déjà terminée' : `la première se termine dans ${Number(d.days)} ${Number(d.days) === 1 ? 'jour' : 'jours'}`} : ${String(d.offer)}.`,
+        },
         FEE_ESTIMATE_EXPIRED: {
           what: 'l’estimation des frais de certaines offres est terminée — leurs prix ne changent plus',
           step: 'Importez de nouveau votre fichier de coûts unitaires avec les colonnes fee_percent et fixed_fee (Coûts et planchers). D’ici là, chaque prix reste où il est.',

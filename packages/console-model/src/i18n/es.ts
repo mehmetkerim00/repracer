@@ -1277,6 +1277,12 @@ export const es: Messages = {
           step: 'Antes de la fecha, vuelva a importar su archivo de costos unitarios con las columnas fee_percent y fixed_fee (Costos y pisos): una nueva estimación dura 90 días.',
           detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'oferta' : 'ofertas'}; la primera termina en ${Number(d.days)} ${Number(d.days) === 1 ? 'día' : 'días'}: ${String(d.offer)}.`,
         },
+        // Шаг 142: в распродаже цена не замерзает — продажа идёт на пол распродажи, убыток мог устареть
+        FEE_ESTIMATE_CLEARANCE: {
+          what: 'la estimación de comisiones de algunas ofertas en liquidación termina pronto o ya terminó — se siguen vendiendo a su piso de liquidación, pero la pérdida por unidad que confirmó puede ya no ser exacta',
+          step: 'Para ver la pérdida por unidad actual, vuelva a importar su archivo de costos unitarios con las columnas fee_percent y fixed_fee (Costos y pisos). Si la liquidación termina mientras la estimación está vencida, estos precios dejan de cambiar.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'oferta' : 'ofertas'} en liquidación; ${Number(d.days) === 0 ? 'la primera ya terminó' : `la primera termina en ${Number(d.days)} ${Number(d.days) === 1 ? 'día' : 'días'}`}: ${String(d.offer)}.`,
+        },
         FEE_ESTIMATE_EXPIRED: {
           what: 'la estimación de comisiones de algunas ofertas terminó — sus precios ya no cambian',
           step: 'Vuelva a importar su archivo de costos unitarios con las columnas fee_percent y fixed_fee (Costos y pisos). Hasta entonces cada precio se queda donde está.',

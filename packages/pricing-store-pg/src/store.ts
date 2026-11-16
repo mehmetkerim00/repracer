@@ -4102,9 +4102,11 @@ export class PgPricingStore implements PricingStore {
          INSERT INTO channel_data.fee_expiry_notice (tenant_id, write_scope_id, valid_until, kind)
          SELECT $1, d.write_scope_id, d.until, CASE WHEN d.until <= now() THEN 'EXPIRED' ELSE 'EXPIRING' END FROM due d
          ON CONFLICT DO NOTHING
-         RETURNING write_scope_id, valid_until, kind`,
+         RETURNING write_scope_id, valid_until, kind,
+                   -- Шаг 142: распродажа сейчас — её пол комиссии не требует, цена не замерзает; письмо о таком предложении — своё
+                   EXISTS (SELECT 1 FROM tenant_data.active_clearance(tenant_id, write_scope_id, now())) AS clearance`,
         [tenantId, channelAccountId, warnDays]);
-      return rows.map((r) => ({ writeScopeId: String(r.write_scope_id), validUntil: iso(r.valid_until), kind: r.kind as FeeExpiryNotice['kind'] }));
+      return rows.map((r) => ({ writeScopeId: String(r.write_scope_id), validUntil: iso(r.valid_until), kind: r.kind as FeeExpiryNotice['kind'], clearance: r.clearance === true }));
     });
   }
 

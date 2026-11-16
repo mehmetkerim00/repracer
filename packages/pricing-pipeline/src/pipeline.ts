@@ -1040,9 +1040,16 @@ export function createPricingPipeline(deps: PipelineDeps) {
           days: Math.max(0, Math.ceil((Date.parse(first.validUntil) - Date.parse(deps.now())) / 86_400_000)),
         };
       };
-      const expiring = fees.filter((f) => f.kind === 'EXPIRING');
+      /**
+       * Шаг 142 (решение владельца по строке «140»): у предложения в распродаже цена не замерзает — пол распродажи владелец назначил сам,
+       * комиссия ему не нужна. Письма о заморозке его не называют («prices no longer change» было бы неправдой); владелец получает одно
+       * WARNING распродажи — продажа идёт на его пол, а подтверждённый убыток на штуку мог устареть
+       */
+      const inClearance = fees.filter((f) => f.clearance);
+      if (inClearance.length > 0) await alerts.raise({ ...alertBase(ctx), code: 'FEE_ESTIMATE_CLEARANCE', severity: 'WARNING', details: await feeDetails(inClearance) });
+      const expiring = fees.filter((f) => f.kind === 'EXPIRING' && !f.clearance);
       if (expiring.length > 0) await alerts.raise({ ...alertBase(ctx), code: 'FEE_ESTIMATE_EXPIRING', severity: 'WARNING', details: await feeDetails(expiring) });
-      const expired = fees.filter((f) => f.kind === 'EXPIRED');
+      const expired = fees.filter((f) => f.kind === 'EXPIRED' && !f.clearance);
       if (expired.length > 0) await alerts.raise({ ...alertBase(ctx), code: 'FEE_ESTIMATE_EXPIRED', severity: 'CRITICAL', details: await feeDetails(expired) });
       const reports = new Map<string, ScopeReport>();
       const raises = await store.listFloorRaiseScopes(ctx.tenantId, ctx.channelAccountId, deps.now(), options.limit ?? 1_000);

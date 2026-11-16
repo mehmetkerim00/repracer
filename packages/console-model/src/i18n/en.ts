@@ -1281,6 +1281,12 @@ export const en = {
           step: 'Before the date, import your unit cost file again with the fee_percent and fixed_fee columns (Costs & floors): a new estimate lasts 90 days.',
           detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offer' : 'offers'}; the first one ends in ${Number(d.days)} ${Number(d.days) === 1 ? 'day' : 'days'}: ${String(d.offer)}.`,
         },
+        // Шаг 142 (решение владельца по строке «140»): в распродаже цена не замерзает — продажа идёт на пол распродажи, убыток мог устареть
+        FEE_ESTIMATE_CLEARANCE: {
+          what: 'the fee estimate of some offers on clearance ends soon or has ended — they keep selling at your clearance floor, but the loss per piece you confirmed may no longer be accurate',
+          step: 'To see the current loss per piece, import your unit cost file again with the fee_percent and fixed_fee columns (Costs & floors). If clearance ends while the estimate is out of date, these prices stop changing.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'offer' : 'offers'} on clearance; ${Number(d.days) === 0 ? 'the first one has already ended' : `the first one ends in ${Number(d.days)} ${Number(d.days) === 1 ? 'day' : 'days'}`}: ${String(d.offer)}.`,
+        },
         FEE_ESTIMATE_EXPIRED: {
           what: 'the fee estimate of some offers has ended — their prices no longer change',
           step: 'Import your unit cost file again with the fee_percent and fixed_fee columns (Costs & floors). Until then each price stays where it is.',

@@ -1225,6 +1225,12 @@ export const de: Messages = {
           step: 'Laden Sie vor dem Datum Ihre Stückkosten-Datei erneut mit den Spalten fee_percent und fixed_fee hoch (Kosten & Untergrenzen): Eine neue Schätzung gilt 90 Tage.',
           detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'Angebot' : 'Angebote'}; das erste endet in ${Number(d.days)} ${Number(d.days) === 1 ? 'Tag' : 'Tagen'}: ${String(d.offer)}.`,
         },
+        // Шаг 142: в распродаже цена не замерзает — продажа идёт на пол распродажи, убыток мог устареть
+        FEE_ESTIMATE_CLEARANCE: {
+          what: 'Die Gebührenschätzung einiger Angebote im Abverkauf läuft bald ab oder ist abgelaufen — sie werden weiter zu Ihrer Abverkaufs-Untergrenze verkauft, aber der bestätigte Verlust je Stück stimmt womöglich nicht mehr',
+          step: 'Um den aktuellen Verlust je Stück zu sehen, laden Sie Ihre Stückkosten-Datei erneut mit den Spalten fee_percent und fixed_fee hoch (Kosten & Untergrenzen). Endet der Abverkauf, solange die Schätzung veraltet ist, ändern sich diese Preise nicht mehr.',
+          detail: (d: Readonly<Record<string, unknown>>) => `${Number(d.offers)} ${Number(d.offers) === 1 ? 'Angebot' : 'Angebote'} im Abverkauf; ${Number(d.days) === 0 ? 'das erste ist bereits abgelaufen' : `das erste endet in ${Number(d.days)} ${Number(d.days) === 1 ? 'Tag' : 'Tagen'}`}: ${String(d.offer)}.`,
+        },
         FEE_ESTIMATE_EXPIRED: {
           what: 'Die Gebührenschätzung einiger Angebote ist abgelaufen — ihre Preise ändern sich nicht mehr',
           step: 'Laden Sie Ihre Stückkosten-Datei erneut mit den Spalten fee_percent und fixed_fee hoch (Kosten & Untergrenzen). Bis dahin bleibt jeder Preis, wo er ist.',
