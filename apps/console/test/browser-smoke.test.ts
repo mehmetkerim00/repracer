@@ -1367,7 +1367,8 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   // шаг 96.2: в профиле eu подпись файла остатков называет немецкие заголовки — и правило это видит; в us её не было (выше)
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/inventory`)}, true)`);
   await settled(b, 'eu inventory');
-  assert.ok((await b.evaluate<string>('document.body.innerText')).includes(en.ui.stock.importFile.hintBilingual), 'eu: the stock file takes German or English headers');
+  // Шаг 154: длинная подпись — первая фраза на виду, остальное по «Learn more» в разметке: подпись ищется в тексте страницы, а не в видимом
+  assert.ok((await b.evaluate<string>(`document.querySelector('.world-content').textContent.replace(/\\s+/g, ' ')`)).includes(en.ui.stock.importFile.hintBilingual), 'eu: the stock file takes German or English headers');
   assert.deepEqual([EUROPE.test(en.ui.stock.importFile.hintBilingual), EUROPE.test(en.ui.stock.importFile.hint)], [true, false], 'the rule sees the German headers of the eu caption and nothing European in the us one');
   assert.ok(!/\bWalmart\b/.test(await b.evaluate<string>('document.body.innerText')), 'eu: Walmart is a channel of the us market only');
   const euMenu = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
@@ -1921,7 +1922,8 @@ test('step 101 (C): the draft offers Anchor and Compete with where they mean som
   // Поля черновика: подписи над контролами, варианты — словами; у «Match the Buy Box» ориентира нет, у фиксированной цены нет обоих
   const fields = () => b.evaluate<Array<{ label: string; options: string[]; caption: string }>>(`[...document.querySelectorAll('.draft-form .field')].map((f) => ({
     label: f.querySelector('label, .field-label')?.textContent.trim() ?? '', options: [...f.querySelectorAll('option')].map((o) => o.textContent.trim()),
-    caption: f.querySelector('.field-caption, .caption')?.textContent.trim() ?? '' })).filter((f) => [${JSON.stringify(t.fields.anchor)}, ${JSON.stringify(t.fields.competeWith)}].includes(f.label))`);
+    // Шаг 154: подпись целиком — со скрытой частью и без кнопки «Learn more»
+    caption: (() => { const c = f.querySelector('.field-caption, .caption'); if (!c) return ''; const x = c.cloneNode(true); x.querySelectorAll('button').forEach((n) => n.remove()); return x.textContent.trim(); })() })).filter((f) => [${JSON.stringify(t.fields.anchor)}, ${JSON.stringify(t.fields.competeWith)}].includes(f.label))`);
   const chooseType = (type: string) => b.evaluate(`(() => { const sel = [...document.querySelectorAll('.draft-form select')].find((x) => [...x.options].some((o) => o.value === 'FIXED'));
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(type)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   const expected = {
