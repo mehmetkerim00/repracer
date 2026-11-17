@@ -620,7 +620,9 @@ const SAME_AS_ENGLISH: Readonly<Record<'es' | 'fr', readonly string[]>> = {
     // Шаг 109 [Р-234]: заголовок купонов конкурентов на Competition
     'Coupons',
     // Шаг 143: источник снимка — имя канала и Buy Box
-    'Kaufland, Buy Box', 'Walmart, Buy Box'],
+    'Kaufland, Buy Box', 'Walmart, Buy Box',
+    // Шаг 150: колонка действий таблицы стратегий — французское слово
+    'Actions'],
 };
 test('step 98 (Р-223): a Spanish or French dictionary string equal to the English one is a name or a word spelled the same — from an explicit list', async () => {
   const { messagesFor } = await import('./i18n/index.ts');

@@ -809,6 +809,15 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * Шаг 105 [Р-230]: что канал каждого аккаунта говорит о конкурентах — из описания канала, тем же правилом, что страница Competition:
      * основной источник есть (иначе — «нет данных», eBay) и называет ли он держателя Buy Box (Amazon — нет, A-29)
      */
+    /**
+     * Шаг 148 (#27): режимы записи аккаунтов мира [Р-169] — у мира тенанта из строк аккаунтов, прочитанных при открытии (ноль
+     * обращений; клик агентства держит их число, Р-182), у мира стенда без режима в аккаунтах — запросом хранилища
+     */
+    const writeModesOf = async (): Promise<Map<string, 'SHADOW' | 'LIVE'>> => {
+      const known = live.accounts.every((a) => a.writeMode !== undefined);
+      const rows = known ? live.accounts.map((a) => ({ channelAccountId: a.channelAccountId, writeMode: a.writeMode! })) : await live.store.channelAccounts(live.tenantId);
+      return new Map(rows.map((a) => [a.channelAccountId, a.writeMode] as const));
+    };
     const accountCompetitors = (): Record<string, AccountCompetitorInfo> => Object.fromEntries(live.accounts.map((a) => {
       const primary = (descriptorOf(a.channel).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE' && x.role === 'PRIMARY');
       const all = (descriptorOf(a.channel).competitorSources ?? []).filter((x) => x.availability !== 'UNAVAILABLE');
@@ -879,14 +888,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return null;
         }
       };
-      const [state, pieces, accounts] = await Promise.all([live.store.clearanceOf(w.tenantId, writeScopeId), stockPieces(), live.store.channelAccounts(live.tenantId)]);
+      const [state, pieces, writeModes] = await Promise.all([live.store.clearanceOf(w.tenantId, writeScopeId), stockPieces(), writeModesOf()]);
       const computed = effectiveFloor({ ...scope, clearance: null }, w).minor;
       const paceMinutes = Math.round((descriptorOf(channelOf(w, scope.channelAccountId)).scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS) / 60);
       const steps = computed !== null && scope.currentPriceMinor !== null ? ladderSteps(scope.currentPriceMinor, computed, scope.maxStepChangeBp ?? null) : 0;
       return boundsView(w, writeScopeId, m, {
         clearance: state, stockPieces: pieces, returnSteps: { steps, minutes: steps * paceMinutes }, canManage: can(viewer.role, 'MANAGE_PRICING'), people: w.people,
         // Шаг 149 (#27): статус наверху страницы — тот же, что на Offers, с тенью
-        writeMode: accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.writeMode ?? null,
+        writeMode: writeModes.get(scope.channelAccountId) ?? null,
       });
     };
     /** Единицы среза вмешательств: решения, намерения, снятые записи — отчёты отклонённых и опасных изменений */
@@ -1028,7 +1037,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           // Колонки Buy Box — только включённые: снимок и отрезки показанных строк одним обращением, правило страницы Competition
           const buybox = oq.bb ? buyboxCellsOf(world, await live.store.competitionData(world.tenantId, shown, deps.shareRange.since as never, deps.shareRange.until as never), deps, shown) : null;
           // Шаг 148 (#27, UX-03): режим аккаунта — «On» только в бою, в тени — «On · shadow mode»
-          const writeModes = new Map((await live.store.channelAccounts(live.tenantId)).map((a) => [a.channelAccountId, a.writeMode] as const));
+          const writeModes = await writeModesOf();
           return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined, { filter, sort: oq.sort, buybox, writeModes }));
         }
         case 'decisions': {

@@ -95,7 +95,8 @@ test('step 118: a manager signed in with a password only turns automatic pricing
   assert.ok(on.rows.length > 0 && on.matched !== null, `the demo has offers with automatic pricing on: ${on.rows.length}`);
   assert.deepEqual(on.rows.filter((r) => !r.canDisable).map((r) => r.unit.label), [], 'every offer that is on can be turned off by the manager');
   const offBefore = (await offers(manager, { pricing: 'OFF' })).body.matched ?? 0;
-  const target = on.rows.find((r) => r.enabled.tone === 'ok')!;
+  // Шаг 148 (#27): включённое в тени — «On · shadow mode» (тон внимания), в бою — «On»; выключить можно оба
+  const target = on.rows.find((r) => r.canDisable)!;
   const id = target.unit.writeScopeId;
 
   const turnedOff = await call<{ disabled: boolean }>('POST', api('scopes', id, 'disable'), manager, { note: 'Supplier price talks — hold this one' });

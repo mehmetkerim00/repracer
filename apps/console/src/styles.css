@@ -801,15 +801,25 @@ button.role-row:hover { background: var(--surface-muted); }
 .tabs a.active { background: var(--knob-bg); border-color: var(--border); font-weight: var(--weight-heading); }
 .groups { display: flex; flex-wrap: wrap; gap: var(--space-3); list-style: none; padding: 0; }
 .index li { margin: var(--space-1) 0; }
-/* Стратегии: каждая — карточка; выбор предложений — список в рамке с прокруткой, а не простыня на экран */
-ul.strategy-cards { list-style: none; padding: 0; display: grid; gap: var(--space-3); margin: var(--space-2) 0 var(--space-4); }
-ul.strategy-cards > li.card { margin: 0; padding: var(--space-4); }
+/*
+ * Шаг 150 (#27, Р-254): стратегии — таблицей; параметры и версии — под «Details» строки. Выбор предложений — список в рамке с
+ * прокруткой, а не простыня на экран
+ */
+.table-wrap:has(> table.strategies-table) { margin: var(--space-2) 0 var(--space-4); }
+table.strategies-table td { vertical-align: top; }
 .strategy-title { font-size: var(--font-size-md); }
-ul.strategy-cards .buttons { margin-top: var(--space-2); }
+table.strategies-table .buttons { margin: 0; flex-wrap: nowrap; }
+table.strategies-table .buttons button, table.strategies-table td.strategy-last { white-space: nowrap; }
+/* тип, умолчание и «Details» под именем — обычным весом и на телефоне, где ячейка имени — заголовок карточки */
+table.strategies-table td.strategy-cell .small { font-weight: 400; }
 /* сводка стратегии — сколько и где, ссылка раскрывает предложения списком (шаг 78) */
-.strategy-usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 var(--space-1); font-weight: var(--weight-medium); }
-/* шаг 103 [Р-228]: стратегия — умолчание новых предложений аккаунтов, строкой под сводкой */
-.strategy-default { margin: 0 0 var(--space-1); }
+.strategy-usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); font-weight: var(--weight-medium); }
+table.strategies-table ul.offer-list { columns: 1; margin-bottom: 0; }
+/* шаг 103 [Р-228]: стратегия — умолчание новых предложений аккаунтов, строкой под именем */
+.strategy-default { margin: var(--space-1) 0 0; }
+details.strategy-details { margin-top: var(--space-1); font-weight: 400; }
+details.strategy-details > summary { cursor: pointer; color: var(--accent); font-weight: var(--weight-medium); }
+details.strategy-details .strategy-params { margin-top: var(--space-1); }
 button.link {
   border: 0; background: none; box-shadow: none; padding: 0; color: var(--accent); font-size: var(--font-size-sm); font-weight: var(--weight-medium); cursor: pointer;
 }
@@ -982,6 +992,8 @@ p.notice.live-blocked { margin: 0; }
   .periods button, .segmented button, .lang-button, .lang-menu button { min-height: var(--touch-target); }
   /* шаг 96: «что делать» у пилюли — цель касания телефона */
   details.what-to-do > summary { min-height: var(--touch-target); display: flex; align-items: center; }
+  /* шаг 150: «Details» строки стратегии — та же цель касания */
+  details.strategy-details > summary { min-height: var(--touch-target); display: flex; align-items: center; }
   /* шаг 94: галочка стандарта — цель касания не ниже 44px */
   /* галочка остаётся на линии ПЕРВОЙ строки подписи: по середине блока встаёт вся строка, а не галочка против двух строк */
   .check-field { min-height: var(--touch-target); align-content: center; }

@@ -227,39 +227,67 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       <h3>{t.inUse}</h3>
       {/* Задача D шага 34: новый тенант без стратегий и офферов видит объяснение, а не пустой список */}
       {view.strategies.length === 0 ? <p className="notice">{m.ui.onboarding.empty.strategies} <a href={href(view.worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
-      <ul className="index strategy-cards">
-        {view.strategies.map((s) => (
-          <li key={s.strategyId} className="card">
-            {/* Шаг 78: заголовок — имя для человека; тип — приглушённо и только если имя другое */}
-            <div className="strategy-title"><strong>{s.name ?? s.label}</strong>{s.name && s.name !== s.label ? <span className="muted"> · {s.label}</span> : null}</div>
-            <div className="small muted">{s.detail}</div>
-            {/* Р-136, шаг 78: сводка — сколько и где; сами предложения (примеры, всего — числом) — по ссылке, а не стеной через запятую */}
-            <div className="strategy-usage">{s.scopeCount === 0 ? <span className="muted">{t.notUsed}</span> : (
-              <>
-                <span>{t.offersOn(s.scopeCount, s.storefronts.length === 1 ? s.storefronts[0]!.label : s.storefronts.map((x) => `${x.label} ${x.count}`).join(' · '))}</span>
-                {s.scopes.length > 0 ? <button type="button" className="link" aria-expanded={openOffers === s.strategyId}
-                  onClick={() => setOpenOffers(openOffers === s.strategyId ? null : s.strategyId)}>{openOffers === s.strategyId ? t.hideOffers : t.showOffers}</button> : null}
-              </>
-            )}</div>
-            {/* Шаг 103 [Р-228]: стратегия — умолчание новых предложений аккаунтов: одной строкой, без пилюли */}
-            {s.defaultFor ? <div className="small muted strategy-default">{s.defaultFor}</div> : null}
-            {openOffers === s.strategyId ? (
-              <ul className="offer-list small">
-                {s.scopes.map((u) => <li key={u.unit.writeScopeId}><UnitName unit={u.unit} />{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
-                {s.scopeCount > s.scopes.length ? <li className="muted">{t.moreOffers(s.scopeCount - s.scopes.length)} — <a href={href(worldId, 'products')}>{m.ui.app.screens.products}</a></li> : null}
-              </ul>
-            ) : null}
-            {/* Шаг 79: статус версии — пилюлей, а не словом в строке */}
-            <ul className="versions small muted">{s.versions.map((v) => (
-              <li key={v.version}>v{v.version} <Badge tone={v.tone}>{v.status}</Badge> {t.versionBy(v.author, shortWhen(v.createdAt))}</li>
-            ))}</ul>
-            <div className="buttons">
-              {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s, m.locale)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
-              {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
-            </div>
-          </li>
-        ))}
-      </ul>
+      {/*
+        * Шаг 150 (#27, Р-254): стратегии — таблицей, а не крупными карточками. На виду — имя и тип, цель простыми словами, сколько
+        * предложений и где, последняя версия; параметры (подрез, ориентир, «Compete with», граница) и все версии — под «Details» строки
+        */}
+      {view.strategies.length > 0 ? (
+        <div className="table-wrap">
+        <table className="cardify strategies-table">
+          <thead><tr><th>{t.table.strategy}</th><th>{t.table.goal}</th><th>{t.table.offers}</th><th>{t.table.lastChange}</th><th><span className="visually-hidden">{t.table.actions}</span></th></tr></thead>
+          <tbody>
+            {view.strategies.map((s) => {
+              const last = s.versions[0];
+              return (
+                <tr key={s.strategyId}>
+                  <td className="card-title strategy-cell">
+                    {/* Шаг 78: заголовок — имя для человека; тип — приглушённо и только если имя другое */}
+                    <div className="strategy-title"><strong>{s.name ?? s.label}</strong></div>
+                    {s.name && s.name !== s.label ? <div className="small muted">{s.label}</div> : null}
+                    {/* Шаг 103 [Р-228]: стратегия — умолчание новых предложений аккаунтов: одной строкой, без пилюли */}
+                    {s.defaultFor ? <div className="small muted strategy-default">{s.defaultFor}</div> : null}
+                    <details className="strategy-details small">
+                      <summary>{t.details}</summary>
+                      <div className="muted strategy-params">{s.detail}</div>
+                      {/* Шаг 79: статус версии — пилюлей, а не словом в строке */}
+                      <ul className="versions muted" aria-label={t.versionsTitle}>{s.versions.map((v) => (
+                        <li key={v.version}>v{v.version} <Badge tone={v.tone}>{v.status}</Badge> {v.createdAt ? t.versionBy(v.author, shortWhen(v.createdAt)) : v.author}</li>
+                      ))}</ul>
+                    </details>
+                  </td>
+                  <td className="text-cell strategy-goal" data-label={t.table.goal}><div>{s.goalText}</div><div className="small muted">{s.goalHint}</div></td>
+                  {/* Р-136, шаг 78: сводка — сколько и где; сами предложения (примеры, всего — числом) — по ссылке, а не стеной через запятую */}
+                  <td className="text-cell" data-label={t.table.offers}>
+                    <div className="strategy-usage">{s.scopeCount === 0 ? <span className="muted">{t.notUsed}</span> : (
+                      <>
+                        <span>{t.offersOn(s.scopeCount, s.storefronts.length === 1 ? s.storefronts[0]!.label : s.storefronts.map((x) => `${x.label} ${x.count}`).join(' · '))}</span>
+                        {s.scopes.length > 0 ? <button type="button" className="link" aria-expanded={openOffers === s.strategyId}
+                          onClick={() => setOpenOffers(openOffers === s.strategyId ? null : s.strategyId)}>{openOffers === s.strategyId ? t.hideOffers : t.showOffers}</button> : null}
+                      </>
+                    )}</div>
+                    {openOffers === s.strategyId ? (
+                      <ul className="offer-list small">
+                        {s.scopes.map((u) => <li key={u.unit.writeScopeId}><UnitName unit={u.unit} />{u.version !== s.version ? <span className="muted"> · {t.versionShort(u.version)}</span> : null}</li>)}
+                        {s.scopeCount > s.scopes.length ? <li className="muted">{t.moreOffers(s.scopeCount - s.scopes.length)} — <a href={href(worldId, 'products')}>{m.ui.app.screens.products}</a></li> : null}
+                      </ul>
+                    ) : null}
+                  </td>
+                  <td className="text-cell strategy-last" data-label={t.table.lastChange}>
+                    {last ? <><div>v{last.version} <Badge tone={last.tone}>{last.status}</Badge></div><div className="small muted">{last.createdAt ? t.versionBy(last.author, shortWhen(last.createdAt)) : last.author}</div></> : null}
+                  </td>
+                  <td className="card-action">
+                    <div className="buttons">
+                      {view.canEdit ? <button type="button" disabled={busy} onClick={() => { setAssigning(null); setForm(formOf(s, m.locale)); changed(); setMessage(null); }}>{t.newVersion}</button> : null}
+                      {s.assignable ? <button type="button" disabled={busy} onClick={() => { setAssigning(s); changed(); setMessage(null); }}>{t.assignVersion}</button> : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+      ) : null}
 
       <h3>{t.channelPricingTitle}</h3>
       <p className="section-sub">{t.channelPricingIntro}</p>

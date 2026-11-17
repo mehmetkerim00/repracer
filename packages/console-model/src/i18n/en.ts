@@ -1809,6 +1809,14 @@ export const en = {
       confirmSave: 'Yes, save and assign', cancel: 'Cancel',
       rePreviewed: 'The offers changed since the preview. The preview was run again — check it and save again.',
       sample: (shown: number, total: number) => `Preview of ${shown} of ${total} offers: the strategy is applied to all ${total}. The database checks every offer on its own.`,
+      // Шаг 150 (#27): таблица стратегий — колонки, цель по типу с пояснением, раскрытие параметров и версий
+      table: { strategy: 'Strategy', goal: 'Goal', offers: 'Offers', lastChange: 'Last change', actions: 'Actions' }, details: 'Details',
+      goals: { FOLLOW_MARKET: 'Follow the market', PROTECT_MARGIN: 'Protect margin', FIXED_PRICE: 'Fixed price' },
+      goalHints: {
+        FOLLOW_MARKET: 'Moves with competitor prices — never below your floor or above your maximum price.',
+        PROTECT_MARGIN: 'Aims at a margin over your unit cost and fees — within your floor and maximum price.',
+        FIXED_PRICE: 'Keeps the one price you set — within your floor and maximum price.',
+      },
       versionsTitle: 'Versions', statuses: { DRAFT: 'draft', ACTIVE: 'active', ARCHIVED: 'archived' }, statusUnknown: 'status not recorded', authorUnknown: 'author not recorded',
       defaultFor: (accounts: string) => `Default for new offers on: ${accounts}`, byDefaultRule: 'by default rule',
       versionBy: (author: string, when: string) => `${author} · ${when}`,

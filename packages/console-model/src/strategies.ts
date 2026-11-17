@@ -97,11 +97,27 @@ export interface StrategyListItem {
   /** Черновик новой версии — параметры последней версии */
   draft: StrategyDraft;
   /** OQ-170 (шаг 24): версии с автором, моментом и статусом — от новой к старой; у стратегий посева в памяти — только номер */
-  versions: Array<{ version: number; status: string; tone: Tone; author: string; createdAt: string }>;
+  /** Шаг 150: момент неизвестен (версия посева без журнала) — null, а не «no value»: экран показывает только автора */
+  versions: Array<{ version: number; status: string; tone: Tone; author: string; createdAt: string | null }>;
   /** OQ-169: последнюю версию можно назначить выбранным офферам без новой версии — только действующую */
   assignable: boolean;
   /** Шаг 103 [Р-228]: для каких аккаунтов стратегия — умолчание новых предложений («Default for new offers on: …»), иначе null */
   defaultFor: string | null;
+  /** Шаг 150 (#27): цель простыми словами по типу стратегии — колонка «Goal» таблицы стратегий; пояснение — подсказкой */
+  goal: StrategyGoal;
+  goalText: string;
+  goalHint: string;
+}
+
+/** Шаг 150 (#27): цель стратегии — следовать рынку (конкурентные типы), держать маржу, фиксированная цена */
+export type StrategyGoal = 'FOLLOW_MARKET' | 'PROTECT_MARGIN' | 'FIXED_PRICE';
+
+export function strategyGoal(type: StrategyDefinition['params']['type']): StrategyGoal {
+  switch (type) {
+    case 'FIXED': return 'FIXED_PRICE';
+    case 'TARGET_MARGIN': return 'PROTECT_MARGIN';
+    case 'MATCH_BUYBOX': case 'BEAT_LOWEST': case 'WIN_BUYBOX': return 'FOLLOW_MARKET';
+  }
 }
 
 export interface StrategyScopeItem {
@@ -188,11 +204,13 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
           version, status: meta ? m.ui.strategies.statuses[meta.status] : m.ui.strategies.statusUnknown,
           // Шаг 79: статус версии — пилюлей: действующая зелёная, черновик янтарный, остальное серым
           tone: (meta?.status === 'ACTIVE' ? 'ok' : meta?.status === 'DRAFT' ? 'warn' : 'off') as Tone,
-          author: meta ? member(meta.createdByMembershipId) : m.ui.strategies.authorUnknown, createdAt: meta?.createdAt ? m.when(meta.createdAt) : m.ui.common.noValue,
+          author: meta ? member(meta.createdByMembershipId) : m.ui.strategies.authorUnknown, createdAt: meta?.createdAt ? m.when(meta.createdAt) : null,
         };
       });
     const latestMeta = versions.find((x) => x.version === d.version);
+    const goal = strategyGoal(d.params.type);
     return {
+      goal, goalText: m.ui.strategies.goals[goal], goalHint: m.ui.strategies.goalHints[goal],
       strategyId: d.strategyId, version: d.version, name, label: label.label, detail: label.detail,
       scopes: using.examples.map((s) => ({ unit: unitOf(world, s, m), version: s.strategy!.version })),
       scopeCount: using.count, storefronts: using.storefronts,

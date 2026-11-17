@@ -73,6 +73,8 @@ export function createTenantWorlds(pools: TenantWorldPools, now: () => string = 
     const accounts = rows.map((a) => ({
       channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: [...a.marketplaces],
       haltRelease: haltReleaseOf(a.channel),
+      // Шаг 148 (#27): режим записи — из тех же строк: Offers и страница пола различают тень без нового обращения к базе (Р-182)
+      writeMode: a.writeMode,
     }));
     const id = `${TENANT_WORLD_PREFIX}${tenantId}`;
     // Путь решения мира — по каналу аккаунта вызова: каждый метод получает контекст первым аргументом

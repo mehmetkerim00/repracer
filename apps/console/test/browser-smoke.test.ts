@@ -2997,3 +2997,50 @@ test('step 149 (#27): the floor page leads with the floor, the current price and
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
+
+test('step 150 (#27): strategies are a table — strategy, goal, offers, last change; parameters and versions folded under Details but on the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.strategies;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      // Тот же адрес экран не перерисовывает — раскрытое на прошлой ширине осталось бы раскрытым: сначала другой экран
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${width}: offers`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/strategies`)}, true)`);
+      await settled(b, `${width}: strategies`);
+      await waitFor(b, `!!document.querySelector('table.strategies-table tbody tr')`, `${width}: the strategies table`);
+      const seen = await b.evaluate<{ heads: string[]; rows: number; open: boolean[]; params: string[]; versions: number[]; goals: string[]; last: string[] }>(`(() => {
+        const table = document.querySelector('table.strategies-table'); const rows = [...table.querySelectorAll('tbody tr')];
+        return { heads: [...table.querySelectorAll('thead th')].map((x) => x.textContent.trim()).filter((x) => x !== ''), rows: rows.length,
+          open: rows.map((r) => r.querySelector('details.strategy-details').open),
+          params: rows.map((r) => r.querySelector('details.strategy-details .strategy-params').textContent.trim()),
+          versions: rows.map((r) => r.querySelectorAll('details.strategy-details ul.versions li').length),
+          goals: rows.map((r) => r.querySelector('td.strategy-goal').textContent.trim()),
+          last: rows.map((r) => r.querySelector('td.strategy-last').textContent.trim()) }; })()`);
+      assert.deepEqual(seen.heads.slice(0, 4), [t.table.strategy, t.table.goal, t.table.offers, t.table.lastChange], `${width}: the columns`);
+      assert.ok(seen.rows > 0 && seen.open.every((x) => !x), `${width}: Details folded on every row`);
+      assert.ok(seen.params.every((x) => x !== '') && seen.versions.every((n) => n >= 1), `${width}: parameters and versions stay on the page under Details`);
+      const goals = Object.values(t.goals);
+      assert.ok(seen.goals.every((g) => goals.some((x) => g.startsWith(x))), `${width}: every row says its goal — ${seen.goals.join(' | ')}`);
+      assert.ok(seen.last.every((x) => /^v\d+/.test(x) && !x.includes(en.ui.common.noValue)), `${width}: every row shows its last version — ${seen.last.join(' | ')}`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+      await b.evaluate(`(document.querySelector('table.strategies-table details.strategy-details > summary').click(), true)`);
+      await waitFor(b, `document.querySelector('table.strategies-table details.strategy-details').open`, `${width}: a click opens Details`);
+    }
+  } finally {
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});

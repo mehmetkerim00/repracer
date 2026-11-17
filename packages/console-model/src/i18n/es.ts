@@ -1796,6 +1796,14 @@ export const es: Messages = {
       confirmSave: 'Sí, guardar y asignar', cancel: 'Cancelar',
       rePreviewed: 'Las ofertas cambiaron desde la vista previa. La vista previa se generó de nuevo: revísela y vuelva a guardar.',
       sample: (shown: number, total: number) => `Vista previa de ${shown} de ${total} ofertas: la estrategia se aplica a las ${total}. La base de datos revisa cada oferta por separado.`,
+      // Шаг 150 (#27): таблица стратегий — колонки, цель по типу с пояснением, раскрытие параметров и версий
+      table: { strategy: 'Estrategia', goal: 'Objetivo', offers: 'Ofertas', lastChange: 'Último cambio', actions: 'Acciones' }, details: 'Detalles',
+      goals: { FOLLOW_MARKET: 'Seguir el mercado', PROTECT_MARGIN: 'Proteger el margen', FIXED_PRICE: 'Precio fijo' },
+      goalHints: {
+        FOLLOW_MARKET: 'Sigue los precios de la competencia, nunca por debajo de su piso ni por encima de su precio máximo.',
+        PROTECT_MARGIN: 'Busca un margen sobre su costo unitario y comisiones, dentro de su piso y su precio máximo.',
+        FIXED_PRICE: 'Mantiene el precio que usted fija, dentro de su piso y su precio máximo.',
+      },
       versionsTitle: 'Versiones', statuses: { DRAFT: 'borrador', ACTIVE: 'activa', ARCHIVED: 'archivada' }, statusUnknown: 'estado no registrado', authorUnknown: 'autor no registrado',
       defaultFor: (accounts: string) => `Predeterminada para ofertas nuevas en: ${accounts}`, byDefaultRule: 'por regla predeterminada',
       versionBy: (author: string, when: string) => `${author} · ${when}`,
