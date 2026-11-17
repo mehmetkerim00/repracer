@@ -679,6 +679,8 @@ const LONG_WHEN = `(() => {
  * одной таблицы. Числа и время различают строки, но не делают предложение своим — поэтому они маскируются
  */
 const REPEATED_IN_ROWS = `(() => {
+  // Шаг 157: таблица в свёрнутой панели — по тексту разметки (innerText не отрисованного пуст)
+  const txt = (e) => (e.closest('details:not([open])') ? e.textContent : e.innerText);
   const out = [];
   for (const table of document.querySelectorAll('.world-content table')) {
     const rows = [...table.querySelectorAll('tbody tr')];
@@ -686,7 +688,7 @@ const REPEATED_IN_ROWS = `(() => {
     const seen = new Map();
     for (const tr of rows) {
       // по ячейкам: строка таблицы в innerText склеивает ячейки табуляцией
-      const lines = new Set([...tr.querySelectorAll('td')].flatMap((td) => td.innerText.split('\\n')).map((l) => l.trim().replace(/\\d+([.,:]\\d+)*/g, '#'))
+      const lines = new Set([...tr.querySelectorAll('td')].flatMap((td) => txt(td).split('\\n')).map((l) => l.trim().replace(/\\d+([.,:]\\d+)*/g, '#'))
         .filter((l) => l.split(/\\s+/).filter((w) => /\\p{L}{2,}/u.test(w) && !w.includes('#')).length >= 10));
       for (const l of lines) seen.set(l, (seen.get(l) ?? 0) + 1);
     }
@@ -702,16 +704,18 @@ const REPEATED_IN_ROWS = `(() => {
  * $14.00 у всех предложений amazon.com), а не служебный текст. Таблица меньше трёх строк не судится
  */
 const CONSTANT_COLUMNS = `(() => {
+  // Шаг 157: таблица в свёрнутой панели не отрисована — её innerText пуст; правило судит и её, по тексту разметки
+  const txt = (e) => (e.closest('details:not([open])') ? e.textContent : e.innerText);
   const out = [];
   for (const table of document.querySelectorAll('.world-content table')) {
     const rows = [...table.querySelectorAll('tbody tr')].filter((tr) => tr.querySelectorAll('td').length > 1);
     if (rows.length < 3) continue;
     [...table.querySelectorAll('thead th')].forEach((th, c) => {
-      const head = th.innerText.trim().replace(/\\s+/g, ' ');
+      const head = txt(th).trim().replace(/\\s+/g, ' ');
       if (!head) return;
       const cells = rows.map((tr) => tr.children[c]);
       if (cells.some((td) => !td)) return;
-      const values = cells.map((td) => td.innerText.trim().replace(/\\s+/g, ' ')).filter((v) => v !== '' && !/^[–—-]$/.test(v));
+      const values = cells.map((td) => txt(td).trim().replace(/\\s+/g, ' ')).filter((v) => v !== '' && !/^[–—-]$/.test(v));
       if (values.length === 0) out.push('«' + head + '»: every cell is a dash');
       else if (!th.classList.contains('num') && values.length === cells.length && new Set(values).size === 1) out.push('«' + head + '»: every cell is «' + values[0].slice(0, 50) + '»');
     });
@@ -3121,6 +3125,50 @@ const LONG_HELP = `(() => {
   }
   return out;
 })()`;
+
+test('step 157 (#28): Stop pricing leads with one status line, then the stop controls; the kinds table and the audit log are folded but on the page; quiet system sections are one line', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(localStorage.removeItem('repracer.stop.open'), true)`);
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/shadow`)}, true)`);
+      await settled(b, `${width}: shadow`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stop`)}, true)`);
+      await settled(b, `${width}: stop`);
+      await waitFor(b, `!!document.querySelector('.stop-headline')`, `${width}: the status line`);
+      const seen = await b.evaluate<{ afterPause: boolean; headline: string; order: string[]; kindsOpen: boolean; kindsRows: number; auditOpen: boolean; quiet: boolean; systemSections: number; how: string }>(`(() => {
+        const content = document.querySelector('.world-content section');
+        const order = [...content.children].map((c) => c.classList.contains('stop-headline') ? 'headline' : c.matches('section.stop-human') ? 'human' : c.matches('details.stop-kinds') ? 'kinds'
+          : c.matches('details.stop-audit') ? 'audit' : c.matches('.stop-system-quiet, section.stop-system, section.stop-distrust') ? 'system' : '').filter(Boolean);
+        const kinds = document.querySelector('details.stop-kinds'); const audit = document.querySelector('details.stop-audit'); const quiet = document.querySelector('.stop-system-quiet');
+        return { afterPause: document.querySelector('.pause-safe').nextElementSibling === document.querySelector('.stop-headline'), headline: document.querySelector('.stop-headline').textContent.trim(),
+          order: [...new Set(order)], kindsOpen: kinds.open, kindsRows: kinds.querySelectorAll('tbody tr').length, auditOpen: audit.open, quiet: !!quiet,
+          systemSections: document.querySelectorAll('section.stop-system, section.stop-distrust').length, how: quiet ? quiet.querySelector('details').textContent : '' }; })()`);
+      assert.ok(seen.afterPause && seen.headline !== '', `${width}: the status line right after «Pause is safe» — ${seen.headline}`);
+      assert.deepEqual(seen.order, ['headline', 'human', 'system', 'kinds', 'audit'], `${width}: status, stop controls, system, then the folded reference`);
+      assert.deepEqual([seen.kindsOpen, seen.kindsRows, seen.auditOpen], [false, 3, false], `${width}: the kinds table and the audit log folded, the table on the page`);
+      assert.ok(seen.quiet ? seen.systemSections === 0 && seen.how.includes(en.ui.stop.systemTitle) && seen.how.includes(en.ui.stop.distrustTitle) : seen.systemSections === 2,
+        `${width}: no system stops — one line with the explanations on demand; some — the sections`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+    }
+  } finally {
+    await b.evaluate(`(localStorage.removeItem('repracer.stop.open'), true)`);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
 
 test('step 156 (#25): Channels — one row per channel account with its mode and setup state; an incomplete setup is open, a complete one folded; the choice is remembered', async () => {
   const b = browser!;

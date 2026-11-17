@@ -2213,6 +2213,9 @@ export const en = {
       activeDistrusts: 'Active distrusts', distrustHistory: 'Released distrusts', releaseDistrust: 'Trust again',
       distrustHolds: 'Holds all prices, including fixed and margin prices, and the channel price threshold',
       haltManualOnly: (channel: string) => `${channel} gives no competitor sample: only a person releases this halt`,
+      // Шаг 157 (#28): строка состояния Stop pricing и одна строка, пока системных остановок нет
+      headline: { running: 'Pricing is running', stopped: (scope: string, by: string, when: string, note: string) => `Stopped: ${scope} — by ${by}, ${when}. Note: ${note}`, more: (n: number) => `${n} more ${n === 1 ? 'stop' : 'stops'}`, halts: (n: number) => `${n} storefront ${n === 1 ? 'halt' : 'halts'} by the system`, distrusts: (n: number) => `${n} ${n === 1 ? 'channel' : 'channels'} distrusted by the system` },
+      systemNone: 'No storefront halts and no distrusted channels.', systemHow: 'How the system stops prices',
       kindsTitle: 'Three kinds of stop',
       kindsColumns: { kind: 'Kind', holds: 'What it holds', setBy: 'Who sets it', release: 'How it ends', active: 'Active' },
       kinds: {

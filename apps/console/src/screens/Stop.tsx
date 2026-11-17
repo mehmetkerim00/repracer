@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AUDIT_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type DistrustCard, type HaltCard, type ListQuery, type Period, type StopCard, type StopPlan, type StopTarget, type StopView, type TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, NoteConfirm, Pager, UnitName, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, NoteConfirm, Pager, UnitName, useMessages, useOpenBlocks, When, WhenHead } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 
@@ -81,29 +81,15 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
   const s = m.ui.stop;
   const k = s.kindsColumns;
   const auditZone = commonZone(view.audit.map((a) => a.at));
+  const blocks = useOpenBlocks('stop');
   return (
     <section>
       <h2>{s.pageTitle}</h2>
       <p className="subtitle">{m.ui.app.subtitles.stop}</p>
       {/* Шаг 96 (аудит А10): первой строкой — что пауза безопасна */}
       <p className="notice pause-safe">{s.pauseSafe}</p>
-
-      <section className="stop-kinds">
-        <h3>{s.kindsTitle}</h3>
-        <div className="table-wrap">
-          <table className="cardify">
-            <thead><tr><th>{k.kind}</th><th>{k.holds}</th><th>{k.setBy}</th><th>{k.release}</th><th>{k.active}</th></tr></thead>
-            <tbody>
-              {view.kinds.map((row) => (
-                <tr key={row.kind}>
-                  <td className="card-title"><strong>{row.title}</strong></td><td className="text-cell" data-label={k.holds}>{row.holds}</td><td className="text-cell" data-label={k.setBy}>{row.setBy}</td><td className="text-cell" data-label={k.release}>{row.release}</td>
-                  <td className="num" data-label={k.active}>{row.active > 0 ? <Badge tone="stop">{row.active}</Badge> : row.active}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {/* Шаг 157 (#28, Р-254): одна строка состояния — работает или что остановлено, кем, когда и с какой запиской; системные — следом */}
+      <p className="stop-headline"><span className={`status-dot dot-${view.headline.tone}`} aria-hidden="true" /> <strong>{view.headline.text}</strong></p>
 
       <section className="stop-human">
         <h3>{s.humanTitle}</h3>
@@ -133,6 +119,21 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         ) : null}
       </section>
 
+      {/*
+        * Шаг 157 (#28): системных остановок и недоверия нет и не было — одной строкой, пояснения по раскрытию; есть или были — прежние разделы
+        */}
+      {view.systemQuiet ? (
+        <section className="stop-system-quiet">
+          <p className="muted">{s.systemNone}</p>
+          <details className="what-to-do">
+            <summary>{s.systemHow}</summary>
+            <h4>{s.systemTitle}</h4>
+            <Help className="section-sub" text={s.systemIntro} />
+            <h4>{s.distrustTitle}</h4>
+            <Help className="section-sub" text={s.distrustIntro} />
+          </details>
+        </section>
+      ) : <>
       <section className="stop-system">
         <h3>{s.systemTitle}</h3>
         <Help className="section-sub" text={s.systemIntro} />
@@ -159,8 +160,28 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
           </>
         ) : null}
       </section>
-      <section className="stop-audit">
-        <h3>{s.auditTitle}</h3>
+      </>}
+      {/* Шаг 157 (#28): таблица трёх видов остановки — пояснение, раскрываемой панелью; число действующих — в строке состояния */}
+      <details className="card more-block stop-kinds" open={blocks.isOpen('kinds')} onToggle={blocks.toggle('kinds')}>
+        <summary>{s.kindsTitle}</summary>
+        <div className="table-wrap">
+          <table className="cardify">
+            <thead><tr><th>{k.kind}</th><th>{k.holds}</th><th>{k.setBy}</th><th>{k.release}</th><th>{k.active}</th></tr></thead>
+            <tbody>
+              {view.kinds.map((row) => (
+                <tr key={row.kind}>
+                  <td className="card-title"><strong>{row.title}</strong></td><td className="text-cell" data-label={k.holds}>{row.holds}</td><td className="text-cell" data-label={k.setBy}>{row.setBy}</td><td className="text-cell" data-label={k.release}>{row.release}</td>
+                  <td className="num" data-label={k.active}>{row.active > 0 ? <Badge tone="stop">{row.active}</Badge> : row.active}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      {/* Шаг 157 (#28): журнал аудита — раскрываемым разделом; период, выгрузка и страницы — прежние */}
+      <details className="card more-block stop-audit" open={blocks.isOpen('audit')} onToggle={blocks.toggle('audit')}>
+        <summary>{s.auditTitle}</summary>
         {audit ? (
           <div className="toolbar field-toolbar">
             <PeriodPicker value={audit.period} maxDays={AUDIT_KEEP_DAYS} onChange={audit.onPeriod} />
@@ -188,7 +209,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
           </div>
         )}
         {audit && view.auditPage ? <Pager page={view.auditPage} query={audit.query} onQuery={audit.onQuery} /> : null}
-      </section>
+      </details>
       <Gaps gaps={view.gaps} />
     </section>
   );

@@ -2195,6 +2195,9 @@ export const es: Messages = {
       activeDistrusts: 'Desconfianzas activas', distrustHistory: 'Desconfianzas levantadas', releaseDistrust: 'Volver a confiar',
       distrustHolds: 'Retiene todos los precios, incluidos los fijos y los basados en margen, y el umbral de precio del canal',
       haltManualOnly: (channel: string) => `${channel} no ofrece muestras de la competencia: solo una persona puede levantar esta suspensión`,
+      // Шаг 157 (#28): строка состояния Stop pricing и одна строка, пока системных остановок нет
+      headline: { running: 'Los precios están funcionando', stopped: (scope: string, by: string, when: string, note: string) => `Detenido: ${scope} — por ${by}, ${when}. Nota: ${note}`, more: (n: number) => `${n} ${n === 1 ? 'detención más' : 'detenciones más'}`, halts: (n: number) => `${n} ${n === 1 ? 'sitio suspendido' : 'sitios suspendidos'} por el sistema`, distrusts: (n: number) => `${n} ${n === 1 ? 'canal no confiable' : 'canales no confiables'} según el sistema` },
+      systemNone: 'Ningún sitio suspendido y ningún canal marcado como no confiable.', systemHow: 'Cómo detiene el sistema los precios',
       kindsTitle: 'Tres tipos de detención',
       kindsColumns: { kind: 'Tipo', holds: 'Qué retiene', setBy: 'Quién la activa', release: 'Cómo termina', active: 'Activas' },
       kinds: {

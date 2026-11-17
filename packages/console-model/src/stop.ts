@@ -2,7 +2,7 @@ import { can, type StopScope } from '@repracer/pricing-model';
 import type { PageInfo } from './page.ts';
 import type { Messages } from './i18n/index.ts';
 import type { ConsoleAuditRow, ConsoleDistrustRow } from '@repracer/pricing-pipeline';
-import { channelOf, gap, storefrontChip, storefrontName, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
+import { channelOf, gap, storefrontChip, storefrontName, type ConsoleHalt, type ConsoleScope, type ConsoleStop, type Gap, type StandWorld, type StorefrontChip, type Tone } from './world.ts';
 
 /**
  * Экран E: три вида остановки, у каждого своя таблица, своя причина и свой путь снятия.
@@ -113,6 +113,10 @@ export interface StopView {
   auditPage?: PageInfo;
   notStopped: string[];
   gaps: Gap[];
+  /** Шаг 157 (#28): строка состояния экрана — работает или что остановлено, кем, когда, с какой запиской; системные остановки — следом */
+  headline: { tone: Tone; text: string };
+  /** Шаг 157 (#28): системных остановок и недоверия нет и не было — разделы одной строкой, пояснения по раскрытию */
+  systemQuiet: boolean;
 }
 
 export interface StopPlan {
@@ -271,7 +275,29 @@ export function stopView(world: StandWorld, audit: readonly ConsoleAuditRow[], m
     audit: auditCards(world, audit, m),
     notStopped: m.ui.stop.notStopped,
     gaps: world.state.distrusts.length > 0 ? [gap(m, 'DISTRUST_DETAILS')] : [],
+    headline: stopHeadline(world, m),
+    systemQuiet: world.state.halts.length === 0 && world.state.distrusts.length === 0,
   };
+}
+
+/**
+ * Шаг 157 (#28): одна строка состояния Stop pricing. Остановка всего пространства — первой (она перекрывает остальные), её кто, когда и
+ * записка — те же, что у карточки; ещё остановки — числом; системные остановки и недоверие — следом. Тон: человек остановил — stop,
+ * только система — внимание, ничего — ok
+ */
+function stopHeadline(world: StandWorld, m: Messages): { tone: Tone; text: string } {
+  const h = m.ui.stop.headline;
+  const active = world.state.stops.filter((x) => x.releasedAt === null).sort((a, b) => Number(b.scope === 'TENANT') - Number(a.scope === 'TENANT'));
+  const halts = world.state.halts.filter((x) => x.releasedAt === null).length;
+  const distrusts = world.state.distrusts.filter((x) => x.releasedAt === null).length;
+  const first = active[0] ? stopCard(world, active[0], m) : null;
+  const parts = [
+    first ? h.stopped(first.scopeLabel, first.by, first.since, first.note) : h.running,
+    ...(active.length > 1 ? [h.more(active.length - 1)] : []),
+    ...(halts > 0 ? [h.halts(halts)] : []),
+    ...(distrusts > 0 ? [h.distrusts(distrusts)] : []),
+  ];
+  return { tone: first ? 'stop' : halts + distrusts > 0 ? 'warn' : 'ok', text: parts.join(' · ') };
 }
 
 /**

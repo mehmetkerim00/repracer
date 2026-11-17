@@ -864,6 +864,11 @@ ul.channels > li.card ul { margin: var(--space-2) 0 0; }
 /* Аккаунты каналов: карточка с двумя колонками */
 .accounts { display: grid; gap: var(--space-3); }
 .accounts > .account-row { margin: 0; }
+/* шаг 157 (#28): строка состояния Stop pricing — та же точка тона, что у строки состояния шага 146; системные остановки без случаев — одной строкой */
+.stop-headline { margin: var(--space-3) 0 var(--space-4); }
+.stop-system-quiet { margin: var(--space-4) 0; }
+.stop-system-quiet > p { margin: 0 0 var(--space-1); }
+section.stop-human + .stop-system-quiet, .stop-system-quiet + details { margin-top: var(--space-4); }
 /* шаг 156 (#25): строка аккаунта — имя, пилюли режима и настройки, свежесть; разделы — внутри раскрытия, прежней сеткой */
 .account-row > summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); cursor: pointer; list-style-position: inside; }
 .account-row > summary .account-title { margin: 0; }

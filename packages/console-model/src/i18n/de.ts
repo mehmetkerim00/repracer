@@ -2129,6 +2129,9 @@ export const de: Messages = {
       activeDistrusts: 'Aktives Misstrauen', distrustHistory: 'Aufgehobenes Misstrauen', releaseDistrust: 'Wieder vertrauen',
       distrustHolds: 'Hält alle Preise, auch Fest- und Margenpreise, und die Kanal-Preisschwelle',
       haltManualOnly: (channel: string) => `${channel} liefert keine Wettbewerbsstichprobe: nur eine Person hebt dieses Anhalten auf`,
+      // Шаг 157 (#28): строка состояния Stop pricing и одна строка, пока системных остановок нет
+      headline: { running: 'Preisänderungen laufen', stopped: (scope: string, by: string, when: string, note: string) => `Gestoppt: ${scope} — von ${by}, ${when}. Notiz: ${note}`, more: (n: number) => `${n} ${n === 1 ? 'weiterer Stopp' : 'weitere Stopps'}`, halts: (n: number) => `${n} ${n === 1 ? 'Storefront' : 'Storefronts'} vom System angehalten`, distrusts: (n: number) => `${n} ${n === 1 ? 'Kanal' : 'Kanäle'} vom System misstraut` },
+      systemNone: 'Keine vom System angehaltenen Storefronts und keine misstrauten Kanäle.', systemHow: 'Wie das System Preise stoppt',
       kindsTitle: 'Drei Arten des Stoppens',
       kindsColumns: { kind: 'Art', holds: 'Was sie hält', setBy: 'Wer sie setzt', release: 'Wie sie endet', active: 'Aktiv' },
       kinds: {

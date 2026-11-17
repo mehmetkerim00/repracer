@@ -2195,6 +2195,9 @@ export const fr: Messages = {
       activeDistrusts: 'Défiances actives', distrustHistory: 'Défiances levées', releaseDistrust: 'Refaire confiance',
       distrustHolds: 'Bloque tous les prix, y compris les prix fixes et à marge, ainsi que le seuil de prix du canal',
       haltManualOnly: (channel: string) => `${channel} ne fournit pas d’échantillon de concurrents : seule une personne peut lever cette suspension`,
+      // Шаг 157 (#28): строка состояния Stop pricing и одна строка, пока системных остановок нет
+      headline: { running: 'Les prix fonctionnent', stopped: (scope: string, by: string, when: string, note: string) => `Arrêté : ${scope} — par ${by}, ${when}. Note : ${note}`, more: (n: number) => `${n} ${n === 1 ? 'autre arrêt' : 'autres arrêts'}`, halts: (n: number) => `${n} ${n === 1 ? 'site suspendu' : 'sites suspendus'} par le système`, distrusts: (n: number) => `${n} ${n === 1 ? 'canal en défiance' : 'canaux en défiance'} par le système` },
+      systemNone: 'Aucun site suspendu et aucun canal en défiance.', systemHow: 'Comment le système arrête les prix',
       kindsTitle: 'Trois types d’arrêt',
       kindsColumns: { kind: 'Type', holds: 'Ce qu’il bloque', setBy: 'Qui le pose', release: 'Comment il prend fin', active: 'Actifs' },
       kinds: {
