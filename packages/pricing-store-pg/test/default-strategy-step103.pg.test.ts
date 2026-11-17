@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { decide, NO_GUARDRAILS } from '@repracer/price-gate';
 import type { CostInputs } from '@repracer/pricing-model';
-import { inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
+import { createPool, inTenant, PgPricingStore, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
 /**
@@ -301,4 +301,31 @@ test('step 128 [Р-250]: on a live account a new offer with unread Amazon bounds
   assert.equal(s.pricing_strategy_id, null, 'live: the default is not assigned to an offer with unread Amazon bounds');
   const row = (await journal(amazon)).filter((r) => r.write_scope_id === s.write_scope_id);
   assert.equal(JSON.stringify(row.map((r) => [r.outcome, r.reason])), JSON.stringify([['NOT_ASSIGNED', 'CHANNEL_PRICING']]));
+});
+
+/**
+ * Шаг 155 (находка выкладки QA-A 2026-11-17): журнал стенда QA-A с 13 ноября — «demo US new offers failed: permission denied for table
+ * tenant». Страж `write_scope_guard` (0005) держал подзапрос к `tenant_data.tenant` в одном выражении с проверкой режима Smart Pricing.
+ * Правило умолчания назначает стратегию новичку узкой ролью `repracer_default_strategy` — UPDATE единицы в транзакции обнаружения, — а
+ * права на `tenant` у неё нет. На своём плане PL/pgSQL выражение сворачивается (режим не Smart Pricing), на ОБЩЕМ (с шестого исполнения
+ * в сессии) проверка прав идёт на весь запрос — и обнаружение отказывает: новые предложения продавца не появляются никогда. Класс шага
+ * 61 (0160). Общий план — принудительно, параметром сессии пула: число исполнений до перехода зависит от статистики
+ */
+test('step 155: a new offer with a default strategy is discovered on a generic plan — the narrow role does not need the tenant table', async () => {
+  const u = new URL(db.url('svc_app'));
+  u.searchParams.set('options', '-c plan_cache_mode=force_generic_plan');
+  const generic = createPool(u.toString(), { max: 1, applicationName: 'repracer-step155' });
+  try {
+    const plan = (await generic.query(`SELECT current_setting('plan_cache_mode') AS mode`)).rows[0].mode;
+    assert.equal(plan, 'force_generic_plan', 'the pool really plans generically');
+    const genericStore = new PgPricingStore(generic, { adminPool: admin });
+    const fixed = kaufland.ids.dbId('st-fixed');
+    const set = await genericStore.setDefaultStrategy(kaufland.tenantId, kaufland.ids.dbId(KAUFLAND), fixed, actor(kaufland));
+    assert.equal(set.status, 'SET');
+    const created = await outcome(genericStore.recordDiscoveredOffers(kaufland.tenantId, kaufland.ids.dbId(KAUFLAND), [kauflandOffer('SYN-155-NEW-1', '31551'), kauflandOffer('SYN-155-NEW-2', '31552')]));
+    assert.equal(created, 'accepted', 'discovery with the default rule on a generic plan');
+    for (const sku of ['SYN-155-NEW-1', 'SYN-155-NEW-2']) assert.equal((await scopeOf(kaufland, sku))?.pricing_strategy_id, fixed, `${sku}: the default strategy is assigned`);
+  } finally {
+    await generic.end();
+  }
 });
