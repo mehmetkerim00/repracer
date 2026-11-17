@@ -1662,6 +1662,8 @@ export const fr: Messages = {
       marginAtLeast: (pct: string) => `marge d’au moins ${pct}`, marginSuspended: 'ne s’applique pas tant que le déstockage est actif', effectiveFloor: 'Plancher effectif', costAndFees: 'Coût et commissions',
       columns: { part: 'Composante', amount: (currency: string) => `Montant, ${currency}`, formula: 'Mode de calcul' },
       exactMargin: (text: string) => `Marge exacte : ${text}.`, balance: (ok: boolean): string => (ok ? 'Taxe, commissions, coût et marge correspondent au prix au centime près.' : 'Taxe, commissions, coût et marge NE correspondent PAS au prix — erreur de calcul.'),
+      // Шаг 149 (#27): сверху — главное; расчёт пола — панелью
+      glance: 'En un coup d’œil', calculation: 'Comment le plancher est calculé',
       calculator: 'Vérifier avec le calculateur de commissions du canal',
       fxText: (rate: string, quote: string, date: string, from: string, to: string, up: boolean) => `1 EUR = ${rate} ${quote} (taux BCE du ${date}) : ${from} → ${to}, arrondi ${up ? 'au centime supérieur' : 'au centime le plus proche'}`,
       noPrice: 'aucun prix', price: 'Prix sur le site', priceGross: 'TTC, TVA incluse', priceNet: 'HT, taxe de vente ajoutée au paiement',

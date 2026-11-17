@@ -1604,6 +1604,8 @@ export const de: Messages = {
       marginAtLeast: (pct: string) => `Marge mindestens ${pct}`, marginSuspended: 'gilt nicht, solange der Abverkauf läuft', effectiveFloor: 'Wirksame Untergrenze', costAndFees: 'Kosten und Gebühren',
       columns: { part: 'Bestandteil', amount: (currency: string) => `Betrag, ${currency}`, formula: 'Berechnung' },
       exactMargin: (text: string) => `Exakte Marge: ${text}.`, balance: (ok: boolean) => (ok ? 'Steuer, Gebühren, Kosten und Marge ergeben centgenau den Preis.' : 'Steuer, Gebühren, Kosten und Marge ergeben NICHT den Preis — Rechenfehler.'),
+      // Шаг 149 (#27): сверху — главное; расчёт пола — панелью
+      glance: 'Auf einen Blick', calculation: 'Wie die Untergrenze berechnet wird',
       calculator: 'Abgleich mit dem Gebührenrechner des Kanals',
       fxText: (rate: string, quote: string, date: string, from: string, to: string, up: boolean) => `1 EUR = ${rate} ${quote} (EZB-Kurs vom ${date}): ${from} → ${to}, ${up ? 'aufgerundet' : 'kaufmännisch gerundet'}`,
       noPrice: 'kein Preis', price: 'Storefront-Preis', priceGross: 'brutto, inkl. USt.', priceNet: 'netto, Sales Tax an der Kasse',

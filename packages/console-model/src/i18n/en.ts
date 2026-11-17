@@ -1674,6 +1674,8 @@ export const en = {
       marginAtLeast: (pct: string) => `margin at least ${pct}`, marginSuspended: 'not applied while clearance is on', effectiveFloor: 'Effective floor', costAndFees: 'Cost and fees',
       columns: { part: 'Component', amount: (currency: string) => `Amount, ${currency}`, formula: 'How it is calculated' },
       exactMargin: (text: string) => `Exact margin: ${text}.`, balance: (ok: boolean): string => (ok ? 'Tax, fees, cost and margin add up to the price to the cent.' : 'Tax, fees, cost and margin do NOT add up to the price — calculation error.'),
+      // Шаг 149 (#27): сверху — главное; расчёт пола — панелью
+      glance: 'At a glance', calculation: 'How the floor is calculated',
       calculator: 'Check against the channel’s fee calculator',
       fxText: (rate: string, quote: string, date: string, from: string, to: string, up: boolean) => `1 EUR = ${rate} ${quote} (ECB rate of ${date}): ${from} → ${to}, rounded ${up ? 'up' : 'to the nearest cent'}`,
       noPrice: 'no price', price: 'Storefront price', priceGross: 'gross, VAT included', priceNet: 'net, sales tax added at checkout',

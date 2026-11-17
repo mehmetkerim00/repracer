@@ -1,9 +1,9 @@
 import { convertMinor, marginBpAtPrice, storefrontPriceForMarginBp, type CostInputs, type FxApplied } from '@repracer/pricing-model';
 import type { ClearanceState } from '@repracer/pricing-pipeline';
 import type { Messages } from './i18n/index.ts';
-import { boundText } from './products.ts';
+import { boundText, enabledCell } from './products.ts';
 import { channelBoundsView, type ChannelBoundsView } from './channel-bounds.ts';
-import { gap, scopeById, unitOf, type ConsoleScope, type Gap, type StandWorld, type UnitRef } from './world.ts';
+import { gap, scopeById, unitOf, type ConsoleScope, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
 
 /**
  * Экран D: min_price и max_price, пол по марже и разбивка цены до цента — налог, комиссии, себестоимость, курс.
@@ -34,6 +34,13 @@ export interface BoundsView {
   currency: string;
   priceBasis: string;
   taxRegime: string;
+  /** Шаг 149 (#27): сверху — текущая цена (пусто — словами, шаг 148) и статус той же ячейкой, что на Offers */
+  current: { amount: string; missing: boolean };
+  status: StatusCell;
+  /** Шаг 149 (шаг 142): распродажа без действующей оценки комиссии — подписанный убыток может быть устаревшим */
+  feeExpired: string | null;
+  /** Шаг 149 (#27): панель расчёта пола раскрыта сразу, только когда в ней есть что объяснить */
+  calculationOpen: boolean;
   minPrice: { amount: string; minor: number | null; source: string };
   maxPrice: { amount: string; minor: number | null; source: string };
   marginFloor: { minMarginBp: string | null; amount: string | null; minor: number | null; unavailable: string | null };
@@ -80,6 +87,8 @@ export interface BoundsExtra {
   returnSteps?: { steps: number; minutes: number } | null;
   canManage?: boolean;
   people?: Readonly<Record<string, string>>;
+  /** Шаг 149 (#27): режим аккаунта предложения — статус «On · shadow mode», как на Offers */
+  writeMode?: 'SHADOW' | 'LIVE' | null;
 }
 
 const BP = 10_000n;
@@ -248,15 +257,22 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages,
     return 'unavailable' in r ? null : r;
   };
 
+  const frozen = floor.aboveCeiling && scope.bounds.max.status === 'RESOLVED' ? b.frozen(money(floor.minor), money(scope.bounds.max.amountMinor)) : null;
+  const costUnavailable = 'unavailableCause' in converted ? (m.values[converted.unavailableCause as keyof typeof m.values] ?? converted.unavailableCause) : null;
   return {
     worldId: world.id, unit: unitOf(world, scope, m), currency: c,
     priceBasis: m.values[scope.basis],
     taxRegime: m.values[scope.taxRegime],
+    current: { amount: scope.currentPriceMinor === null ? m.ui.products.noPriceYet : money(scope.currentPriceMinor), missing: scope.currentPriceMinor === null },
+    status: enabledCell(scope, m, world, extra.writeMode === 'SHADOW'),
+    feeExpired: scope.clearance && scope.cost === null ? m.ui.products.feeExpired : null,
+    // Пол выше потолка, пол маржи не вычисляется (кроме распродажи, где он не действует законно) или нет себестоимости — раскрыто сразу
+    calculationOpen: frozen !== null || (floor.source !== 'CLEARANCE' && floor.marginUnavailableCause !== null && floor.marginUnavailableCause !== undefined) || costUnavailable !== null || cost === null,
     minPrice: { amount: boundText(scope.bounds.min, c, m), minor: floor.minMinor, source: source(scope.bounds.min) },
     maxPrice: { amount: boundText(scope.bounds.max, c, m), minor: scope.bounds.max.status === 'RESOLVED' ? scope.bounds.max.amountMinor : null, source: source(scope.bounds.max) },
     marginFloor,
     effectiveFloor: { amount: money(floor.minor), minor: floor.minor, source: floorSource },
-    frozen: floor.aboveCeiling && scope.bounds.max.status === 'RESOLVED' ? b.frozen(money(floor.minor), money(scope.bounds.max.amountMinor)) : null,
+    frozen,
     channelBounds: channelBoundsView(world, scope, m),
     clearance,
     // Р-138: оценка продавца и тарифная таблица показываются рядом; помечена та, по которой считается пол
@@ -270,7 +286,7 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages,
           ]
         : [],
       fx: cost?.fx ? fxText(cost.fx, m) : null,
-      unavailable: 'unavailableCause' in converted ? (m.values[converted.unavailableCause as keyof typeof m.values] ?? converted.unavailableCause) : null,
+      unavailable: costUnavailable,
     },
     floorBreakdown: breakdown(b.floorBreakdown, floor.minor),
     currentBreakdown: breakdown(b.currentBreakdown, scope.currentPriceMinor),

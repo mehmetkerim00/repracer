@@ -1662,6 +1662,8 @@ export const es: Messages = {
       marginAtLeast: (pct: string) => `margen de al menos ${pct}`, marginSuspended: 'no se aplica mientras la liquidación está activa', effectiveFloor: 'Piso vigente', costAndFees: 'Costo y comisiones',
       columns: { part: 'Componente', amount: (currency: string) => `Importe, ${currency}`, formula: 'Cómo se calcula' },
       exactMargin: (text: string) => `Margen exacto: ${text}.`, balance: (ok: boolean): string => (ok ? 'Impuesto, comisiones, costo y margen suman el precio al centavo.' : 'Impuesto, comisiones, costo y margen NO suman el precio: error de cálculo.'),
+      // Шаг 149 (#27): сверху — главное; расчёт пола — панелью
+      glance: 'De un vistazo', calculation: 'Cómo se calcula el piso',
       calculator: 'Compárelo con la calculadora de comisiones del canal',
       fxText: (rate: string, quote: string, date: string, from: string, to: string, up: boolean) => `1 EUR = ${rate} ${quote} (tipo de cambio del BCE, ${date}): ${from} → ${to}, redondeado ${up ? 'hacia arriba' : 'al centavo más cercano'}`,
       noPrice: 'sin precio', price: 'Precio en el sitio', priceGross: 'bruto, IVA incluido', priceNet: 'neto, impuesto sobre las ventas al pagar',

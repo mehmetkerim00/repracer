@@ -2,9 +2,12 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, DateTimeField, errorText, Gaps, href, Load, NotFound, Pager, SectionAnchor, useMessages, UnitName } from '../components.tsx';
+import { Badge, Cell, DateTimeField, errorText, Gaps, href, Load, NotFound, Pager, SectionAnchor, useMessages, UnitName } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
+
+/** Шаг 149 (#27, скрин владельца): пустое значение поля — нейтральный прочерк, а не «no value»; почему пусто — подписью поля */
+const EMPTY = '–';
 
 /**
  * Шаг 102 [Р-227]: режим распродажи — осознанная продажа ниже безубыточности. Форма считает убыток на штуку и общий при текущем
@@ -75,9 +78,9 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
             <Field label={`${t.floor} (${c.currency})`} caption={t.floorHint}>
               <input type="text" inputMode="decimal" value={floor} disabled={busy} onChange={(e) => setFloor(e.target.value)} />
             </Field>
-            <Field label={t.breakEven} caption={c.breakEven === null ? t.breakEvenUnknown : null}><output className="field-value">{c.breakEven ?? m.ui.common.noValue}</output></Field>
+            <Field label={t.breakEven} caption={c.breakEven === null ? t.breakEvenUnknown : null}><output className={`field-value${c.breakEven === null ? ' muted' : ''}`}>{c.breakEven ?? EMPTY}</output></Field>
             <Field label={t.lossPerUnit} caption={loss !== null ? (c.stockPieces !== null ? `${t.maxLoss}: −${money(loss * c.stockPieces)} ${t.stock(c.stockPieces)}` : t.stockUnknown) : null}>
-              <output className="field-value">{floorMinor === null ? m.ui.common.noValue : loss === null ? t.noLoss : `−${money(loss)}`}</output>
+              <output className={`field-value${floorMinor === null ? ' muted' : ''}`}>{floorMinor === null ? EMPTY : loss === null ? t.noLoss : `−${money(loss)}`}</output>
             </Field>
           </FieldGrid>
           {belowChannelMin ? <p className="notice warn channel-min-warning" role="alert">{t.channelMinWarning(money(floorMinor!), money(channelMin!))}</p> : null}
@@ -176,6 +179,8 @@ export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakd
 export function BoundsScreenView({ view, onChanged = () => undefined }: { view: BoundsView; onChanged?: () => void }) {
   const m = useMessages();
   const b = m.ui.bounds;
+  // Шаг 149: раскрытие — по модели (есть что объяснить), дальше — выбор зрителя на этой странице
+  const [calcOpen, setCalcOpen] = useState(view.calculationOpen);
   return (
     <section>
       <p className="back"><a href={href(view.worldId, 'costs')}>{b.back}</a></p>
@@ -185,47 +190,70 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
       <p className="page-actions"><a className="button-link" href={href(view.worldId, 'costs', 'edit', view.unit.writeScopeId)}>{b.changeFloor}</a></p>
       {/* Шаг 102 [Р-227]: пол выше потолка — ни одна цена не проходит; продавцу видно, почему цены стоят, и что сделать */}
       {view.frozen ? <p className="notice frozen" role="status">{view.frozen}</p> : null}
-      <div className="cards">
-        <div className="card emphasis"><h3>{b.effectiveFloor}</h3><p className="big">{view.effectiveFloor.amount}</p><p className="small muted">{view.effectiveFloor.source}</p></div>
-        <div className="card"><h3>{b.minPrice}</h3><p className="big">{view.minPrice.amount}</p><p className="small muted">{view.minPrice.source}</p></div>
-        <div className="card">
-          <h3>{b.minMargin}</h3>
-          {view.marginFloor.minMarginBp === null
-            ? <p className="muted">{b.marginNotSet}</p>
-            : <><p className="big">{view.marginFloor.amount ?? m.ui.common.noValue}</p><p className="small muted">{b.marginAtLeast(view.marginFloor.minMarginBp)}{view.marginFloor.unavailable ? `: ${view.marginFloor.unavailable}` : ''}</p></>}
-        </div>
-        <div className="card"><h3>{b.maxPrice}</h3><p className="big">{view.maxPrice.amount}</p><p className="small muted">{view.maxPrice.source}</p></div>
+      {/*
+        Шаг 149 (#27, Р-254): сверху — главное: действующий пол, текущая цена, статус (тот же, что на Offers) и максимальная цена; рядом — рамки
+        цены канала с их предупреждениями. На ≥ 1012 px — две колонки, ниже — одна
+      */}
+      <div className="floor-top">
+        <section className="card floor-glance">
+          <h3>{b.glance}</h3>
+          <div className="verdict-price">{view.effectiveFloor.amount}</div>
+          <p className="small muted">{b.effectiveFloor} · {view.effectiveFloor.source}</p>
+          <dl className="receipt-summary">
+            <div><dt>{m.ui.products.columns.current}</dt><dd className={view.current.missing ? 'muted' : 'cur'}>{view.current.amount}</dd></div>
+            <div><dt>{m.ui.products.columns.status}</dt><dd><Cell cell={view.status} /></dd></div>
+            <div><dt>{b.maxPrice}</dt><dd className={view.maxPrice.minor === null ? 'muted' : 'cur'}>{view.maxPrice.minor === null ? m.ui.products.notSet : view.maxPrice.amount}</dd></div>
+          </dl>
+          {/* Шаг 149 (шаг 142): распродажа без действующей оценки комиссии — подписанный убыток может быть устаревшим */}
+          {view.feeExpired ? <p className="notice warn fee-expired" role="status">{view.feeExpired}</p> : null}
+        </section>
+        <ChannelBoundsSection view={view} />
       </div>
-
-      <ChannelBoundsSection view={view} />
 
       <ClearanceSection view={view} onChanged={onChanged} />
 
-      {/* Шаг 79: себестоимость и комиссии — карточкой */}
-      <section className="card">
-        <h3>{b.costAndFees}</h3>
-        {view.cost.unavailable ? <p className="gap-note">{view.cost.unavailable}</p> : (
-          <ul className="plain cost-lines">
-            {view.cost.lines.map((l) => <li key={l.key}>{l.label}{m.colon}<strong>{l.amount}</strong> <span className="small muted">({l.formula})</span></li>)}
-          </ul>
-        )}
-        {view.feeEstimates.length > 0 ? (
-          <ul className="fee-estimates plain">
-            {/* Р-138: число продавца и тарифная таблица — рядом; помечено то, по которому считается пол */}
-            {view.feeEstimates.map((f) => (
-              <li key={f.source} className={f.used ? 'used' : 'muted'}>{f.text}{f.used ? ` — ${b.feeUsed}` : ''}</li>
-            ))}
-          </ul>
-        ) : null}
-      </section>
+      {/*
+        Шаг 149: расчёт пола — составляющие (минимальная цена, минимальная маржа, себестоимость и комиссии, разбивки, калькулятор) — панелью.
+        Свёрнута, кроме случаев, когда в ней есть что объяснить; содержимое свёрнутой — на странице
+      */}
+      <details className="card more-block calc" open={calcOpen} onToggle={(e) => setCalcOpen(e.currentTarget.open)}>
+        <summary>{b.calculation}</summary>
+        <div className="cards">
+          <div className="card"><h3>{b.minPrice}</h3><p className="big">{view.minPrice.amount}</p><p className="small muted">{view.minPrice.source}</p></div>
+          <div className="card">
+            <h3>{b.minMargin}</h3>
+            {view.marginFloor.minMarginBp === null
+              ? <p className="muted">{b.marginNotSet}</p>
+              : <><p className={view.marginFloor.amount === null ? 'big muted' : 'big'}>{view.marginFloor.amount ?? EMPTY}</p><p className="small muted">{b.marginAtLeast(view.marginFloor.minMarginBp)}{view.marginFloor.unavailable ? `: ${view.marginFloor.unavailable}` : ''}</p></>}
+          </div>
+        </div>
 
-      {view.floorBreakdown ? <BreakdownTable breakdown={view.floorBreakdown} currency={view.currency} /> : null}
-      {view.currentBreakdown ? <BreakdownTable breakdown={view.currentBreakdown} currency={view.currency} /> : null}
+        {/* Шаг 79: себестоимость и комиссии — карточкой */}
+        <section className="card">
+          <h3>{b.costAndFees}</h3>
+          {view.cost.unavailable ? <p className="gap-note">{view.cost.unavailable}</p> : (
+            <ul className="plain cost-lines">
+              {view.cost.lines.map((l) => <li key={l.key}>{l.label}{m.colon}<strong>{l.amount}</strong> <span className="small muted">({l.formula})</span></li>)}
+            </ul>
+          )}
+          {view.feeEstimates.length > 0 ? (
+            <ul className="fee-estimates plain">
+              {/* Р-138: число продавца и тарифная таблица — рядом; помечено то, по которому считается пол */}
+              {view.feeEstimates.map((f) => (
+                <li key={f.source} className={f.used ? 'used' : 'muted'}>{f.text}{f.used ? ` — ${b.feeUsed}` : ''}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
 
-      <section className="card">
-        <h3>{b.calculator}</h3>
-        <ol>{view.calculatorCheck.map((c) => <li key={c}>{c}</li>)}</ol>
-      </section>
+        {view.floorBreakdown ? <BreakdownTable breakdown={view.floorBreakdown} currency={view.currency} /> : null}
+        {view.currentBreakdown ? <BreakdownTable breakdown={view.currentBreakdown} currency={view.currency} /> : null}
+
+        <section className="card">
+          <h3>{b.calculator}</h3>
+          <ol>{view.calculatorCheck.map((c) => <li key={c}>{c}</li>)}</ol>
+        </section>
+      </details>
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -291,5 +319,5 @@ function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId
   const m = useMessages();
   const [resource, retry] = useResource<BoundsView>(worldPath(worldId, 'bounds', writeScopeId), m.locale);
   const missing = <NotFound title={m.ui.bounds.missingTitle} text={m.ui.bounds.missingText} back={m.ui.bounds.back} href={href(worldId, 'costs')} />;
-  return <Load shape="cards" resource={resource} retry={retry} notFound={missing}>{(view) => <BoundsScreenView view={view} onChanged={retry} />}</Load>;
+  return <Load shape="cards" resource={resource} retry={retry} notFound={missing}>{(view) => <BoundsScreenView key={view.unit.writeScopeId} view={view} onChanged={retry} />}</Load>;
 }

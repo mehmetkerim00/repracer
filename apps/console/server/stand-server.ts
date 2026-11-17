@@ -879,12 +879,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           return null;
         }
       };
-      const [state, pieces] = await Promise.all([live.store.clearanceOf(w.tenantId, writeScopeId), stockPieces()]);
+      const [state, pieces, accounts] = await Promise.all([live.store.clearanceOf(w.tenantId, writeScopeId), stockPieces(), live.store.channelAccounts(live.tenantId)]);
       const computed = effectiveFloor({ ...scope, clearance: null }, w).minor;
       const paceMinutes = Math.round((descriptorOf(channelOf(w, scope.channelAccountId)).scheduledRecomputeSeconds ?? DEFAULT_SCHEDULED_RECOMPUTE_SECONDS) / 60);
       const steps = computed !== null && scope.currentPriceMinor !== null ? ladderSteps(scope.currentPriceMinor, computed, scope.maxStepChangeBp ?? null) : 0;
       return boundsView(w, writeScopeId, m, {
         clearance: state, stockPieces: pieces, returnSteps: { steps, minutes: steps * paceMinutes }, canManage: can(viewer.role, 'MANAGE_PRICING'), people: w.people,
+        // Шаг 149 (#27): статус наверху страницы — тот же, что на Offers, с тенью
+        writeMode: accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.writeMode ?? null,
       });
     };
     /** Единицы среза вмешательств: решения, намерения, снятые записи — отчёты отклонённых и опасных изменений */

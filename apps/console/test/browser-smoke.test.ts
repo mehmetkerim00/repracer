@@ -2945,3 +2945,55 @@ test('step 148 (#27): Offers — the Buy Box holder by default, no maximum price
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
+
+/**
+ * Шаг 149 (#27, Р-254): страница «Bounds and price floor» — сверху «At a glance» (пол, текущая цена, статус, максимум) и рамки канала двумя
+ * колонками на 1440; расчёт пола свёрнут, но его составляющие — на странице; нажатие раскрывает; на 375 — одна колонка без бокового прокрута
+ */
+test('step 149 (#27): the floor page leads with the floor, the current price and the status; the calculation is folded but on the page; two columns at 1440, one at 375', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.bounds;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+  await settled(b, 'offers');
+  const page = await b.evaluate<string>(`document.querySelector('table.products tbody tr a.secondary-link').getAttribute('href')`);
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${width}: offers`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(page)}, true)`);
+      await settled(b, `${width}: floor page`);
+      await waitFor(b, `!!document.querySelector('.floor-glance')`, `${width}: the glance card`);
+      const seen = await b.evaluate<{ first: string; labels: string[]; open: boolean; inPanel: string[]; sameRow: boolean }>(`(() => {
+        const glance = document.querySelector('.floor-glance'); const channel = document.querySelector('.floor-top > .channel-bounds'); const calc = document.querySelector('details.calc');
+        const first = [...document.querySelectorAll('.world-content section > .card, .world-content section > .floor-top, .world-content section > details')][0];
+        return { first: first ? first.className : '', labels: [...glance.querySelectorAll('dt')].map((x) => x.textContent.trim()), open: calc.open,
+          inPanel: [...calc.querySelectorAll('h3')].map((h) => h.textContent.trim()),
+          sameRow: Math.abs(glance.getBoundingClientRect().top - channel.getBoundingClientRect().top) < 2 }; })()`);
+      assert.equal(seen.first, 'floor-top', `${width}: the glance row comes first`);
+      assert.deepEqual(seen.labels, [en.ui.products.columns.current, en.ui.products.columns.status, t.maxPrice], `${width}: price, status, maximum at a glance`);
+      assert.equal(seen.open, false, `${width}: a normal floor keeps the calculation folded`);
+      assert.ok([t.minPrice, t.minMargin, t.costAndFees, t.calculator].every((h) => seen.inPanel.includes(h)), `${width}: every floor component stays on the page — ${seen.inPanel.join(' | ')}`);
+      // Геометрия ряда — в сообщении: колонки сетки, верх и отступ каждой карточки
+      const geo = await b.evaluate<string>(`(() => { const top = document.querySelector('.floor-top'); return getComputedStyle(top).gridTemplateColumns + ' | ' + [...top.children].map((c) => c.className + '@' + Math.round(c.getBoundingClientRect().top) + ' mt=' + getComputedStyle(c).marginTop).join(' ; '); })()`);
+      assert.equal(seen.sameRow, width === 1440, `${width}: ${width === 1440 ? 'two columns' : 'one column'} — ${geo}`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+      await b.evaluate(`(document.querySelector('details.calc > summary').click(), true)`);
+      await waitFor(b, `document.querySelector('details.calc').open`, `${width}: a click opens the calculation`);
+    }
+  } finally {
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
