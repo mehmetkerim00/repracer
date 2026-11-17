@@ -163,7 +163,11 @@ test('шаг 68: демо США — решения в долларах, «по�
       assert.ok(strategy.items.some((i) => i.reason && /\$\d+\.\d{2} by \$0\.01/.test(i.reason.text)), `amazon.com: шаг подреза с суммами — ${JSON.stringify(strategy.items)}`);
       // Шаг 143 (аудит UX, 1.1): снимок демо пришёл от симулятора, а не уведомлением Amazon — так и сказано, через консоль как браузер
       const source = changed.trace.steps.find((st) => st.key === 'SNAPSHOT')!.items.find((i) => i.label === en.ui.trace.source)?.value ?? '';
-      assert.equal(source, en.ui.sourceDelivery.line(en.ui.sources.AMAZON_ANY_OFFER_CHANGED, en.ui.sourceDelivery.SIMULATOR), `amazon.com: источник снимка демо — ${source}`);
+      // Шаг 153 (красный push-прогон шага 150): демо подаёт amazon.com снимки и моделью уведомления, и опросом сводки — с шага 115 сводка
+      // основной источник цены. Какой из них дал последнее удержанное решение, решает время прогона (скрытый вход «время»): утверждается
+      // источник Amazon — любой из двух — и ровно способ «simulator», о котором шаг 143
+      const amazonSources = [en.ui.sources.AMAZON_ANY_OFFER_CHANGED, en.ui.sources.AMAZON_COMPETITIVE_SUMMARY];
+      assert.ok(amazonSources.some((x) => source === en.ui.sourceDelivery.line(x, en.ui.sourceDelivery.SIMULATOR)), `amazon.com: источник снимка демо — ${source}`);
       // Та же строка на странице Competition этого предложения
       const page = (await call<{ observed: { source: string } | null }>('GET', `/api/worlds/${w}/competition/${changed.trace.unit!.writeScopeId}?period=7d`, guest)).body;
       assert.ok(page.observed?.source.endsWith(en.ui.sourceDelivery.SIMULATOR), `amazon.com: Competition называет симулятор — ${JSON.stringify(page.observed)}`);
