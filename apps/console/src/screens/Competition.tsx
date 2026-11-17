@@ -76,28 +76,59 @@ export function CompetitionScreenView({ view, period, onPeriod }: { view: Compet
       <h2>{c.pageTitle}</h2>
       <p className="subtitle">{view.unit.label} · {c.subtitle}</p>
       {view.state === 'NO_COMPETITOR_DATA' ? <section className="card"><p className="notice">{view.stateText}</p></section> : <>
-        {/* Нынешняя картина: держатель, наше место и разрыв до победителя */}
-        <section className="card competition-now">
-          <h3>{c.nowTitle}</h3>
-          {view.state === 'NO_SNAPSHOT' ? <p className="muted empty">{view.stateText}</p> : <>
-            <p className="holder"><Badge tone={HOLDER_TONE[view.holder?.kind ?? 'UNKNOWN'] ?? 'unknown'}>{view.holder?.text}</Badge></p>
-            <ul className="plain facts">
-              {view.holder?.why ? <li className="muted">{view.holder.why}</li> : null}
-              {view.buyBoxPrice ? <li>{view.buyBoxPrice}</li> : null}
-              {view.position ? <li>{view.position}</li> : null}
-              {view.gap ? <li>{view.gap}</li> : null}
-              {view.observed ? <li className="muted small">{c.observed} <span className="when" title={view.observed.at}>{view.observed.when}</span> · {view.observed.source}</li> : null}
-            </ul>
+        {/*
+          Шаг 151 (#27, Р-254): сверху ряд из двух колонок на ≥ 1012 px — нынешняя картина (держатель, наше место и разрыв до победителя)
+          и доля Buy Box; таблица конкурентов — во всю ширину своей карточкой
+        */}
+        <div className="competition-top">
+          <section className="card competition-now">
+            <h3>{c.nowTitle}</h3>
+            {view.state === 'NO_SNAPSHOT' ? <p className="muted empty">{view.stateText}</p> : <>
+              <p className="holder"><Badge tone={HOLDER_TONE[view.holder?.kind ?? 'UNKNOWN'] ?? 'unknown'}>{view.holder?.text}</Badge></p>
+              <ul className="plain facts">
+                {view.holder?.why ? <li className="muted">{view.holder.why}</li> : null}
+                {view.buyBoxPrice ? <li>{view.buyBoxPrice}</li> : null}
+                {view.position ? <li>{view.position}</li> : null}
+                {view.gap ? <li>{view.gap}</li> : null}
+                {view.observed ? <li className="muted small">{c.observed} <span className="when" title={view.observed.at}>{view.observed.when}</span> · {view.observed.source}</li> : null}
+              </ul>
+            </>}
+          </section>
+          {/* Доля Buy Box за период — по снимкам, а не по продажам [Р-220]; глубже 45 суток отрезков нет — календарь это говорит */}
+          <section className="card competition-share">
+            <h3>{c.share.title}</h3>
+            <div className="toolbar field-toolbar period-bar">
+              <PeriodPicker value={period} onChange={onPeriod} maxDays={BUYBOX_SHARE_KEEP_DAYS} />
+              {view.share.clipped ? <span className="filters-count">{c.share.limit}</span> : null}
+            </div>
+            {view.share.value !== null ? <p className="big">{view.share.value}</p> : null}
+            <p>{view.share.note}</p>
+            {view.share.coverage ? <p className="small muted">{view.share.coverage}</p> : null}
+            <p className="note">{view.share.caption}</p>
+          </section>
+        </div>
+        {view.state === 'NO_SNAPSHOT' ? null : (
+          <section className="card competition-offers">
+            <h3>{c.offersTitle}</h3>
             <CompetitorTable rows={view.rows} columns={view.columns} shipping={view.columns.shipping} />
-          </>}
-        </section>
+          </section>
+        )}
+        {/* Почему не в Buy Box — только по данным, которые канал назвал; сноска — всегда */}
+        {view.diagnosis ? (
+          <section className="card competition-why">
+            <h3>{c.why.title}</h3>
+            {view.diagnosis.reasons.length > 0 ? <ul className="reasons-list">{view.diagnosis.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : null}
+            <p className="note">{view.diagnosis.footnote}</p>
+          </section>
+        ) : null}
         {/*
           Шаг 109 [Р-234, Р-235]: последняя сводка конкурентов канала (сверка) со своим моментом — Buy Box по группам покупателей с долей
-          просмотров, держатель большинства (он и считается в доле) и купоны конкурентов. Цены она не двигает
+          просмотров, держатель большинства (он и считается в доле) и купоны конкурентов. Цены она не двигает.
+          Шаг 151 (#27): свёрнута — раскрываемой панелью, содержимое на странице и без раскрытия
         */}
         {view.summary ? (
-          <section className="card competition-summary">
-            <h3>{view.summary.title}</h3>
+          <details className="card more-block competition-summary">
+            <summary>{view.summary.title}</summary>
             <p className="muted small">{c.summary.observed} <span className="when" title={view.summary.observed.at}>{view.summary.observed.when}</span></p>
             {view.summary.segments.length > 0 ? <>
               <h4>{c.summary.segmentsTitle}</h4>
@@ -124,27 +155,7 @@ export function CompetitionScreenView({ view, period, onPeriod }: { view: Compet
               {view.summary.couponNote ? <p className="note">{view.summary.couponNote}</p> : null}
             </> : null}
             <p className="note">{view.summary.note}</p>
-          </section>
-        ) : null}
-        {/* Доля Buy Box за период — по снимкам, а не по продажам [Р-220]; глубже 45 суток отрезков нет — календарь это говорит */}
-        <section className="card competition-share">
-          <h3>{c.share.title}</h3>
-          <div className="toolbar field-toolbar period-bar">
-            <PeriodPicker value={period} onChange={onPeriod} maxDays={BUYBOX_SHARE_KEEP_DAYS} />
-            {view.share.clipped ? <span className="filters-count">{c.share.limit}</span> : null}
-          </div>
-          {view.share.value !== null ? <p className="big">{view.share.value}</p> : null}
-          <p>{view.share.note}</p>
-          {view.share.coverage ? <p className="small muted">{view.share.coverage}</p> : null}
-          <p className="note">{view.share.caption}</p>
-        </section>
-        {/* Почему не в Buy Box — только по данным, которые канал назвал; сноска — всегда */}
-        {view.diagnosis ? (
-          <section className="card competition-why">
-            <h3>{c.why.title}</h3>
-            {view.diagnosis.reasons.length > 0 ? <ul className="reasons-list">{view.diagnosis.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : null}
-            <p className="note">{view.diagnosis.footnote}</p>
-          </section>
+          </details>
         ) : null}
       </>}
     </section>

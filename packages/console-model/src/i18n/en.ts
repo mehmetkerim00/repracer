@@ -1489,7 +1489,7 @@ export const en = {
       missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace.',
       noCompetitorData: (channel: string) => `${channel} does not give us competitor offers, so there is nothing to compare here — the same as in the strategy preview.`,
       noSnapshot: 'No competitor data has been read for this offer yet. It appears with the first competitor reading.',
-      nowTitle: 'Right now', observed: 'Seen',
+      nowTitle: 'Right now', observed: 'Seen', offersTitle: 'Competitor offers',
       holderSelf: 'You hold the Buy Box', holderOther: (seller: string) => `${seller} holds the Buy Box`, holderNone: 'Nobody holds the Buy Box right now',
       holderUnknown: (channel: string) => `Buy Box holder unknown on ${channel} (for now)`, holderUnknownWhy: 'The channel gives the Buy Box price but not who holds it.',
       buyBoxPrice: (amount: string) => `Buy Box price with shipping: ${amount}`,

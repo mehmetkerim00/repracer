@@ -1426,7 +1426,7 @@ export const de: Messages = {
       missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs.',
       noCompetitorData: (channel: string) => `${channel} liefert uns keine Angebote der Wettbewerber, hier gibt es nichts zu vergleichen — wie in der Strategievorschau.`,
       noSnapshot: 'Für dieses Angebot wurden noch keine Wettbewerbsdaten gelesen. Sie erscheinen mit der ersten Lesung.',
-      nowTitle: 'Gerade jetzt', observed: 'Gesehen',
+      nowTitle: 'Gerade jetzt', observed: 'Gesehen', offersTitle: 'Angebote der Wettbewerber',
       holderSelf: 'Sie halten die Buy Box', holderOther: (seller: string) => `${seller} hält die Buy Box`, holderNone: 'Gerade hält niemand die Buy Box',
       holderUnknown: (channel: string) => `Inhaber der Buy Box bei ${channel} unbekannt (vorerst)`, holderUnknownWhy: 'Der Kanal nennt den Buy-Box-Preis, aber nicht, wer ihn hält.',
       buyBoxPrice: (amount: string) => `Buy-Box-Preis mit Versand: ${amount}`,

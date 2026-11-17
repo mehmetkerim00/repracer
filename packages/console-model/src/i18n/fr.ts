@@ -1480,7 +1480,7 @@ export const fr: Messages = {
       missingTitle: 'Offre introuvable', missingText: 'Ce lien ne mène à aucune offre de cet espace de travail.',
       noCompetitorData: (channel: string) => `${channel} ne nous fournit pas les offres concurrentes ; il n’y a donc rien à comparer ici — comme dans l’aperçu de la stratégie.`,
       noSnapshot: 'Aucune donnée de la concurrence n’a encore été lue pour cette offre. Elles apparaîtront à la première lecture.',
-      nowTitle: 'En ce moment', observed: 'Vu',
+      nowTitle: 'En ce moment', observed: 'Vu', offersTitle: 'Offres des concurrents',
       holderSelf: 'Vous détenez la Buy Box', holderOther: (seller: string) => `${seller} détient la Buy Box`, holderNone: 'Personne ne détient la Buy Box en ce moment',
       holderUnknown: (channel: string) => `Détenteur de la Buy Box inconnu sur ${channel} (pour l’instant)`, holderUnknownWhy: 'Le canal donne le prix de la Buy Box, mais pas son détenteur.',
       buyBoxPrice: (amount: string) => `Prix de la Buy Box livraison comprise : ${amount}`,

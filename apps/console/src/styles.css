@@ -1326,10 +1326,11 @@ details.evidence > .trace-card { padding-top: var(--space-4); }
 }
 
 /* Шаг 149 (#27, Р-254): страница пола — сверху главное и рамки канала двумя колонками на ≥ 1012 px; расчёт пола — панелью */
-.floor-top { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-@media (width >= 63.25rem) { .floor-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+.floor-top, .competition-top { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+/* шаг 151: тот же ряд у Competition — нынешняя картина и доля Buy Box */
+@media (width >= 63.25rem) { .floor-top, .competition-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
 /* вторая карточка ряда — без отступа сверху: общее правило соседних блоков (:is с p.empty) специфичнее одного класса */
-.floor-top > .card, .floor-top > .card + .card { margin: 0; }
+.floor-top > .card, .floor-top > .card + .card, .competition-top > .card, .competition .competition-top > .card + .card { margin: 0; }
 .floor-glance .verdict-price { margin-top: var(--space-1); }
-.floor-top + .card, .floor-top + details { margin-top: var(--space-4); }
+.floor-top + .card, .floor-top + details, .competition-top + .card, .competition-top + details { margin-top: var(--space-4); }
 details.calc > .cards, details.calc > section, details.calc > .breakdown { margin-top: var(--space-4); }

@@ -2456,9 +2456,10 @@ test('step 109 [Р-234, Р-235], step 109.1: Competition shows the latest compet
         await settled(b, route);
       };
       const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
-      const read = `(() => { const s = document.querySelector('section.competition-summary'); if (!s) return null;
+      // Шаг 151 (#27): сводка — раскрываемой панелью, заголовок — строкой раскрытия; содержимое на странице и свёрнутым
+      const read = `(() => { const s = document.querySelector('details.competition-summary'); if (!s) return null;
         const flat = (t) => t.replace(/\\s+/g, ' ').trim();
-        return { title: flat(s.querySelector('h3').textContent), segments: [...s.querySelectorAll('ul.segments li')].map((li) => flat(li.textContent)),
+        return { title: flat(s.querySelector('summary').textContent), segments: [...s.querySelectorAll('ul.segments li')].map((li) => flat(li.textContent)),
           holder: s.querySelector('.summary-holder') ? flat(s.querySelector('.summary-holder').textContent) : null,
           coupons: [...s.querySelectorAll('ul.coupons li')].map((li) => flat(li.textContent)),
           amounts: [...s.querySelectorAll('ul.coupons .cur, ul.coupons .coupon')].map((x) => flat(x.textContent)),
@@ -2993,6 +2994,61 @@ test('step 149 (#27): the floor page leads with the floor, the current price and
       await waitFor(b, `document.querySelector('details.calc').open`, `${width}: a click opens the calculation`);
     }
   } finally {
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+test('step 151 (#27): Competition leads with right now and the Buy Box share side by side; the competitor table full width; the channel summary folded but on the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  // Мир ЕС шагов 107 и 109: у предложения шага 107 — снимок с таблицей конкурентов, у предложения шага 109 — сводка канала (группы и купоны)
+  currentApi = step107Api;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    await settled(b, 'first screen');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    // Тот же адрес экран не перерисовывает — раскрытое на прошлой ширине осталось бы раскрытым: сначала другой экран
+    const open = async (writeScopeId: string, what: string) => {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${what}: offers`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/competition/${encodeURIComponent(writeScopeId)}`)}, true)`);
+      await settled(b, what);
+      await waitFor(b, `!!document.querySelector('.competition-top')`, `${what}: the top row`);
+    };
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await open(step107.writeScopeId, `${width}: competition with a snapshot`);
+      const seen = await b.evaluate<{ top: string[]; next: string; sameRow: boolean; rows: number; tableInTop: boolean }>(`(() => {
+        const top = document.querySelector('.competition-top'); const now = top.querySelector('.competition-now'); const share = top.querySelector('.competition-share');
+        const next = top.nextElementSibling;
+        return { top: [...top.children].map((c) => c.className), next: next ? next.className : '',
+          sameRow: Math.abs(now.getBoundingClientRect().top - share.getBoundingClientRect().top) < 2,
+          rows: next ? next.querySelectorAll('table tbody tr').length : 0, tableInTop: !!top.querySelector('table') }; })()`);
+      assert.deepEqual(seen.top, ['card competition-now', 'card competition-share'], `${width}: right now and the Buy Box share first`);
+      assert.equal(seen.tableInTop, false, `${width}: the competitor table is not squeezed into the row`);
+      assert.equal(seen.next, 'card competition-offers', `${width}: the competitor table right after the row, full width`);
+      assert.ok(seen.rows > 0, `${width}: the competitor table has its rows`);
+      assert.equal(seen.sameRow, width === 1440, `${width}: ${width === 1440 ? 'side by side' : 'one column'}`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+
+      await open(step109.writeScopeId, `${width}: competition with a channel summary`);
+      const summary = await b.evaluate<{ open: boolean; segments: number; coupons: number; title: string }>(`(() => { const d = document.querySelector('details.competition-summary');
+        return { open: d.open, segments: d.querySelectorAll('ul.segments li').length, coupons: d.querySelectorAll('ul.coupons li').length, title: d.querySelector('summary').textContent.trim() }; })()`);
+      assert.equal(summary.title, en.ui.competition.summary.title('Amazon'), `${width}: the summary line names it`);
+      assert.ok(!summary.open && summary.segments > 0 && summary.coupons > 0, `${width}: the summary is folded, its groups and coupons on the page — ${JSON.stringify(summary)}`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll with the summary`);
+      await b.evaluate(`(document.querySelector('details.competition-summary > summary').click(), true)`);
+      await waitFor(b, `document.querySelector('details.competition-summary').open`, `${width}: a click opens the summary`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out of the open summary`);
+    }
+  } finally {
+    currentApi = euApi;
     await b.setViewport(1440, 900);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
