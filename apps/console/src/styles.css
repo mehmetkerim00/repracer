@@ -864,6 +864,11 @@ ul.channels > li.card ul { margin: var(--space-2) 0 0; }
 /* Аккаунты каналов: карточка с двумя колонками */
 .accounts { display: grid; gap: var(--space-3); }
 .accounts > .account-row { margin: 0; }
+/* шаг 161 (#29): общая шапка карточки — заголовок, пилюля состояния, действие справа; последствие — строкой под ней */
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.card-head > h3 { margin: 0; }
+.card-head > .card-action { margin-left: auto; }
+.card-consequence { margin: var(--space-2) 0 0; }
 /* шаг 157 (#28): строка состояния Stop pricing — та же точка тона, что у строки состояния шага 146; системные остановки без случаев — одной строкой */
 .stop-headline { margin: var(--space-3) 0 var(--space-4); }
 .stop-system-quiet { margin: var(--space-4) 0; }

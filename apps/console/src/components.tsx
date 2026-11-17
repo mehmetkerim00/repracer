@@ -98,6 +98,20 @@ export function Intro({ text }: { text: string }) {
   return <div className="intro"><Help text={text} className="subtitle" /></div>;
 }
 
+/**
+ * Шаг 161 (#29, Р-254): общая шапка карточки — заголовок, пилюля состояния и действие справа одной строкой (при нехватке места — перенос).
+ * Последствие — строкой сразу под шапкой у вызывающего (`p.card-consequence`), пояснение — ниже
+ */
+export function CardHeader({ title, state, action = null }: { title: ReactNode; state: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="card-head">
+      <h3>{title}</h3>
+      <span className="card-state">{state}</span>
+      {action ? <span className="card-action">{action}</span> : null}
+    </div>
+  );
+}
+
 /** Шаг 78, шаг 154: до этой длины вспомогательный текст показывается целиком */
 export const HELP_FULL_LENGTH = 160;
 

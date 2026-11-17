@@ -3127,6 +3127,45 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 161 (#29): every Stop pricing card opens with one header — title, state pill, action — and the consequence right under it', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  for (const width of [1440, 375]) {
+    await b.setViewport(width, 900);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/shadow`)}, true)`);
+    await settled(b, `${width}: shadow`);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/stop`)}, true)`);
+    await settled(b, `${width}: stop`);
+    await waitFor(b, `!!document.querySelector('.target-card')`, `${width}: the stop cards`);
+    const cards = await b.evaluate<Array<{ first: string; title: string; pill: string; action: string; next: string; oneRow: boolean }>>(`[...document.querySelectorAll('.world-content .cards > .card')].map((c) => {
+      const head = c.firstElementChild; const h3 = head.querySelector('h3'); const button = head.querySelector('.card-action button');
+      return { first: head.className, title: h3 ? h3.textContent.trim() : '', pill: head.querySelector('.card-state .badge')?.textContent.trim() ?? '',
+        action: button ? button.textContent.trim() : '', next: head.nextElementSibling ? head.nextElementSibling.className : '',
+        oneRow: !button || Math.abs(h3.getBoundingClientRect().top - button.getBoundingClientRect().top) < 12 }; })`);
+    assert.ok(cards.length >= 3, `${width}: the stop cards are there — ${cards.length}`);
+    for (const c of cards) {
+      assert.equal(c.first, 'card-head', `${width}: «${c.title}» opens with the header`);
+      assert.ok(c.title !== '' && c.pill !== '', `${width}: «${c.title}» names its state — ${c.pill}`);
+      assert.ok(c.next.includes('card-consequence'), `${width}: «${c.title}» says its consequence right under the header`);
+      if (width === 1440) assert.ok(c.oneRow, `${width}: «${c.title}» — title, state and «${c.action}» in one row`);
+    }
+    assert.ok(cards.some((c) => c.action !== ''), `${width}: the owner sees the stop actions in the headers`);
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+    assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+  }
+  await b.setViewport(1440, 900);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 160 (#26): before enabling, Inventory previews what a channel would get with the entered buffer — the calculation of the rows; no preview for a wrong value', async () => {
   const b = browser!;
   const before = b.errors().length;

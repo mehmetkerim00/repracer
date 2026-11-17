@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AUDIT_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type DistrustCard, type HaltCard, type ListQuery, type Period, type StopCard, type StopPlan, type StopTarget, type StopView, type TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, NoteConfirm, Pager, UnitName, useMessages, useOpenBlocks, When, WhenHead } from '../components.tsx';
+import { Badge, CardHeader, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, NoteConfirm, Pager, UnitName, useMessages, useOpenBlocks, When, WhenHead } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 
@@ -17,12 +17,12 @@ function TargetCardView({ card, onStop }: { card: TargetCard; onStop?: (target: 
   const s = m.ui.stop;
   return (
     <div className={`card target-card${card.target.kind === 'TENANT' ? ' whole' : ''} ${card.coveredBy ? 'stopped' : ''}`}>
-      <h3>{card.label}</h3>
-      <p>{card.coveredBy ? <Badge tone="stop">{s.stopped}</Badge> : <Badge tone="ok">{s.running}</Badge>}</p>
-      {card.coveredBy ? <p className="small">{s.coveredBy(card.coveredBy.scopeLabel, card.coveredBy.since)}</p> : null}
+      {/* Шаг 161 (#29): шапка — область, состояние, действие; последствие — строкой под ней */}
+      <CardHeader title={card.label} state={card.coveredBy ? <Badge tone="stop">{s.stopped}</Badge> : <Badge tone="ok">{s.running}</Badge>}
+        action={card.canStop && onStop ? <button type="button" className="danger" onClick={() => onStop(card.target)}>{card.target.kind === 'TENANT' ? s.stopTenant : s.stopTarget}</button> : null} />
       {/* Шаг 153 (#29): последствие — своё у каждой карточки (число её предложений), как ячейка таблицы, а не вспомогательная фраза */}
-      <p className="small consequence">{card.impact.text}</p>
-      {card.canStop && onStop ? <button type="button" className="danger" onClick={() => onStop(card.target)}>{card.target.kind === 'TENANT' ? s.stopTenant : s.stopTarget}</button> : null}
+      <p className="small consequence card-consequence">{card.impact.text}</p>
+      {card.coveredBy ? <p className="small">{s.coveredBy(card.coveredBy.scopeLabel, card.coveredBy.since)}</p> : null}
     </div>
   );
 }
@@ -32,13 +32,12 @@ function StopCardView({ stop, onResume }: { stop: StopCard; onResume?: (stop: St
   const s = m.ui.stop;
   return (
     <div className={`card ${stop.released ? '' : 'stopped'}`}>
-      <h3>{stop.scopeLabel}</h3>
-      {/* Шаг 76 (предполётный прогон демо): у снятой остановки рядом с «Resumed» стояло время НАЧАЛА остановки без подписи */}
-      <p><Badge tone={stop.released ? 'off' : 'stop'}>{stop.released ? s.stopHistory : s.stopped}</Badge> {stop.released ? s.stoppedAt(stop.since) : stop.since}</p>
-      <p className="small">{s.by(stop.by)}</p>
+      <CardHeader title={stop.scopeLabel} state={<Badge tone={stop.released ? 'off' : 'stop'}>{stop.released ? s.stopHistory : s.stopped}</Badge>}
+        action={stop.canResume && onResume ? <button type="button" onClick={() => onResume(stop)}>{s.resume}</button> : null} />
+      {/* Шаг 76 (предполётный прогон демо): у снятой остановки рядом с «Resumed» стояло время НАЧАЛА остановки без подписи; шаг 161 — когда и кто одной строкой */}
+      <p className="small card-consequence">{stop.released ? s.stoppedAt(stop.since) : stop.since} · {s.by(stop.by)}</p>
       <p className="small">{s.noteLabel(stop.note)}</p>
       {stop.released ? <p className="small muted">{stop.released}</p> : null}
-      {stop.canResume && onResume ? <button type="button" onClick={() => onResume(stop)}>{s.resume}</button> : null}
     </div>
   );
 }
@@ -47,10 +46,9 @@ function HaltCardView({ halt, onRelease }: { halt: HaltCard; onRelease?: (halt: 
   const m = useMessages();
   return (
     <div className={`card ${halt.released ? '' : 'stopped'}`}>
-      <h3>{halt.scopeLabel}</h3>
-      <p><Badge tone={halt.released ? 'off' : 'warn'}>{halt.reason}</Badge> {halt.since}</p>
-      <p className="small muted">{halt.released ?? halt.review}</p>
-      {halt.canRelease && onRelease ? <button type="button" onClick={() => onRelease(halt)}>{m.ui.stop.release}</button> : null}
+      <CardHeader title={halt.scopeLabel} state={<Badge tone={halt.released ? 'off' : 'warn'}>{halt.reason}</Badge>}
+        action={halt.canRelease && onRelease ? <button type="button" onClick={() => onRelease(halt)}>{m.ui.stop.release}</button> : null} />
+      <p className="small card-consequence">{halt.since} · {halt.released ?? halt.review}</p>
     </div>
   );
 }
@@ -59,11 +57,11 @@ function DistrustCardView({ distrust, onRelease }: { distrust: DistrustCard; onR
   const m = useMessages();
   return (
     <div className={`card ${distrust.released ? '' : 'stopped'}`}>
-      <h3>{distrust.scopeLabel}</h3>
-      <p><Badge tone={distrust.released ? 'off' : 'stop'}>{distrust.reason}</Badge> {distrust.since}</p>
-      <p className="small">{distrust.holds}</p>
+      <CardHeader title={distrust.scopeLabel} state={<Badge tone={distrust.released ? 'off' : 'stop'}>{distrust.reason}</Badge>}
+        action={distrust.canRelease && onRelease ? <button type="button" onClick={() => onRelease(distrust)}>{m.ui.stop.releaseDistrust}</button> : null} />
+      <p className="small card-consequence">{distrust.holds}</p>
+      <p className="small">{distrust.since}</p>
       {distrust.released ? <p className="small muted">{distrust.released}</p> : null}
-      {distrust.canRelease && onRelease ? <button type="button" onClick={() => onRelease(distrust)}>{m.ui.stop.releaseDistrust}</button> : null}
     </div>
   );
 }
