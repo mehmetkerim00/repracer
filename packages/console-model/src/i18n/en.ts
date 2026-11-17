@@ -1010,6 +1010,8 @@ export const en = {
       pending: (until: string) => `Waiting for your consent on the page of the channel — until ${until}.`,
       failed: (why: string) => `The last attempt did not connect: ${why}`,
       platformMissing: (what: string) => `Not available yet: ${what}. Nothing is to be done by you — the button appears as soon as this is in place.`,
+      // Шаг 156 (#25): состояние настройки аккаунта — пилюлей в строке аккаунта
+      setup: { complete: 'Setup complete', incomplete: (what: string) => `Setup incomplete: ${what}`, missing: { RECONNECT: 'connect again', ACCESS: 'waiting for access', OTHER_TOOLS: 'answer the other-tools question' } },
       states: {
         NOT_CONNECTED: 'not connected',
         AWAITING_CONSENT: 'waiting for your consent',

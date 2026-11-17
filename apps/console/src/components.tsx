@@ -389,7 +389,8 @@ export function NoteConfirm(props: {
  * (листание и смена периода его не сбрасывают) и в браузере (возврат с квитанции — тоже). Хранилище может быть недоступно (приватное
  * окно) — тогда предпочтение живёт до ухода с экрана, экран работает
  */
-export function useOpenBlocks(screen: string): { isOpen: (block: string) => boolean; toggle: (block: string) => (e: SyntheticEvent<HTMLDetailsElement>) => void } {
+/** Шаг 156: `fallback` — раскрытие по умолчанию, пока зритель сам не раскрывал и не сворачивал блок (у Channels — незавершённая настройка) */
+export function useOpenBlocks(screen: string): { isOpen: (block: string, fallback?: boolean) => boolean; toggle: (block: string) => (e: SyntheticEvent<HTMLDetailsElement>) => void } {
   const key = `repracer.${screen}.open`;
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     try {
@@ -406,7 +407,7 @@ export function useOpenBlocks(screen: string): { isOpen: (block: string) => bool
       return next;
     });
   };
-  return { isOpen: (block) => open[block] === true, toggle };
+  return { isOpen: (block, fallback = false) => open[block] ?? fallback, toggle };
 }
 
 export function Pager({ page, query, onQuery }: { page: PageInfo; query: ListQuery; onQuery: (q: ListQuery) => void }) {

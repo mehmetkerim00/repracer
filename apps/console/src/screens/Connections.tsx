@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { zoneName, type ConnectionAccountView, type ConnectionsView, type Locale } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, href, Load, MarketContext, useMessages, Intro } from '../components.tsx';
+import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, useMessages, useOpenBlocks } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FormActions } from '../forms.tsx';
 
 /**
@@ -24,6 +24,10 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
   const [view, retry] = useResource<ConnectionsView>(worldPath(worldId, 'connections'), m.locale);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Record<string, string[]>>({});
+  const blocks = useOpenBlocks('channels');
+  // Шаг 156: умолчание раскрытия — по первому показу аккаунта на экране: ответ на вопрос не сворачивает строку под рукой
+  const firstSeen = useRef<Record<string, boolean>>({});
+  const openByDefault = (id: string, incomplete: boolean) => (firstSeen.current[id] ??= incomplete);
   const start = (channel: string, marketplaces: string[]) =>
     void requestJson<{ consentUrl: string }>(worldPath(worldId, 'connections', 'start'), { method: 'POST', locale: m.locale, body: { channel, marketplaces } })
       .then((r) => {
@@ -75,13 +79,21 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
               );
             })}
           </section> : null}
-          {/* Шаг 77: аккаунт — карточкой: слева аккаунт, состояние и доступ, справа другие инструменты, запись остатков, внешние правки */}
+          {/*
+            * Шаг 77: аккаунт — карточкой: слева аккаунт, состояние и доступ, справа другие инструменты, запись остатков, внешние правки.
+            * Шаг 156 (#25, Р-254): сверху — одна строка на аккаунт (имя, режим, состояние настройки, свежесть); раскрытие — прежние разделы.
+            * Незавершённая настройка раскрыта сразу; раскрытие помнит браузер зрителя
+            */}
           <div className="accounts">
             {v.accounts.map((a) => (
-              <article key={a.channelAccountId} className="card account">
+              <details key={a.channelAccountId} className="card account-row" open={blocks.isOpen(a.channelAccountId, openByDefault(a.channelAccountId, !a.setup.complete))} onToggle={blocks.toggle(a.channelAccountId)}>
+              <summary>
+                <span className="account-title">{a.label}</span>
+                <span className="account-pills"><Badge tone={tone(a.state)}>{a.stateText}</Badge> <Badge tone={a.setup.tone}>{a.setup.text}</Badge></span>
+                {a.freshness ? <span className="small muted account-freshness"><span className={`status-dot dot-${a.freshness.tone}`} aria-hidden="true" /> {a.freshness.text}</span> : null}
+              </summary>
+              <article className="account">
                 <div className="account-main">
-                  <div className="account-title">{a.label}</div>
-                  <p><Badge tone={tone(a.state)}>{a.stateText}</Badge></p>
                   {a.progressText ? <p className="note">{a.progressText}</p> : null}
                   {a.channelLimitText ? <p className="note">{a.channelLimitText}</p> : null}
                   <p className="note">{a.authorizationText}</p>
@@ -90,13 +102,13 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
                   {a.catalogTexts.map((c) => <p className="note" key={c.text}>{c.incomplete ? <><Badge tone="warn">{m.ui.connections.catalog.incompletePill}</Badge> </> : null}{c.text}</p>)}
                   {/* Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */}
                   {a.dataSourceText ? <p className="note">{a.dataSourceText}</p> : null}
-                  {/* Шаг 146 (#34): свежесть данных конкурентов — та же строка, что в строке состояния */}
-                  {a.freshness ? <p className="note" data-part="freshness"><span className={`status-dot dot-${a.freshness.tone}`} aria-hidden="true" /> {a.freshness.text}</p> : null}
+                  {/* Шаг 146 (#34): свежесть данных конкурентов — та же строка, что в строке состояния; шаг 156 — в строке аккаунта */}
                   {a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}
                 </div>
                 <div className="account-writers"><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></div>
                 {a.defaultStrategy ? <div className="account-default"><DefaultStrategy worldId={worldId} account={a} onChanged={retry} /></div> : null}
               </article>
+              </details>
             ))}
           </div>
           {/* Шаг 79: пустое рабочее пространство — не пустая страница: подключить нечем, только если сервер не настроил каналы */}

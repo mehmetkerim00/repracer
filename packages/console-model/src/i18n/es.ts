@@ -1008,6 +1008,8 @@ export const es: Messages = {
       pending: (until: string) => `Esperando su consentimiento en la página del canal, hasta ${until}.`,
       failed: (why: string) => `El último intento no se conectó: ${why}`,
       platformMissing: (what: string) => `Aún no disponible: ${what}. Usted no tiene que hacer nada: el botón aparecerá en cuanto esté listo.`,
+      // Шаг 156 (#25): состояние настройки аккаунта — пилюлей в строке аккаунта
+      setup: { complete: 'Configuración completa', incomplete: (what: string) => `Configuración incompleta: ${what}`, missing: { RECONNECT: 'conectar de nuevo', ACCESS: 'esperando acceso', OTHER_TOOLS: 'responda la pregunta sobre otras herramientas' } },
       states: {
         NOT_CONNECTED: 'no conectada',
         AWAITING_CONSENT: 'esperando su consentimiento',

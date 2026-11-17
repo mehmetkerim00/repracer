@@ -968,6 +968,8 @@ export const de: Messages = {
       pending: (until: string) => `Wir warten auf Ihre Zustimmung auf der Seite des Kanals — bis ${until}.`,
       failed: (why: string) => `Der letzte Versuch hat nicht verbunden: ${why}`,
       platformMissing: (what: string) => `Noch nicht verfügbar: ${what}. Von Ihnen ist nichts zu tun — der Knopf erscheint, sobald das vorliegt.`,
+      // Шаг 156 (#25): состояние настройки аккаунта — пилюлей в строке аккаунта
+      setup: { complete: 'Einrichtung abgeschlossen', incomplete: (what: string) => `Einrichtung unvollständig: ${what}`, missing: { RECONNECT: 'erneut verbinden', ACCESS: 'wartet auf Zugang', OTHER_TOOLS: 'Frage zu anderen Tools beantworten' } },
       states: {
         NOT_CONNECTED: 'nicht verbunden',
         AWAITING_CONSENT: 'wartet auf Ihre Zustimmung',

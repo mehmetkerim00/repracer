@@ -2124,6 +2124,8 @@ test('step 103 (D) [Р-228]: the channel account card says the default strategy 
   const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/channels`)}, true)`);
   await settled(b, 'channels');
+  // Шаг 156 (#25): аккаунт с завершённой настройкой — строкой, свёрнут; продавец раскрывает его нажатием на строку
+  await b.evaluate(`([...document.querySelectorAll('details.account-row:not([open]) > summary')].forEach((x) => x.click()), true)`);
   await b.waitText(t.title);
   const line = () => b.evaluate<string>(`document.querySelector('.account-default .default-line')?.textContent.trim() ?? ''`);
   assert.equal(await line(), t.line(t.none), 'no default yet — «None», the behaviour before the step');
@@ -2138,7 +2140,7 @@ test('step 103 (D) [Р-228]: the channel account card says the default strategy 
   await b.click(t.save, '.account-default button');
   await waitFor(b, `(document.querySelector('.account-default .default-line')?.textContent ?? '').startsWith(${JSON.stringify(`${t.line(choice.label)} · set by `)})`,
     'the line names the strategy and who set it');
-  const fits = `(() => { const card = document.querySelector('.card.account').getBoundingClientRect(), s = document.querySelector('.account-default select').getBoundingClientRect();
+  const fits = `(() => { const card = document.querySelector('.card.account-row').getBoundingClientRect(), s = document.querySelector('.account-default select').getBoundingClientRect();
     return s.left >= card.left - 0.5 && s.right <= card.right + 0.5; })()`;
   for (const scheme of ['light', 'dark'] as const) {
     await b.setColorScheme(scheme);
@@ -2158,6 +2160,7 @@ test('step 103 (D) [Р-228]: the channel account card says the default strategy 
   await new Promise((x) => setTimeout(x, 200));
   await b.click(t.save, '.account-default button');
   await waitFor(b, `(document.querySelector('.account-default .default-line')?.textContent ?? '').startsWith(${JSON.stringify(`${t.line(t.none)} · set by `)})`, 'back to «None»');
+  await b.evaluate(`(localStorage.removeItem('repracer.channels.open'), true)`);
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
@@ -3118,6 +3121,54 @@ const LONG_HELP = `(() => {
   }
   return out;
 })()`;
+
+test('step 156 (#25): Channels — one row per channel account with its mode and setup state; an incomplete setup is open, a complete one folded; the choice is remembered', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const s = en.ui.connections.setup;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (route: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`); await settled(b, route); };
+  await b.evaluate(`(localStorage.removeItem('repracer.channels.open'), true)`);
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await go('shadow');
+      await go('channels');
+      await waitFor(b, `!!document.querySelector('details.account-row')`, `${width}: account rows`);
+      const rows = await b.evaluate<Array<{ open: boolean; pills: string[]; inside: boolean }>>(`[...document.querySelectorAll('details.account-row')].map((d) => ({ open: d.open,
+        pills: [...d.querySelectorAll(':scope > summary .badge')].map((x) => x.textContent.trim()), inside: !!d.querySelector(':scope > article.account .account-writers') }))`);
+      assert.ok(rows.length > 0, `${width}: one row per account`);
+      for (const r of rows) {
+        const setup = r.pills.find((p) => p === s.complete || p.startsWith(s.incomplete('').trim())) ?? '';
+        assert.equal(r.pills.length, 2, `${width}: the row says the mode and the setup state — ${r.pills.join(' | ')}`);
+        assert.equal(r.open, setup !== s.complete, `${width}: «${setup}» — ${setup === s.complete ? 'folded' : 'open'}`);
+        assert.ok(r.inside, `${width}: the sections stay inside the row`);
+      }
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+    }
+    // Свёрнутое зрителем остаётся свёрнутым после ухода с экрана
+    await b.setViewport(1440, 900);
+    const first = await b.evaluate<boolean>(`document.querySelector('details.account-row').open`);
+    await b.evaluate(`(document.querySelector('details.account-row > summary').click(), true)`);
+    await waitFor(b, `document.querySelector('details.account-row').open === ${!first}`, 'a click toggles the row');
+    await go('shadow');
+    await go('channels');
+    await waitFor(b, `!!document.querySelector('details.account-row')`, 'account rows again');
+    assert.equal(await b.evaluate<boolean>(`document.querySelector('details.account-row').open`), !first, 'the viewer choice is remembered');
+  } finally {
+    await b.evaluate(`(localStorage.removeItem('repracer.channels.open'), true)`);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
 
 test('step 154 (#29): a helper text shows one sentence and the rest behind «Learn more» — every console screen, with a positive control', async () => {
   const b = browser!;

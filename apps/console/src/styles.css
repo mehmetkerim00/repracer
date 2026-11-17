@@ -863,7 +863,13 @@ ul.channels > li.card ul { margin: var(--space-2) 0 0; }
 
 /* Аккаунты каналов: карточка с двумя колонками */
 .accounts { display: grid; gap: var(--space-3); }
-.card.account { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 1.7fr); gap: var(--space-5); margin: 0; }
+.accounts > .account-row { margin: 0; }
+/* шаг 156 (#25): строка аккаунта — имя, пилюли режима и настройки, свежесть; разделы — внутри раскрытия, прежней сеткой */
+.account-row > summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); cursor: pointer; list-style-position: inside; }
+.account-row > summary .account-title { margin: 0; }
+.account-pills { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+.account-row[open] > summary { padding-bottom: var(--space-3); border-bottom: var(--border-width) solid var(--divider); margin-bottom: var(--space-3); }
+.account-row > .account { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 1.7fr); gap: var(--space-5); margin: 0; }
 .account-title { font-weight: var(--weight-heading); font-size: var(--font-size-md); margin-bottom: var(--space-2); word-break: break-word; }
 .account-main .note { margin: var(--space-1) 0 0; }
 /* статус-фраза — блоком своего тона (тон-классы дают фон, цвет и границу) */
@@ -884,7 +890,7 @@ p.status-line { padding: var(--space-2) var(--space-3); border-radius: var(--rad
 .segmented button:hover:not(:disabled) { background: var(--control-bg-hover); }
 .segmented button:disabled { opacity: 1; background: var(--knob-bg); border-color: var(--border); font-weight: var(--weight-heading); cursor: default; }
 /* шаг 85: брейкпоинт — со шкалы Primer (large, 1012) вместо своего 1100 */
-@media (width < 63.25rem) { .card.account { grid-template-columns: 1fr; } .account-writers { border-left: 0; padding-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); } }
+@media (width < 63.25rem) { .account-row > .account { grid-template-columns: 1fr; } .account-writers { border-left: 0; padding-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); } }
 
 /* шаг 79 (ревью): сопоставление колонок импорта — сеткой «поле — выбор колонки», а не рваным списком */
 ul.columns { margin: var(--space-1) 0 0; padding-left: var(--space-4); color: var(--text-2); }

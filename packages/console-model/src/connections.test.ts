@@ -331,3 +331,27 @@ test('step 89: the Walmart stock trap names the default ship node, not a wider s
     assert.equal(t.requiresAck, false);
   }
 });
+
+/**
+ * Шаг 156 (#25, Р-254): строка аккаунта несёт состояние настройки — что ещё нужно сделать, словами; запись количества без подтверждения —
+ * безопасное умолчание [Р-202], а не «незавершённая настройка»
+ */
+test('step 156 (#25): every account says whether its setup is complete and names the missing step — on four languages', () => {
+  for (const l of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(l);
+    const s = m.ui.connections.setup;
+    const v = connectionsView({ worldId: 'w', role: 'OWNER', now: NOW }, {
+      accounts: [
+        row({ channelAccountId: 'revoked', authStatus: 'REVOKED', otherTools: 'NONE' }),
+        row({ channelAccountId: 'awaiting', authStatus: 'AWAITING_ACCESS', accessBlockers: ['NOTIFICATION_QUEUE'], oauth: false, otherTools: 'NONE' }),
+        row({ channelAccountId: 'unanswered', otherTools: null }),
+        row({ channelAccountId: 'done', otherTools: 'NONE', quantityWritesConfirmed: false }),
+      ], pending: [],
+    }, apps, m);
+    const by = Object.fromEntries(v.accounts.map((a) => [a.channelAccountId, a.setup]));
+    assert.deepEqual(by.revoked, { complete: false, missing: 'RECONNECT', text: s.incomplete(s.missing.RECONNECT), tone: 'stop' }, `${l}: revoked`);
+    assert.deepEqual(by.awaiting, { complete: false, missing: 'ACCESS', text: s.incomplete(s.missing.ACCESS), tone: 'warn' }, `${l}: awaiting`);
+    assert.deepEqual(by.unanswered, { complete: false, missing: 'OTHER_TOOLS', text: s.incomplete(s.missing.OTHER_TOOLS), tone: 'warn' }, `${l}: unanswered`);
+    assert.deepEqual(by.done, { complete: true, missing: null, text: s.complete, tone: 'ok' }, `${l}: quantity writes off is the safe default, not an incomplete setup`);
+  }
+});

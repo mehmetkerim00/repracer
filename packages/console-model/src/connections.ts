@@ -74,6 +74,21 @@ export interface ConnectionAccountView {
   dataSourceText: string | null;
   /** Шаг 146 (#34): свежесть данных конкурентов — та же строка, что в строке состояния (куда ведёт её ссылка); null — у аккаунта нечего считать */
   freshness: { text: string; tone: Tone } | null;
+  /**
+   * Шаг 156 (#25): состояние настройки аккаунта — что ещё нужно сделать, словами: доступ отозван, ждёт доступа, не отвечен вопрос о других
+   * инструментах [Р-202]. Запись количества без подтверждения — безопасное умолчание, а не незавершённая настройка
+   */
+  setup: AccountSetup;
+}
+
+export type AccountSetupMissing = 'RECONNECT' | 'ACCESS' | 'OTHER_TOOLS';
+export interface AccountSetup { complete: boolean; missing: AccountSetupMissing | null; text: string; tone: Tone }
+
+export function accountSetup(a: Pick<ConnectionRow, 'otherTools'>, state: ConnectionState, m: Messages): AccountSetup {
+  const s = m.ui.connections.setup;
+  const missing: AccountSetupMissing | null = state === 'REVOKED' ? 'RECONNECT' : state === 'AWAITING_ACCESS' ? 'ACCESS' : a.otherTools === null ? 'OTHER_TOOLS' : null;
+  return missing === null ? { complete: true, missing, text: s.complete, tone: 'ok' }
+    : { complete: false, missing, text: s.incomplete(s.missing[missing]), tone: missing === 'RECONNECT' ? 'stop' : 'warn' };
 }
 
 /** Шаг 114: уведомления аккаунта за сутки — по журналу сырья (NotificationSourceFacts хранилища) */
@@ -333,7 +348,7 @@ export function connectionsView(
       channelAccountId: a.channelAccountId, channel: a.channel,
       // Шаг 64 (проход консоли): имя канала и витрины словами — «eBay · … · ebay.com», а не коды EBAY и EBAY_US
       label: `${(m.values as Record<string, string | undefined>)[a.channel] ?? a.channel} · ${a.externalAccountId} · ${a.marketplaces.map((id) => storefrontName(a.channel, id, m)).join(', ')}`, marketplaces: [...a.marketplaces],
-      state, stateText: t.states[state] ?? state, progressText, authorizationText, offers: a.offers, unmanagedOffers: a.unmanagedOffers, shadowDecisions24h: a.shadowDecisions24h,
+      state, stateText: t.states[state] ?? state, setup: accountSetup(a, state, m), progressText, authorizationText, offers: a.offers, unmanagedOffers: a.unmanagedOffers, shadowDecisions24h: a.shadowDecisions24h,
       // eBay не называет продавца (E-11): повторное согласие создало бы второй аккаунт того же продавца (находка 6 ревью шага 43)
       canReconnect: canManage && a.channel === 'AMAZON' && a.oauth,
       reconnectLabel: state === 'REVOKED' ? t.reconnectRevoked : t.reconnect,
