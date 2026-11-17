@@ -630,6 +630,9 @@ export const en = {
     },
     enabled: {
       off: 'Off', offDetail: 'The price is not changed automatically', smart: 'Kaufland Smart Pricing', smartDetail: 'Our engine is off for this offer',
+      // Шаг 148 (#27, UX-03): включено, но аккаунт в тени — цена считается и не уходит; кто остановил — в ячейке
+      onShadow: 'On · shadow mode', onShadowShort: 'Calculated, not sent to your store', onShadowDetail: 'The price is calculated automatically; nothing is sent to your store — the channel account is in shadow mode.',
+      stoppedBy: (who: string, when: string) => `by ${who}, ${when}`,
       stopped: 'Stopped', stoppedDetail: (scope: string, when: string) => `A person stopped all price changes for ${scope} since ${when}`,
       inactive: (status: string) => `On, but ${status}`, inactiveDetail: 'New prices are not applied until the offer is active',
       halted: 'Halted', haltedDetail: (when: string) => `Competitor-derived prices are halted on this storefront since ${when}`,
@@ -1394,6 +1397,9 @@ export const en = {
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'Walmart ID', EBAY: 'eBay ID', KAUFLAND: 'Kaufland ID' } as Record<string, string>)[channel] ?? 'Product ID'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'competitor data',
       why: 'Why this price', bounds: 'Bounds and floor', noDecisions: 'no decisions yet', enable: 'Enable',
+      // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      noPriceYet: 'No price yet', notSet: 'Not set', feeExpired: 'Fee estimate expired — signed loss may be stale',
+      missingTitle: 'To switch it on, add:', missingItems: { UNIT_COST: 'Unit cost and fees', MIN_PRICE: 'Minimum price', MAX_PRICE: 'Maximum price' },
       floorNoMin: 'Minimum price is not set',
       floorFromMin: (_min: string) => 'from your minimum price',
       floorFromMargin: (pct: string, _margin: string, min: string) => `from minimum margin ${pct} (your minimum price ${min})`,

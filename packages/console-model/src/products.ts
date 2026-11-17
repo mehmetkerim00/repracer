@@ -19,13 +19,24 @@ export interface StrategyLabel {
 export interface FloorCell {
   amount: string;
   minor: number | null;
+  /** Шаг 148 (#27, UX-04): пола нет — «Not set» словами; экран не ставит пустому значению моноширинный шрифт сумм */
+  missing: boolean;
   /** Из чего складывается: min_price и цена минимальной маржи */
   parts: string;
 }
 
+/** Шаг 148 (#27, UX-05): чего не хватает для включения автоцены — окно отказа называет каждое со ссылкой */
+export type MissingSetup = 'UNIT_COST' | 'MIN_PRICE' | 'MAX_PRICE';
+
 export interface ProductRow {
   unit: UnitRef;
   currentPrice: string;
+  /** Шаг 148 (#27, UX-04): цены ещё нет — «No price yet» словами, без шрифта сумм */
+  currentPriceMissing: boolean;
+  maxPriceMissing: boolean;
+  missing: MissingSetup[];
+  /** Шаг 148 (шаг 142): распродажа без действующей оценки комиссии — пометка «подписанный убыток может быть устаревшим» */
+  feeExpired: string | null;
   floor: FloorCell;
   minPrice: string;
   maxPrice: string;
@@ -154,7 +165,11 @@ export function boundText(b: BoundResolution, currency: string, m: Messages): st
 
 const ACTIVE_WRITE = new Set(['PENDING', 'DISPATCHED', 'FAILED', 'ACCEPTED', 'BLOCKED']);
 
-export function enabledCell(scope: ConsoleScope, m: Messages, world?: StandWorld): StatusCell {
+/**
+ * Шаг 148 (#27, UX-03): `shadow` — аккаунт предложения в тени; «On» без оговорки — только в бою. Итоги каталога зовут без него: включённое
+ * в тени — включённое
+ */
+export function enabledCell(scope: ConsoleScope, m: Messages, world?: StandWorld, shadow = false): StatusCell {
   const e = m.ui.enabled;
   if (scope.pricingMode === 'OFF') {
     // Шаг 118: выключил человек — кто и когда видно под пилюлей, записка — в подсказке
@@ -169,13 +184,19 @@ export function enabledCell(scope: ConsoleScope, m: Messages, world?: StandWorld
   }
   if (scope.pricingMode === 'KAUFLAND_SMART_PRICING') return { tone: 'off', label: e.smart, detail: e.smartDetail };
   // Р-69: остановка человеком — все цены, включая фиксированные и маржинальные
-  if (scope.priceStop) return { tone: 'stop', label: e.stopped, detail: e.stoppedDetail(m.values[scope.priceStop.scope], m.when(scope.priceStop.stoppedAt)) };
+  if (scope.priceStop) {
+    // Шаг 148 (#27, UX-03): в ячейке — кто и когда; полная фраза — подсказкой
+    const role = world?.state.members.find((x) => x.membershipId === scope.priceStop!.stoppedByMembershipId)?.role;
+    const who = role ? m.values[role as keyof typeof m.values] ?? role : m.ui.common.noValue;
+    return { tone: 'stop', label: e.stopped, detail: e.stoppedDetail(m.values[scope.priceStop.scope], m.when(scope.priceStop.stoppedAt)), short: e.stoppedBy(who, m.when(scope.priceStop.stoppedAt)) };
+  }
   // Р-118: недоверие каналу — все цены, включая фиксированные и маржинальные, до снятия человеком
   if (scope.channelDistrust) return { tone: 'stop', label: e.distrusted, detail: e.distrustedDetail(m.when(scope.channelDistrust.detectedAt)) };
   if (scope.status !== 'ACTIVE') return { tone: 'stop', label: e.inactive(m.values[scope.status]), detail: e.inactiveDetail };
   if (scope.channelHalt && scope.strategy && COMPETITOR_DERIVED_RULES.has(scope.strategy.params.type)) {
     return { tone: 'stop', label: e.halted, detail: e.haltedDetail(m.when(scope.channelHalt.haltedAt)) };
   }
+  if (shadow) return { tone: 'warn', label: e.onShadow, detail: e.onShadowDetail, short: e.onShadowShort };
   if (scope.channelHalt) return { tone: 'ok', label: e.on, detail: e.haltedButWorks };
   return { tone: 'ok', label: e.on, detail: e.onDetail };
 }
@@ -306,7 +327,7 @@ export function catalogRows(scopes: readonly ConsoleScope[], catalog: ConsoleCat
  * Экрану без неё (границы) передавать нечего — тогда столбец решений честно пуст, а не «0».
  */
 export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[], catalog?: ConsoleCatalogPage,
-  options: { filter?: OfferFilter; sort?: OfferSort | null; buybox?: ReadonlyMap<string, BuyboxCells> | null } = {}): ProductListView {
+  options: { filter?: OfferFilter; sort?: OfferSort | null; buybox?: ReadonlyMap<string, BuyboxCells> | null; writeModes?: ReadonlyMap<string, 'SHADOW' | 'LIVE'> | null } = {}): ProductListView {
   const { state } = world;
   const p = m.ui.products;
   /**
@@ -325,6 +346,10 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     const floor = effectiveFloor(scope, world);
     const money = (v: number | null) => m.money(v, scope.currency);
     // Шаг 102 [Р-227]: источник пола — распродажа, безубыточность, минимальная маржа или минимальная цена
+    const missing: MissingSetup[] = [
+      ...(scope.cost === null ? ['UNIT_COST' as const] : []), ...(scope.bounds.min.status !== 'RESOLVED' ? ['MIN_PRICE' as const] : []),
+      ...(scope.bounds.max.status !== 'RESOLVED' ? ['MAX_PRICE' as const] : []),
+    ];
     const parts = floor.aboveCeiling ? p.frozenDetail
       : floor.source === 'CLEARANCE' ? p.floorFromClearance
       : floor.minMinor === null ? p.floorNoMin
@@ -334,12 +359,17 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
               : p.floorFromMin(money(floor.minMinor));
     return {
       unit: unitOf(world, scope, m),
-      currentPrice: money(scope.currentPriceMinor),
-      floor: { amount: money(floor.minor), minor: floor.minor, parts },
+      // Шаг 148 (#27, UX-04): пустое — словами («No price yet», «Not set»), а не «no value» и «not set: not set»
+      currentPrice: scope.currentPriceMinor === null ? p.noPriceYet : money(scope.currentPriceMinor),
+      currentPriceMissing: scope.currentPriceMinor === null,
+      floor: { amount: floor.minor === null ? p.notSet : money(floor.minor), minor: floor.minor, parts, missing: floor.minor === null },
       minPrice: boundText(scope.bounds.min, scope.currency, m),
-      maxPrice: boundText(scope.bounds.max, scope.currency, m),
+      maxPrice: scope.bounds.max.status === 'RESOLVED' ? boundText(scope.bounds.max, scope.currency, m) : p.notSet,
+      maxPriceMissing: scope.bounds.max.status !== 'RESOLVED',
+      missing,
+      feeExpired: scope.clearance && scope.cost === null ? p.feeExpired : null,
       strategy: strategyLabel(scope.strategy, scope.currency, m),
-      enabled: enabledCell(scope, m, world),
+      enabled: enabledCell(scope, m, world, options.writeModes?.get(scope.channelAccountId) === 'SHADOW'),
       applying: applyingCell(scope, state.writes, m),
       lastChange: lastChangeCell(scope, state.writes, m),
       nextCheck: { tone: 'unknown', label: m.ui.nextCheck.label, detail: m.ui.nextCheck.detail },

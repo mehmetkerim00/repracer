@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, type AttentionFilter, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
+import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName, ColorVariant } from '../components.tsx';
@@ -20,13 +20,15 @@ const VIEW_KEY = 'repracer.products.view';
 /** Шаг 105: фильтр строки и сортировка экрана Offers — то, что уходит в адрес экрана и в обе выгрузки */
 export interface OfferUiQuery { storefront: string; pricing: string; attention: string; holder: string; q: string; sort: OfferSort | null }
 export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', attention: '', holder: '', q: '', sort: null };
-/** Включена ли хоть одна колонка Buy Box — по выбору зрителя в браузере (до первого ответа экрана) */
+/** Шаг 148 (#27): один сигнал конкуренции по умолчанию — держатель Buy Box; остальные колонки Buy Box — за «Columns» */
+const BUYBOX_DEFAULTS: Readonly<Record<(typeof BUYBOX_COLUMNS)[number], boolean>> = { bbHolder: true, bbPrice: false, bbGap: false, bbShare: false };
+/** Включена ли хоть одна колонка Buy Box — по выбору зрителя в браузере, а без выбора — по умолчанию (до первого ответа экрана) */
 export function storedBuyboxColumns(): boolean {
   try {
     const raw = globalThis.localStorage?.getItem(VIEW_KEY);
     const parsed = raw ? (JSON.parse(raw) as { columns?: Partial<Record<OptionalColumn, boolean>> }) : null;
-    return BUYBOX_COLUMNS.some((k) => parsed?.columns?.[k] === true);
-  } catch { return false; }
+    return BUYBOX_COLUMNS.some((k) => parsed?.columns?.[k] ?? BUYBOX_DEFAULTS[k]);
+  } catch { return BUYBOX_COLUMNS.some((k) => BUYBOX_DEFAULTS[k]); }
 }
 /** Адрес экрана и запрос выгрузки: пустые поля не передаются */
 export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string> {
@@ -38,8 +40,9 @@ export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string
  * без прокрутки под закреплённую колонку действий (визуальное ревью шага 79); включается в «Columns»
  */
 function defaultColumns(view: ProductListView): Record<OptionalColumn, boolean> {
-  return { ceiling: true, strategy: true, lastChange: false, nextCheck: false, channel: view.rows.some((r) => r.channelNotes.length > 0),
-    bbHolder: false, bbPrice: false, bbGap: false, bbShare: false };
+  // Шаг 148 (#27): по умолчанию — предложение, статус, цена, держатель Buy Box, пол, стратегия; максимальная цена — за «Columns» (её
+  // называют окно включения, страница пола и выгрузка)
+  return { ceiling: false, strategy: true, lastChange: false, nextCheck: false, channel: view.rows.some((r) => r.channelNotes.length > 0), ...BUYBOX_DEFAULTS };
 }
 /** Выбор колонок и плотность — удобство одного зрителя: браузерное хранилище, без него — умолчания (шаг 79) */
 function readView(view: ProductListView): { columns: Record<OptionalColumn, boolean>; compact: boolean } {
@@ -183,6 +186,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                   <strong><UnitName unit={r.unit} variant={false} /></strong>
                   {/* Шаг 102 [Р-227]: режим распродажи — пилюлей attention у названия */}
                   {r.clearance ? <> <Badge tone="warn">{r.clearance}</Badge></> : null}
+                  {/* Шаг 148 (шаг 142): распродажа без действующей оценки комиссии — подписанный убыток может быть устаревшим */}
+                  {r.feeExpired ? <> <Badge tone="warn">{r.feeExpired}</Badge></> : null}
                   {/* Шаг 102: пол выше потолка — цены заморожены законно, но не молча */}
                   {r.frozen ? <> <Badge tone="stop">{r.frozen}</Badge></> : null}
                   {/* Шаг 107 [Р-233]: конфликт с рамками цены, заданными продавцом в канале — подробности на странице пола */}
@@ -195,13 +200,14 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                 </td>
                 {/* Шаг 79: «On» и «In progress» — одна колонка: включённость всегда, ход — только когда что-то идёт */}
                 <td className="status-cell"><Cell cell={r.enabled} />{r.applying.tone !== 'ok' ? <Cell cell={r.applying} /> : null}</td>
-                <td className="num money cur">{r.currentPrice}</td>
+                {/* Шаг 148 (#27, UX-04): пустое — словами и обычным шрифтом; моноширинный — только у сумм */}
+                <td className={`num money${r.currentPriceMissing ? ' muted empty-value' : ' cur'}`}>{r.currentPrice}</td>
                 {bbOn ? bbCells(r.buybox) : null}
-                <td className="num cur floor">
-                  <strong>{r.floor.amount}</strong>
+                <td className={`num floor${r.floor.missing ? '' : ' cur'}`}>
+                  {r.floor.missing ? <span className="muted empty-value">{r.floor.amount}</span> : <strong>{r.floor.amount}</strong>}
                   <div className="muted small floor-parts">{r.floor.parts}</div>
                 </td>
-                {col.ceiling ? <td className="num cur">{r.maxPrice}</td> : null}
+                {col.ceiling ? <td className={`num${r.maxPriceMissing ? ' muted empty-value' : ' cur'}`}>{r.maxPrice}</td> : null}
                 {/* Шаг 78: источник пилюлей и короткое имя; подробности стратегии — подсказкой и на «Why this price» */}
                 {col.strategy ? <td className="strategy" title={r.strategy.detail}>
                   {r.strategy.competitorDerived ? <Badge tone="progress">{p.competitorBadge}</Badge> : null} <span className="strategy-name">{r.strategy.label}</span>
@@ -241,7 +247,9 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
 }
 
 /** Итог попытки включения: отказы, предупреждения и явное «всё равно включить» (шаг 12, G) */
-export function EnableResultView(props: { unit: string; worldId?: string; result: EnableResult | null; busy: boolean; error: string | null; onAcknowledge: () => void; onClose: () => void }) {
+export function EnableResultView(props: { unit: string; worldId?: string; result: EnableResult | null; busy: boolean; error: string | null; onAcknowledge: () => void; onClose: () => void;
+  /** Шаг 148 (#27, UX-05): что добавить для включения — каждое со ссылкой туда, где это задают */
+  missing?: { writeScopeId: string; items: readonly MissingSetup[] } }) {
   const m = useMessages();
   const d = m.ui.app.dialog;
   const { result } = props;
@@ -258,7 +266,18 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
         <>
           <p><strong>{d.enableProblems}</strong></p>
           <ul className="problems">{result.problems.map((r) => <li key={r.code}><ReasonLine reason={r} /></li>)}</ul>
-          {props.worldId && result.problems.some((r) => r.code === 'COST_REQUIRED')
+          {props.worldId && props.missing && props.missing.items.length > 0 ? (
+            <>
+              <p><strong>{m.ui.products.missingTitle}</strong></p>
+              <ul className="missing-setup">
+                {props.missing.items.map((item) => (
+                  <li key={item} data-missing={item}>
+                    <a className="row-link" href={item === 'UNIT_COST' ? href(props.worldId!, 'costs', 'import') : href(props.worldId!, 'costs', 'edit', props.missing!.writeScopeId)}>{m.ui.products.missingItems[item]}</a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : props.worldId && result.problems.some((r) => r.code === 'COST_REQUIRED')
             ? <p><a className="row-link" href={href(props.worldId, 'costs', 'import')}>{d.addCost}</a></p> : null}
         </>
       ) : null}
@@ -370,7 +389,8 @@ export function ProductsScreen({ worldId, initialAttention }: { worldId: string;
 
   return (
     <>
-      {row ? <EnableResultView unit={row.unit.label} worldId={worldId} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close} /> : null}
+      {row ? <EnableResultView unit={row.unit.label} worldId={worldId} result={result} busy={busy} error={error} onAcknowledge={() => void enable(row, true)} onClose={close}
+        missing={{ writeScopeId: row.unit.writeScopeId, items: row.missing }} /> : null}
       {off ? <DisableView unit={off.row.unit.label} done={off.done} busy={busy} error={error} onConfirm={(note) => void disable(off.row, note)} onClose={closeOff} /> : null}
       <Load shape="table" resource={resource} retry={retry}>
         {(view) => <ProductsView view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }}

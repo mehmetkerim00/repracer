@@ -1914,3 +1914,23 @@ test('step 147 (#24): the receipt summary — trigger, proposed, decision, sendi
   assert.equal(kept.summary.decision, kept.headline, '«no change» says the old headline, not «details are not kept»');
   assert.ok(kept.summary.decision.startsWith(en.ui.trace.headlineNoChange('')), kept.summary.decision);
 });
+
+/**
+ * Шаг 148 (#27, UX-05; Р-254): отказ включения называет ВСЁ, чего не хватает, — себестоимость с комиссией, минимальную и максимальную цену,
+ * каждое со ссылкой туда, где это задают (импорт себестоимости, правка границ с выбранным предложением). Сам отказ — прежний
+ */
+test('step 148 (#27, UX-05): the enable refusal lists every missing item with a link — unit cost and fees, minimum price, maximum price', async () => {
+  const refusal = { enabled: false, problems: [describe({ code: 'COST_REQUIRED', params: {} }, en)], warnings: [] };
+  const dialog = await html('/src/screens/Products.tsx', 'EnableResultView', {
+    unit: 'Desk lamp · amazon.com', worldId: 'demo/us', result: refusal, busy: false, error: null, onAcknowledge: () => {}, onClose: () => {},
+    missing: { writeScopeId: 'ws-148', items: ['UNIT_COST', 'MIN_PRICE', 'MAX_PRICE'] },
+  });
+  assert.ok(dialog.includes(en.ui.products.missingTitle), 'the dialog says what to add');
+  const links = [...dialog.matchAll(/<li data-missing="([A-Z_]+)"><a class="row-link" href="([^"]+)">([^<]+)<\/a><\/li>/g)].map((x) => [x[1], x[2], x[3]]);
+  assert.deepEqual(links, [
+    ['UNIT_COST', '#/w/demo%2Fus/costs/import', en.ui.products.missingItems.UNIT_COST],
+    ['MIN_PRICE', '#/w/demo%2Fus/costs/edit/ws-148', en.ui.products.missingItems.MIN_PRICE],
+    ['MAX_PRICE', '#/w/demo%2Fus/costs/edit/ws-148', en.ui.products.missingItems.MAX_PRICE],
+  ], 'every missing item links to where it is set');
+  assert.ok(dialog.includes(refusal.problems[0]!.text), 'the refusal itself is unchanged');
+});

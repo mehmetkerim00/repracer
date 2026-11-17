@@ -1025,7 +1025,9 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const shown = catalog ? catalog.scopeIds : productPage(world, m, query).shown.map((x) => x.writeScopeId);
           // Колонки Buy Box — только включённые: снимок и отрезки показанных строк одним обращением, правило страницы Competition
           const buybox = oq.bb ? buyboxCellsOf(world, await live.store.competitionData(world.tenantId, shown, deps.shareRange.since as never, deps.shareRange.until as never), deps, shown) : null;
-          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined, { filter, sort: oq.sort, buybox }));
+          // Шаг 148 (#27, UX-03): режим аккаунта — «On» только в бою, в тени — «On · shadow mode»
+          const writeModes = new Map((await live.store.channelAccounts(live.tenantId)).map((a) => [a.channelAccountId, a.writeMode] as const));
+          return ok(productList(world, m, query, await live.store.scopeDecisionStats(world.tenantId, shown), catalog ?? undefined, { filter, sort: oq.sort, buybox, writeModes }));
         }
         case 'decisions': {
           if (param === null) {

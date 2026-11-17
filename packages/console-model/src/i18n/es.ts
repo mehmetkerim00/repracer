@@ -629,6 +629,9 @@ export const es: Messages = {
     },
     enabled: {
       off: 'Desactivado', offDetail: 'El precio no se cambia automáticamente', smart: 'Kaufland Smart Pricing', smartDetail: 'Nuestro motor está desactivado para esta oferta',
+      // Шаг 148 (#27, UX-03): включено, но аккаунт в тени — цена считается и не уходит; кто остановил — в ячейке
+      onShadow: 'Activado · modo sombra', onShadowShort: 'Calculado, no enviado a su tienda', onShadowDetail: 'El precio se calcula automáticamente; no se envía nada a su tienda: la cuenta del canal está en modo sombra.',
+      stoppedBy: (who: string, when: string) => `por ${who}, ${when}`,
       stopped: 'Detenido', stoppedDetail: (scope: string, when: string) => `Una persona detuvo todos los cambios de precio para ${scope} desde ${when}`,
       inactive: (status: string) => `Activado, pero la oferta está ${status}`, inactiveDetail: 'Los precios nuevos no se aplican hasta que la oferta esté activa',
       halted: 'Suspendido', haltedDetail: (when: string) => `Los precios basados en la competencia están suspendidos en este sitio desde ${when}`,
@@ -1387,6 +1390,9 @@ export const es: Messages = {
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'ID de Walmart', EBAY: 'ID de eBay', KAUFLAND: 'ID de Kaufland' } as Record<string, string>)[channel] ?? 'ID de producto'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'datos de la competencia',
       why: 'Por qué este precio', bounds: 'Límites y piso', noDecisions: 'aún sin decisiones', enable: 'Activar',
+      // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      noPriceYet: 'Aún sin precio', notSet: 'Sin definir', feeExpired: 'La estimación de comisiones venció: la pérdida firmada puede estar desactualizada',
+      missingTitle: 'Para activarlo, agregue:', missingItems: { UNIT_COST: 'Costo unitario y comisiones', MIN_PRICE: 'Precio mínimo', MAX_PRICE: 'Precio máximo' },
       floorNoMin: 'El precio mínimo no está definido',
       floorFromMin: (_min: string) => 'de su precio mínimo',
       floorFromMargin: (pct: string, _margin: string, min: string) => `del margen mínimo de ${pct} (su precio mínimo: ${min})`,

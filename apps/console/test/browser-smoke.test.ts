@@ -161,6 +161,8 @@ let syntheticRejected: unknown = null;
 let decisionChip: { chip: string; full: string } | null = null;
 /** Шаг 101 (C): таблица конкурентов квитанции под фильтром — у шага снимка настоящей квитанции (в мире смоука стратегий с фильтром нет) */
 let receiptCompetitors: unknown = null;
+/** Шаг 148: правка ответа Offers — строка с пустыми значениями (в смоук-мире у всех предложений есть цена и границы) */
+let productsPatch: ((body: { rows: Array<Record<string, unknown>> }) => void) | null = null;
 
 /** Шаг 139 (BUG-02): решение мира смоука у удержанных строк тени — только на время своего теста (ссылка «Why this price» из тени) */
 let shadowDecisionId: string | null = null;
@@ -290,6 +292,7 @@ before(async () => {
       if (step) step.competitors = receiptCompetitors;
       return r;
     })
+    : productsPatch && /\/products(\?|$)/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) productsPatch!(r.body as never); return r; })
     : decisionChip && /\/decisions\?/.test(req.url) ? currentApi(req).then((r) => {
       const body = r.body as { items?: Array<Record<string, unknown>> };
       if (r.status === 200 && body.items?.length) body.items[0] = { ...body.items[0], trigger: decisionChip };
@@ -2259,7 +2262,8 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
     assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.attention, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
     // Колонки Buy Box выключены по умолчанию и есть в выборе Columns
     const shown = await b.evaluate<string[]>(headers);
-    assert.ok(![p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare].some((c) => shown.includes(c)), `${m.locale}: Buy Box columns are off by default — ${shown.join(' | ')}`);
+    // Шаг 148 (#27): один сигнал конкуренции по умолчанию — держатель Buy Box; остальные колонки Buy Box и Maximum price — за «Columns»
+    assert.ok(shown.includes(p.columns.bbHolder) && ![p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare, p.columns.ceiling].some((c) => shown.includes(c)), `${m.locale}: by default the Buy Box holder only, no maximum price — ${shown.join(' | ')}`);
     const picker = await b.evaluate<string[]>(`[...document.querySelectorAll('details.column-picker .menu label')].map((l) => l.textContent.trim())`);
     assert.ok([p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare].every((c) => picker.includes(c)), `${m.locale}: the four columns in Columns — ${picker.join(' | ')}`);
     if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
@@ -2268,7 +2272,8 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
   await go('products');
   const p = en.ui.products;
   // Первая включённая колонка Buy Box перезапрашивает экран (колонки считаются, только когда показаны) — по одной, с ожиданием экрана
-  for (const label of [p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare]) {
+  // Шаг 148: держатель уже включён по умолчанию — включаются остальные три
+  for (const label of [p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare]) {
     await waitFor(b, `!!document.querySelector('details.column-picker')`, 'the column picker');
     await b.evaluate(`(document.querySelector('details.column-picker').open = true, true)`);
     await b.evaluate(`([...document.querySelectorAll('details.column-picker .menu label')].find((l) => l.textContent.trim() === ${JSON.stringify(label)}).click(), true)`);
@@ -2883,6 +2888,59 @@ test('step 147 (#24): the receipt — a summary card, the seven stations folded 
     }
   } finally {
     await b.setColorScheme(null);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 148 (#27, Р-254): таблица Offers — по умолчанию держатель Buy Box виден, Maximum price — за «Columns»; пустое значение — словами и
+ * обычным шрифтом (не моноширинное «no value» / «not set: not set»); на 1440 таблица в рамке, на 375 страница не уезжает вбок
+ */
+test('step 148 (#27): Offers — the Buy Box holder by default, no maximum price; an empty value is words in the body font, never «no value»; 1440 fits, 375 keeps the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const p = en.ui.products;
+  productsPatch = (body) => {
+    const r = body.rows[0]!;
+    Object.assign(r, { currentPrice: p.noPriceYet, currentPriceMissing: true, maxPrice: p.notSet, maxPriceMissing: true,
+      floor: { amount: p.notSet, minor: null, parts: p.floorNoMin, missing: true } });
+  };
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  try {
+    await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/shadow`)}, true)`);
+      await settled(b, `${width}: shadow`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${width}: offers`);
+      await waitFor(b, `!!document.querySelector('table.products tbody tr')`, 'the offers table');
+      const seen = await b.evaluate<{ headers: string[]; first: Array<{ text: string; mono: boolean }>; debug: string[] }>(`(() => {
+        const headers = [...document.querySelectorAll('table.products thead th')].map((h) => h.textContent.trim());
+        const row = document.querySelector('table.products tbody tr');
+        const cells = [...row.querySelectorAll('td')].filter((td) => td.querySelector('.empty-value') || td.classList.contains('empty-value'));
+        return { headers, first: cells.map((td) => ({ text: td.innerText.trim().split('\\n')[0], mono: td.classList.contains('cur') })),
+          debug: [...document.querySelectorAll('table.products td')].map((td) => td.innerText).filter((t) => /no value|not set: not set/.test(t)) }; })()`);
+      assert.ok(seen.headers.includes(p.columns.bbHolder) && !seen.headers.includes(p.columns.ceiling), `${width}: the holder by default, the maximum price behind Columns — ${seen.headers.join(' | ')}`);
+      assert.deepEqual(seen.first, [{ text: p.noPriceYet, mono: false }, { text: p.notSet, mono: false }], `${width}: empty values are words in the body font`);
+      assert.deepEqual(seen.debug, [], `${width}: no debug placeholder in the table`);
+      if (width === 1440) {
+        assert.ok(await b.evaluate<boolean>(`(() => { const t = document.querySelector('table.products'); return t.scrollWidth <= t.parentElement.clientWidth + 1; })()`), '1440: the table fits its frame');
+      } else {
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), '375: no sideways scroll');
+      }
+    }
+  } finally {
+    productsPatch = null;
     await b.setViewport(1440, 900);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');

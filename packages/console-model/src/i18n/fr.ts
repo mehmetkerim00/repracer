@@ -629,6 +629,9 @@ export const fr: Messages = {
     },
     enabled: {
       off: 'Désactivé', offDetail: 'Le prix n’est pas modifié automatiquement', smart: 'Kaufland Smart Pricing', smartDetail: 'Notre moteur est désactivé pour cette offre',
+      // Шаг 148 (#27, UX-03): включено, но аккаунт в тени — цена считается и не уходит; кто остановил — в ячейке
+      onShadow: 'Activée · mode fantôme', onShadowShort: 'Calculé, non envoyé à votre boutique', onShadowDetail: 'Le prix est calculé automatiquement ; rien n’est envoyé à votre boutique : le compte du canal est en mode fantôme.',
+      stoppedBy: (who: string, when: string) => `par ${who}, ${when}`,
       stopped: 'Arrêté', stoppedDetail: (scope: string, when: string) => `Une personne a arrêté tous les changements de prix pour ${scope} depuis ${when}`,
       inactive: (status: string) => `Activé, mais offre ${status}`, inactiveDetail: 'Les nouveaux prix ne sont pas appliqués tant que l’offre n’est pas active',
       halted: 'Suspendu', haltedDetail: (when: string) => `Les prix basés sur la concurrence sont suspendus sur ce site depuis ${when}`,
@@ -1387,6 +1390,9 @@ export const fr: Messages = {
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'ID Walmart', EBAY: 'ID eBay', KAUFLAND: 'ID Kaufland' } as Record<string, string>)[channel] ?? 'ID produit'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'données de la concurrence',
       why: 'Pourquoi ce prix', bounds: 'Limites et plancher', noDecisions: 'pas encore de décision', enable: 'Activer',
+      // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      noPriceYet: 'Pas encore de prix', notSet: 'Non défini', feeExpired: 'Estimation des frais expirée : la perte signée peut être obsolète',
+      missingTitle: 'Pour l’activer, ajoutez :', missingItems: { UNIT_COST: 'Coût unitaire et frais', MIN_PRICE: 'Prix minimum', MAX_PRICE: 'Prix maximum' },
       floorNoMin: 'Le prix minimum n’est pas défini',
       floorFromMin: (_min: string) => 'issu de votre prix minimum',
       floorFromMargin: (pct: string, _margin: string, min: string) => `issu de la marge minimale ${pct} (votre prix minimum ${min})`,

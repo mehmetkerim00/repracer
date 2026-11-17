@@ -603,6 +603,9 @@ export const de: Messages = {
     },
     enabled: {
       off: 'Aus', offDetail: 'Der Preis wird nicht automatisch geändert', smart: 'Kaufland Smart Pricing', smartDetail: 'Unser Algorithmus ist für dieses Angebot aus',
+      // Шаг 148 (#27, UX-03): включено, но аккаунт в тени — цена считается и не уходит; кто остановил — в ячейке
+      onShadow: 'An · Schattenmodus', onShadowShort: 'Berechnet, nicht an Ihren Shop gesendet', onShadowDetail: 'Der Preis wird automatisch berechnet; an Ihren Shop wird nichts gesendet — das Kanalkonto ist im Schattenmodus.',
+      stoppedBy: (who: string, when: string) => `von ${who}, ${when}`,
       stopped: 'Gestoppt', stoppedDetail: (scope: string, when: string) => `Eine Person hat alle Preisänderungen für ${scope} seit ${when} gestoppt`,
       inactive: (status: string) => `An, aber ${status}`, inactiveDetail: 'Neue Preise werden erst übernommen, wenn das Angebot aktiv ist',
       halted: 'Angehalten', haltedDetail: (when: string) => `Preise aus Wettbewerbsdaten sind auf dieser Storefront seit ${when} angehalten`,
@@ -1333,6 +1336,9 @@ export const de: Messages = {
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'Walmart-ID', EBAY: 'eBay-ID', KAUFLAND: 'Kaufland-ID' } as Record<string, string>)[channel] ?? 'Produkt-ID'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'Wettbewerbsdaten',
       why: 'Warum dieser Preis', bounds: 'Grenzen und Untergrenze', noDecisions: 'noch keine Entscheidungen', enable: 'Aktivieren',
+      // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      noPriceYet: 'Noch kein Preis', notSet: 'Nicht gesetzt', feeExpired: 'Gebührenschätzung abgelaufen — der bestätigte Verlust kann veraltet sein',
+      missingTitle: 'Zum Einschalten fehlt:', missingItems: { UNIT_COST: 'Stückkosten und Gebühren', MIN_PRICE: 'Mindestpreis', MAX_PRICE: 'Höchstpreis' },
       floorNoMin: 'Mindestpreis ist nicht gesetzt',
       floorFromMin: (_min: string) => 'aus Ihrem Mindestpreis',
       floorFromMargin: (pct: string, _margin: string, min: string) => `aus Mindestmarge ${pct} (Ihr Mindestpreis ${min})`,
