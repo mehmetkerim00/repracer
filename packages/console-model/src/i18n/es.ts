@@ -881,6 +881,8 @@ export const es: Messages = {
       divergences: {
         title: 'Discrepancias: nosotros frente al canal',
         none: 'Sin discrepancias: el canal confirmó cada última actualización de inventario.',
+        // Шаг 158 (#26): пустое состояние — что цифры сходятся, и на какой момент канал прочитан
+        agree: 'Nuestras cifras y las del canal coinciden.',
         row: (sent: number, confirmed: string, status: string, when: string) => `enviado ${sent}, el canal confirmó ${confirmed}; última actualización: ${status} (${when})`,
         cannot: 'Entre actualizaciones de inventario no se lee el canal: un descuento por un pedido del lado del canal solo se ve con la siguiente actualización. Esta pantalla muestra lo que el canal confirmó, no lo que muestra ahora mismo.',
       },

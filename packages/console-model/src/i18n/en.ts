@@ -883,6 +883,8 @@ export const en = {
       divergences: {
         title: 'Divergences: ours vs channel',
         none: 'No divergences: every last stock update was confirmed by its channel.',
+        // Шаг 158 (#26): пустое состояние — что цифры сходятся, и на какой момент канал прочитан
+        agree: 'Our figures and the channel agree.',
         row: (sent: number, confirmed: string, status: string, when: string) => `sent ${sent}, channel confirmed ${confirmed}; last update ${status} (${when})`,
         cannot: 'Between stock updates the channel is not read: an order decrement on the channel side becomes visible only with the next update. This screen shows what the channel confirmed, not what it shows right now.',
       },

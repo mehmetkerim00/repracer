@@ -845,6 +845,8 @@ export const de: Messages = {
       divergences: {
         title: 'Abweichungen: bei uns / im Kanal',
         none: 'Keine Abweichungen: jede letzte Bestandsaktualisierung wurde vom Kanal bestätigt.',
+        // Шаг 158 (#26): пустое состояние — что цифры сходятся, и на какой момент канал прочитан
+        agree: 'Unsere Zahlen und die des Kanals stimmen überein.',
         row: (sent: number, confirmed: string, status: string, when: string) => `gesendet ${sent}, Kanal bestätigte ${confirmed}; letzte Aktualisierung ${status} (${when})`,
         cannot: 'Zwischen zwei Bestandsaktualisierungen wird der Kanal nicht gelesen: eine Bestellung, die der Kanal selbst abzieht, wird erst mit der nächsten Aktualisierung sichtbar. Dieser Bildschirm zeigt, was der Kanal bestätigt hat, nicht, was er gerade anzeigt.',
       },

@@ -168,7 +168,7 @@ export function ImportHistory({ view, controls }: {
  * Раздел импорта на своей странице. `stockSources` — у остатков: файл идёт в источник, который ведётся в PriceTrail. `canEdit` — право на
  * вид импорта; шаблон скачивает любой участник
  */
-export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, caption = null, shared = true, exportNote = shared }: {
+export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, caption = null, shared = true, exportNote = shared, heading = true }: {
   worldId: string; kind: ImportKind; canEdit: boolean; stockSources?: ReadonlyArray<{ stockSourceId: string; name: string }>; onApplied?: () => void;
   /** Подпись файла своей страницы (у остатков — какие заголовки понимает разбор в профиле рынка) */
   caption?: string | null;
@@ -179,6 +179,8 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
   shared?: boolean;
   /** Шаг 153 (#29): строку «заголовки — по-английски» у выгрузки журнала импортов уже сказала выгрузка экрана (Inventory) — `false` */
   exportNote?: boolean;
+  /** Шаг 158 (#26): заголовок раздела даёт строка раскрытия экрана (Inventory) — свой заголовок не повторяется */
+  heading?: boolean;
 }) {
   const m = useMessages();
   const t = m.ui.imports;
@@ -255,7 +257,7 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
 
   return (
     <section className={`import-panel import-${kind.toLowerCase()}`}>
-      <h3>{t.titles[kind]}</h3>
+      {heading ? <h3>{t.titles[kind]}</h3> : null}
       <p className="subtitle">{t.intros[kind]}</p>
       {caption ? <Help className="field-caption" text={caption} /> : null}
       {stock ? (

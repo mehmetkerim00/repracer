@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, Help, href, Intro, Load, MarketContext, Pager, StorefrontTag, useMessages } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, Help, href, Intro, Load, MarketContext, Pager, StorefrontTag, useMessages, useOpenBlocks } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
@@ -37,6 +37,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
   /** Шаг 60 [Р-202]: запись количества не подтверждена владельцем — отказ ведёт на экран подключений */
   const [toConnections, setToConnections] = useState(false);
   const refresh = () => { retry(); retryDivergences(); };
+  const blocks = useOpenBlocks('inventory');
   const post = <T,>(path: string, body: Record<string, unknown>) => requestJson<T>(worldPath(worldId, 'stock', path), { method: 'POST', body, locale: m.locale });
 
   const createSource = () => void post<{ stockSourceId: string; apiKey: string | null }>('sources', { mode: sourceMode, name: sourceName })
@@ -55,27 +56,11 @@ export function StockScreen({ worldId }: { worldId: string }) {
       {(v) => (
         <>
           <StockScreenView view={v} worldId={worldId} query={query} onQuery={setQuery} onFilter={(f) => { setFilter(f); setQuery({ ...query, offset: 0 }); }} />
+          {/* Шаг 158 (#26, Р-254): сразу под таблицей — расхождения «у нас / в канале»; пусто — «сходятся» и момент чтения канала */}
+          <Load shape="table" resource={divergences} retry={retryDivergences}>{(d) => <StockDivergences view={d} asOf={v.asOfText} />}</Load>
           {v.canManage ? (
             <>
-              {/* Шаг 94: управление остатками — три группы полей стандарта; подпись над полем, пояснение под ним, кнопка — в конце группы */}
-              <FieldGroup title={m.ui.stock.sources.title}>
-                <FieldGrid cols={2}>
-                  <Field label={m.ui.stock.sources.name} caption={m.ui.stock.sources.nameCaption}><input value={sourceName} onChange={(e) => setSourceName(e.currentTarget.value)} /></Field>
-                  <Field label={m.ui.stock.sources.mode}><select value={sourceMode} onChange={(e) => setSourceMode(e.currentTarget.value as 'INTERNAL_POOL' | 'INBOUND_API')}>
-                    <option value="INTERNAL_POOL">{m.ui.stock.sources.modes.INTERNAL_POOL}</option>
-                    <option value="INBOUND_API">{m.ui.stock.sources.modes.INBOUND_API}</option>
-                  </select></Field>
-                </FieldGrid>
-                <FormActions hint={sourceName.trim() === '' ? m.ui.forms.why.name : null}>
-                  <button type="button" onClick={createSource} disabled={sourceName.trim() === ''} title={sourceName.trim() === '' ? m.ui.forms.why.name : undefined}>{m.ui.stock.sources.create}</button>
-                </FormActions>
-                {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
-              </FieldGroup>
-              {/* Шаг 99 [Р-224]: файл остатков — тем же путём, что остальные импорты: шаблон, примерка, применение ровно примерки, журнал */}
-              <ImportPanel worldId={worldId} kind="STOCK" canEdit={v.canManage} onApplied={refresh} exportNote={false}
-                caption={market.locales.includes('de') ? m.ui.stock.importFile.hintBilingual : m.ui.stock.importFile.hint}
-                stockSources={v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => ({ stockSourceId: s.stockSourceId, name: s.name }))} />
-              <FieldGroup title={m.ui.stock.enable.title}>
+              <FieldGroup title={m.ui.stock.enable.title} className="stock-sync">
                 <FieldGrid cols={3}>
                   <Field label={m.ui.stock.enable.buffer} caption={m.ui.stock.enable.bufferCaption}><input inputMode="numeric" value={buffer} onChange={(e) => setBuffer(e.currentTarget.value)} /></Field>
                   <Field label={m.ui.stock.enable.maxQuantity} caption={m.ui.stock.enable.maxQuantityCaption}><input inputMode="numeric" value={maxQuantity} onChange={(e) => setMaxQuantity(e.currentTarget.value)} /></Field>
@@ -94,9 +79,35 @@ export function StockScreen({ worldId }: { worldId: string }) {
                   );
                 })}
               </FieldGroup>
+              {/*
+                * Шаг 158 (#26): редкое — раскрываемыми разделами под синхронизацией: источники (раскрыты, пока их нет), файл остатков, возвраты
+                * (раскрыты, пока ждут решения). Раскрытие помнит браузер
+                */}
+              <details className="card more-block stock-sources" open={blocks.isOpen('sources', v.sources.length === 0)} onToggle={blocks.toggle('sources')}>
+                <summary>{m.ui.stock.sources.title}</summary>
+              <FieldGroup>
+                <FieldGrid cols={2}>
+                  <Field label={m.ui.stock.sources.name} caption={m.ui.stock.sources.nameCaption}><input value={sourceName} onChange={(e) => setSourceName(e.currentTarget.value)} /></Field>
+                  <Field label={m.ui.stock.sources.mode}><select value={sourceMode} onChange={(e) => setSourceMode(e.currentTarget.value as 'INTERNAL_POOL' | 'INBOUND_API')}>
+                    <option value="INTERNAL_POOL">{m.ui.stock.sources.modes.INTERNAL_POOL}</option>
+                    <option value="INBOUND_API">{m.ui.stock.sources.modes.INBOUND_API}</option>
+                  </select></Field>
+                </FieldGrid>
+                <FormActions hint={sourceName.trim() === '' ? m.ui.forms.why.name : null}>
+                  <button type="button" onClick={createSource} disabled={sourceName.trim() === ''} title={sourceName.trim() === '' ? m.ui.forms.why.name : undefined}>{m.ui.stock.sources.create}</button>
+                </FormActions>
+                {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
+              </FieldGroup>
+              </details>
+              <details className="card more-block stock-import" open={blocks.isOpen('import')} onToggle={blocks.toggle('import')}>
+                <summary>{m.ui.imports.titles.STOCK}</summary>
+              {/* Шаг 99 [Р-224]: файл остатков — тем же путём, что остальные импорты: шаблон, примерка, применение ровно примерки, журнал */}
+              <ImportPanel worldId={worldId} kind="STOCK" canEdit={v.canManage} onApplied={refresh} exportNote={false} heading={false}
+                caption={market.locales.includes('de') ? m.ui.stock.importFile.hintBilingual : m.ui.stock.importFile.hint}
+                stockSources={v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => ({ stockSourceId: s.stockSourceId, name: s.name }))} />
+              </details>
             </>
           ) : <p className="notice">{m.ui.stock.noRight}</p>}
-          <Load shape="table" resource={divergences} retry={retryDivergences}>{(d) => <StockDivergences view={d} />}</Load>
           <StockReturns worldId={worldId} onDecided={refresh} />
           {message ? <p className="notice" role="status">{message}</p> : null}
           {error ? <ErrorBox message={error} onRetry={refresh} /> : null}
@@ -190,12 +201,13 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
   );
 }
 
-export function StockDivergences({ view }: { view: StockDivergencesView }) {
+export function StockDivergences({ view, asOf = null }: { view: StockDivergencesView; asOf?: string | null }) {
   const m = useMessages();
   return (
-    <section className="card">
+    <section className="card stock-divergences">
       <h3>{m.ui.stock.divergences.title}</h3>
-      {view.items.length === 0 ? <p className="muted empty">{view.none}</p> : (
+      {/* Шаг 158 (#26): пусто — «наши цифры и канал сходятся» и на какой момент канал прочитан */}
+      {view.items.length === 0 ? <p className="muted empty">{m.ui.stock.divergences.agree}{asOf ? ` ${asOf}` : ''}</p> : (
         <ul className="small">{view.items.map((d) => <li key={d.writeScopeId}><strong>{d.sku}</strong> · {(m.values as Record<string, string | undefined>)[d.channel] ?? d.channel} · {d.storefrontsText}: {d.text}</li>)}</ul>
       )}
     </section>
@@ -234,9 +246,11 @@ export function StockReturnsList({ view: v, notes, busy, onNote, onDecide, messa
 }) {
   const m = useMessages();
   const t = m.ui.stock.returns;
+  // Шаг 158 (#26): возвраты — раскрываемым разделом, раскрыт, пока ждут решения; своё хранилище раскрытия (два хука одного ключа затирали бы друг друга)
+  const blocks = useOpenBlocks('inventory-returns');
   return (
-    <section className="card">
-      <h3>{t.title}</h3>
+    <details className="card more-block stock-returns" open={blocks.isOpen('returns', v.pendingCount > 0)} onToggle={blocks.toggle('returns')}>
+      <summary>{t.title}{v.pendingCount > 0 ? <> <Badge tone="warn">{v.pendingCount}</Badge></> : null}</summary>
       <p className="small muted">{v.intro}</p>
       <p><strong>{v.pendingText}</strong></p>
       {v.items.length === 0 ? <p className="muted empty">{v.none}</p> : (
@@ -261,6 +275,6 @@ export function StockReturnsList({ view: v, notes, busy, onNote, onDecide, messa
       {!v.canDecide && v.pendingCount > 0 ? <p className="muted">{m.ui.stock.noRight}</p> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {error ? <ErrorBox message={error} onRetry={onRetry} /> : null}
-    </section>
+    </details>
   );
 }

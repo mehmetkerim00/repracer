@@ -881,6 +881,8 @@ export const fr: Messages = {
       divergences: {
         title: 'Écarts : nous vs canal',
         none: 'Aucun écart : chaque dernière mise à jour du stock a été confirmée par son canal.',
+        // Шаг 158 (#26): пустое состояние — что цифры сходятся, и на какой момент канал прочитан
+        agree: 'Nos chiffres et ceux du canal concordent.',
         row: (sent: number, confirmed: string, status: string, when: string) => `envoyé ${sent}, confirmé par le canal ${confirmed} ; dernière mise à jour : ${status} (${when})`,
         cannot: 'Entre deux mises à jour du stock, le canal n’est pas lu : une baisse due à une commande côté canal ne devient visible qu’à la mise à jour suivante. Cet écran montre ce que le canal a confirmé, pas ce qu’il affiche en ce moment.',
       },

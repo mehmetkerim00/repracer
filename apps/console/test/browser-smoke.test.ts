@@ -1445,7 +1445,8 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
     await new Promise((x) => setTimeout(x, 300));
   };
   const t = en.ui.imports;
-  const headings = () => b.evaluate<string[]>(`[...document.querySelectorAll('.import-panel > h3')].map((h) => h.textContent.trim())`);
+  // Шаг 158 (#26): на Inventory импорт — раскрываемым разделом, его заголовок — строка раскрытия, а не свой h3
+  const headings = () => b.evaluate<string[]>(`[...document.querySelectorAll('.import-panel')].map((p) => (p.querySelector(':scope > h3') ?? p.closest('details')?.querySelector(':scope > summary'))?.textContent.trim() ?? '')`);
   // Меню прежнее — девять пунктов и Omnibus; импорты — разделами страниц
   assert.equal((await b.evaluate<number>(`document.querySelectorAll('.nav-group a').length`)), 10, 'the menu does not grow');
   await visit('costs');
@@ -3125,6 +3126,53 @@ const LONG_HELP = `(() => {
   }
   return out;
 })()`;
+
+test('step 158 (#26): Inventory — the stock table, then divergences, then synchronization; sources, the stock file and returns fold below; empty divergences say «agree»', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.stock;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(localStorage.removeItem('repracer.inventory.open'), true)`);
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/shadow`)}, true)`);
+      await settled(b, `${width}: shadow`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/inventory`)}, true)`);
+      await settled(b, `${width}: inventory`);
+      await waitFor(b, `!!document.querySelector('.stock-divergences')`, `${width}: the divergences card`);
+      const seen = await b.evaluate<{ order: string[]; divergences: number; empty: string; sources: { open: boolean; has: boolean }; importOpen: boolean; importInDom: boolean; returns: { open: boolean; pending: boolean } }>(`(() => {
+        const el = (q) => document.querySelector(q);
+        const marks = [['table', 'table.stock-table'], ['divergences', '.stock-divergences'], ['sync', '.stock-sync'], ['sources', 'details.stock-sources'], ['import', 'details.stock-import'], ['returns', 'details.stock-returns']];
+        const pos = marks.map(([n, q]) => [n, el(q)]).filter(([, e]) => e).sort((a, b) => a[1].compareDocumentPosition(b[1]) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1).map(([n]) => n);
+        const d = el('.stock-divergences');
+        return { order: pos, divergences: d.querySelectorAll('li').length, empty: d.querySelector('.empty')?.textContent.trim() ?? '',
+          sources: { open: el('details.stock-sources').open, has: document.querySelectorAll('.stock-summary ul li').length > 0 },
+          importOpen: el('details.stock-import').open, importInDom: !!el('details.stock-import .import-panel input[type=file], details.stock-import .import-panel .file-drop, details.stock-import .import-panel button'),
+          returns: { open: el('details.stock-returns').open, pending: (el('details.stock-returns .badge')?.textContent ?? '') !== '' && !!el('details.stock-returns .return-decision') } }; })()`);
+      const expected = ['table', 'divergences', 'sync', 'sources', 'import', 'returns'].filter((x) => x !== 'table' || seen.order.includes('table'));
+      assert.deepEqual(seen.order, expected, `${width}: order — ${seen.order.join(' → ')}`);
+      if (seen.divergences === 0) assert.ok(seen.empty.startsWith(t.divergences.agree), `${width}: empty divergences say the figures agree — ${seen.empty}`);
+      assert.equal(seen.sources.open, !seen.sources.has, `${width}: sources open only while there is none`);
+      assert.deepEqual([seen.importOpen, seen.importInDom], [false, true], `${width}: the stock file folded, its panel on the page`);
+      assert.equal(seen.returns.open, seen.returns.pending, `${width}: returns open only with a decision waiting`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+    }
+  } finally {
+    await b.evaluate(`(localStorage.removeItem('repracer.inventory.open'), true)`);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
 
 test('step 157 (#28): Stop pricing leads with one status line, then the stop controls; the kinds table and the audit log are folded but on the page; quiet system sections are one line', async () => {
   const b = browser!;
