@@ -1952,8 +1952,6 @@ export const es: Messages = {
       checking: 'El archivo se está comparando con sus datos actuales…',
       stats: { total: 'Filas', changed: 'Cambiarán', unchanged: 'Sin cambios', rejected: 'Con errores' },
       statsLabel: 'Resumen de la revisión',
-      counts: (c: { total: number; changed: number; unchanged: number; rejected: number }) =>
-        `${c.total} ${c.total === 1 ? 'fila' : 'filas'} · ${c.changed} cambiarán · ${c.unchanged} sin cambios · ${c.rejected} con errores`,
       sourceRead: (format: string, delimiter: string | null) => `Leído como ${format}${delimiter ? ` con el separador “${delimiter === '\t' ? 'tabulación' : delimiter}”` : ''}`,
       encodingLabel: 'Codificación de caracteres', encodingRead: (encoding: string, confident: boolean) => confident ? `Codificación: ${encoding}` : `La codificación probablemente es ${encoding}; revísela y cámbiela si hace falta`,
       columnsTitle: 'Columnas del archivo', columnsCaption: 'Emparejamos las columnas por sus encabezados. Corrija una columna si nos equivocamos.',
@@ -2064,7 +2062,8 @@ export const es: Messages = {
       selectNone: 'No seleccionar ninguna', badInput: (text: string) => `“${text}” no es un importe ni un porcentaje`,
       plan: 'Ver los cambios', apply: 'Aplicar', back: 'Cambiar la solicitud',
       columns: { offer: 'Oferta', minBefore: 'mín. antes', minAfter: 'mín. después', maxBefore: 'máx. antes', maxAfter: 'máx. después', price: 'Precio actual', notes: 'Atención' },
-      headline: (s: { scopes: number; flagged: number; pricesOutside: number }) => `${s.scopes} ${s.scopes === 1 ? 'oferta' : 'ofertas'} · requieren atención ${s.flagged} · precio actual fuera de los nuevos límites ${s.pricesOutside}`,
+      stats: { offers: 'Ofertas', changed: 'Cambiarán', unchanged: 'Sin cambios', flagged: 'Requieren atención', pricesOutside: 'Precio fuera de los nuevos límites' },
+      statsLabel: 'Resumen de los cambios',
       mfa: 'Más de una oferta: para aplicar hay que iniciar sesión con un segundo factor.',
       flags: {
         PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `el precio actual ${price} está por debajo del nuevo precio mínimo ${floor}: la próxima decisión lo subirá`,

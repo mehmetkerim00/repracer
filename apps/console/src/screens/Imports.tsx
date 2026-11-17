@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { IMPORTS_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type BulkJobView, type ImportCheckView, type ImportHistoryView, type ImportKind, type ListQuery, type Period } from '@repracer/console-model';
 import { downloadFile, requestJson, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
-import { Badge, commonZone, ErrorBox, errorText, FileDrop, Help, humanWhen, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, FileDrop, Help, humanWhen, Pager, StickySummary, useMessages, When, WhenHead } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
@@ -66,11 +66,9 @@ export function ImportCheck({ view, onMapping, onEncoding }: {
   const stats = (['total', 'changed', 'unchanged', 'rejected'] as const);
   return (
     <section className={`import-check ${view.tone}`}>
+      {/* Шаг 163 (#27): числа примерки — полосой, которая держится под шапкой, пока листаются ошибки и изменения */}
+      <StickySummary label={t.statsLabel} chips={stats.map((k) => ({ key: k, label: t.stats[k], value: view.counts[k], on: k !== 'total' && k !== 'unchanged' }))} />
       <div className="card summary-card">
-        <p className="headline">{view.headline}</p>
-        <ul className="stat-chips" aria-label={t.statsLabel}>
-          {stats.map((k) => <li key={k} className={`stat-chip${view.counts[k] > 0 && k !== 'total' && k !== 'unchanged' ? ' on' : ''}`}><span>{t.stats[k]}</span> <strong>{view.counts[k]}</strong></li>)}
-        </ul>
         <p className="source small muted">{t.sourceRead(view.source.format, view.source.delimiter)} · {view.fileName}</p>
         {view.blocked ? <p className="notice warn">{view.blocked}</p> : null}
         {view.applyBlocked && !view.blocked ? <p className={`notice${view.counts.rejected > 0 ? ' warn' : ''}`}>{view.applyBlocked}</p> : null}

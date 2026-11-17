@@ -1224,6 +1224,12 @@ th .legend { display: block; color: var(--text-3); font-size: var(--font-size-xs
 }
 .stat-chip strong { font-variant-numeric: tabular-nums; font-weight: var(--weight-heading); }
 .stat-chip.on { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent-border); }
+/* Шаг 163 (#27): полоса сводки — первым ребёнком своего раздела; липнет под шапкой страницы, пока раздел на экране, строки листаются под ней */
+.sticky-summary {
+  position: sticky; top: var(--topbar-h); z-index: 10; margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3);
+  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.sticky-summary .stat-chips { margin: 0; }
 .reason-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .reason-filter { display: inline-flex; align-items: center; gap: var(--space-2); border-radius: var(--radius-pill); box-shadow: none; white-space: nowrap; }
 .reason-filter .count { font-variant-numeric: tabular-nums; font-weight: var(--weight-heading); }

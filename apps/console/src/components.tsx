@@ -112,6 +112,20 @@ export function CardHeader({ title, state, action = null }: { title: ReactNode; 
   );
 }
 
+/**
+ * Шаг 163 (#27, Р-254): полоса сводки — числа экрана различий или примерки чипами. Стоит первым ребёнком своего раздела и липнет под
+ * шапкой страницы, пока раздел на экране: строки листаются под ней. Чип с числом, требующим взгляда, — акцентом
+ */
+export function StickySummary({ label, chips }: { label: string; chips: ReadonlyArray<{ key: string; label: string; value: number; on: boolean }> }) {
+  return (
+    <div className="sticky-summary">
+      <ul className="stat-chips" aria-label={label}>
+        {chips.map((c) => <li key={c.key} className={`stat-chip${c.on && c.value > 0 ? ' on' : ''}`}><span>{c.label}</span> <strong>{c.value}</strong></li>)}
+      </ul>
+    </div>
+  );
+}
+
 /** Шаг 78, шаг 154: до этой длины вспомогательный текст показывается целиком */
 export const HELP_FULL_LENGTH = 160;
 

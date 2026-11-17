@@ -1893,8 +1893,6 @@ export const de: Messages = {
       checking: 'Die Datei wird mit Ihren aktuellen Daten abgeglichen…',
       stats: { total: 'Zeilen', changed: 'Werden geändert', unchanged: 'Unverändert', rejected: 'Mit Fehlern' },
       statsLabel: 'Zusammenfassung der Prüfung',
-      counts: (c: { total: number; changed: number; unchanged: number; rejected: number }) =>
-        `${c.total} ${c.total === 1 ? 'Zeile' : 'Zeilen'} · ${c.changed} werden geändert · ${c.unchanged} unverändert · ${c.rejected} mit Fehlern`,
       sourceRead: (format: string, delimiter: string | null) => `Gelesen als ${format}${delimiter ? ` mit dem Trennzeichen „${delimiter === '\t' ? 'Tabulator' : delimiter}“` : ''}`,
       encodingLabel: 'Zeichensatz', encodingRead: (encoding: string, confident: boolean) => confident ? `Zeichensatz: ${encoding}` : `Zeichensatz vermutlich ${encoding} — bitte prüfen und bei Bedarf ändern`,
       columnsTitle: 'Spalten der Datei', columnsCaption: 'Wir haben die Spalten anhand der Überschriften zugeordnet. Korrigieren Sie eine Spalte, wenn sie falsch ist.',
@@ -2005,7 +2003,8 @@ export const de: Messages = {
       selectNone: 'Keine auswählen', badInput: (text: string) => `„${text}“ ist weder ein Betrag noch ein Prozentsatz`,
       plan: 'Änderungen ansehen', apply: 'Anwenden', back: 'Anfrage ändern',
       columns: { offer: 'Angebot', minBefore: 'min vorher', minAfter: 'min nachher', maxBefore: 'max vorher', maxAfter: 'max nachher', price: 'Aktueller Preis', notes: 'Achtung' },
-      headline: (s: { scopes: number; flagged: number; pricesOutside: number }) => `${s.scopes} ${s.scopes === 1 ? 'Angebot' : 'Angebote'} · mit Hinweisen ${s.flagged} · aktueller Preis außerhalb der neuen Grenzen ${s.pricesOutside}`,
+      stats: { offers: 'Angebote', changed: 'Werden geändert', unchanged: 'Unverändert', flagged: 'Mit Hinweisen', pricesOutside: 'Preis außerhalb der neuen Grenzen' },
+      statsLabel: 'Übersicht der Änderungen',
       mfa: 'Mehr als ein Angebot: Anwenden erfordert eine Anmeldung mit zweitem Faktor.',
       flags: {
         PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `der aktuelle Preis ${price} liegt unter dem neuen Mindestpreis ${floor}: die nächste Entscheidung hebt ihn an`,

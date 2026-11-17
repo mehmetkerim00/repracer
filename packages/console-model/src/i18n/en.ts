@@ -1968,8 +1968,6 @@ export const en = {
       checking: 'The file is being checked against your current data…',
       stats: { total: 'Rows', changed: 'Will change', unchanged: 'Unchanged', rejected: 'With errors' },
       statsLabel: 'Summary of the check',
-      counts: (c: { total: number; changed: number; unchanged: number; rejected: number }) =>
-        `${c.total} ${c.total === 1 ? 'row' : 'rows'} · ${c.changed} will change · ${c.unchanged} unchanged · ${c.rejected} with errors`,
       sourceRead: (format: string, delimiter: string | null) => `Read as ${format}${delimiter ? ` with the separator “${delimiter === '\t' ? 'tab' : delimiter}”` : ''}`,
       encodingLabel: 'Character set', encodingRead: (encoding: string, confident: boolean) => confident ? `Character set: ${encoding}` : `Character set is probably ${encoding} — check it and change if needed`,
       columnsTitle: 'Columns of the file', columnsCaption: 'We matched the columns by their headers. Correct a column if we got it wrong.',
@@ -2080,7 +2078,8 @@ export const en = {
       selectNone: 'Select none', badInput: (text: string) => `“${text}” is not an amount or a percentage`,
       plan: 'Preview changes', apply: 'Apply', back: 'Change the request',
       columns: { offer: 'Offer', minBefore: 'min before', minAfter: 'min after', maxBefore: 'max before', maxAfter: 'max after', price: 'Current price', notes: 'Attention' },
-      headline: (s: { scopes: number; flagged: number; pricesOutside: number }) => `${s.scopes} ${s.scopes === 1 ? 'offer' : 'offers'} · need attention ${s.flagged} · current price outside the new bounds ${s.pricesOutside}`,
+      stats: { offers: 'Offers', changed: 'Will change', unchanged: 'Unchanged', flagged: 'Need attention', pricesOutside: 'Price outside the new bounds' },
+      statsLabel: 'Summary of the changes',
       mfa: 'More than one offer: applying requires a sign-in with a second factor.',
       flags: {
         PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `the current price ${price} is below the new minimum price ${floor}: the next decision will raise it`,

@@ -3129,6 +3129,83 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 163 (#27): bulk edit and imports keep a summary bar of their numbers under the page header while the rows scroll; 375 keeps the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 480);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+  await settled(b, 'costs');
+  // Полоса прилипла: конец раздела — у низа окна, раздел ушёл под шапку страницы, а верх полосы — у низа шапки
+  const stuck = async (section: string, what: string) => {
+    await b.evaluate(`(document.querySelector(${JSON.stringify(section)}).scrollIntoView({ block: 'end' }), true)`);
+    await new Promise((x) => setTimeout(x, 200));
+    const r = await b.evaluate<{ header: number; section: number; bar: number | null; chips: string[] }>(`(() => {
+      const s = document.querySelector(${JSON.stringify(section)}); const bar = s.querySelector(':scope > .sticky-summary');
+      return { header: document.querySelector('.topbar').getBoundingClientRect().bottom, section: s.getBoundingClientRect().top,
+        bar: bar ? bar.getBoundingClientRect().top : null, chips: bar ? [...bar.querySelectorAll('.stat-chip')].map((x) => x.innerText.replace(/\\s+/g, ' ').trim()) : [] }; })()`);
+    assert.ok(r.bar !== null, `${what}: the summary bar is there`);
+    assert.ok(r.section < r.header, `${what}: the section scrolled under the page header (${r.section} < ${r.header})`);
+    assert.ok(Math.abs(r.bar! - r.header) <= 1, `${what}: the bar stays right under the page header (${r.bar} vs ${r.header})`);
+    return r.chips;
+  };
+
+  // Импорт себестоимости: одна строка к изменению и 40 строк с ошибкой — полоса держит четыре числа
+  const t = en.ui.imports;
+  const offer = await smokeLive.view(STAND_USERS[0] as never) as { state: { scopes: Array<{ externalUnitId: string }> } };
+  const unit = offer.state.scopes[0]!.externalUnitId;
+  // Сумма своя (не 9.99 шага 99): смоук шага 99 идёт раньше и уже поставил ту себестоимость — строка была бы «без изменений»
+  const file = ['sku,unit_cost,currency', `${unit},6.47,EUR`, ...Array.from({ length: 40 }, (_, i) => `NO-SUCH-SKU-${i},7.00,EUR`)].join('\n') + '\n';
+  await b.evaluate(`(() => { const input = document.querySelector('.import-costs input[type=file]'); const dt = new DataTransfer();
+    dt.items.add(new File([${JSON.stringify(file)}], 'costs-163.csv', { type: 'text/csv' })); input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor(b, `[...document.querySelectorAll('.import-costs .file-drop')].some((x) => x.textContent.includes('costs-163.csv'))`, 'the file is chosen');
+  await b.click(t.check, '.import-costs button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.import-costs .import-check .import-errors tbody tr') !== null`, 'the check is shown');
+  assert.deepEqual(await stuck('.import-costs .import-check', 'import'), [`${t.stats.total} 41`, `${t.stats.changed} 1`, `${t.stats.unchanged} 0`, `${t.stats.rejected} 40`]);
+  assert.equal(await b.evaluate<number>(`document.querySelectorAll('.import-costs .import-check .stat-chip').length`), 4, 'the numbers are in the bar only, not twice');
+
+  // Правка границ всего каталога: минимум — «set to» 1.00; полоса — предложения, меняется, без изменений, внимание, цена вне границ
+  const e = en.ui.boundsEdit;
+  await b.evaluate(`(document.querySelector('.bounds-edit').scrollIntoView(), true)`);
+  await b.evaluate(`(() => { const c = [...document.querySelectorAll('.bounds-edit .check-field')].find((x) => x.textContent.includes('offers of the catalog')); c.querySelector('input').click(); return true; })()`);
+  const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
+  await b.evaluate(`(() => { const s = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'SET'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.evaluate(`(() => { const i = ${field(e.amountLabel)}.querySelector('input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '1.00'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.click(e.plan, '.bounds-edit button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.bounds-edit section.diff tbody tr') !== null`, 'the differences are shown');
+  // Каталог смоук-мира мал — различия короче окна; окно ниже раздела, чтобы раздел ушёл под шапку
+  await b.setViewport(1440, 300);
+  await new Promise((x) => setTimeout(x, 200));
+  const chips = await stuck('.bounds-edit section.diff', 'bounds edit');
+  const n = (label: string) => Number(chips.find((c) => c.startsWith(`${label} `))?.slice(label.length + 1));
+  assert.deepEqual(chips.map((c) => c.replace(/ \d+$/, '')), [e.stats.offers, e.stats.changed, e.stats.unchanged, e.stats.flagged, e.stats.pricesOutside]);
+  assert.ok(n(e.stats.offers) > 0 && n(e.stats.changed) + n(e.stats.unchanged) === n(e.stats.offers), `will change and unchanged add up to the offers: ${chips.join(' | ')}`);
+
+  for (const width of [375, 1440]) {
+    await b.setViewport(width, 900);
+    await new Promise((x) => setTimeout(x, 200));
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+    assert.deepEqual(await b.evaluate(OUT_OF_BOX), [], `${width}: nothing sticks out of its frame`);
+  }
+  await b.setViewport(1440, 900);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 162 (#27): Offers — Margin at the current price by default; Health shows the most important mark of a row with «+N», and the marks leave the offer cell', async () => {
   const b = browser!;
   const before = b.errors().length;

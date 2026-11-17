@@ -644,8 +644,8 @@ export interface ImportCheckView {
   fileName: string;
   source: { format: string; delimiter: string | null; encoding: string | null; encodingConfident: boolean };
   encodings: string[];
+  /** Шаг 163 (#27): числа примерки — полосой сводки над карточкой итога; фразой они больше не повторяются */
   counts: { total: number; changed: number; unchanged: number; rejected: number };
-  headline: string;
   tone: Tone;
   /** Колонок не хватает — сказано словами и названы поля */
   blocked: string | null;
@@ -745,7 +745,7 @@ export function importCheckView(world: StandWorld, plan: ImportPlan, source: { n
       encoding: (source.sheet as Sheet).encoding ?? null, encodingConfident: (source.sheet as Sheet).encodingConfident !== false,
     },
     encodings: [...TABLE_ENCODINGS],
-    counts, headline: t.counts(counts),
+    counts,
     tone: blocked || plan.errors.length > 0 ? 'stop' : plan.changed.length === 0 ? 'off' : 'ok',
     blocked,
     fields: IMPORT_SCHEMAS[plan.kind].filter((s) => s.role !== 'info').map((s) => ({ field: s.field, label: t.fields[s.field], columnIndex: source.mapping[s.field] ?? null })),

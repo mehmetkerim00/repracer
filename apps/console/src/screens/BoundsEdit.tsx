@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
-import { ErrorBox, errorText, Gaps, Help, UnitName, useMessages } from '../components.tsx';
+import { ErrorBox, errorText, Gaps, Help, StickySummary, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
@@ -32,7 +32,11 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
   const c = t.columns;
   return (
     <section className="diff">
-      <p className="headline">{view.headline}</p>
+      {/* Шаг 163 (#27): числа экрана различий — полосой, которая держится под шапкой, пока листаются строки; прежняя фраза — те же числа */}
+      <StickySummary label={t.statsLabel} chips={([
+        ['offers', view.summary.scopes, false], ['changed', view.summary.changed, true], ['unchanged', view.summary.unchanged, false],
+        ['flagged', view.summary.flagged, true], ['pricesOutside', view.summary.pricesOutside, true],
+      ] as const).map(([key, value, on]) => ({ key, label: t.stats[key], value, on }))} />
       {view.mfaRequired ? <p className="notice">{t.mfa}</p> : null}
       <div className="table-wrap">
         <table>

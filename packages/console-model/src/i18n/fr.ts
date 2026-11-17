@@ -1952,8 +1952,6 @@ export const fr: Messages = {
       checking: 'Le fichier est comparé à vos données actuelles…',
       stats: { total: 'Lignes', changed: 'Seront modifiées', unchanged: 'Inchangées', rejected: 'En erreur' },
       statsLabel: 'Résumé de la vérification',
-      counts: (c: { total: number; changed: number; unchanged: number; rejected: number }) =>
-        `${c.total} ${c.total === 1 ? 'ligne' : 'lignes'} · ${c.changed} seront modifiées · ${c.unchanged} inchangées · ${c.rejected} en erreur`,
       sourceRead: (format: string, delimiter: string | null) => `Lu comme ${format}${delimiter ? ` avec le séparateur « ${delimiter === '\t' ? 'tabulation' : delimiter} »` : ''}`,
       encodingLabel: 'Jeu de caractères', encodingRead: (encoding: string, confident: boolean) => confident ? `Jeu de caractères : ${encoding}` : `Le jeu de caractères est probablement ${encoding} — vérifiez-le et modifiez-le si nécessaire`,
       columnsTitle: 'Colonnes du fichier', columnsCaption: 'Nous avons associé les colonnes par leurs en-têtes. Corrigez une colonne si nous nous sommes trompés.',
@@ -2064,7 +2062,8 @@ export const fr: Messages = {
       selectNone: 'Tout désélectionner', badInput: (text: string) => `« ${text} » n’est ni un montant ni un pourcentage`,
       plan: 'Aperçu des changements', apply: 'Appliquer', back: 'Modifier la demande',
       columns: { offer: 'Offre', minBefore: 'min avant', minAfter: 'min après', maxBefore: 'max avant', maxAfter: 'max après', price: 'Prix actuel', notes: 'Attention' },
-      headline: (s: { scopes: number; flagged: number; pricesOutside: number }) => `${s.scopes} ${s.scopes === 1 ? 'offre' : 'offres'} · à vérifier ${s.flagged} · prix actuel hors des nouvelles limites ${s.pricesOutside}`,
+      stats: { offers: 'Offres', changed: 'Seront modifiées', unchanged: 'Inchangées', flagged: 'À vérifier', pricesOutside: 'Prix hors des nouvelles limites' },
+      statsLabel: 'Résumé des modifications',
       mfa: 'Plusieurs offres : l’application exige une connexion avec un second facteur.',
       flags: {
         PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `le prix actuel ${price} est sous le nouveau prix minimum ${floor} : la prochaine décision le relèvera`,

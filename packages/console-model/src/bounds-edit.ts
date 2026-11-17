@@ -130,12 +130,15 @@ export const DIFF_ROWS_SHOWN = 50;
 
 export interface BoundsDiffView {
   worldId: string;
-  headline: string;
   /** Показанные строки: первые DIFF_ROWS_SHOWN; сколько их всего — в summary.scopes */
   rows: DiffRow[];
   /** Строки с пометками показываются первыми: продавцу важно именно опасное */
   shown: { rows: number; of: number };
-  summary: { scopes: number; flagged: number; pricesOutside: number };
+  /**
+   * Шаг 163 (#27): числа полосы сводки — предложения, у скольких граница меняется и у скольких нет (правка ничего не меняет — `NO_EFFECT`),
+   * сколько с пометками и у скольких текущая цена вне новых границ
+   */
+  summary: { scopes: number; changed: number; unchanged: number; flagged: number; pricesOutside: number };
   mfaRequired: boolean;
   /** Применение принимается только с этим токеном: правки и различия — те, что видел человек */
   planToken: string;
@@ -177,13 +180,16 @@ export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInpu
   });
   // Сначала — строки с пометками: если показать можно не всё, показывается то, что важно
   const ordered = [...out].sort((a, b) => b.flags.length - a.flags.length);
+  const unchanged = out.filter((r) => r.flags.some((f) => f.code === 'NO_EFFECT')).length;
   const summary = {
     scopes: out.length,
+    changed: out.length - unchanged,
+    unchanged,
     flagged: out.filter((r) => r.flags.length > 0).length,
     pricesOutside: out.filter((r) => r.flags.some((f) => f.code === 'PRICE_BELOW_NEW_FLOOR' || f.code === 'PRICE_ABOVE_NEW_CEILING')).length,
   };
   return {
-    worldId: world.id, headline: t.headline(summary), rows: ordered.slice(0, DIFF_ROWS_SHOWN),
+    worldId: world.id, rows: ordered.slice(0, DIFF_ROWS_SHOWN),
     shown: { rows: Math.min(ordered.length, DIFF_ROWS_SHOWN), of: out.length }, summary, mfaRequired: out.length > 1,
     planToken: boundsPlanToken(edits, rows), gaps: [gap(m, 'BOUND_LEVELS'), gap(m, 'MASS_EDIT_MFA_PER_TRANSACTION')],
   };
