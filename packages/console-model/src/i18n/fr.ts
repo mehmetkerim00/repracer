@@ -857,6 +857,8 @@ export const fr: Messages = {
         unmatched: { UNKNOWN_SKU: 'SKU inconnu', BAD_QUANTITY: 'la quantité n’est pas un nombre entier positif ou nul', DUPLICATE_SKU: 'SKU listé deux fois', EMPTY_SKU: 'SKU vide', AMBIGUOUS_SKU: 'le SKU correspond à deux produits — il n’est pas deviné' },
       },
       enable: {
+        // Шаг 160 (#26): превью синхронизации до включения
+        previewTitle: 'Avec ces réglages', previewSummary: (n: number, pieces: number, zero: number) => `Sur cette page : ${n} ${n === 1 ? 'produit publierait' : 'produits publieraient'} ${pieces} ${pieces === 1 ? 'pièce' : 'pièces'}${zero > 0 ? ` ; ${zero} ${zero === 1 ? 'afficherait' : 'afficheraient'} 0 (sous le minimum de publication)` : ''}.`,
         title: 'Synchronisation',
         // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
         buffer: 'Réserve par canal', bufferCaption: 'Pièces non publiées sur chaque canal. S’applique au compte que vous activez ci-dessous ; la réserve en vigueur figure sur chaque ligne ci-dessus.',

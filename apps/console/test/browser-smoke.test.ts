@@ -3127,6 +3127,45 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 160 (#26): before enabling, Inventory previews what a channel would get with the entered buffer — the calculation of the rows; no preview for a wrong value', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const e = en.ui.stock.enable;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/inventory`)}, true)`);
+  await settled(b, 'inventory');
+  await waitFor(b, `!!document.querySelector('.stock-sync')`, 'the synchronization section');
+  const buffer = `[...document.querySelectorAll('.stock-sync .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(e.buffer)}).querySelector('input')`;
+  const type = async (value: string) => {
+    await b.evaluate(`(() => { const i = ${buffer}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await new Promise((x) => setTimeout(x, 200));
+  };
+  const preview = () => b.evaluate<{ title: string; lines: string[]; summary: string } | null>(`(() => { const p = document.querySelector('.stock-sync .sync-preview'); if (!p) return null;
+    return { title: p.querySelector('.field-caption').textContent.trim(), lines: [...p.querySelectorAll('li')].map((li) => li.textContent.trim()), summary: p.querySelector('p.muted').textContent.trim() }; })()`);
+  await type('0');
+  const zero = await preview();
+  assert.ok(zero && zero.title === e.previewTitle && zero.lines.length > 0, `the preview is there with buffer 0: ${JSON.stringify(zero)}`);
+  await type('2');
+  const two = await preview();
+  assert.ok(two && two.lines.some((l) => /buffer 2/.test(l)) && JSON.stringify(two) !== JSON.stringify(zero), `buffer 2 changes the preview with the row calculation: ${JSON.stringify(two)}`);
+  await type('-1');
+  assert.equal(await preview(), null, 'a wrong value — no preview');
+  await type('0');
+  for (const width of [375, 1440]) {
+    await b.setViewport(width, 900);
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 159 (#26): Inventory filters by offer channel and «needs attention» and sorts by reserved — across the catalog, and «Show all» clears them', async () => {
   const b = browser!;
   const before = b.errors().length;

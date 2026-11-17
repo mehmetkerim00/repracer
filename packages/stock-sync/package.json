@@ -5,7 +5,8 @@
   "description": "Stock synchronisation (Р-6, Р-152, Р-153): sources, published quantity over the shared pool with a per-channel buffer, reservations from channel orders, quantity writes and the stock screens' data.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./published": "./src/published.ts"
   },
   "dependencies": {
     "@repracer/channel-port": "0.1.0",

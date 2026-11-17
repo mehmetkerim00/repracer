@@ -25,3 +25,12 @@ export function publishedQuantity(available: number, allocation: StockAllocation
   if (q < allocation.minQuantityToList) q = 0;
   return q;
 }
+
+/**
+ * Шаг 159 (#26): есть что опубликовать (после буфера и потолка), но меньше порога выставления — канал покажет ноль. Одно правило у фильтра
+ * «требует внимания» (stock-sync, SQL хранилища) и у превью синхронизации экрана (шаг 160)
+ */
+export function belowMinimumToList(available: number, a: StockAllocation): boolean {
+  const q = Math.min(a.maxQuantity ?? Number.MAX_SAFE_INTEGER, Math.max(0, available - a.bufferUnits));
+  return a.minQuantityToList > 0 && q > 0 && q < a.minQuantityToList;
+}

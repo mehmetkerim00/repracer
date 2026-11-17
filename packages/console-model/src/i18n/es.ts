@@ -857,6 +857,8 @@ export const es: Messages = {
         unmatched: { UNKNOWN_SKU: 'SKU desconocido', BAD_QUANTITY: 'la cantidad no es un número entero no negativo', DUPLICATE_SKU: 'SKU repetido', EMPTY_SKU: 'SKU vacío', AMBIGUOUS_SKU: 'el SKU coincide con dos productos; no se adivina' },
       },
       enable: {
+        // Шаг 160 (#26): превью синхронизации до включения
+        previewTitle: 'Con estos ajustes', previewSummary: (n: number, pieces: number, zero: number) => `En esta página: ${n} ${n === 1 ? 'producto publicaría' : 'productos publicarían'} ${pieces} ${pieces === 1 ? 'unidad' : 'unidades'}${zero > 0 ? `; ${zero} ${zero === 1 ? 'mostraría' : 'mostrarían'} 0 (por debajo del mínimo para publicar)` : ''}.`,
         title: 'Sincronización',
         // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
         buffer: 'Colchón por canal', bufferCaption: 'Unidades que se descuentan de lo publicado en cada canal. Se aplica a la cuenta que active abajo; el colchón vigente se muestra en cada fila de arriba.',

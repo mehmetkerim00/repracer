@@ -824,6 +824,8 @@ export const de: Messages = {
         unmatched: { UNKNOWN_SKU: 'SKU unbekannt', BAD_QUANTITY: 'Menge ist keine ganze, nicht negative Zahl', DUPLICATE_SKU: 'SKU doppelt', EMPTY_SKU: 'leere SKU', AMBIGUOUS_SKU: 'die SKU passt auf zwei Produkte — sie wird nicht erraten' },
       },
       enable: {
+        // Шаг 160 (#26): превью синхронизации до включения
+        previewTitle: 'Mit diesen Einstellungen', previewSummary: (n: number, pieces: number, zero: number) => `Auf dieser Seite: ${n} ${n === 1 ? 'Produkt würde' : 'Produkte würden'} ${pieces} Stück veröffentlichen${zero > 0 ? `; ${zero} ${zero === 1 ? 'zeigt' : 'zeigen'} 0 (unter dem Mindestbestand zum Einstellen)` : ''}.`,
         title: 'Abgleich',
         buffer: 'Puffer je Kanal', bufferCaption: 'Stück, die jedem Kanal vorenthalten werden. Gilt für das Konto, das Sie unten einschalten; der geltende Puffer steht in jeder Zeile oben.',
         maxQuantity: 'Höchstens veröffentlichen', maxQuantityCaption: 'Leer lassen — keine Obergrenze.',

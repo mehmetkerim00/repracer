@@ -1,6 +1,7 @@
 import { useContext, useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
+import { syncPreview } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, ErrorBox, errorText, Gaps, Help, href, Intro, Load, MarketContext, Pager, StorefrontTag, useMessages, useOpenBlocks } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
@@ -66,6 +67,17 @@ export function StockScreen({ worldId }: { worldId: string }) {
                   <Field label={m.ui.stock.enable.maxQuantity} caption={m.ui.stock.enable.maxQuantityCaption}><input inputMode="numeric" value={maxQuantity} onChange={(e) => setMaxQuantity(e.currentTarget.value)} /></Field>
                   <Field label={m.ui.stock.enable.minToList} caption={m.ui.stock.enable.minToListCaption}><input inputMode="numeric" value={minToList} onChange={(e) => setMinToList(e.currentTarget.value)} /></Field>
                 </FieldGrid>
+                {/* Шаг 160 (#26): до включения — что получит канал при введённых значениях, той же фразой расчёта, что строка таблицы */}
+                {(() => {
+                  const preview = syncPreview(v.rows, { buffer, maxQuantity, minToList }, m);
+                  return preview ? (
+                    <div className="sync-preview" aria-live="polite">
+                      <p className="field-caption"><strong>{m.ui.stock.enable.previewTitle}</strong></p>
+                      <ul className="small plain">{preview.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+                      <p className="small muted">{preview.summary}</p>
+                    </div>
+                  ) : null;
+                })()}
                 {/* Ловушки каналов — плашкой: канал и пилюля, суть в одну-две строки, подробности — по раскрытию [Р-153] */}
                 {v.traps.map((t) => {
                   const why = t.requiresAck && !ack ? m.ui.forms.why.confirmSideEffect : job !== null ? m.ui.forms.why.jobRunning : null;

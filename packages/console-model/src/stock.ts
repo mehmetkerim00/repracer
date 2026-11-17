@@ -1,5 +1,7 @@
 import { can } from '@repracer/pricing-model';
 import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSort, StockSourceRow } from '@repracer/stock-sync';
+// Шаг 160: правило публикуемого количества — подпутём без модулей Node (страница консоли, правило импортов шага 76)
+import { belowMinimumToList, publishedQuantity } from '@repracer/stock-sync/published';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, storefrontChip, storefrontName, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
@@ -136,6 +138,33 @@ function toPublishWithCalc(c: StockChannelRow, available: number | null, m: Mess
   const capped = a.maxQuantity !== null && afterBuffer > a.maxQuantity;
   const belowMin = !capped && afterBuffer < a.minQuantityToList;
   return s.toPublishCalc({ published: c.published, available, buffer: a.bufferUnits, afterBuffer, cap: capped ? a.maxQuantity : null, min: belowMin ? a.minQuantityToList : null });
+}
+
+/**
+ * Шаг 160 (#26): превью синхронизации до включения — что получит канал при введённых буфере, потолке и пороге: по первым товарам страницы
+ * той же фразой расчёта, что строка (шаг 138), и итог по странице. Правило — `publishedQuantity`; неверный ввод (не целое, отрицательное) —
+ * превью нет. Пустой потолок — без потолка
+ */
+export function syncPreview(rows: ReadonlyArray<{ label: string; available: number }>, input: { buffer: string; maxQuantity: string; minToList: string }, m: Messages,
+  shown = 5): { lines: string[]; summary: string } | null {
+  const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
+  const bufferUnits = whole(input.buffer);
+  const minQuantityToList = whole(input.minToList);
+  const maxQuantity = input.maxQuantity.trim() === '' ? null : whole(input.maxQuantity);
+  if (bufferUnits === null || minQuantityToList === null || (input.maxQuantity.trim() !== '' && maxQuantity === null)) return null;
+  const a = { bufferUnits, maxQuantity, minQuantityToList };
+  const s = m.ui.stock.channel;
+  const calc = rows.map((r) => {
+    const published = publishedQuantity(r.available, a);
+    const afterBuffer = Math.max(0, r.available - bufferUnits);
+    const capped = maxQuantity !== null && afterBuffer > maxQuantity;
+    const belowMin = !capped && afterBuffer < minQuantityToList;
+    return { r, published, text: `${r.label}: ${s.toPublishCalc({ published, available: r.available, buffer: bufferUnits, afterBuffer, cap: capped ? maxQuantity : null, min: belowMin ? minQuantityToList : null })}` };
+  });
+  return {
+    lines: calc.slice(0, shown).map((x) => x.text),
+    summary: m.ui.stock.enable.previewSummary(rows.length, calc.reduce((n, x) => n + x.published, 0), rows.filter((r) => belowMinimumToList(r.available, a)).length),
+  };
 }
 
 export function channelCell(c: StockChannelRow, m: Messages, world: Pick<StandWorld, 'accounts'> | null = null, available: number | null = null): StockChannelCell {

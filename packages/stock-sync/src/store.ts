@@ -1,6 +1,6 @@
 import type { ImportRunInput, ImportRunRow } from '@repracer/pricing-pipeline';
 import type { Instant, OrderLine } from '@repracer/channel-port';
-import type { StockAllocation } from './published.ts';
+import { belowMinimumToList } from './published.ts';
 
 /** Участник, от чьего имени пишется административная запись [Р-97] */
 export interface StockActor {
@@ -268,11 +268,7 @@ export function stockNeedsAttention(row: Pick<StockRow, 'available' | 'channels'
   return row.channels.some((c) => c.divergence !== null || (c.syncEnabled && c.allocation != null && belowMinimumToList(row.available, c.allocation)));
 }
 
-/** Шаг 159: есть что опубликовать (после буфера и потолка), но меньше порога выставления — канал покажет ноль */
-export function belowMinimumToList(available: number, a: StockAllocation): boolean {
-  const q = Math.min(a.maxQuantity ?? Number.MAX_SAFE_INTEGER, Math.max(0, available - a.bufferUnits));
-  return a.minQuantityToList > 0 && q > 0 && q < a.minQuantityToList;
-}
+
 
 export interface StockDivergenceRow {
   writeScopeId: string;

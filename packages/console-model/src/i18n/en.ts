@@ -859,6 +859,8 @@ export const en = {
         unmatched: { UNKNOWN_SKU: 'SKU unknown', BAD_QUANTITY: 'quantity is not a whole non-negative number', DUPLICATE_SKU: 'SKU listed twice', EMPTY_SKU: 'empty SKU', AMBIGUOUS_SKU: 'the SKU matches two products — it is not guessed' },
       },
       enable: {
+        // Шаг 160 (#26): превью синхронизации до включения
+        previewTitle: 'With these settings', previewSummary: (n: number, pieces: number, zero: number) => `On this page: ${n} ${n === 1 ? 'product' : 'products'} would publish ${pieces} ${pieces === 1 ? 'piece' : 'pieces'}${zero > 0 ? `; ${zero} would show 0 (below the minimum to list)` : ''}.`,
         title: 'Synchronization',
         // шаг 94: подпись короткая, пояснение — под полем, а не в скобках подписи
         buffer: 'Buffer per channel', bufferCaption: 'Pieces kept back from every channel. Applies to the account you enable below; the buffer in force is shown on every row above.',
