@@ -1531,6 +1531,9 @@ export const de: Messages = {
       headlineApplied: (price: string) => `Der Preis ${price} wurde gesetzt und vom Kanal übernommen`,
       headlineApproved: (price: string, status: string) => `Der Preis ${price} wurde freigegeben; Übertragung: ${status}`,
       headlineNoWrite: (price: string) => `Der Preis ${price} wurde freigegeben, aber keine Übertragung angelegt`,
+      // Шаг 147 (#24): краткий вид квитанции и блок доказательств
+      summaryLabels: { proposed: 'Vorschlag', decision: 'Entscheidung' },
+      evidence: { show: (steps: number, remarks: number) => `Alle Belege zeigen – ${steps} Schritte${remarks > 0 ? `, ${remarks} mit Hinweisen` : ''}`, hide: 'Belege ausblenden' },
       headlineNoChange: (text: string) => `Der Preis blieb: ${text}`,
       nothingSent: 'An den Kanal wurde nichts gesendet', writeMissing: 'Der Preis wurde freigegeben; seine Übertragung wird hier nicht mehr gezeigt — abgeschlossene Übertragungen bleiben etwa einen Tag auf dieser Seite',
       writeVersion: (version: number, price: string) => `Version ${version}: ${price}`,

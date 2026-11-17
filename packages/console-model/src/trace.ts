@@ -83,6 +83,28 @@ export interface DecisionTrace {
   clearance: { pill: string; line: string } | null;
   steps: TraceStep[];
   gaps: Gap[];
+  /**
+   * Шаг 147 (#24, Р-254): кратко — повод, предложенная цена, решение Price Gate и судьба цены; те же сводки, что у станций. Доказательства
+   * (станции) свёрнуты, кроме отказа, паузы и станции со статусом STOP — тогда раскрыты, и станция, которая решила, помечена
+   */
+  summary: TraceSummary;
+}
+
+export interface TraceSummary {
+  /** Кто подвинул цену (фраза шага 97) или повод стратегии словами; null — у решения без слепка повода нет */
+  trigger: string | null;
+  /** Цена, изменение и причина стратегии (без слова «Proposed» — оно подпись строки); «оставить цену» — сводка станции; null — станции нет */
+  proposed: string | null;
+  /** Сводка станции Price Gate; у «без изменения» и без станции — прежняя фраза итога */
+  decision: string;
+  /** Подтверждение канала, если оно было, иначе станция отправки; удержание рамками Amazon — в той же строке */
+  sending: string;
+  /** Станция, которая решила: Price Gate у отказа и паузы, иначе первая со статусом STOP; null — решили все в порядке */
+  decidedBy: TraceStepKey | null;
+  /** Доказательства раскрыты сразу */
+  evidenceOpen: boolean;
+  /** Станций с замечанием или остановкой — подпись свёрнутого блока говорит, что внутри есть на что посмотреть */
+  remarks: number;
 }
 
 export interface DecisionListItem {
@@ -400,12 +422,42 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
     line: [clearanceStep ? say(clearanceStep).text : null, cl ? `${t.clearanceBy(clWho!, m.when(cl.enabledAt), cl.note)}.` : null].filter((x): x is string => x !== null).join(' '),
   } : null;
   const statusCode = decisionStatus(d, last?.status ?? null);
+  // Предложение — без слова «Proposed» (оно — подпись строки): цена, изменение и причина стратегии; «оставить цену» — сводкой станции
+  const proposedShort = e && e.strategy.intentClass === 'CHANGED'
+    ? ((change) => `${money(e.strategy.proposedMinor)}${change ? ` (${change})` : ''}${m.colon}${say(e.strategy.reason).text}`)(m.change(e.strategy.currentMinor, e.strategy.proposedMinor)) : null;
+  const summary = traceSummary(steps, statusCode, headline, e ? ((m.ui.triggers as Record<string, string | undefined>)[e.strategy.trigger] ?? e.strategy.trigger) : null, proposedShort, m);
   return {
     worldId: world.id, decisionId: d.decisionId, unit: scope ? unitOf(world, scope, m) : null, decidedAt: m.when(d.decidedAt), headline,
     status: { code: statusCode, label: m.ui.statuses[statusCode], tone: PRICE_STATUS_TONE[statusCode] },
     headlinePrice: d.outcome === 'APPROVED' ? money(d.finalMinor) : null, clearance,
     tone: last?.status === 'APPLIED' ? 'ok' : last?.status === 'SHADOW_HELD' ? 'warn' : OUTCOME_TONE[d.outcome] ?? 'unknown', dangerous: isDangerous(d), steps,
-    gaps: uniqueGaps([...gaps, ...steps.flatMap((s) => s.gaps)]),
+    gaps: uniqueGaps([...gaps, ...steps.flatMap((s) => s.gaps)]), summary,
+  };
+}
+
+/**
+ * Шаг 147 (#24): краткий вид квитанции из её же станций — второго расчёта нет. Повод: кто подвинул цену (таблица конкурентов станции снимка),
+ * иначе повод стратегии словами. Судьба цены: подтверждение канала, если оно было, иначе станция отправки; удержание рамками Amazon (шаг 127) —
+ * та же строка. Отказ и пауза раскрывают доказательства на Price Gate; станция со статусом STOP раскрывает их на себе
+ */
+function traceSummary(steps: readonly TraceStep[], status: PriceStatus, headline: string, triggerWord: string | null, proposed: string | null, m: Messages): TraceSummary {
+  const t = m.ui.trace;
+  const at = (key: TraceStepKey) => steps.find((x) => x.key === key);
+  const write = at('WRITE');
+  const channel = at('CHANNEL');
+  const held = write?.items.find((i) => i.label === t.channelBoundsHeld.label);
+  const fate = channel && channel.status !== 'SKIPPED' ? channel.summary : write?.summary ?? t.nothingSent;
+  const stopped = steps.find((x) => x.status === 'STOP')?.key ?? null;
+  const decidedBy: TraceStepKey | null = status === 'REJECTED' || status === 'BLOCKED' ? (at('GATE') ? 'GATE' : stopped) : stopped;
+  return {
+    trigger: at('SNAPSHOT')?.competitors?.trigger ?? triggerWord,
+    proposed: proposed ?? at('STRATEGY')?.summary ?? null,
+    // «Без изменения» — фраза итога («No change: …»): у решения без слепка станция Gate говорит лишь, что детали не хранятся
+    decision: status === 'NO_CHANGE' ? headline : at('GATE')?.summary ?? headline,
+    sending: held?.value ? `${fate}. ${held.value}` : fate,
+    decidedBy,
+    evidenceOpen: decidedBy !== null || status === 'REJECTED' || status === 'BLOCKED',
+    remarks: steps.filter((x) => x.status === 'WARN' || x.status === 'STOP').length,
   };
 }
 

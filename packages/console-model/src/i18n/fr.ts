@@ -1586,6 +1586,9 @@ export const fr: Messages = {
       headlineApplied: (price: string) => `Le prix ${price} a été fixé et appliqué par le canal`,
       headlineApproved: (price: string, status: string) => `Le prix ${price} a été approuvé ; envoi à votre boutique : ${status}`,
       headlineNoWrite: (price: string) => `Le prix ${price} a été approuvé, mais aucune mise à jour n’a été créée pour votre boutique`,
+      // Шаг 147 (#24): краткий вид квитанции и блок доказательств
+      summaryLabels: { proposed: 'Proposition', decision: 'Décision' },
+      evidence: { show: (steps: number, remarks: number) => `Afficher toutes les preuves — ${steps} étapes${remarks > 0 ? `, ${remarks} avec remarques` : ''}`, hide: 'Masquer les preuves' },
       headlineNoChange: (text: string) => `Le prix est resté inchangé : ${text}`,
       nothingSent: 'Rien n’a été envoyé au canal', writeMissing: 'Le prix a été approuvé ; sa mise à jour n’est plus affichée ici — les mises à jour terminées restent sur cet écran environ une journée',
       writeVersion: (version: number, price: string) => `Version ${version} : ${price}`,

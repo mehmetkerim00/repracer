@@ -7,7 +7,7 @@ export type { Fmt, Locale, Template } from './i18n/types.ts';
 /** Права по роли [OQ-125] — те же, что проверяют хранилище и БД */
 export { can, EXTENDED_ROLES, offeredRoles, VISIBLE_ROLES, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 export { boundText, channelNotes, noteBlocksPricing, notAssignedText, productList, strategyLabel, type ChannelNote, type FloorCell, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
-export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, triggerChip, triggerPhrase, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceCompetitors, type TraceItem, type TraceStep, type TraceStepKey } from './trace.ts';
+export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, triggerChip, triggerPhrase, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceCompetitors, type TraceItem, type TraceStep, type TraceStepKey, type TraceSummary } from './trace.ts';
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { decisionStatus, PRICE_STATUS_TONE, type PriceStatus } from './statuses.ts';
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';

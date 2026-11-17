@@ -1870,3 +1870,47 @@ test('step 107 [Р-233, Р-231]: the floor page and Offers through the console �
   assert.deepEqual(rows.filter((r) => r.channelBounds !== null).map((r) => [r.unit.writeScopeId, r.channelBounds]), [[s.conflictScopeId, 'Below the channel minimum']]);
   assert.ok(rows.every((r) => !r.channelNotes.some((n) => n.code === 'CHANNEL_BOUNDS')), 'bounds with known values are not a channel block');
 });
+
+/**
+ * Шаг 147 (#24, Р-254): квитанция «кратко → доказательства». Краткий вид — повод, предложенная цена, решение Price Gate и судьба цены
+ * (те же сводки, что у станций). Отказ Gate раскрывает доказательства сам и называет станцию, которая решила; одобренное и «без
+ * изменения» — свёрнуты. Миры стенда в памяти: отказ — «выше max_price», одобренное и «без изменения» — путь без происшествий
+ */
+const en = messagesFor('en');
+test('step 147 (#24): the receipt summary — trigger, proposed, decision, sending; a Gate rejection opens the evidence at Price Gate, an approved decision keeps it folded', async () => {
+  const auth = await login('OWNER');
+  const station = (t: DecisionTrace, key: string) => t.steps.find((s) => s.key === key);
+  const rejectedId = 'kaufland/pipeline/above-max-price';
+  const rejectedItem = (await get<RejectedView>(auth, api(rejectedId, 'rejected'))).items.find((i) => i.status === 'REJECTED' && i.decisionId)!;
+  assert.ok(rejectedItem, 'the stand world has a Gate rejection');
+  const rejected = await get<DecisionTrace>(auth, api(rejectedId, 'decisions', rejectedItem.decisionId!));
+  assert.deepEqual([rejected.summary.decidedBy, rejected.summary.evidenceOpen], ['GATE', true], 'a rejection opens the evidence at Price Gate');
+  assert.equal(rejected.summary.decision, station(rejected, 'GATE')!.summary, 'the decision is what Price Gate said');
+  assert.match(rejected.summary.decision, /^Rejected: /, 'the refusal reason is on view');
+  assert.ok(rejected.summary.proposed && station(rejected, 'STRATEGY')!.summary.endsWith(rejected.summary.proposed), `the proposal is what the strategy said: ${rejected.summary.proposed}`);
+  assert.ok(!rejected.summary.proposed!.startsWith('Proposed'), 'the row is labelled «Proposed» — the value does not repeat it');
+  assert.equal(rejected.summary.sending, en.ui.trace.nothingSent, 'nothing was sent');
+  // Разметка: отказ раскрывает доказательства сам, Price Gate помечена; у одобренного блок свёрнут, но станции — в разметке
+  const rejectedHtml = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: rejected });
+  assert.match(rejectedHtml, /<details class="card more-block evidence" open="">/, 'the rejection opens the evidence');
+  assert.match(rejectedHtml, /<li class="step status-STOP decided" data-step="GATE">/, 'Price Gate is marked as the station that decided');
+  assert.ok(rejectedHtml.includes(rejected.summary.decision), 'the refusal reason is in the summary card');
+
+  const happy = 'kaufland/pipeline/happy-path';
+  const decisions = (await get<DecisionListView>(auth, api(happy, 'decisions'))).items;
+  const approved = await get<DecisionTrace>(auth, api(happy, 'decisions', decisions.find((d) => d.outcome === 'Approved for sending')!.decisionId));
+  assert.deepEqual([approved.summary.decidedBy, approved.summary.evidenceOpen], [null, false], 'an approved decision keeps the evidence folded');
+  const channel = station(approved, 'CHANNEL')!;
+  assert.equal(approved.summary.sending, channel.status === 'SKIPPED' ? station(approved, 'WRITE')!.summary : channel.summary, 'sending is the fate of the price');
+  assert.equal(approved.summary.decision, station(approved, 'GATE')!.summary);
+  assert.ok(approved.summary.trigger, 'the trigger is named');
+  assert.equal(approved.summary.remarks, approved.steps.filter((s) => s.status === 'WARN' || s.status === 'STOP').length, 'remarks count the stations with a warning or a stop');
+  const approvedHtml = await html('/src/screens/Decisions.tsx', 'TraceView', { trace: approved });
+  assert.match(approvedHtml, /<details class="card more-block evidence">/, 'an approved decision keeps the evidence folded');
+  for (const step of approved.steps) assert.ok(approvedHtml.includes(step.title) && approvedHtml.includes(step.summary.replace(/&/g, '&amp;')), `the folded evidence keeps «${step.title}» in the page`);
+
+  const kept = await get<DecisionTrace>(auth, api(happy, 'decisions', decisions.find((d) => d.outcome === 'No change')!.decisionId));
+  assert.deepEqual([kept.summary.evidenceOpen, kept.summary.decidedBy], [false, null], '«no change» keeps the evidence folded');
+  assert.equal(kept.summary.decision, kept.headline, '«no change» says the old headline, not «details are not kept»');
+  assert.ok(kept.summary.decision.startsWith(en.ui.trace.headlineNoChange('')), kept.summary.decision);
+});

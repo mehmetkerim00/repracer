@@ -2828,3 +2828,62 @@ test('step 146 (#34): the status line heads every workspace screen in four langu
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
+
+/**
+ * Шаг 147 (#24, Р-254): квитанция — краткий вид (повод, предложение, решение, отправка) в карточке итога, станции свёрнуты за «Show full
+ * evidence», но остаются на странице; клик раскрывает; на 375 — без бокового прокрута, заголовок блока — цель касания 44 px. Отказ раскрывает
+ * станции сам — разметку держит тест консоли (в смоук-мире отказов нет)
+ */
+test('step 147 (#24): the receipt — a summary card, the seven stations folded behind «Show full evidence» but kept in the page; a click opens them; 375 keeps the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const t = en.ui.trace;
+  try {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed/decisions`)}, true)`);
+    await settled(b, 'feed, decisions');
+    const receipt = await b.evaluate<string | null>(`(() => { const row = [...document.querySelectorAll('.world-content tbody tr')].find((r) => r.textContent.includes(${JSON.stringify(en.ui.statuses.APPROVED_LIVE)}));
+      return row?.querySelector('a.row-link')?.getAttribute('href') ?? null; })()`);
+    assert.ok(receipt, 'the decision list has an approved decision');
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        // Тот же адрес не меняет hash — сначала журнал, затем квитанция заново (раскрытие — выбор зрителя на этой квитанции)
+        await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed/decisions`)}, true)`);
+        await settled(b, `${scheme} ${width}: feed`);
+        await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`);
+        await settled(b, `${scheme} ${width}: receipt`);
+        const seen = await b.evaluate<{ labels: string[]; open: boolean; summary: string; stations: number; titles: string[] } | null>(`(() => {
+          const d = document.querySelector('details.evidence');
+          if (!d) return null;
+          return { labels: [...document.querySelectorAll('.verdict .receipt-summary dt')].map((x) => x.textContent.trim()), open: d.open,
+            summary: d.querySelector(':scope > summary').textContent.trim(), stations: d.querySelectorAll('li.step').length,
+            titles: [...d.querySelectorAll('li.step h3')].map((h) => h.textContent.trim()) }; })()`);
+        assert.ok(seen, `${scheme} ${width}: the stations are in a folded evidence block`);
+        assert.deepEqual(seen.labels.slice(-3), [t.summaryLabels.proposed, t.summaryLabels.decision, t.titles.WRITE], `${scheme} ${width}: the summary rows`);
+        assert.equal(seen.open, false, `${scheme} ${width}: an approved decision keeps the evidence folded`);
+        assert.ok(seen.stations >= 5 && seen.summary.startsWith(t.evidence.show(seen.stations, 0).split(' — ')[0]!), `${scheme} ${width}: «${seen.summary}» over ${seen.stations} stations`);
+        assert.ok(seen.titles.includes(t.titles.GATE) && seen.titles.includes(t.titles.WRITE), `${scheme} ${width}: the folded stations stay in the page`);
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out`);
+        if (width === 375) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${scheme} 375: touch targets`);
+        await b.evaluate(`(document.querySelector('details.evidence > summary').click(), true)`);
+        await waitFor(b, `document.querySelector('details.evidence').open && document.querySelector('details.evidence > summary').textContent.trim() === ${JSON.stringify(t.evidence.hide)}`, `${scheme} ${width}: a click opens the evidence`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: open — nothing sticks out`);
+      }
+    }
+  } finally {
+    await b.setColorScheme(null);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});

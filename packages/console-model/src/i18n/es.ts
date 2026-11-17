@@ -1586,6 +1586,9 @@ export const es: Messages = {
       headlineApplied: (price: string) => `Se fijó el precio ${price} y el canal lo aplicó`,
       headlineApproved: (price: string, status: string) => `Se aprobó el precio ${price}; envío a su tienda: ${status}`,
       headlineNoWrite: (price: string) => `Se aprobó el precio ${price}, pero no se creó ninguna actualización para su tienda`,
+      // Шаг 147 (#24): краткий вид квитанции и блок доказательств
+      summaryLabels: { proposed: 'Propuesta', decision: 'Decisión' },
+      evidence: { show: (steps: number, remarks: number) => `Ver todas las pruebas — ${steps} pasos${remarks > 0 ? `, ${remarks} con observaciones` : ''}`, hide: 'Ocultar las pruebas' },
       headlineNoChange: (text: string) => `El precio se mantuvo: ${text}`,
       nothingSent: 'No se envió nada al canal', writeMissing: 'El precio se aprobó; su actualización ya no se muestra aquí: las actualizaciones terminadas permanecen en esta pantalla alrededor de un día',
       writeVersion: (version: number, price: string) => `Versión ${version}: ${price}`,

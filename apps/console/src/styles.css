@@ -1296,3 +1296,19 @@ output.field-value { display: flex; align-items: center; min-height: var(--contr
   .status-item { display: flex; }
   .status-item + .status-item { padding-left: 0; border-left: 0; border-top: var(--border-width) solid var(--divider); }
 }
+
+/*
+ * Шаг 147 (#24, Р-254): квитанция — краткий вид в карточке итога (строки «подпись — значение») и станции в сворачиваемом блоке, как блоки
+ * экрана тени. Станция, которая решила, — полосой цвета отказа слева. Только существующие токены
+ */
+.receipt-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 0; }
+.receipt-summary > div { display: contents; }
+.receipt-summary dt { color: var(--text-2); font-size: var(--font-size-sm); padding-top: var(--space-1); }
+.receipt-summary dd { margin: 0; color: var(--text); }
+details.evidence > .trace-card { padding-top: var(--space-4); }
+/* полоса решившей станции — рамкой слева; полоса сдвигает станцию на свою ширину, кружок и линия таймлайна сдвигаются вместе с ней */
+.step.decided { border-left: var(--focus-width) solid var(--danger-line); margin-left: calc(-1 * var(--focus-width)); }
+@media (width < 48rem) {
+  .receipt-summary { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .receipt-summary dd + dt, .receipt-summary > div + div dt { margin-top: var(--space-2); }
+}

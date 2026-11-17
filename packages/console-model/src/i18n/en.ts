@@ -1596,6 +1596,9 @@ export const en = {
       headlineApplied: (price: string) => `The price ${price} was set and applied by the channel`,
       headlineApproved: (price: string, status: string) => `The price ${price} was approved; sending to your store: ${status}`,
       headlineNoWrite: (price: string) => `The price ${price} was approved, but no update for your store was created`,
+      // Шаг 147 (#24): краткий вид квитанции и блок доказательств
+      summaryLabels: { proposed: 'Proposed', decision: 'Decision' },
+      evidence: { show: (steps: number, remarks: number) => `Show full evidence — ${steps} steps${remarks > 0 ? `, ${remarks} with remarks` : ''}`, hide: 'Hide full evidence' },
       headlineNoChange: (text: string) => `The price stayed: ${text}`,
       nothingSent: 'Nothing was sent to the channel', writeMissing: 'The price was approved; its update is no longer shown here — finished updates stay on this screen for about a day',
       writeVersion: (version: number, price: string) => `Version ${version}: ${price}`,

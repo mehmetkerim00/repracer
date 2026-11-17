@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { DecisionListItem, DecisionTrace, StepStatus } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, receiptBack, useMessages, When, WhenHead, UnitName } from '../components.tsx';
@@ -43,7 +44,9 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
 export function TraceView({ trace }: { trace: DecisionTrace }) {
   const m = useMessages();
   const t = m.ui.trace;
-  const competitors = trace.steps.find((s) => s.competitors)?.competitors ?? null;
+  const s = trace.summary;
+  // Шаг 147: раскрытие — по решению модели (отказ, пауза, станция STOP); дальше — выбор зрителя на этой квитанции
+  const [open, setOpen] = useState(s.evidenceOpen);
   // Шаг 139 (BUG-02): «назад» — на экран, с которого квитанцию открыли, и его именем; без него — в журнал решений
   const origin = receiptBack(trace.worldId);
   const originName = origin ? (m.ui.app.screens as Readonly<Record<string, string | undefined>>)[origin.screen] : undefined;
@@ -55,56 +58,70 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
         {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что
             помешает продать ниже себестоимости» вёл на экран товаров без поиска, где нужное предложение — на пятой странице */}
         {trace.unit ? <> · <a href={href(trace.worldId, 'bounds', trace.unit.writeScopeId)}>{m.ui.products.bounds}</a></> : null}</p>
-      {/* Шаг 81: итог — карточкой своего тона: знак исхода, итоговая цена крупно (та же сумма, что во фразе), фраза итога под ней */}
+      {/*
+        Шаг 147 (#24, Р-254): итог — краткий вид. Карточка своего тона: знак исхода, итоговая цена крупно (только у одобренного), пилюля статуса
+        словарём шага 137 и пометки; у отказа и паузы рядом — их причина (это и есть решение). Ниже — повод, предложение, решение и судьба
+        цены теми же сводками, что у станций. Распродажа (шаг 102) — своей строкой, как была
+      */}
       <section className={`verdict verdict-${trace.tone}`}>
         <span className="verdict-icon"><Icon name={VERDICT_ICON[trace.tone] ?? 'help'} size={22} /></span>
         <div className="verdict-body">
           {trace.headlinePrice ? <div className="verdict-price">{trace.headlinePrice}</div> : null}
           {/* Шаг 137 (BUG-03): статус решения — тем же словом, что строка Protections и журнала решений */}
-          <p className="headline"><Badge tone={trace.status.tone}>{trace.status.label}</Badge> {trace.headline}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}{trace.clearance ? <> <Badge tone="warn">{trace.clearance.pill}</Badge></> : null}</p>
+          <p className="headline"><Badge tone={trace.status.tone}>{trace.status.label}</Badge>{trace.headlinePrice ? null : <> {s.decision}</>}{trace.dangerous ? <> <Badge tone="stop">{t.dangerousBadge}</Badge></> : null}{trace.clearance ? <> <Badge tone="warn">{trace.clearance.pill}</Badge></> : null}</p>
+          <dl className="receipt-summary">
+            {s.trigger ? <div><dt>{t.trigger}</dt><dd>{s.trigger}</dd></div> : null}
+            {s.proposed ? <div><dt>{t.summaryLabels.proposed}</dt><dd>{s.proposed}</dd></div> : null}
+            {trace.headlinePrice ? <div><dt>{t.summaryLabels.decision}</dt><dd>{s.decision}</dd></div> : null}
+            <div><dt>{t.titles.WRITE}</dt><dd>{s.sending}</dd></div>
+          </dl>
           {/* Шаг 102 [Р-227]: пол ниже безубыточности намеренно — пол, убыток на штуку, кто включил, когда и зачем */}
           {trace.clearance ? <p className="clearance-line">{trace.clearance.line}</p> : null}
-          {/* Шаг 97 [C]: кто подвинул цену — одной фразой сверху; таблица — в шаге снимка конкурентов */}
-          {competitors?.trigger ? <p className="trigger-line">{competitors.trigger}</p> : null}
         </div>
       </section>
-      {/* Шаг 79 (ревью): шаги расчёта — в карточке, а не на сером фоне страницы */}
-      <section className="card trace-card">
-      <ol className="steps">
-        {trace.steps.map((step) => (
-          <li key={step.key} className={`step status-${step.status}`}>
-            <div className="step-head">
-              <h3>{step.title}</h3>
-              <Badge tone={STATUS_TONE[step.status]}>{t.status[step.status]}</Badge>
-            </div>
-            <p>{step.summary}</p>
-            {step.items.length > 0 ? (
-              <ul className="items">
-                {step.items.map((item, i) => (
-                  <li key={i}>
-                    <span className={`mark outcome-${item.outcome ?? 'INFO'}`}>{t.marks[item.outcome ?? 'INFO']}</span>{' '}
-                    <span className="label">{item.label}</span>
-                    {item.value ? <span>{m.colon}{item.value}</span> : null}
-                    {item.reason ? <ReasonLine reason={item.reason} /> : null}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {/* Шаг 97 [C]: шаг снимка раскрывается таблицей конкурентов того момента; срок хранения деталей — подписью */}
-            {step.competitors ? (step.competitors.rows.length > 0 ? (
-              <details className="competitors-at" open>
-                <summary>{t.competitors.title} ({step.competitors.rows.length})</summary>
-                {/* Шаг 101 [Р-226]: с кем стратегия соревновалась — по всему снимку; исключённые строки остаются в таблице приглушёнными */}
-                {step.competitors.filter ? (
-                  <p className="competitors-filter">{step.competitors.filter.head}{step.competitors.filter.unknown ? <span className="muted"> · {step.competitors.filter.unknown}</span> : null}</p>
-                ) : null}
-                <CompetitorTable rows={step.competitors.rows} columns={step.competitors.columns} foot={[step.competitors.note]} />
-              </details>
-            ) : <p className="note">{step.competitors.note}</p>) : null}
-          </li>
-        ))}
-      </ol>
-      </section>
+      {/*
+        Шаг 147: станции — доказательства, без изменений внутри; свёрнуты, кроме отказа, паузы и станции со статусом STOP. Станция, которая
+        решила, помечена. Содержимое свёрнутого блока остаётся в разметке (ничего не удаляется) — образец блоков экрана тени (шаг 96)
+      */}
+      <details className="card more-block evidence" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+        <summary>{open ? t.evidence.hide : t.evidence.show(trace.steps.length, s.remarks)}</summary>
+        <section className="trace-card">
+        <ol className="steps">
+          {trace.steps.map((step) => (
+            <li key={step.key} className={`step status-${step.status}${s.decidedBy === step.key ? ' decided' : ''}`} data-step={step.key}>
+              <div className="step-head">
+                <h3>{step.title}</h3>
+                <Badge tone={STATUS_TONE[step.status]}>{t.status[step.status]}</Badge>
+              </div>
+              <p>{step.summary}</p>
+              {step.items.length > 0 ? (
+                <ul className="items">
+                  {step.items.map((item, i) => (
+                    <li key={i}>
+                      <span className={`mark outcome-${item.outcome ?? 'INFO'}`}>{t.marks[item.outcome ?? 'INFO']}</span>{' '}
+                      <span className="label">{item.label}</span>
+                      {item.value ? <span>{m.colon}{item.value}</span> : null}
+                      {item.reason ? <ReasonLine reason={item.reason} /> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {/* Шаг 97 [C]: шаг снимка раскрывается таблицей конкурентов того момента; срок хранения деталей — подписью */}
+              {step.competitors ? (step.competitors.rows.length > 0 ? (
+                <details className="competitors-at" open>
+                  <summary>{t.competitors.title} ({step.competitors.rows.length})</summary>
+                  {/* Шаг 101 [Р-226]: с кем стратегия соревновалась — по всему снимку; исключённые строки остаются в таблице приглушёнными */}
+                  {step.competitors.filter ? (
+                    <p className="competitors-filter">{step.competitors.filter.head}{step.competitors.filter.unknown ? <span className="muted"> · {step.competitors.filter.unknown}</span> : null}</p>
+                  ) : null}
+                  <CompetitorTable rows={step.competitors.rows} columns={step.competitors.columns} foot={[step.competitors.note]} />
+                </details>
+              ) : <p className="note">{step.competitors.note}</p>) : null}
+            </li>
+          ))}
+        </ol>
+        </section>
+      </details>
       <Gaps gaps={trace.gaps} />
     </article>
   );
@@ -115,5 +132,5 @@ export function TraceScreen({ worldId, decisionId }: { worldId: string; decision
   const [resource, retry] = useResource<DecisionTrace>(worldPath(worldId, 'decisions', decisionId), m.locale);
   const d = m.ui.trace;
   const missing = <NotFound title={d.missingTitle} text={d.missingText} back={d.back} href={href(worldId, 'feed', 'decisions')} />;
-  return <Load shape="trace" resource={resource} retry={retry} notFound={missing}>{(trace) => <TraceView trace={trace} />}</Load>;
+  return <Load shape="trace" resource={resource} retry={retry} notFound={missing}>{(trace) => <TraceView key={trace.decisionId} trace={trace} />}</Load>;
 }
