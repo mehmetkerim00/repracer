@@ -1005,3 +1005,27 @@ test('шаг 116: дата внутри окна секций шаблона в 
   assert.deepEqual(findings, [], 'дата теста живёт в окне секций шаблона: через два дня тест покраснеет');
 });
 
+
+/**
+ * Шаг 163.1 (красный `clickhouse-compression` полного прогона шага 160): смоук базы ставил запросу срок «через 300 мс» и следующей командой
+ * ждал, что захват уложится в срок. На медленном раннере между двумя командами прошло 350 мс — захват «в срок» отказал. Скрытый вход
+ * «скорость раннера»: срок меньше секунды годится только тому, что ДОЛЖНО истечь, — следующая команда после него — `pg_sleep`, а не
+ * ожидание успеха
+ */
+test('step 163.1: a sub-second deadline in a database smoke is only for what must expire — the next statement sleeps', () => {
+  const findings = (text: string) => [...text.matchAll(/interval '(\d+) milliseconds'|interval '0\.\d+ seconds?'/g)].flatMap((m) => {
+    if (m[1] && Number(m[1]) >= 1000) return [];
+    const rest = text.slice(m.index! + m[0].length);
+    const next = rest.slice(rest.search(/;\s*\n/) + 1).split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('--')) ?? '';
+    return next.startsWith('SELECT pg_sleep(') ? [] : [`${m[0]} → ${next.slice(0, 60)}`];
+  });
+  // Зубы [Р-94]: прежняя форма шага 43 — находка; срок, за которым ждут истечения, и срок в секунды — нет
+  assert.equal(findings("VALUES (1, now() + interval '300 milliseconds') $q$));\nSELECT pg_temp.ok('claims in time', 'UPDATE …');\nSELECT pg_sleep(0.5);").length, 1);
+  assert.deepEqual(findings("VALUES (1, now() + interval '20 milliseconds') $q$));\n\nSELECT pg_sleep(0.1);\nSELECT pg_temp.expect_fail('late', 'UPDATE …');"), []);
+  assert.deepEqual(findings("VALUES (1, now() + interval '3 seconds') $q$));\nSELECT pg_temp.ok('claims in time', 'UPDATE …');"), []);
+  assert.equal(findings("VALUES (1, now() + interval '0.3 seconds') $q$));\nSELECT pg_temp.ok('claims in time', 'UPDATE …');").length, 1);
+
+  const dir = new URL('tests/db/', root);
+  const all = readdirSync(dir).filter((f) => f.endsWith('.sql')).flatMap((f) => findings(readFileSync(new URL(f, dir), 'utf8')).map((x) => `tests/db/${f}: ${x}`));
+  assert.deepEqual(all, [], 'a sub-second deadline followed by an expected success — red on a slow runner');
+});

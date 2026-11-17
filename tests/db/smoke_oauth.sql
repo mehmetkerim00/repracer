@@ -826,11 +826,12 @@ SET SESSION AUTHORIZATION svc_admin;
 SELECT set_config('app.tenant_id', :tA, false), set_config('app.user_id', :ownerU, false), set_config('app.auth_mfa', 'on', false) \gset
 SELECT pg_temp.ok('a short request claimed in time (Р-175)', format($q$
   INSERT INTO tenant_data.channel_authorization_request (tenant_id, authorization_request_id, channel, region, marketplaces, state_sha256, requested_by_membership_id, expires_at)
-  VALUES (%L, 'a4430000-0000-4000-8000-0000000000a5', 'AMAZON', 'EU', ARRAY['A1PA6795UKMFR9'], sha256('state-claimed'), %L, now() + interval '300 milliseconds') $q$, :tA, :ownerM));
+  VALUES (%L, 'a4430000-0000-4000-8000-0000000000a5', 'AMAZON', 'EU', ARRAY['A1PA6795UKMFR9'], sha256('state-claimed'), %L, now() + interval '3 seconds') $q$, :tA, :ownerM));
 SELECT pg_temp.ok('the console claims the exchange before the deadline (Р-175)', format($q$
   UPDATE tenant_data.channel_authorization_request SET exchange_started_at = now()
    WHERE tenant_id = %L AND authorization_request_id = 'a4430000-0000-4000-8000-0000000000a5' $q$, :tA));
-SELECT pg_sleep(0.5);
+-- Шаг 163.1: окно — 3 с, а не 300 мс: на медленном раннере CI между вставкой и захватом прошло 350 мс, и захват «в срок» отказал
+SELECT pg_sleep(3.5);
 SELECT pg_temp.ok('an exchange claimed in time completes shortly after the deadline (Р-175)', format($q$
   UPDATE tenant_data.channel_authorization_request SET status = 'COMPLETED', channel_account_id = %L
    WHERE tenant_id = %L AND authorization_request_id = 'a4430000-0000-4000-8000-0000000000a5' $q$, :oAcc, :tA));
