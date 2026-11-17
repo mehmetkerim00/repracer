@@ -4,7 +4,7 @@ import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { listingStatusStep, type LatestListingState } from './listing-status.ts';
 import { prioritizedWindow } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, FeeExpiryNotice, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
-  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow } from './store.ts';
+  BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow, FreshnessRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FloorHoldEpisodeRow, type FloorHoldTotals, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
@@ -1988,12 +1988,14 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       own.set(s.channelAccountId, marketplaces);
     }
     const ownRows: ChannelAccountRow[] = [...own].map(([channelAccountId, marketplaces]) => ({
-      channelAccountId, channel: this.channel, displayName: null, marketplaces: [...marketplaces].sort(), authStatus: 'ACTIVE', accessBlockers: [],
+      channelAccountId, channel: this.channel, displayName: null, marketplaces: [...marketplaces].sort(), authStatus: 'ACTIVE', accessBlockers: [], writeMode: 'LIVE',
     }));
     return [...ownRows, ...this.seedAccounts.map((a): ChannelAccountRow => ({
       channelAccountId: a.channelAccountId, channel: a.channel, displayName: null, marketplaces: a.marketplaces,
       authStatus: a.awaitingAccess && a.awaitingAccess.length > 0 ? 'AWAITING_ACCESS' : 'ACTIVE',
       accessBlockers: a.awaitingAccess ?? [],
+      // Как `channel_account.write_mode`: аккаунт посева без режима — в бою
+      writeMode: a.writeMode === 'SHADOW' ? 'SHADOW' : 'LIVE',
     }))];
   }
 
@@ -2770,6 +2772,21 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
     if (!s) return [];
     const spans = this.buyboxSpanRows.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition })) ?? [];
     return spans.filter((x) => Date.parse(x.startedAt) < Date.parse(to) && Date.parse(x.lastSeenAt) >= Date.parse(from) - BUYBOX_SPAN_HORIZON_MS).map((x) => ({ ...x }));
+  }
+
+  /** Шаг 146 (#34): свежесть данных конкурентов по аккаунту — тем же правилом, что запрос PostgreSQL (`competitorFreshness`) */
+  async competitorFreshness(_tenantId: string): Promise<FreshnessRow[]> {
+    const out = new Map<string, FreshnessRow>();
+    for (const s of this.scopes.values()) {
+      if (s.status === 'RETIRED' || s.pricingMode !== 'ENGINE' || !s.strategy || !COMPETITOR_DERIVED_RULES.has(s.strategy.params.type)) continue;
+      const row = out.get(s.channelAccountId) ?? { channelAccountId: s.channelAccountId, counted: 0, unread: 0, oldestAt: null };
+      const state = this.competitorState.get(productKey({ marketplace: s.marketplace, channelProductRef: s.channelProductRef, condition: s.condition }));
+      row.counted += 1;
+      if (!state) row.unread += 1;
+      else if (row.oldestAt === null || Date.parse(state.observedAt) < Date.parse(row.oldestAt)) row.oldestAt = state.observedAt;
+      out.set(s.channelAccountId, row);
+    }
+    return [...out.values()].sort((a, b) => a.channelAccountId.localeCompare(b.channelAccountId));
   }
 
   async competitionSnapshot(_tenantId: string, writeScopeId: string): Promise<{ snapshot: CompetitorSnapshot; source: string; observedAt: Instant } | null> {

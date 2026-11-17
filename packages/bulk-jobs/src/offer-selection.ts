@@ -1,9 +1,9 @@
 import {
-  catalogTotals, channelOf, competitionRowOffers, matchesHolder, orderedOffers, offerBuyboxCells, offerMatchesSearch, sortOffers, type BuyboxCells, type Messages, type OfferHolderFilterValue, type OfferSort,
+  attentionReasons, catalogTotals, channelOf, competitionRowOffers, matchesAttention, matchesHolder, orderedOffers, offerBuyboxCells, offerMatchesSearch, sortOffers, type BuyboxCells, type Messages, type OfferHolderFilterValue, type OfferSort,
   type StandWorld,
 } from '@repracer/console-model';
 import type { Instant } from '@repracer/channel-port';
-import { PRICING_MODE_OF_FILTER, type CompetitionData, type CompetitionDataRow, type ConsoleCatalogPage, type OfferPricingFilterValue, type PricingStore } from '@repracer/pricing-pipeline';
+import { PRICING_MODE_OF_FILTER, type AttentionFilter, type CompetitionData, type CompetitionDataRow, type ConsoleCatalogPage, type OfferPricingFilterValue, type PricingStore } from '@repracer/pricing-pipeline';
 
 /**
  * Шаг 105 [Р-230]: какие предложения показывает Offers и в каком порядке — витрина, держатель Buy Box, поиск и сортировка по колонкам
@@ -22,6 +22,8 @@ export interface OfferQuery {
   storefront: { channelAccountId: string; marketplace: string } | null;
   /** Шаг 118: автоцена включена или выключена; null — все */
   pricing?: OfferPricingFilterValue | null;
+  /** Шаг 146 (#34): «требует внимания» — любая причина или одна; null — все */
+  attention?: AttentionFilter | null;
   holder: OfferHolderFilterValue | null;
   /** Поиск — в нижнем регистре и без пробелов по краям; пусто — без поиска */
   q: string;
@@ -85,6 +87,7 @@ export async function selectOffers(deps: OfferSelectionDeps, query: OfferQuery, 
       offers: {
         ...(query.storefront ? { storefront: query.storefront } : {}),
         ...(query.pricing ? { pricing: query.pricing } : {}),
+        ...(query.attention ? { attention: { filter: query.attention, now: deps.now as Instant } } : {}),
         ...(query.holder ? { holder: query.holder } : {}),
         ...(query.q !== '' ? { search: { q: query.q, labelTemplate: m.ui.common.unitLabel('{p}', '{s}'), marketplaceWords: m.ui.connections.marketplaces as Readonly<Record<string, string>>, channelNames,
           unknownChannel: (m.values as Record<string, string | undefined>).UNKNOWN_CHANNEL ?? 'UNKNOWN_CHANNEL' } } : {}),
@@ -100,6 +103,8 @@ export async function selectOffers(deps: OfferSelectionDeps, query: OfferQuery, 
   let scopes = world.state.scopes;
   if (query.storefront) scopes = scopes.filter((s) => s.channelAccountId === query.storefront!.channelAccountId && s.marketplace === query.storefront!.marketplace);
   if (query.pricing) scopes = scopes.filter((s) => s.pricingMode === PRICING_MODE_OF_FILTER[query.pricing!]);
+  // Шаг 146 (#34): правило экрана — те же причины, что считает строка состояния
+  if (query.attention) scopes = scopes.filter((s) => matchesAttention(attentionReasons(world, s, m), query.attention!));
   if (query.q !== '') scopes = scopes.filter((s) => offerMatchesSearch(world, s, query.q, m));
   let competitorRows: number | undefined;
   if (query.holder || query.sort || options.countCompetitorRows) {

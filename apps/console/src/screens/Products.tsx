@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
+import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, type AttentionFilter, type BuyboxCells, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName, ColorVariant } from '../components.tsx';
@@ -18,8 +18,8 @@ const SORT_OF: Record<(typeof BUYBOX_COLUMNS)[number], OfferSortKeyValue> = { bb
 const VIEW_KEY = 'repracer.products.view';
 
 /** Шаг 105: фильтр строки и сортировка экрана Offers — то, что уходит в адрес экрана и в обе выгрузки */
-export interface OfferUiQuery { storefront: string; pricing: string; holder: string; q: string; sort: OfferSort | null }
-export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', holder: '', q: '', sort: null };
+export interface OfferUiQuery { storefront: string; pricing: string; attention: string; holder: string; q: string; sort: OfferSort | null }
+export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', attention: '', holder: '', q: '', sort: null };
 /** Включена ли хоть одна колонка Buy Box — по выбору зрителя в браузере (до первого ответа экрана) */
 export function storedBuyboxColumns(): boolean {
   try {
@@ -30,7 +30,7 @@ export function storedBuyboxColumns(): boolean {
 }
 /** Адрес экрана и запрос выгрузки: пустые поля не передаются */
 export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string> {
-  return exportQuery(null, { storefront: q.storefront, pricing: q.pricing, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
+  return exportQuery(null, { storefront: q.storefront, pricing: q.pricing, attention: q.attention, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
 }
 /**
  * «Следующая проверка» у всех предложений сейчас одна и та же («нет данных») — по умолчанию скрыта; «Канал сообщает» — когда есть что
@@ -75,7 +75,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
   };
   const col = shown.columns;
   const bbOn = BUYBOX_COLUMNS.some((k) => col[k]);
-  const filtered = offerQuery.storefront !== '' || offerQuery.pricing !== '' || offerQuery.holder !== '' || offerQuery.q !== '';
+  const filtered = offerQuery.storefront !== '' || offerQuery.pricing !== '' || offerQuery.attention !== '' || offerQuery.holder !== '' || offerQuery.q !== '';
   /** Заголовок колонки Buy Box — кнопка сортировки по всему каталогу: первое нажатие — по возрастанию, второе — по убыванию */
   const sortHead = (k: (typeof BUYBOX_COLUMNS)[number], numeric: boolean) => {
     const key = SORT_OF[k];
@@ -123,6 +123,13 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
               <select value={offerQuery.pricing} onChange={(e) => onOfferQuery({ ...offerQuery, pricing: e.currentTarget.value })}>
                 <option value="">{f.anyPricing}</option>
                 {OFFER_PRICING_FILTERS.map((v) => <option key={v} value={v}>{f.pricingValues[v]}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 146 (#34): «требует внимания» — та же выборка, что число строки состояния; любая причина или одна */}
+            <Field label={f.attention}>
+              <select value={offerQuery.attention} onChange={(e) => onOfferQuery({ ...offerQuery, attention: e.currentTarget.value })}>
+                <option value="">{f.anyAttention}</option>
+                {ATTENTION_FILTERS.map((v) => <option key={v} value={v}>{f.attentionValues[v]}</option>)}
               </select>
             </Field>
             <Field label={f.holder}>
@@ -314,12 +321,13 @@ function ProductRef({ unit }: { unit: ProductRow['unit'] }) {
   );
 }
 
-export function ProductsScreen({ worldId }: { worldId: string }) {
+export function ProductsScreen({ worldId, initialAttention }: { worldId: string; initialAttention?: AttentionFilter }) {
   const m = useMessages();
   // Р-136: экран просит страницу; переключение страницы — новый запрос, как у ленты цен
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
-  // Шаг 105: фильтр, порядок и включённые колонки Buy Box — в адресе экрана; новый фильтр или порядок — с первой страницы
-  const [offerQuery, setOfferQuery] = useState<OfferUiQuery>(NO_OFFER_QUERY);
+  // Шаг 105: фильтр, порядок и включённые колонки Buy Box — в адресе экрана; новый фильтр или порядок — с первой страницы.
+  // Шаг 146 (#34): `products/attention/<причина>` — клик по строке состояния открывает Offers с этой выборкой
+  const [offerQuery, setOfferQuery] = useState<OfferUiQuery>(() => ({ ...NO_OFFER_QUERY, attention: initialAttention ?? '' }));
   const [bb, setBb] = useState(storedBuyboxColumns);
   const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit), ...offerParams(offerQuery, bb) });
   const [resource, retry] = useResource<ProductListView>(`${worldPath(worldId, 'products')}?${params}`, m.locale);

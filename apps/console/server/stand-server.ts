@@ -12,6 +12,7 @@ import {
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
   BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
+  ATTENTION_FILTERS, attentionCounts, freshnessItems, statusLineView, statusStops, type AttentionFilter,
 } from '@repracer/console-model';
 import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
 import { TABLE_ENCODINGS } from '@repracer/cost-import';
@@ -628,7 +629,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           rows: defaultRows, strategies: activeStrategyChoices(strategyWorld, m), availability: strategyAvailableOn, canEdit: can(viewer.role, 'MANAGE_PRICING'),
           ...(services.people ? { people: services.people } : {}),
         };
-        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m, defaults, sources));
+        // Шаг 146 (#34): свежесть данных конкурентов — та же строка, что в строке состояния, тем же моментом
+        const fresh = live.store.competitorFreshness ? await live.store.competitorFreshness(live.tenantId) : null;
+        const freshness = fresh ? freshnessItems({ now: live.clock.iso(), accounts: await live.store.channelAccounts(live.tenantId), freshness: fresh }, m) : null;
+        return ok(connectionsView({ worldId: live.id, role: viewer.role, now: systemClock.now() }, rows, connect ? connect.connectable() : [], m, defaults, sources, freshness));
       }
       /**
        * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — правом назначать стратегии (владелец и менеджер), без
@@ -819,16 +823,19 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const holder = params.get('holder');
       // Шаг 118: автоцена включена или выключена
       const pricing = params.get('pricing');
+      // Шаг 146 (#34): «требует внимания» — любая причина или одна
+      const attention = params.get('attention');
       const q = (params.get('q') ?? '').trim();
       const sort = params.get('sort');
       const dir = params.get('dir');
       const bb = params.get('bb');
       if (q.length > 100 || (holder !== null && !(OFFER_HOLDER_FILTERS as readonly string[]).includes(holder)) || (pricing !== null && !(OFFER_PRICING_FILTERS as readonly string[]).includes(pricing)) || (sort !== null && !(OFFER_SORT_KEYS as readonly string[]).includes(sort))
+        || (attention !== null && !(ATTENTION_FILTERS as readonly string[]).includes(attention))
         || (dir !== null && dir !== 'asc' && dir !== 'desc') || (bb !== null && bb !== '1')) return null;
       const [acc, mk] = storefront.split('|');
       const sf = storefront === '' ? null : acc && mk && live.accounts.some((a) => a.channelAccountId === acc && a.marketplaces.includes(mk)) ? { channelAccountId: acc, marketplace: mk } : undefined;
       if (sf === undefined) return null;
-      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
+      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, attention: attention as AttentionFilter | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
         sort: sort ? { key: sort as NonNullable<OfferQuery['sort']>['key'], dir: (dir ?? 'asc') as 'asc' | 'desc' } : null, bb: bb === '1' };
     };
     const offerDeps = () => ({ store: live.store, tenantId: live.tenantId, now: live.clock.iso(), useDatabase: targeted !== null, world: () => load(null), m,
@@ -985,12 +992,32 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const [page, sources] = await Promise.all([live.stock.stockPage(world.tenantId, { ...clamped, ...filter }), live.stock.stockSources(world.tenantId)]);
           return ok(stockView(world, page, clamped, sources, m, filter));
         }
+        /**
+         * Шаг 146 (#34, ярус 1): строка состояния — режим цен, действующие остановки (ровно те, что Stop pricing показывает действующими),
+         * свежесть данных конкурентов по аккаунту и «требует внимания». Итоги причин на PostgreSQL считает база теми же фрагментами, что
+         * фильтр Offers; без базы — правило экрана по каталогу целиком
+         */
+        case 'status': {
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          const now = live.clock.iso();
+          const [world, accounts, freshness, f] = await Promise.all([
+            load([]), live.store.channelAccounts(live.tenantId),
+            live.store.competitorFreshness ? live.store.competitorFreshness(live.tenantId) : Promise.resolve(null),
+            facts({ attention: { now: now as never } }),
+          ]);
+          const stops = statusStops(world, m);
+          return ok(statusLineView({
+            worldId: live.id, now, accounts, tenantStop: stops.tenant, activeStops: stops.active, freshness,
+            // Без базы мир — каталог целиком (`load` без списка единиц)
+            attention: f?.attention ?? attentionCounts(targeted ? await load(null) : world, m),
+          }, m));
+        }
         case 'products': {
           const query = parseListQuery(url.searchParams);
           const oq = parseOfferQuery(url.searchParams);
           if (!query || !oq) return fail(400, 'BAD_PAGE', s.badRequest);
           // Шаг 105 [Р-230]: фильтр строки и сортировка по колонке Buy Box — выборкой по всему каталогу (база или правило экрана)
-          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, holder: oq.holder, q: oq.q };
+          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, attention: oq.attention ?? null, holder: oq.holder, q: oq.q };
           const deps = offerDeps();
           const catalog = filterActive(filter) || oq.sort ? await selectOffers(deps, oq, query) : await catalogPageFor(query);
           const world = await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog });
@@ -1282,7 +1309,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const { storefrontValue: _sv, bb, ...query } = oq;
           return {
             query: { offers: { query, accounts: accountCompetitors(), shareRange: { since: range.since, until: range.until }, buybox: exportScreen === 'offers' && bb } },
-            filters: { storefront: sf, repricing: oq.pricing ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
+            filters: { storefront: sf, repricing: oq.pricing ?? '', needs_attention: oq.attention ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
               ...(exportScreen === 'offers' ? { buy_box_columns: bb ? 'on' : '' } : {}) },
             period: null, periodPart: day(now),
           };

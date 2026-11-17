@@ -1116,6 +1116,11 @@ export interface PricingStore {
    * влияние остановки, ценообразование канала — базой, без каталога в памяти сервера. Хранилищу в памяти не нужно: его каталог мал
    */
   consoleCatalogFacts?(tenantId: string, query: ConsoleCatalogFactsQuery): Promise<ConsoleCatalogFacts>;
+  /**
+   * Шаг 146 (#34): свежесть данных конкурентов строки состояния — по аккаунту: включённые предложения со стратегией из данных конкурентов,
+   * сколько из них без единого принятого чтения и самое давнее последнее чтение (`competitor_state.observed_at`)
+   */
+  competitorFreshness?(tenantId: string): Promise<FreshnessRow[]>;
   // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -----------------------------------------------------
   decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
   decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
@@ -1575,6 +1580,8 @@ export interface OfferPageFilter {
   storefront?: { channelAccountId: string; marketplace: string };
   /** Шаг 118: автоцена включена (ENGINE) или выключена (OFF); Smart Pricing Kaufland — ни то, ни другое */
   pricing?: OfferPricingFilterValue;
+  /** Шаг 146 (#34): «требует внимания» — любая причина или одна (момент — для себестоимости и оценки комиссии) */
+  attention?: { filter: AttentionFilter; now: Instant };
   holder?: OfferHolderFilter;
   /** Поиск — по подписи экрана, SKU, ключу канала и EAN, как у поиска предложения (`consoleCatalogFacts.search`) */
   search?: { q: string; labelTemplate: string; marketplaceWords: Readonly<Record<string, string>>; channelNames: Readonly<Record<string, string>>; unknownChannel: string };
@@ -1591,6 +1598,30 @@ export const OFFER_PRICING_FILTERS = ['ON', 'OFF'] as const;
 export type OfferPricingFilterValue = (typeof OFFER_PRICING_FILTERS)[number];
 /** Режим единицы, которому отвечает значение фильтра — одно правило у базы и экрана */
 export const PRICING_MODE_OF_FILTER: Readonly<Record<OfferPricingFilterValue, 'ENGINE' | 'OFF'>> = { ON: 'ENGINE', OFF: 'OFF' };
+
+/**
+ * Шаг 146 (#34, ярус 1): причины «требует внимания» — одно правило у базы (фильтр Offers и итоги строки состояния — одни и те же фрагменты
+ * запроса) и у экрана без базы (`attentionReasons` модели экранов); равенство на всех мирах стенда держит тест
+ */
+export const ATTENTION_REASONS = ['NO_UNIT_COST', 'AUTOMATED_PRICING', 'CHANNEL_BOUNDS', 'NOT_BUYABLE', 'TURNED_OFF'] as const;
+export type AttentionReason = (typeof ATTENTION_REASONS)[number];
+/** Значения фильтра Offers «Needs attention»: любая причина или одна */
+export const ATTENTION_FILTERS = ['ANY', ...ATTENTION_REASONS] as const;
+export type AttentionFilter = (typeof ATTENTION_FILTERS)[number];
+export interface AttentionCounts {
+  /** Предложений хотя бы с одной причиной */
+  any: number;
+  byReason: Readonly<Record<AttentionReason, number>>;
+}
+/** Шаг 146: свежесть данных конкурентов одного аккаунта */
+export interface FreshnessRow {
+  channelAccountId: string;
+  /** Включённые предложения со стратегией из данных конкурентов */
+  counted: number;
+  /** Из них без единого принятого чтения */
+  unread: number;
+  oldestAt: Instant | null;
+}
 
 /** Шаг 105 [Р-230]: снимок и отрезки держателя единицы — то, из чего страница Competition и колонки Offers считают Buy Box */
 export interface CompetitionData {
@@ -1622,6 +1653,8 @@ export interface ConsoleCatalogFactsQuery {
   channelPricing?: { limit: number };
   /** Первая единица каталога по ключу снимка (витрина, ссылка товара, состояние) — отчёт отклонённых */
   keys?: ReadonlyArray<{ marketplace: string; channelProductRef: string; condition: string }>;
+  /** Шаг 146 (#34): итоги «требует внимания» по каталогу — теми же фрагментами, что фильтр Offers */
+  attention?: { now: Instant };
 }
 
 export interface ConsoleCatalogFacts {
@@ -1634,6 +1667,7 @@ export interface ConsoleCatalogFacts {
   stopImpact: Array<{ channelAccountId: string; marketplace: string; enginePrices: number; pendingWrites: number }> | null;
   channelPricing: Array<{ channelAccountId: string; total: number; rows: ConsoleOfferChannelPricingRow[] }> | null;
   keyed: Array<{ marketplace: string; channelProductRef: string; condition: string; writeScopeId: string }> | null;
+  attention?: AttentionCounts | null;
 }
 
 export interface ScopeDecisionStats {
@@ -1817,6 +1851,8 @@ export interface ChannelAccountRow {
   marketplaces: string[];
   authStatus: ChannelAuthStatus;
   accessBlockers: ChannelAccessBlocker[];
+  /** Шаг 146 (#34): режим записи аккаунта [Р-169] — строка состояния называет тень и бой */
+  writeMode: 'SHADOW' | 'LIVE';
 }
 
 /** Шаг 44 [Р-179]: оффер канала для каталога — идентичность предложения, без цены (цена — решение движка, а не каталога) */

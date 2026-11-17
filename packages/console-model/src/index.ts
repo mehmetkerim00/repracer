@@ -11,7 +11,7 @@ export { decisionItems, decisionListView, type DecisionListView, decisionTrace, 
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { decisionStatus, PRICE_STATUS_TONE, type PriceStatus } from './statuses.ts';
 export { boundsView, costInScopeCurrency, effectiveFloor, priceBreakdown, type BoundsView, type EffectiveFloor, type MoneyLine, type PriceBreakdown } from './bounds.ts';
-export { planStop, stopView, type AuditCard, type DistrustCard, type HaltCard, type StopKindRow, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
+export { planStop, statusStops, stopView, type AuditCard, type DistrustCard, type HaltCard, type StopKindRow, type StopCard, type StopImpact, type StopPlan, type StopTarget, type StopView, type TargetCard } from './stop.ts';
 export { accountLabel, activeStrategyChoices, assignedByDefaultRule, CHANNEL_PRICING_SHOWN, currentStrategies, fingerprint, parseStrategyDraft, unmetText, previewToken, STRATEGY_PREVIEW_ROWS_SHOWN, STRATEGY_SCOPE_EXAMPLES, strategiesView, strategyPreviewView, type DraftProblem, type PreviewRow, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyScopeItem, type StrategyPreviewView } from './strategies.ts';
 export { boundsDiffView, boundsPlanToken, DIFF_ROWS_SHOWN, expandBoundsEdit, MAX_SCOPES, parseAmountInput, parseBoundsEditRequest, parsePercentInput, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest, type BoundsRequestProblem, type DiffFlag, type DiffRow } from './bounds-edit.ts';
 export { OFFER_CHOICES } from './compliance.ts';
@@ -58,3 +58,6 @@ export { auditCards } from './stop.ts';
 export { sellerLink, type SellerLinkInput } from './seller-link.ts';
 export { snapshotSourceText, sourceDelivery, SOURCE_KIND, type SourceDelivery } from './snapshot-source.ts';
 export { channelBoundsConflicts, channelBoundsFacts, channelBoundsPill, channelBoundsView, channelBoundsUnread, channelPricingBlocks, type ChannelBoundsConflict, type ChannelBoundsFacts, type ChannelBoundsState, type ChannelBoundsView } from './channel-bounds.ts';
+// Шаг 146 (#34, ярус 1): строка состояния продавца и причины «требует внимания» — одно правило у экрана и фильтра Offers
+export { AGEING_SECONDS, ATTENTION_FILTERS, ATTENTION_REASONS, attentionCounts, attentionReasons, FRESH_SECONDS, freshnessItems, freshnessLevel, matchesAttention, statusLineView, type FreshnessItem,
+  type AttentionCounts, type AttentionFilter, type AttentionReason, type FreshnessLevel, type FreshnessRow, type StatusLineInput, type StatusLineView, type StatusMode } from './status-line.ts';

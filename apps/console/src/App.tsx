@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import { can, LOCALES, messagesFor, parsePeriod, type Locale, type MemberRole, type Period } from '@repracer/console-model';
+import { ATTENTION_FILTERS, can, LOCALES, messagesFor, parsePeriod, type AttentionFilter, type Locale, type MemberRole, type Period } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, noteNavigation, SectionAnchor, useMessages, WORKSPACES_HREF } from './components.tsx';
 import { BrandMark, Icon, Octicon } from './icons.tsx';
 import { applyTheme, storedTheme, systemDark, type ThemeChoice } from './theme.ts';
 import { ZoneContext } from './date-range.tsx';
+import { StatusLine } from './status-line.tsx';
 import { ExportContext } from './export.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { CompetitionScreen } from './screens/Competition.tsx';
@@ -291,6 +292,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       {/* клик мимо выдвинутой панели её закрывает */}
       {nav.open ? <div className="nav-backdrop" aria-hidden="true" onClick={() => setOpen(false)} /> : null}
       <div className="world-content">
+      {/* Шаг 146 (#34, ярус 1): строка состояния — первой на каждом экране пространства; повторный запрос — при смене экрана */}
+      {redirectTo ? null : <StatusLine worldId={world.id} screen={[route.screen, route.param, route.param2, route.param3].filter(Boolean).join('/')} />}
       {redirectTo ? null
         : route.screen === 'shadow' ? <ShadowScreen worldId={world.id} />
         // Шаг 145: `feed/held/<период>` — клик по плитке «Held back» тени: журнал с группой «Held by shadow mode» и тем же периодом
@@ -320,7 +323,9 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
             <SectionAnchor id="product-details" focus={route.param2 === 'details'} />
             <ImportPanel worldId={world.id} kind="PRODUCTS" canEdit={world.role !== null && can(world.role as MemberRole, 'MANAGE_CATALOG')} />
             <JobHistory worldId={world.id} /></>
-        : route.screen === 'products' ? <ProductsScreen worldId={world.id} />
+        // Шаг 146 (#34): `products/attention/<причина>` — клик по «требует внимания» строки состояния
+        : route.screen === 'products' ? <ProductsScreen key={`${route.param}|${route.param2}`} worldId={world.id}
+            initialAttention={route.param === 'attention' && (ATTENTION_FILTERS as readonly string[]).includes(route.param2 ?? '') ? route.param2 as AttentionFilter : undefined} />
         : route.screen === 'inventory' ? <StockScreen worldId={world.id} />
         : route.screen === 'channels' ? <ChannelsScreen worldId={world.id} section={route.param} />
         : route.screen === 'compliance' ? (world.euStorefronts && market.omnibus ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)

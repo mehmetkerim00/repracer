@@ -17,7 +17,8 @@ h2 { font-size: var(--font-size-lg); line-height: var(--line-height-tight); marg
 .world-content h2, main > h2 { font-size: var(--font-size-xl); line-height: var(--line-height-tight); margin-bottom: var(--space-2); }
 h3 { font-size: var(--font-size-md); line-height: var(--line-height-tight); margin: var(--space-4) 0 var(--space-2); }
 /* экран, который открывается и сам по себе, и внутри онбординга (импорт себестоимости), начинается с h3 — на своём месте он заголовок страницы */
-.world-content > section:first-child > h3:first-child { font-size: var(--font-size-lg); margin: 0 0 var(--space-2); }
+/* шаг 146: первая — строка состояния; правило — для первого экрана после неё, как прежде для первого элемента */
+.world-content > section:first-child > h3:first-child, .world-content > .status-line:first-child + section > h3:first-child { font-size: var(--font-size-lg); margin: 0 0 var(--space-2); }
 h4 { font-size: var(--font-size); margin: var(--space-3) 0 var(--space-1); }
 p { margin: 0 0 var(--space-2); }
 ul, ol { margin: 0 0 var(--space-2); padding-left: var(--space-5); }
@@ -1265,3 +1266,30 @@ output.field-value { display: flex; align-items: center; min-height: var(--contr
 
 /* Шаг 121 (QA-A): подвал страницы — версия сборки, тихо и мелко; переносится, а не выталкивает страницу вбок на телефоне */
 .build-stamp { font-size: var(--font-size-xs); color: var(--text-2); padding: var(--space-2) var(--space-4); text-align: center; overflow-wrap: anywhere; }
+
+/*
+ * Шаг 146 (#34, ярус 1): строка состояния продавца — первая на каждом экране пространства. Только существующие токены: поверхность и рамка
+ * карточки, малый шрифт, точки тона — цвета статусов. На телефоне части — столбцом, каждая ссылка — цель касания 44 px
+ */
+.status-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3);
+  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); font-size: var(--font-size-sm); color: var(--text-2);
+}
+.status-line.loading-line { min-height: calc(var(--badge-h) + 2 * var(--space-2)); background: var(--surface-muted); }
+.status-line a, .status-line .status-quiet { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--badge-h); color: var(--text); text-decoration: none; }
+.status-line a:hover { text-decoration: underline; }
+.status-item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.status-item + .status-item { padding-left: var(--space-3); border-left: var(--border-width) solid var(--divider); }
+.status-dot { display: inline-block; vertical-align: middle; flex: none; width: var(--space-2); height: var(--space-2); border-radius: var(--radius-pill); background: var(--text-3); }
+.status-dot.dot-ok { background: var(--success); }
+.status-dot.dot-warn { background: var(--warning); }
+.status-dot.dot-stop { background: var(--danger); }
+.status-reasons { display: inline-flex; flex-wrap: wrap; gap: 0 var(--space-2); }
+.status-reasons a { color: var(--text-2); }
+.status-reasons a + a::before { content: '·'; margin-right: var(--space-2); color: var(--text-3); }
+@media (width < 48rem) {
+  .status-line { flex-direction: column; align-items: stretch; gap: 0; padding: 0 var(--space-3); }
+  .status-item { display: flex; }
+  .status-item + .status-item { padding-left: 0; border-left: 0; border-top: var(--border-width) solid var(--divider); }
+  .status-line a, .status-line .status-quiet { min-height: var(--touch-target); }
+}

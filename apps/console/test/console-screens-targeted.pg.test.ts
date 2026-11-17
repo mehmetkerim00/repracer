@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import type { DecisionListView, ProductListView, StopView, StrategyListView } from '@repracer/console-model';
+import { ATTENTION_FILTERS, ATTENTION_REASONS, type DecisionListView, type ProductListView, type StatusLineView, type StopView, type StrategyListView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
@@ -138,7 +138,7 @@ test('step 105 (A) [Р-230], step 118: Offers with the Buy Box columns — every
   };
   // Неизвестного держателя (Amazon, A-29) в мирах стенда на PostgreSQL нет — снимков Amazon у них нет; его группу и порядок базы на
   // PostgreSQL сверяет прогон демо США (`demo-us-live.pg.test.ts`, step 105 (A)), где amazon.com есть
-  const seen = { worlds: 0, named: 0, gap: 0, share: 0, filtered: 0, storefronts: 0, pricing: 0 };
+  const seen = { worlds: 0, named: 0, gap: 0, share: 0, filtered: 0, storefronts: 0, pricing: 0, attention: 0 };
   for (const live of worlds) {
     if (!live.store.consoleCatalogFacts) continue;
     const api = (path: string) => `/api/worlds/${encodeURIComponent(live.id)}/${path}`;
@@ -167,6 +167,12 @@ test('step 105 (A) [Р-230], step 118: Offers with the Buy Box columns — every
       if (page.page.total > 0 && page.page.total < all.page.total) seen.pricing += 1;
       await compare(api(`products?offset=0&limit=7&pricing=${pricing}&holder=OTHER&sort=gap&dir=asc`));
     }
+    // Шаг 146 (#34): «требует внимания» — любая причина и каждая; базе и правилу экрана — одно правило (`attentionReasons`)
+    for (const attention of ATTENTION_FILTERS) {
+      const page = await compare(api(`products?offset=0&limit=200&attention=${attention}`));
+      if (page.page.total > 0 && page.page.total < all.page.total) seen.attention += 1;
+    }
+    await compare(api(`products?offset=0&limit=5&bb=1&attention=ANY&sort=gap&dir=desc`));
     for (const sf of all.filters.storefronts) { await compare(api(`products?offset=0&limit=200&bb=1&storefront=${encodeURIComponent(sf.value)}`)); seen.storefronts += 1; }
     const word = all.rows[0]!.unit.label.split(/[ ,·]/).find((x) => x.length > 2) ?? '';
     await compare(api(`products?offset=0&limit=200&bb=1&q=${encodeURIComponent(word)}&sort=price&dir=desc&holder=OTHER`));
@@ -174,6 +180,44 @@ test('step 105 (A) [Р-230], step 118: Offers with the Buy Box columns — every
     await compare(api(`products?offset=0&limit=7&q=${encodeURIComponent(word)}`));
   }
   for (const [k, v] of Object.entries(seen)) assert.ok(v > 0, `every rule met data: ${k} = 0 (${JSON.stringify(seen)})`);
+});
+
+/**
+ * Шаг 146 (#34, ярус 1): строка состояния на PostgreSQL — итоги «требует внимания» считает база теми же фрагментами, что фильтр Offers;
+ * без базы — правило экрана по каталогу целиком. Ответы двух серверов равны на каждом мире стенда; каждое число строки — ровно `page.total`
+ * Offers по её ссылке (итог и каждая причина); остановки — действующие трёх видов на Stop pricing
+ */
+test('step 146 (#34): the status line — the database equals the screen rule on every stand world; every attention number is the Offers list it links to; stops are the active ones of Stop pricing', { timeout: 20 * 60_000 }, async () => {
+  const r = await targeted({ method: 'POST', url: '/api/stand-issuer/token', body: { role: 'OWNER' } });
+  const auth = { authorization: `Bearer ${(r.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
+  const get = async <T>(url: string): Promise<T> => {
+    const x = await targeted({ method: 'GET', url, body: null, ...auth });
+    assert.equal(x.status, 200, `${url}: ${JSON.stringify(x.body).slice(0, 300)}`);
+    return x.body as T;
+  };
+  const seen = { worlds: 0, attention: 0, stops: 0, reasons: new Set<string>() };
+  for (const live of worlds) {
+    if (!live.store.consoleCatalogFacts) continue;
+    const api = (path: string) => `/api/worlds/${encodeURIComponent(live.id)}/${path}`;
+    const [a, b] = await Promise.all([targeted({ method: 'GET', url: api('status'), body: null, ...auth }), full({ method: 'GET', url: api('status'), body: null, ...auth })]);
+    assert.equal(a.status, 200, `${live.id}: ${JSON.stringify(a.body).slice(0, 300)}`);
+    assert.deepEqual(a.body, b.body, `${live.id}: the status line — database = screen rule`);
+    const st = a.body as StatusLineView;
+    const total = async (filter: string) => (await get<ProductListView>(api(`products?offset=0&limit=1&attention=${filter}`))).page.total;
+    assert.equal(await total('ANY'), st.attention.count, `${live.id}: «${st.attention.text}» is the Offers list it links to`);
+    for (const reason of ATTENTION_REASONS) {
+      const n = await total(reason);
+      assert.equal(n, st.attention.reasons.find((x) => x.code === reason)?.count ?? 0, `${live.id}: ${reason} is the Offers list it links to`);
+      if (n > 0) seen.reasons.add(reason);
+    }
+    const stop = await get<StopView>(api('stop'));
+    assert.equal(st.stops.count, stop.kinds.reduce((n, k) => n + k.active, 0), `${live.id}: «${st.stops.text}» — the active stops of Stop pricing`);
+    seen.worlds += 1;
+    if (st.attention.count > 0) seen.attention += 1;
+    if (st.stops.count > 0) seen.stops += 1;
+  }
+  assert.ok(seen.worlds > 0 && seen.attention > 0 && seen.stops > 0, `every part met data: ${JSON.stringify({ ...seen, reasons: [...seen.reasons] })}`);
+  assert.ok(seen.reasons.size >= 2, `at least two reasons met data: ${[...seen.reasons].join(', ')}`);
 });
 
 /**

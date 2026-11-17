@@ -90,6 +90,8 @@ export function ConnectionsScreen({ worldId, embedded = false }: { worldId: stri
                   {a.catalogTexts.map((c) => <p className="note" key={c.text}>{c.incomplete ? <><Badge tone="warn">{m.ui.connections.catalog.incompletePill}</Badge> </> : null}{c.text}</p>)}
                   {/* Шаг 114: откуда данные аккаунта Amazon — уведомления за сутки или только опрос */}
                   {a.dataSourceText ? <p className="note">{a.dataSourceText}</p> : null}
+                  {/* Шаг 146 (#34): свежесть данных конкурентов — та же строка, что в строке состояния */}
+                  {a.freshness ? <p className="note" data-part="freshness"><span className={`status-dot dot-${a.freshness.tone}`} aria-hidden="true" /> {a.freshness.text}</p> : null}
                   {a.canReconnect ? <button type="button" onClick={() => start(a.channel, a.marketplaces)}>{a.reconnectLabel}</button> : null}
                 </div>
                 <div className="account-writers"><ExternalWriters worldId={worldId} account={a} onChanged={retry} /></div>

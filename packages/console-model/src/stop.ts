@@ -189,6 +189,19 @@ function stopCard(world: StandWorld, s: ConsoleStop, m: Messages): StopCard {
   };
 }
 
+/**
+ * Шаг 146 (#34): часть «остановки» строки состояния — ровно то, что Stop pricing показывает действующим (три вида), и действующая остановка
+ * человеком всего пространства с тем же «кто» и «когда», что у её карточки
+ */
+export function statusStops(world: StandWorld, m: Messages): { active: number; tenant: { by: string; stoppedAt: string } | null } {
+  const active = world.state.stops.filter((x) => x.releasedAt === null);
+  const tenant = active.find((x) => x.scope === 'TENANT') ?? null;
+  return {
+    active: active.length + world.state.halts.filter((x) => x.releasedAt === null).length + world.state.distrusts.filter((x) => x.releasedAt === null).length,
+    tenant: tenant ? { by: memberLabel(world, tenant.stoppedByMembershipId, m), stoppedAt: tenant.stoppedAt } : null,
+  };
+}
+
 function haltCard(world: StandWorld, h: ConsoleHalt, m: Messages): HaltCard {
   const review = [...world.state.haltReviews].reverse().find((r) => r.haltId === h.haltId && r.outcome === 'RELEASED');
   const channel = m.values[channelOf(world, h.channelAccountId) as keyof typeof m.values] ?? channelOf(world, h.channelAccountId);

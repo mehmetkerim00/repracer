@@ -53,7 +53,8 @@ import type {
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded, FeeExpiryNotice,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason, PricingSwitchRef } from '@repracer/pricing-pipeline';
-import { CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
+import { ATTENTION_REASONS, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
+import type { AttentionCounts, AttentionFilter, AttentionReason, FreshnessRow } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 import { IMPORT_RUN_COLUMNS, importRunRow, insertImportRun } from './import-runs.ts';
@@ -241,6 +242,46 @@ const SCOPE_FROM = `
     LEFT JOIN channel_data.pricing_strategy_undercut ud
       ON ud.tenant_id = ps.tenant_id AND ud.pricing_strategy_id = ps.pricing_strategy_id AND ud.version = ps.version
    WHERE m.tenant_id = $1 AND m.status <> 'ENDED'`;
+
+/**
+ * Шаг 146 (#34, ярус 1): причины «требует внимания» — условия по единице `s` и предложению `m` каталога (`SCOPE_FROM`). Одни и те же
+ * фрагменты у фильтра Offers (`offerSelection`) и у итогов строки состояния (`consoleCatalogFacts.attention`): число в строке и выборка по
+ * её ссылке — одно правило по построению. Правило экрана без базы — `attentionReasons` модели экранов; оно читает то же, что загрузчик
+ * мира: последнее наблюдение ценообразования канала, последнее состояние публикации и статус листинга, себестоимость с действующей оценкой
+ * комиссии (`cost` строки каталога), журнал выключения. Равенство на всех мирах стенда держит `console-screens-targeted.pg.test.ts`.
+ * `now` — номер параметра момента (себестоимость и оценка комиссии действуют на момент)
+ */
+const LATEST_CHANNEL_PRICING = (cond: string) => `EXISTS (SELECT 1 FROM (SELECT x.automated_pricing, x.channel_bounds, x.bounds_currency FROM channel_data.offer_channel_pricing x
+    WHERE x.tenant_id = m.tenant_id AND x.channel_account_id = s.channel_account_id AND x.marketplace = m.marketplace
+      AND x.external_sku = coalesce(m.external_unit_id, m.external_sku, '')
+    ORDER BY x.observed_at DESC, x.recorded_at DESC LIMIT 1) o WHERE ${cond})`;
+// Момент — параметром запроса, и только у той причины, что его читает (лишний параметр PostgreSQL не принимает)
+const ATTENTION_SQL: Readonly<Record<AttentionReason, (now: () => string) => string>> = {
+    NO_UNIT_COST: (now) => `NOT (EXISTS (SELECT 1 FROM tenant_data.cost_profile cp
+                                 WHERE cp.tenant_id = s.tenant_id AND cp.product_id = s.product_id AND cp.valid_from <= ${now()}::timestamptz
+                                   AND (cp.channel_account_id IS NULL OR (cp.channel_account_id = s.channel_account_id AND cp.marketplace = m.marketplace)))
+                    AND EXISTS (SELECT 1 FROM channel_data.fee_estimate fe
+                                 WHERE fe.tenant_id = s.tenant_id AND fe.write_scope_id = s.write_scope_id AND fe.valid_until > ${now()}::timestamptz
+                                   AND jsonb_typeof(fe.fee_model -> 'feeRateBp') = 'number' AND jsonb_typeof(fe.fee_model -> 'fixedFeeMinor') = 'number'))`,
+    AUTOMATED_PRICING: () => LATEST_CHANNEL_PRICING('o.automated_pricing'),
+    // Рамки Amazon без значений в валюте предложения — в тени и в бою (`channelBoundsUnread`, Р-250)
+    CHANNEL_BOUNDS: () => LATEST_CHANNEL_PRICING('NOT o.automated_pricing AND o.channel_bounds AND o.bounds_currency IS DISTINCT FROM s.currency'),
+    NOT_BUYABLE: () => `(EXISTS (SELECT 1 FROM (SELECT l.buyable FROM channel_data.listing_status l
+                                           WHERE l.tenant_id = m.tenant_id AND l.channel_account_id = s.channel_account_id AND l.marketplace = m.marketplace
+                                             AND l.external_sku = coalesce(m.external_unit_id, m.external_sku, '') AND l.buyable IS NOT NULL
+                                           ORDER BY l.observed_at DESC, l.recorded_at DESC LIMIT 1) ls WHERE NOT ls.buyable)
+                   OR EXISTS (SELECT 1 FROM (SELECT h.issue_type FROM channel_data.offer_pricing_health h
+                                              WHERE h.tenant_id = m.tenant_id AND h.channel_account_id = s.channel_account_id AND h.marketplace = m.marketplace
+                                                AND h.channel_product_ref = m.channel_product_ref AND h.condition = m.condition
+                                              ORDER BY h.event_time DESC, h.recorded_at DESC LIMIT 1) ph
+                               WHERE ph.issue_type = 'WALMART_UNPUBLISHED_UNCOMPETITIVE_PRICE'))`,
+    // Выключил человек (Р-242): режим OFF и последняя строка журнала выключения — OFF
+    TURNED_OFF: () => `(s.pricing_mode = 'OFF' AND (SELECT j.action FROM tenant_data.offer_pricing_switch j
+                                               WHERE j.tenant_id = s.tenant_id AND j.write_scope_id = s.write_scope_id ORDER BY j.seq DESC LIMIT 1) = 'OFF')`,
+};
+function attentionWhere(filter: AttentionFilter, now: () => string): string {
+  return filter === 'ANY' ? `(${ATTENTION_REASONS.map((r) => ATTENTION_SQL[r](now)).join(' OR ')})` : ATTENTION_SQL[filter](now);
+}
 
 /**
  * Шаг 67: каталог НАЗВАННЫХ единиц (страница экрана, найденные, примеры) — каждая таблица каталога ограничена своим списком: единица,
@@ -2184,12 +2225,13 @@ export class PgPricingStore implements PricingStore {
   async channelAccounts(tenantId: string): Promise<ChannelAccountRow[]> {
     return inTenant(this.admin('channelAccounts'), tenantId, async (tx) => {
       const { rows } = await tx.query(
-        `SELECT channel_account_id, channel, display_name, marketplaces, auth_status, access_blockers
+        `SELECT channel_account_id, channel, display_name, marketplaces, auth_status, access_blockers, write_mode
            FROM tenant_data.channel_account WHERE tenant_id = $1 AND disconnected_at IS NULL ORDER BY connected_at, channel_account_id`, [tenantId]);
       return rows.map((r) => ({
         channelAccountId: r.channel_account_id as string, channel: r.channel as string, displayName: (r.display_name as string | null) ?? null,
         marketplaces: r.marketplaces as string[], authStatus: r.auth_status as ChannelAccountRow['authStatus'],
         accessBlockers: (r.access_blockers as ChannelAccountRow['accessBlockers']) ?? [],
+        writeMode: r.write_mode === 'LIVE' ? 'LIVE' : 'SHADOW',
       }));
     });
   }
@@ -3006,6 +3048,8 @@ export class PgPricingStore implements PricingStore {
     if (f.storefront) where.push(`m.channel_account_id = ${p(f.storefront.channelAccountId)}::uuid AND m.marketplace = ${p(f.storefront.marketplace)}`);
     // Шаг 118: автоцена включена или выключена — режим единицы
     if (f.pricing) where.push(`s.pricing_mode = ${p(PRICING_MODE_OF_FILTER[f.pricing])}`);
+    // Шаг 146 (#34): «требует внимания» — те же фрагменты, что итоги строки состояния
+    if (f.attention) { const at = f.attention.now; let ref: string | null = null; where.push(attentionWhere(f.attention.filter, () => (ref ??= p(at)))); }
     const search = f.search && f.search.q !== '' ? f.search : null;
     const label = search
       ? `, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref, coalesce(p.gtin, '') AS gtin, coalesce(p.title, p.sku) AS product,
@@ -3137,6 +3181,25 @@ export class PgPricingStore implements PricingStore {
    * (`offers`), использование стратегий и ценообразование канала (`strategiesView`), влияние остановки (`impactOf`), первая единица
    * по ключу снимка (`rejectedView`). Равенство с правилами экрана на всех мирах стенда держит `console-screens-targeted.pg.test.ts`
    */
+  /**
+   * Шаг 146 (#34): свежесть данных конкурентов по аккаунту — включённые предложения со стратегией из данных конкурентов, без чтения и самое
+   * давнее последнее принятое чтение (`competitor_state`, ключ — аккаунт и товар). То же правило — у хранилища в памяти
+   */
+  async competitorFreshness(tenantId: string): Promise<FreshnessRow[]> {
+    return inTenant(this.admin('competitorFreshness'), tenantId, async (tx) => {
+      await PgPricingStore.wholeCatalogPlan(tx);
+      const { rows } = await tx.query(
+        `WITH sc AS (SELECT s.channel_account_id, m.marketplace, m.channel_product_ref, m.condition ${SCOPE_FROM}
+                        AND s.pricing_mode = 'ENGINE' AND ps.params ->> 'type' = ANY ($2::text[]))
+         SELECT sc.channel_account_id, count(*)::int AS counted, count(*) FILTER (WHERE c.observed_at IS NULL)::int AS unread, min(c.observed_at) AS oldest_at
+           FROM sc LEFT JOIN channel_data.competitor_state c
+             ON c.tenant_id = $1 AND c.channel_account_id = sc.channel_account_id AND c.marketplace = sc.marketplace
+            AND c.channel_product_ref = sc.channel_product_ref AND c.condition = sc.condition
+          GROUP BY sc.channel_account_id ORDER BY sc.channel_account_id`, [tenantId, [...COMPETITOR_DERIVED_RULES]]);
+      return rows.map((r) => ({ channelAccountId: String(r.channel_account_id), counted: Number(r.counted), unread: Number(r.unread), oldestAt: r.oldest_at ? iso(r.oldest_at) : null }));
+    });
+  }
+
   async consoleCatalogFacts(tenantId: string, query: ConsoleCatalogFactsQuery): Promise<ConsoleCatalogFacts> {
     return inTenant(this.admin('consoleCatalogFacts'), tenantId, async (tx) => {
       await PgPricingStore.wholeCatalogPlan(tx);
@@ -3239,7 +3302,17 @@ export class PgPricingStore implements PricingStore {
           [tenantId, JSON.stringify(query.keys.map((k) => ({ marketplace: k.marketplace, ref: k.channelProductRef, cond: k.condition })))]);
         keyed = rows.map((r) => ({ marketplace: String(r.marketplace), channelProductRef: String(r.ref), condition: String(r.cond), writeScopeId: String(r.write_scope_id) }));
       }
-      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed };
+      let attention: AttentionCounts | null = null;
+      if (query.attention) {
+        // Шаг 146 (#34): итоги — теми же фрагментами, что фильтр Offers; «any» — предложения хотя бы с одной причиной
+        const { rows: [r] } = await tx.query(
+          `WITH sc AS (SELECT ${ATTENTION_REASONS.map((x) => `${ATTENTION_SQL[x](() => '$2')} AS ${x.toLowerCase()}`).join(', ')} ${SCOPE_FROM})
+           SELECT count(*) FILTER (WHERE ${ATTENTION_REASONS.map((x) => x.toLowerCase()).join(' OR ')})::int AS any,
+                  ${ATTENTION_REASONS.map((x) => `count(*) FILTER (WHERE ${x.toLowerCase()})::int AS ${x.toLowerCase()}`).join(', ')}
+             FROM sc`, [tenantId, query.attention.now]);
+        attention = { any: Number(r!.any), byReason: Object.fromEntries(ATTENTION_REASONS.map((x) => [x, Number(r![x.toLowerCase()])])) as Record<AttentionReason, number> };
+      }
+      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed, attention };
     });
   }
 

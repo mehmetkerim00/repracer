@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { StockView } from '@repracer/console-model';
 import type { BoundsIndexView, JobCreatedResponse, StandToken } from '../src/api-types.ts';
-import { DIFF_ROWS_SHOWN, LIST_PAGE_DEFAULT, type BoundsDiffView, type BulkJobView, type ImportCheckView, type ProductListView, type StopPlan, type StopView, type StrategyPreviewView } from '@repracer/console-model';
+import { DIFF_ROWS_SHOWN, LIST_PAGE_DEFAULT, type BoundsDiffView, type BulkJobView, type ImportCheckView, type ProductListView, type StatusLineView, type StopPlan, type StopView, type StrategyPreviewView } from '@repracer/console-model';
 import { STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, MemoryIdentityDirectory, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -314,6 +314,13 @@ test('Р-136: остальные экраны продавца — лента, �
   assert.equal(compliance.status, 200, JSON.stringify(compliance.body).slice(0, 200));
   const stop = await measure('stop (экран остановок)', 'GET', api('stop'));
   assert.equal(stop.status, 200, JSON.stringify(stop.body).slice(0, 200));
+  // Шаг 146 (#34): строку состояния запрашивает каждый экран — на каталоге целевого клиента она в пределе экрана, и её число «требует
+  // внимания» — ровно выборка Offers по её ссылке
+  const status = await measure<StatusLineView>('status (строка состояния)', 'GET', api('status'));
+  assert.equal(status.status, 200, JSON.stringify(status.body).slice(0, 200));
+  const attention = await measure<ProductListView>('products (требует внимания)', 'GET', api('products', undefined, '?attention=ANY'));
+  assert.equal(attention.status, 200, JSON.stringify(attention.body).slice(0, 200));
+  assert.equal(attention.body.page.total, status.body.attention.count, 'the status line number is the Offers list it links to');
 });
 
 test('Р-136: импорт себестоимости целого каталога — файл продавца через HTTP', async () => {

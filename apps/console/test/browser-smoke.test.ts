@@ -482,7 +482,8 @@ const FORM_GEOMETRY = `(() => {
   }
   return bad.slice(0, 5);
 })()`;
-const SMALL_TARGETS = `[...document.querySelectorAll('button, select, input:not([type=checkbox]):not([type=radio]):not([type=file]), .nav-group a, a.row-link, .tabs a, summary')]
+// Шаг 146 (#34): ссылки строки состояния — цели касания, как пункты меню
+const SMALL_TARGETS = `[...document.querySelectorAll('button, select, input:not([type=checkbox]):not([type=radio]):not([type=file]), .nav-group a, a.row-link, .tabs a, summary, .status-line a')]
   .filter((el) => el.checkVisibility({ visibilityProperty: true }) && el.getBoundingClientRect().height > 0 && el.getBoundingClientRect().height < 43.5)
   .slice(0, 5).map((el) => el.tagName.toLowerCase() + ' «' + (el.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 30) + '» ' + Math.round(el.getBoundingClientRect().height) + 'px')`;
 
@@ -2254,7 +2255,8 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
     if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
     await go('products');
     const p = m.ui.products;
-    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
+    // Шаг 146 (#34): поле «Needs attention» — после «Repricing»
+    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.attention, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
     // Колонки Buy Box выключены по умолчанию и есть в выборе Columns
     const shown = await b.evaluate<string[]>(headers);
     assert.ok(![p.columns.bbHolder, p.columns.bbPrice, p.columns.bbGap, p.columns.bbShare].some((c) => shown.includes(c)), `${m.locale}: Buy Box columns are off by default — ${shown.join(' | ')}`);
@@ -2739,6 +2741,85 @@ test('step 139 (BUG-01, BUG-02): Shadow mode blocks stay open over «Older» and
   } finally {
     shadowDecisionId = null;
     await b.evaluate(`(localStorage.removeItem('repracer.shadow.open'), true)`);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 146 (#34, ярус 1): строка состояния — первая на каждом экране пространства, на четырёх языках, в обеих темах; ссылка «требует внимания»
+ * ведёт в Offers с фильтром, и Offers называет то же число («N of M offers match the filter»), ссылка причины — с её числом; остановки — на
+ * Stop pricing. На 375 — части столбцом, страница не уезжает вбок, ссылки — цели касания 44 px (правило шага 85 знает `.status-line a`)
+ */
+const STATUS = `(() => { const n = document.querySelector('.world-content > nav.status-line:first-child');
+  if (!n || n.getAttribute('aria-busy') === 'true') return null;
+  return { parts: [...n.querySelectorAll('[data-part]')].map((x) => x.dataset.part), text: n.innerText.replace(/\\s+/g, ' ').trim(),
+    attention: n.querySelector('[data-part=attention] > a')?.getAttribute('href') ?? null, count: n.querySelector('[data-part=attention] > a')?.textContent.trim() ?? null,
+    reasons: [...n.querySelectorAll('.status-reasons a')].map((a) => ({ href: a.getAttribute('href'), text: a.textContent.trim() })),
+    stops: n.querySelector('[data-part=stops]')?.getAttribute('href') ?? null }; })()`;
+async function statusOf(b: Browser, what: string): Promise<{ parts: string[]; text: string; attention: string | null; count: string | null; reasons: Array<{ href: string; text: string }>; stops: string | null }> {
+  for (let i = 0; i < 150; i++) {
+    const s = await b.evaluate<Awaited<ReturnType<typeof statusOf>> | null>(STATUS);
+    if (s) return s;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return assert.fail(`${what}: no status line at the top of the screen`);
+}
+
+test('step 146 (#34): the status line heads every workspace screen in four languages and both themes; «needs attention» opens Offers with the same number; 375 keeps the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (path: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${path}`)}, true)`); await settled(b, path); };
+  try {
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const m of [en, de, es, fr]) {
+        if (m !== en) { await chooseLanguage(b, en.ui.app.languages[m.locale]); await b.waitText(m.ui.app.screens.feed); }
+        // Каждый пункт меню и экраны без своего пункта: квитанция и страница предложения
+        const links = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.getAttribute('href').split('/').slice(3).join('/'))`);
+        for (const path of [...links, 'products/bulk']) {
+          await go(path);
+          const st = await statusOf(b, `${scheme} ${m.locale} ${path}`);
+          assert.deepEqual([st.parts[0], st.parts[1], st.parts.at(-1)], ['mode', 'stops', 'attention'], `${scheme} ${m.locale} ${path}: the four parts in order — ${JSON.stringify(st.parts)}`);
+          assert.ok(!/undefined|NaN|\{|\}/.test(st.text), `${m.locale} ${path}: ${st.text}`);
+          assert.equal(st.stops, `#/w/${world}/stop`, `${m.locale} ${path}: active stops lead to Stop pricing`);
+          assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${m.locale} ${path}: the status line keeps inside its frame`);
+        }
+        if (m !== en) { await chooseLanguage(b, m.ui.app.languages.en); await b.waitText(en.ui.app.screens.feed); }
+      }
+    }
+    await b.setColorScheme('light');
+    // «Требует внимания» — ровно выборка Offers: тот же итог и то же число у каждой причины
+    await go('shadow');
+    const st = await statusOf(b, 'shadow');
+    assert.ok(st.attention && st.count, `the smoke world has offers that need attention: ${st.text}`);
+    const total = Number(/\d+/.exec(st.count)![0]);
+    assert.ok(st.reasons.length > 0, 'the reasons are named');
+    for (const target of [{ href: st.attention, n: total }, ...st.reasons.map((r) => ({ href: r.href, n: Number(/\d+/.exec(r.text)![0]) }))]) {
+      await b.evaluate(`(location.hash = ${JSON.stringify(target.href)}, true)`);
+      await settled(b, target.href!);
+      await waitFor(b, `document.querySelector('.section-sub') !== null`, `${target.href}: Offers names the filtered count`);
+      const matched = await b.evaluate<string>(`document.querySelector('.section-sub').textContent.trim()`);
+      assert.equal(matched, en.ui.products.filters.matched(target.n, Number(/of (\d+)/.exec(matched)?.[1] ?? NaN)), `${target.href}: Offers shows the same number as the status line`);
+      assert.notEqual(await b.evaluate<string>(`document.querySelectorAll('.filters select')[2].value`), '', `${target.href}: the «Needs attention» field shows the filter`);
+    }
+    // Телефон: части столбцом, без бокового прокрута, ссылки — 44 px
+    await b.setViewport(375, 812);
+    await go('products');
+    await statusOf(b, '375 offers');
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), '375: no sideways scroll with the status line');
+    assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], '375: the status line links are 44px touch targets');
+  } finally {
+    await b.setViewport(1440, 900);
+    await b.setColorScheme(null);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

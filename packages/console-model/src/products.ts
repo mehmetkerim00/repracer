@@ -4,7 +4,7 @@ import { channelBoundsPill, channelBoundsUnread } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
-import type { ConsoleCatalogPage, OfferPricingFilterValue, ScopeDecisionStats } from '@repracer/pricing-pipeline';
+import type { AttentionFilter, ConsoleCatalogPage, OfferPricingFilterValue, ScopeDecisionStats } from '@repracer/pricing-pipeline';
 import { storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferSort } from './offer-buybox.ts';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
@@ -60,6 +60,8 @@ export interface OfferFilter {
   storefront: string | null;
   /** Шаг 118: автоцена включена или выключена; null — все */
   pricing: OfferPricingFilterValue | null;
+  /** Шаг 146 (#34): «требует внимания» — любая причина или одна; null — все */
+  attention: AttentionFilter | null;
   holder: OfferHolderFilterValue | null;
   q: string;
 }
@@ -372,8 +374,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
   };
 }
 
-export const NO_FILTER: OfferFilter = { storefront: null, pricing: null, holder: null, q: '' };
-export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.pricing !== null || f.holder !== null || f.q !== '';
+export const NO_FILTER: OfferFilter = { storefront: null, pricing: null, attention: null, holder: null, q: '' };
+export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.pricing !== null || f.attention !== null || f.holder !== null || f.q !== '';
 
 /** Итоги каталога целиком — правило экрана Offers без базы; на PostgreSQL их считает база (`consoleCatalogPage`) */
 export function catalogTotals(world: StandWorld, m: Messages): { total: number; enabled: number; applying: number; stopped: number; off: number } {

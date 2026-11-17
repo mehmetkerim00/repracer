@@ -2,7 +2,8 @@ import { can, holdsOwnerActions, type MemberRole, type StrategyParams } from '@r
 import type { DefaultStrategyRow } from '@repracer/pricing-pipeline';
 import type { ConnectionRow, PendingRequestRow } from '@repracer/pricing-store-pg';
 import type { Messages } from './i18n/index.ts';
-import { storefrontName } from './world.ts';
+import { storefrontName, type Tone } from './world.ts';
+import type { FreshnessItem } from './status-line.ts';
 
 /**
  * Р-175…Р-177 (шаг 43): экран «Подключение каналов». Продавец подключает канал САМ — кнопкой, согласием на стороне
@@ -71,6 +72,8 @@ export interface ConnectionAccountView {
    * уведомлений в очереди (Kaufland, eBay, Walmart) или экрану не дали данных
    */
   dataSourceText: string | null;
+  /** Шаг 146 (#34): свежесть данных конкурентов — та же строка, что в строке состояния (куда ведёт её ссылка); null — у аккаунта нечего считать */
+  freshness: { text: string; tone: Tone } | null;
 }
 
 /** Шаг 114: уведомления аккаунта за сутки — по журналу сырья (NotificationSourceFacts хранилища) */
@@ -289,6 +292,7 @@ export function connectionsView(
   m: Messages,
   defaults: DefaultStrategyInput | null = null,
   notificationSources: readonly NotificationSourceInput[] | null = null,
+  freshness: readonly FreshnessItem[] | null = null,
 ): ConnectionsView {
   const t = m.ui.connections;
   const canManage = can(input.role, 'MANAGE_TENANT');
@@ -339,6 +343,7 @@ export function connectionsView(
       // Шаг 114: очередь уведомлений есть только у Amazon (ANY_OFFER_CHANGED, PRICING_HEALTH, уведомления листингов через EventBridge)
       dataSourceText: notificationSources && a.channel === 'AMAZON' && a.authStatus !== 'DISCONNECTED'
         ? dataSourceText(notificationSources.find((x) => x.channelAccountId === a.channelAccountId), m, nowMs) : null,
+      freshness: ((f) => (f ? { text: m.ui.statusLine.channelsLine(f.text, f.levelText), tone: f.tone } : null))(freshness?.find((x) => x.channelAccountId === a.channelAccountId)),
     };
   });
   const channels = connectable.map((c): ConnectionChannelView => {
