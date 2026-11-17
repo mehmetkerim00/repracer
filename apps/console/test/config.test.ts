@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { loadConsoleConfig, CONSOLE_ROLES } from '../server/config.ts';
+import { loadConsoleConfig, CONSOLE_ROLES, slowRequestMsOf } from '../server/config.ts';
 
 /**
  * Р-180 (шаг 44): промышленный профиль консоли поднимается ТОЛЬКО с настоящим поставщиком identity — отказ при старте
@@ -53,4 +53,12 @@ test('шаг 87 [Р-214]: профиль рынка развёртывания �
   assert.equal(loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'global', REPRACER_CONSOLE_LOCALE: 'en' }, read).locale, 'en');
   assert.throws(() => loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'europe' }, read), /CONFIG_INVALID: REPRACER_MARKET_PROFILE must be one of us, eu, global, got europe/);
   assert.throws(() => loadConsoleConfig({ ...base, REPRACER_CONSOLE_LOCALE: 'de' }, read), /CONFIG_INVALID: REPRACER_CONSOLE_LOCALE=de is not a language of the market profile us/);
+});
+
+test('step 164: the slow request threshold — 2 s by default, off only explicitly, a crooked value refuses to start', () => {
+  assert.equal(slowRequestMsOf(undefined), 2000);
+  assert.equal(slowRequestMsOf(''), 2000);
+  assert.equal(slowRequestMsOf('off'), null);
+  assert.equal(slowRequestMsOf('500'), 500);
+  for (const bad of ['2s', '50', '0', '-1', '1.5', '700000']) assert.throws(() => slowRequestMsOf(bad), /REPRACER_SLOW_REQUEST_MS/, bad);
 });

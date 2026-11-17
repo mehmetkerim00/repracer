@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DEFAULT_SCHEDULED_RECOMPUTE_SECONDS, systemClock } from '@repracer/channel-port';
 import type { TenantWorldIndex } from './tenant-worlds.ts';
+import { slowRequestMsOf } from './config.ts';
 import { createServer, type ServerResponse } from 'node:http';
 import { buildInfoFromEnv, ConfigError, createHeartbeat, secretFromEnv, type BuildInfo } from '@repracer/service-runtime';
 import { fileURLToPath } from 'node:url';
@@ -2202,6 +2203,18 @@ export function createRateLimiter(config: RateLimitConfig) {
   return Object.assign(check, { size: () => hits.size, close: () => clearInterval(timer) });
 }
 
+/**
+ * Шаг 164: параметры запроса в строке медленного запроса. Значения — только у параметров выборки без текста продавца (период, вид, исход,
+ * страница, порядок, фильтры-перечисления); у остальных (поиск, записка, идентификаторы) — только имя: строка журнала не несёт ни текста
+ * поиска, ни данных продавца
+ */
+const SLOW_QUERY_VALUES = new Set(['period', 'kind', 'outcome', 'limit', 'offset', 'sort', 'dir', 'group', 'status', 'channel', 'attention', 'tab', 'format', 'since', 'until']);
+export function slowQuery(params: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of params) out[key] = SLOW_QUERY_VALUES.has(key) ? value.slice(0, 40) : '…';
+  return out;
+}
+
 export function createStandServer(
   handle: ReturnType<typeof createStandApi>, locale: Locale = 'de',
   /**
@@ -2214,11 +2227,19 @@ export function createStandServer(
    * Шаг 121 (QA-A): `build` — какой код работает; `/healthz` называет её раньше раздачи файлов страницы (иначе он отдавал бы страницу с
    * кодом 200) и без предела частоты: проверку здоровья зовут развёртывание и туннель, а не человек
    */
-  options: { rateLimit?: RateLimitConfig; contentSecurityPolicy?: string; build?: BuildInfo | null } = {},
+  options: {
+    rateLimit?: RateLimitConfig; contentSecurityPolicy?: string; build?: BuildInfo | null;
+    /** Шаг 164: запрос API дольше этого числа миллисекунд оставляет строку журнала `SLOW_REQUEST`; без него — строк нет */
+    slowRequestMs?: number | null;
+    log?: (line: Record<string, unknown>) => void;
+  } = {},
 ) {
   const fallback = messagesFor(locale).ui.server;
   const limited = options.rateLimit ? createRateLimiter(options.rateLimit) : null;
+  const slowMs = options.slowRequestMs ?? null;
+  const log = options.log ?? ((line: Record<string, unknown>) => console.log(JSON.stringify(line)));
   const server = createServer(async (req, res) => {
+    const startedAt = performance.now(); // real-clock: длительность запроса для журнала медленных запросов (шаг 164)
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     if (options.contentSecurityPolicy) res.setHeader('content-security-policy', options.contentSecurityPolicy);
     // Шаг 55 (ревью шага 54, находка 4): предел — у API и Inbound API; страница и файлы сборки дешёвы (из памяти) и грузятся без входа
@@ -2270,6 +2291,9 @@ export function createStandServer(
     } catch {
       return send(res, { status: 400, body: { error: { code: 'BAD_JSON', message: fallback.badJson } } });
     }
+    // Шаг 164: клиент ушёл раньше ответа (туннель по своему сроку, закрытая вкладка) — соединение закрылось до конца ответа
+    let clientLeft = false;
+    res.on('close', () => { if (!res.writableEnded) clientLeft = true; });
     try {
       send(res, await handle({ method: req.method ?? 'GET', url: req.url ?? '/', body, authorization: req.headers.authorization,
         idToken: typeof req.headers['x-repracer-id-token'] === 'string' ? req.headers['x-repracer-id-token'] : undefined, cookie: req.headers.cookie }),
@@ -2280,6 +2304,12 @@ export function createStandServer(
       // Ни тело запроса, ни токен в журнал не пишутся — только метод, путь и сообщение ошибки
       console.error('stand request failed', req.method, new URL(req.url ?? '/', 'http://stand').pathname, error instanceof Error ? error.message : error);
       send(res, { status: 500, body: { error: { code: 'STAND_ERROR', message: fallback.standError } } });
+    } finally {
+      const ms = Math.round(performance.now() - startedAt); // real-clock: длительность запроса для журнала медленных запросов (шаг 164)
+      if (slowMs !== null && ms >= slowMs) {
+        const url = new URL(req.url ?? '/', 'http://console');
+        log({ level: 'WARN', code: 'SLOW_REQUEST', details: { method: req.method ?? 'GET', path: url.pathname, query: slowQuery(url.searchParams), status: res.statusCode, ms, clientLeft } });
+      }
     }
   });
   if (limited) server.on('close', () => limited.close());
@@ -2431,7 +2461,8 @@ async function main(): Promise<void> {
     handle = createStandApi(worlds, { authenticator: createAuthenticator({ ...verify, directory: memoryStandDirectory(worlds) }), ...(simulator ? { simulator } : {}) }, { people: STAND_PEOPLE, build, ...defaultLocale });
   }
   const { createStaticHandler } = await import('./static.ts');
-  const server = createStandServer(handle, undefined, staticDir ? createStaticHandler(staticDir) : undefined, { build });
+  // Шаг 164: журнал медленных запросов — тем же порогом, что у развёрнутой консоли
+  const server = createStandServer(handle, undefined, staticDir ? createStaticHandler(staticDir) : undefined, { build, slowRequestMs: slowRequestMsOf(process.env.REPRACER_SLOW_REQUEST_MS) });
   server.listen(port, host, () => console.log(`stand on http://${host}:${port}/api/session (${process.env.REPRACER_PG_URL ? 'PostgreSQL' : 'memory'}${staticDir ? ', page from the build' : ''}${build ? `, build ${build.sha}` : ''})`));
   const heartbeat = heartbeatUrl ? createHeartbeat({ url: heartbeatUrl }) : null;
   if (heartbeat) {

@@ -68,6 +68,8 @@ export interface ConsoleConfig {
    * консоль публичного демо не заметит НИКТО, кроме посетителя, который просто уйдёт. Выключение — только явное.
    */
   heartbeatUrl: string | null;
+  /** Шаг 164: запрос API дольше стольких миллисекунд — строка журнала `SLOW_REQUEST` (`REPRACER_SLOW_REQUEST_MS`, по умолчанию 2000, `off` — без строк) */
+  slowRequestMs: number | null;
 }
 
 /**
@@ -185,12 +187,25 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     pgUrls,
     oidc,
     profile,
+    slowRequestMs: slowRequestMsOf(env.REPRACER_SLOW_REQUEST_MS),
     rateLimit: {
       authorizedPerMinute: intFromEnv(env, 'REPRACER_CONSOLE_RATE_AUTHORIZED', 600, 10, 100_000),
       anonymousPerMinute: intFromEnv(env, 'REPRACER_CONSOLE_RATE_ANONYMOUS', 120, 10, 100_000),
       trustProxy: env.REPRACER_CONSOLE_TRUST_PROXY === 'on',
     },
   };
+}
+
+/**
+ * Шаг 164: порог журнала медленных запросов — у стенда и развёрнутой консоли одним правилом. Не задано — 2 с; `off` — выключено явно;
+ * иначе целое число миллисекунд от 100 до 10 минут, кривое значение — отказ при старте
+ */
+export function slowRequestMsOf(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === '') return 2000;
+  if (raw.trim() === 'off') return null;
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < 100 || n > 600_000) throw new ConfigError(`REPRACER_SLOW_REQUEST_MS must be off or whole milliseconds from 100 to 600000, got ${raw}`);
+  return n;
 }
 
 /** Шаг 69 (K4): пояс показа демо — имя IANA или пусто; неверное имя — отказ старта, а не тихий UTC (известность пояса проверит база) */

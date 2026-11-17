@@ -278,6 +278,7 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
   // Шаг 53 (OWASP A04, A05): ограничение частоты и полная политика содержимого — адреса поставщика входа из конфигурации
   const server = createStandServer(api, config.locale, createStaticHandler(config.distDir), {
     rateLimit: config.rateLimit,
+    slowRequestMs: config.slowRequestMs,
     contentSecurityPolicy: consoleContentSecurityPolicy(config.oidc ? [config.oidc.issuer, ...(config.oidc.discoveryBase ? [config.oidc.discoveryBase] : [])] : []),
     build,
   });

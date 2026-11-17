@@ -12,7 +12,8 @@ import type { BoundsIndexView, DiscountAnnounceResponse, EnableResult, JobCreate
 import { createHash } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
 import { parseCsv, parseXlsx } from '@repracer/cost-import';
-import { createStandApi, EVIDENCE_MAX_DAYS, resolveStandIdentityMode, standTokenSecondsOf } from '../server/stand-server.ts';
+import { createStandApi, createStandServer, EVIDENCE_MAX_DAYS, resolveStandIdentityMode, standTokenSecondsOf } from '../server/stand-server.ts';
+import type { AddressInfo } from 'node:net';
 import { runJob, runPendingJobs } from './run-jobs.ts';
 import { prepareStep107, SELLER107, SELLER_ID_107 } from './step107-world.ts';
 
@@ -474,6 +475,42 @@ test('no endless spinner: a request that gets no answer ends with an error the s
     await assert.rejects(requestJson('/api/worlds', { timeoutMs: 50 }), (e: unknown) => e instanceof ApiError && /did not answer within 0\.05 s/.test(errorText(e, messagesFor('en'))));
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+/**
+ * Шаг 164 (решение владельца по таймауту Price changes на QA-A): медленный запрос оставляет строку журнала — метод, путь, значения только
+ * безопасных параметров выборки, код, время и ушёл ли клиент, не дождавшись. Тела, токена и текста поиска в строке нет; быстрый — без строки
+ */
+test('step 164: a slow request leaves one journal line — path, safe query values, status, time and whether the client left; no body, token or search text', async () => {
+  const lines: Array<{ level: string; code: string; details: Record<string, unknown> }> = [];
+  const server = createStandServer(async (req) => {
+    if (req.url.startsWith('/api/slow')) await new Promise((r) => setTimeout(r, 150));
+    return { status: 200, body: { ok: true } };
+  }, 'en', undefined, { slowRequestMs: 100, log: (line) => lines.push(line as never) });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    await fetch(`${base}/api/fast?period=7d`);
+    await fetch(`${base}/api/slow/worlds/w1/decisions?period=7d&kind=WRITES&q=Plant%20pot`, {
+      method: 'POST', headers: { authorization: 'Bearer secret-token-164', 'content-type': 'application/json' }, body: JSON.stringify({ note: 'private note 164' }),
+    });
+    // Клиент ушёл раньше ответа (как туннель по своему сроку): строка говорит это
+    const gone = new AbortController();
+    const left = fetch(`${base}/api/slow/worlds/w1/feed`, { signal: gone.signal }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 30));
+    gone.abort();
+    await left;
+    await new Promise((r) => setTimeout(r, 250));
+    assert.deepEqual(lines.map((l) => [l.level, l.code, l.details.method, l.details.path, l.details.query, l.details.status, l.details.clientLeft]), [
+      ['WARN', 'SLOW_REQUEST', 'POST', '/api/slow/worlds/w1/decisions', { period: '7d', kind: 'WRITES', q: '…' }, 200, false],
+      ['WARN', 'SLOW_REQUEST', 'GET', '/api/slow/worlds/w1/feed', {}, 200, true],
+    ], JSON.stringify(lines));
+    // Нижняя граница: медленная машина её не нарушит; верхней нет — это не замер
+    assert.deepEqual(lines.filter((l) => !(Number(l.details.ms) >= 100)), [], 'the time is in milliseconds and over the threshold');
+    assert.doesNotMatch(JSON.stringify(lines), /secret-token-164|private note 164|Plant/, 'no token, body or search text in the journal');
+  } finally {
+    await new Promise((r) => server.close(r));
   }
 });
 
