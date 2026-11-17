@@ -2817,6 +2817,11 @@ test('step 146 (#34): the status line heads every workspace screen in four langu
     await statusOf(b, '375 offers');
     assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), '375: no sideways scroll with the status line');
     assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], '375: the status line links are 44px touch targets');
+    // Касание 44 px — на всём узком диапазоне правила шага 85 (ниже 1012), а не только на телефоне (CI шага 146: 768 — ссылки по 20 px)
+    await b.setViewport(768, 1024);
+    await go('products');
+    await statusOf(b, '768 offers');
+    assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], '768: the status line links are 44px touch targets');
   } finally {
     await b.setViewport(1440, 900);
     await b.setColorScheme(null);
