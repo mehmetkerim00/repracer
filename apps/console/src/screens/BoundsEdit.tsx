@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
-import { ErrorBox, errorText, Gaps, useMessages, UnitName } from '../components.tsx';
+import { ErrorBox, errorText, Gaps, Help, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
@@ -177,7 +177,7 @@ function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string;
           </FormActions>
         );
       })()}
-      {diff ? <p className="section-sub">{t.shownRows(diff.view.shown.rows, diff.view.shown.of)}</p> : null}
+      {diff ? <Help className="section-sub" text={t.shownRows(diff.view.shown.rows, diff.view.shown.of)} /> : null}
       </FieldGroup>
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}

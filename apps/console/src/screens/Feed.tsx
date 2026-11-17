@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodPhrase, periodSearch, type DecisionListView, type FeedQuery, type FeedStatusGroup, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
-import { Badge, commonZone, Gaps, href, Load, OfferPicker, Pager, ReasonLine, useMessages, When, WhenHead, UnitName } from '../components.tsx';
+import { Badge, commonZone, Gaps, Help, href, Load, OfferPicker, Pager, ReasonLine, UnitName, useMessages, When, WhenHead } from '../components.tsx';
 import { Field } from '../forms.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
@@ -209,7 +209,7 @@ function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch }
         {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
         <ExportControl worldId={worldId} screen="decisions" query={exportQuery(period, { writeScopeId: query.writeScopeId, outcome: query.outcome, q: search })} />
       </div>
-      <p className="section-sub">{f.kind.decisionsCaption}</p>
+      <Help className="section-sub" text={f.kind.decisionsCaption} />
       <Load shape="table" resource={resource} retry={retry}>
         {(view) => (
           <>

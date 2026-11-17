@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AUDIT_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type DistrustCard, type HaltCard, type ListQuery, type Period, type StopCard, type StopPlan, type StopTarget, type StopView, type TargetCard } from '@repracer/console-model';
 import { NOTE_MIN } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, NoteConfirm, Pager, useMessages, When, WhenHead, UnitName } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, NoteConfirm, Pager, UnitName, useMessages, When, WhenHead } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 
@@ -107,7 +107,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
 
       <section className="stop-human">
         <h3>{s.humanTitle}</h3>
-        <p className="section-sub">{s.humanIntro}</p>
+        <Help className="section-sub" text={s.humanIntro} />
         {!view.permissions.canStop ? <p className="notice">{s.noRight}</p> : null}
         <h4>{s.tenantTitle}</h4>
         <div className="cards"><TargetCardView card={view.tenant} {...(onStop ? { onStop } : {})} /></div>
@@ -135,7 +135,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
 
       <section className="stop-system">
         <h3>{s.systemTitle}</h3>
-        <p className="section-sub">{s.systemIntro}</p>
+        <Help className="section-sub" text={s.systemIntro} />
         <h4>{s.activeHalts}</h4>
         {view.halts.active.length === 0 ? <p className="muted empty">{s.noneHalts}</p>
           : <div className="cards">{view.halts.active.map((h) => <HaltCardView key={h.haltId} halt={h} {...(onRelease ? { onRelease } : {})} />)}</div>}
@@ -148,7 +148,7 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
       </section>
       <section className="stop-distrust">
         <h3>{s.distrustTitle}</h3>
-        <p className="section-sub">{s.distrustIntro}</p>
+        <Help className="section-sub" text={s.distrustIntro} />
         <h4>{s.activeDistrusts}</h4>
         {view.distrusts.active.length === 0 ? <p className="muted empty">{s.noneDistrusts}</p>
           : <div className="cards">{view.distrusts.active.map((d) => <DistrustCardView key={d.distrustId} distrust={d} {...(onReleaseDistrust ? { onRelease: onReleaseDistrust } : {})} />)}</div>}

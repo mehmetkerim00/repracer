@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, ErrorBox, errorText, Gaps, href, Intro, Load, MarketContext, Pager, useMessages, StorefrontTag } from '../components.tsx';
+import { Badge, ErrorBox, errorText, Gaps, Help, href, Intro, Load, MarketContext, Pager, StorefrontTag, useMessages } from '../components.tsx';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { Banner, CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
@@ -147,7 +147,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
           <ExportControl worldId={worldId} screen="inventory" query={exportQuery(null, { q: v.filter.search, reserved: v.filter.withReservations ? '1' : undefined })} empty={v.rows.length === 0} />
         </form>
       ) : null}
-      {v.filter.matchedText ? <p className="section-sub">{v.filter.matchedText}</p> : null}
+      {v.filter.matchedText ? <Help className="section-sub" text={v.filter.matchedText} /> : null}
       {v.filter.noneText ? <p className="notice">{v.filter.noneText}</p> : null}
       {v.rows.length > 0 ? (
         <div className="table-wrap">
@@ -181,7 +181,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
           </tbody>
         </table>
         {/* Шаг 79: чего экран не видит — подвалом таблицы, а не текстом на фоне страницы */}
-        <p className="table-foot">{v.cannot}</p>
+        <Help className="table-foot" text={v.cannot} />
         </div>
       ) : <p className="notice">{v.cannot}</p>}
       <Pager page={v.page} query={query} onQuery={onQuery} />

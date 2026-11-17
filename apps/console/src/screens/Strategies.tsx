@@ -5,7 +5,7 @@ import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, shortWhen, useMessages, When, WhenHead, UnitName } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ReasonLine, shortWhen, UnitName, useMessages, When, WhenHead } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
 /**
@@ -290,11 +290,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       ) : null}
 
       <h3>{t.channelPricingTitle}</h3>
-      <p className="section-sub">{t.channelPricingIntro}</p>
+      <Help className="section-sub" text={t.channelPricingIntro} />
       {view.channelPricingOffers.length === 0 ? <p className="muted empty">{t.channelPricingNone}</p> : (
         <ul className="index link-list">{view.channelPricingOffers.map((o) => <li key={o.label}><Badge tone={o.tone}>{o.label}</Badge> <span className="small">{o.detail}</span></li>)}</ul>
       )}
-      {view.channelPricingOffersTotal > view.channelPricingOffers.length ? <p className="section-sub">{t.channelPricingMore(view.channelPricingOffersTotal - view.channelPricingOffers.length)}</p> : null}
+      {view.channelPricingOffersTotal > view.channelPricingOffers.length ? <Help className="section-sub" text={t.channelPricingMore(view.channelPricingOffersTotal - view.channelPricingOffers.length)} /> : null}
 
       <h3>{assigning ? t.assigning(assigning.draft.name, assigning.version) : form.strategyId ? t.editing(form.name, form.baseVersion ?? 0) : t.draftTitle}</h3>
       {!view.canEdit ? <p className="notice">{t.noRight}</p> : null}

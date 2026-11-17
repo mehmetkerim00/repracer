@@ -93,17 +93,29 @@ export function humanWhen(value: string, _locale: string): string {
  * разметке (скрытая часть — атрибутом hidden): вступление, важное юридически (Omnibus), не сокращается — сворачивается
  */
 export function Intro({ text }: { text: string }) {
+  const split = /^(.+?[.!?])\s+(\S[\s\S]*)$/.exec(text);
+  if (!split || text.length <= HELP_FULL_LENGTH) return <p className="subtitle">{text}</p>;
+  return <div className="intro"><Help text={text} className="subtitle" /></div>;
+}
+
+/** Шаг 78, шаг 154: до этой длины вспомогательный текст показывается целиком */
+export const HELP_FULL_LENGTH = 160;
+
+/**
+ * Шаг 154 (#29, Р-254): вспомогательный текст — подпись поля, подзаголовок раздела, подвал таблицы — тем же правилом, что вступление
+ * экрана: до 160 знаков целиком, длиннее и из нескольких фраз — первая фраза на виду, остальное по «Learn more». Скрытое остаётся в
+ * разметке (атрибут hidden): ничего не удаляется. Не строка (разметка) — как есть
+ */
+export function Help({ text, className, id }: { text: ReactNode; className: string; id?: string }) {
   const m = useMessages();
   const [open, setOpen] = useState(false);
-  const split = /^(.+?[.!?])\s+(\S[\s\S]*)$/.exec(text);
-  if (!split || text.length <= 160) return <p className="subtitle">{text}</p>;
+  const split = typeof text === 'string' ? /^(.+?[.!?])\s+(\S[\s\S]*)$/.exec(text) : null;
+  if (typeof text !== 'string' || !split || text.length <= HELP_FULL_LENGTH) return <p className={className} id={id}>{text}</p>;
   return (
-    <div className="intro">
-      <p className="subtitle">{split[1]}{' '}
-        <span hidden={!open}>{split[2]} </span>
-        <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? m.ui.common.showLess : m.ui.common.learnMore}</button>
-      </p>
-    </div>
+    <p className={`${className} has-more`} id={id}>{split[1]}{' '}
+      <span hidden={!open}>{split[2]} </span>
+      <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? m.ui.common.showLess : m.ui.common.learnMore}</button>
+    </p>
   );
 }
 

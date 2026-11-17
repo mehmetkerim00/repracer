@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ErrorBox, errorText, Gaps, href, Load, Pager, ReasonLine, SellerName, useMessages, UnitName, ColorVariant } from '../components.tsx';
+import { Badge, Cell, ColorVariant, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ReasonLine, SellerName, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FormActions } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
@@ -148,7 +148,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
           <ExportControl worldId={view.worldId} screen="offer-competitors" label={m.ui.export.competitors} query={offerParams(offerQuery, false)} empty={view.rows.length === 0} />
         </form>
       ) : null}
-      {view.matched !== null ? <p className="section-sub">{f.matched(view.matched, view.totals.total)}</p> : null}
+      {view.matched !== null ? <Help className="section-sub" text={f.matched(view.matched, view.totals.total)} /> : null}
       {view.rows.length > 0 ? <div className="table-wrap">
         {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными */}
         <div className="table-head">

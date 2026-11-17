@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, DateTimeField, errorText, Gaps, href, Load, NotFound, Pager, SectionAnchor, useMessages, UnitName } from '../components.tsx';
+import { Badge, Cell, DateTimeField, errorText, Gaps, Help, href, Load, NotFound, Pager, SectionAnchor, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 
@@ -54,7 +54,7 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
   return (
     <section className="card clearance">
       <h3>{t.title}{c.pill ? <> <Badge tone="warn">{c.pill}</Badge></> : null}</h3>
-      <p className="section-sub">{t.intro}</p>
+      <Help className="section-sub" text={t.intro} />
       {c.active ? (
         <>
           <ul className="plain clearance-state">
@@ -134,7 +134,7 @@ function ChannelBoundsSection({ view }: { view: BoundsView }) {
   return (
     <section className="card channel-bounds">
       <h3>{c.title}</h3>
-      <p className="section-sub">{c.lead}</p>
+      <Help className="section-sub" text={c.lead} />
       {c.state === 'VALUES' ? (
         <>
           <ul className="plain channel-bounds-values">

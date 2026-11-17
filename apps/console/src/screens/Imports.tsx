@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { IMPORTS_KEEP_DAYS, LIST_PAGE_DEFAULT, periodSearch, type BulkJobView, type ImportCheckView, type ImportHistoryView, type ImportKind, type ListQuery, type Period } from '@repracer/console-model';
 import { downloadFile, requestJson, worldPath } from '../api.ts';
 import type { JobCreatedResponse } from '../api-types.ts';
-import { Badge, commonZone, ErrorBox, errorText, FileDrop, humanWhen, Pager, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, FileDrop, Help, humanWhen, Pager, useMessages, When, WhenHead } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
@@ -257,7 +257,7 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
     <section className={`import-panel import-${kind.toLowerCase()}`}>
       <h3>{t.titles[kind]}</h3>
       <p className="subtitle">{t.intros[kind]}</p>
-      {caption ? <p className="field-caption">{caption}</p> : null}
+      {caption ? <Help className="field-caption" text={caption} /> : null}
       {stock ? (
         <FieldGroup>
           {stockSources && stockSources.length > 0 ? (

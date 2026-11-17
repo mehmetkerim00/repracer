@@ -1,5 +1,5 @@
 import { Children, cloneElement, useId, useState, type ReactElement, type ReactNode } from 'react';
-import { useMessages } from './components.tsx';
+import { Help, useMessages } from './components.tsx';
 
 /**
  * Шаг 94: стандарт формы консоли по образцу Primer FormControl. Поле — подпись НАД контролом, пояснение мелким приглушённым ПОД ним,
@@ -44,7 +44,8 @@ export function Field({ label, caption = null, error = null, children, wide = fa
         ? <span className="field-label" id={`${id}-label`}>{label}</span>
         : <label className="field-label" id={`${id}-label`} htmlFor={controlId}>{label}</label>}
       {control}
-      {caption ? <p className="field-caption" id={`${id}-caption`}>{caption}</p> : null}
+      {/* Шаг 154 (#29): длинная подпись — первая фраза на виду, остальное по «Learn more» */}
+      {caption ? <Help className="field-caption" id={`${id}-caption`} text={caption} /> : null}
       {error ? <p className="field-error" id={`${id}-error`} role="alert">{error}</p> : null}
     </div>
   );
@@ -60,7 +61,8 @@ export function CheckField({ label, caption = null, checked, onChange, disabled 
       <input type="checkbox" id={id} checked={checked} disabled={disabled} onChange={(e) => onChange(e.currentTarget.checked)}
         {...(caption ? { 'aria-describedby': `${id}-caption` } : {})} />
       <label htmlFor={id}>{label}</label>
-      {caption ? <p className="field-caption" id={`${id}-caption`}>{caption}</p> : null}
+      {/* Шаг 154 (#29): длинная подпись — первая фраза на виду, остальное по «Learn more» */}
+      {caption ? <Help className="field-caption" id={`${id}-caption`} text={caption} /> : null}
     </div>
   );
 }
@@ -78,7 +80,7 @@ export function FieldGroup({ title, caption = null, children, className = '' }: 
   return (
     <section className={`card field-group${className ? ` ${className}` : ''}`}>
       {title ? <h3 className="field-group-title">{title}</h3> : null}
-      {caption ? <p className="field-caption field-group-caption">{caption}</p> : null}
+      {caption ? <Help className="field-caption field-group-caption" text={caption} /> : null}
       {children}
     </section>
   );

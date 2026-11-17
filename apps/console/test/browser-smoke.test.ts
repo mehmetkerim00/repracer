@@ -3029,7 +3029,8 @@ const LEARN_MORE_REPEATS = `(async () => {
   const words = (t) => t.split(' ').filter((w) => /\\p{L}{2,}/u.test(w) && !w.includes('#')).length;
   const sentences = (t) => t.split(/(?<=[.!?])\\s+/).map(norm).filter((x) => words(x) >= 6);
   const out = [];
-  for (const intro of document.querySelectorAll('.world-content .intro p.subtitle')) {
+  // Шаг 154: каждая подсказка с «Learn more» (\`Help\`, у вступления — тоже), а не только вступления экранов
+  for (const intro of document.querySelectorAll('.world-content p.has-more')) {
     const hidden = intro.querySelector('span');
     if (!hidden) continue;
     const first = norm(intro.firstChild ? intro.firstChild.textContent : '');
@@ -3095,6 +3096,63 @@ test('step 153 (#29): no helper sentence twice on one screen; an expanded «Lear
   assert.equal((await b.evaluate<string[]>(REPEATED_HELP)).length, 1, 'control: the same helper sentence twice is found');
   await b.evaluate(`(document.querySelector('.world-content section').insertAdjacentHTML('beforeend', '<div class="banner"><p class="banner-summary">' + ${JSON.stringify(sentence)} + '</p><p class="banner-details">More: ' + ${JSON.stringify(sentence)} + '</p></div>'), true)`);
   assert.ok((await b.evaluate<string[]>(LEARN_MORE_REPEATS)).length > 0, 'control: details repeating the summary are found');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 154 (#29, Р-254): вспомогательный текст — одна фраза на виду, остальное по «Learn more», то же правило, что у вступления экрана с
+ * шага 78. Видимая часть подписи поля, подзаголовка раздела, примечания или подвала таблицы вне таблиц — не длиннее 160 знаков или одна
+ * фраза. Видимая часть — без скрытого (`[hidden]`) и без кнопки «Learn more». Отказы, ошибки и подсказки кнопок — не подсказки: не судятся
+ */
+const LONG_HELP = `(() => {
+  const out = [];
+  for (const e of document.querySelectorAll('.world-content .field-caption:not(.form-hint), .world-content p.section-sub, .world-content p.table-foot, .world-content p.note, .world-content p.subtitle')) {
+    // Раскрытое зрителем («Show less») — его выбор, правило о том, что на виду по умолчанию
+    if (e.closest('table') || e.querySelector(':scope > button.link[aria-expanded="true"]')) continue;
+    const c = e.cloneNode(true);
+    for (const x of c.querySelectorAll('[hidden], button')) x.remove();
+    const visible = c.textContent.trim().replace(/\\s+/g, ' ');
+    if (visible.length > 160 && visible.split(/(?<=[.!?])\\s+(?=\\S)/).length > 1) out.push(e.className + ': «' + visible.slice(0, 90) + '»');
+  }
+  return out;
+})()`;
+
+test('step 154 (#29): a helper text shows one sentence and the rest behind «Learn more» — every console screen, with a positive control', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const visit = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+    await new Promise((x) => setTimeout(x, 300));
+  };
+  const found: Record<string, string[]> = {};
+  for (const route of HELP_ROUTES) {
+    await visit(route);
+    const f = await b.evaluate<string[]>(LONG_HELP);
+    if (f.length) found[route] = f;
+  }
+  assert.deepEqual(found, {}, 'every helper text: one sentence in view, the rest behind «Learn more»');
+  // «Learn more» раскрывает остальное и не повторяет первую фразу (правило шага 153 — на всех подсказках)
+  await visit('stop');
+  const more = await b.evaluate<number>(`document.querySelectorAll('.world-content p.has-more').length`);
+  assert.ok(more > 0, 'stop: long helper texts have «Learn more»');
+  assert.deepEqual(await b.evaluate<string[]>(LEARN_MORE_REPEATS), [], 'stop: «Learn more» adds, never repeats');
+  await b.evaluate(`(document.querySelector('.world-content p.has-more button.link').click(), true)`);
+  await waitFor(b, `!document.querySelector('.world-content p.has-more span').hidden`, 'a click shows the rest');
+  // Положительный контроль: подзаголовок раздела в три фразы и 300 знаков без «Learn more» — находка
+  const long = 'This is a long helper text that explains a screen in more words than anyone reads at once. It goes on with a second sentence that adds a detail. And a third one closes it with yet another remark for good measure, so it is long.';
+  await b.evaluate(`(document.querySelector('.world-content section').insertAdjacentHTML('beforeend', '<p class="section-sub">' + ${JSON.stringify(long)} + '</p>'), true)`);
+  assert.equal((await b.evaluate<string[]>(LONG_HELP)).length, 1, 'control: a long multi-sentence helper text in view is found');
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
