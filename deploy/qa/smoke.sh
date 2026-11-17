@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Шаг 121 (QA-A): проверка выкладки — какая сборка работает, страница и API, исполнитель заданий, страж базы, демо, а снаружи — что без входа
+# Шаг 121 (QA-A): проверка выкладки — какая сборка работает, страница и API, исполнитель заданий, страж базы, новые предложения по умолчанию
+# (шаг 165), демо, а снаружи — что без входа
 # Access консоль не отдаёт. Красное — с причиной и кодом выхода 1.
 #   deploy/qa/smoke.sh
 set -euo pipefail
@@ -18,6 +19,10 @@ bulk="$("${C}" exec -T bulk-worker node -e "fetch('http://127.0.0.1:9473/healthz
 grep -q "^build ${want} " <<< "${bulk}" || fail "исполнитель заданий работает не той сборкой: ${bulk}"
 guard="$("${C}" exec -T postgres psql -U postgres -d repracer_qa -Atc 'SELECT security.live_writes_forbidden()')"
 [ "${guard}" = t ] || fail "база QA не закрыта стражем P0-09 — deploy/production/README.md §4б"
+# Шаг 165: новое предложение заводится при заданной стратегии по умолчанию — у каждого аккаунта с умолчанием правило завело хотя бы одно
+read -r defaults orphans <<< "$("${C}" exec -T postgres psql -U postgres -d repracer_qa -At -F ' ' < "${here}/new-offers-check.sql")"
+[ "${defaults:-0}" -ge 1 ] || fail "ни у одного аккаунта не задана стратегия по умолчанию — демо США её задаёт"
+[ "${orphans}" = 0 ] || fail "у ${orphans} из ${defaults} аккаунтов со стратегией по умолчанию новые предложения не завелись — журнал стенда: compose.sh logs stand | grep 'new offers'"
 # Демо: вход имитатором владельцем — три рабочих пространства, все с пометкой демо. Токен в вывод не попадает
 token="$(curl -sf -X POST -H 'content-type: application/json' -d '{"role":"OWNER"}' "${base}/api/stand-issuer/token" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
 [ -n "${token}" ] || fail "вход имитатором не выдал токен"
@@ -35,4 +40,4 @@ if [ -n "${QA_PUBLIC_URL:-}" ]; then
 else
   echo "QA_PUBLIC_URL не задан в qa.env — проверка снаружи пропущена"
 fi
-echo "SMOKE GREEN: сборка ${want}, страж P0-09 стоит, демо-пространств ${demos}"
+echo "SMOKE GREEN: сборка ${want}, страж P0-09 стоит, демо-пространств ${demos}, новые предложения по умолчанию заводятся (${defaults})"
