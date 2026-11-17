@@ -280,12 +280,13 @@ export function decisionTrace(world: StandWorld, detail: DecisionDetail, m: Mess
   if (!e && d.decisionClass === 'NO_OP' && kept) {
     // Р-74: только код причины; остальные шаги называют, почему их нет
     gaps.push(gap(m, 'NO_OP_NOT_EXPLAINED'));
-    for (const key of ['SNAPSHOT', 'SANITY', 'ANCHORS'] as const) steps.push({ key, title: t.titles[key], status: 'UNKNOWN', summary: t.noOpNotExplained, items: [], gaps: [] });
+    // Шаг 153 (#29): почему деталей нет — полной фразой у первой станции, у следующих — коротко: одна фраза не повторяется на экране
+    for (const key of ['SNAPSHOT', 'SANITY', 'ANCHORS'] as const) steps.push({ key, title: t.titles[key], status: 'UNKNOWN', summary: key === 'SNAPSHOT' ? t.noOpNotExplained : t.notKept, items: [], gaps: [] });
     // Шаг 107 [Р-233]: пока горячее намерение того же решения живо (3 дня, Р-28), причина «без изменения» — фразой с суммами (у удержания
     // вне рамок канала — обе суммы); у решения старше — только код [Р-74]
     const why = d.noChangeReason && fresh.has(d.noChangeReason) ? describe({ code: d.noChangeReason, params: fresh.get(d.noChangeReason)! }, m) : null;
     steps.push({ key: 'STRATEGY', title: t.titles.STRATEGY, status: 'OK', summary: t.keep(kept), items: why ? [{ label: kept, reason: why }] : [], gaps: [] });
-    steps.push({ key: 'GATE', title: t.titles.GATE, status: 'UNKNOWN', summary: t.noOpNotExplained, items: [], gaps: [] });
+    steps.push({ key: 'GATE', title: t.titles.GATE, status: 'UNKNOWN', summary: t.notKept, items: [], gaps: [] });
   } else if (!e) {
     gaps.push(gap(m, 'NO_EXPLANATION'));
     steps.push({ key: 'SNAPSHOT', title: t.titles.SNAPSHOT, status: 'UNKNOWN', summary: t.noExplanation, items: [], gaps: [] });
@@ -488,7 +489,8 @@ function channelStep(world: StandWorld, d: ConsoleDecision, writes: readonly Con
   const items: TraceItem[] = world.state.divergenceCases
     .filter((c) => c.writeScopeId === d.writeScopeId && c.status === 'OPEN')
     .map((c) => ({ label: t.divergence, outcome: 'INFO' as const, reason: describe({ code: 'DIVERGENCE_CASE_OPENED', params: { observedMinor: c.observedMinor, expectedMinor: c.expectedMinor, currency: d.currency } }, m) }));
-  if (!last) return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'SKIPPED', summary: t.nothingSent, items, gaps: [] };
+  // Шаг 153 (#29): «ничего не отправлено» говорит станция отправки; станции канала — ждать нечего
+  if (!last) return { key: 'CHANNEL', title: t.titles.CHANNEL, status: 'SKIPPED', summary: d.outcome === 'APPROVED' ? t.replyNotShown : t.noReply, items, gaps: [] };
   switch (last.status) {
     case 'APPLIED': {
       // Р-190 (находка 9 ревью шага 49): подтверждено только нашей записью у канала — продавец видит это словами, а не «подтверждено»

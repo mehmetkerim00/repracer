@@ -20,7 +20,8 @@ function TargetCardView({ card, onStop }: { card: TargetCard; onStop?: (target: 
       <h3>{card.label}</h3>
       <p>{card.coveredBy ? <Badge tone="stop">{s.stopped}</Badge> : <Badge tone="ok">{s.running}</Badge>}</p>
       {card.coveredBy ? <p className="small">{s.coveredBy(card.coveredBy.scopeLabel, card.coveredBy.since)}</p> : null}
-      <p className="small">{card.impact.text}</p>
+      {/* Шаг 153 (#29): последствие — своё у каждой карточки (число её предложений), как ячейка таблицы, а не вспомогательная фраза */}
+      <p className="small consequence">{card.impact.text}</p>
       {card.canStop && onStop ? <button type="button" className="danger" onClick={() => onStop(card.target)}>{card.target.kind === 'TENANT' ? s.stopTenant : s.stopTarget}</button> : null}
     </div>
   );

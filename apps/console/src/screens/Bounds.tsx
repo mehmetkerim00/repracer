@@ -150,7 +150,11 @@ function ChannelBoundsSection({ view }: { view: BoundsView }) {
   );
 }
 
-export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakdown; currency: string }) {
+/**
+ * Шаг 153 (#29): как читать разбивку — один раз на странице: при двух разбивках (пол и текущая цена) сходимость и округление говорит
+ * последняя (`foot`), первая — только точную маржу и, если не сошлось, это. Расхождение не прячется никогда
+ */
+export function BreakdownTable({ breakdown, currency, foot = true }: { breakdown: PriceBreakdown; currency: string; foot?: boolean }) {
   const m = useMessages();
   const b = m.ui.bounds;
   return (
@@ -170,7 +174,7 @@ export function BreakdownTable({ breakdown, currency }: { breakdown: PriceBreakd
           </tbody>
         </table>
         {/* Шаг 79: как читать разбивку — подвалом таблицы */}
-        <p className="table-foot">{b.exactMargin(breakdown.marginExact)} {b.balance(breakdown.balanced)} {breakdown.note}.</p>
+        <p className="table-foot">{b.exactMargin(breakdown.marginExact)}{foot ? ` ${b.balance(breakdown.balanced)} ${breakdown.note}.` : breakdown.balanced ? '' : ` ${b.balance(false)}`}</p>
       </div>
     </div>
   );
@@ -246,7 +250,7 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
           ) : null}
         </section>
 
-        {view.floorBreakdown ? <BreakdownTable breakdown={view.floorBreakdown} currency={view.currency} /> : null}
+        {view.floorBreakdown ? <BreakdownTable breakdown={view.floorBreakdown} currency={view.currency} foot={!view.currentBreakdown} /> : null}
         {view.currentBreakdown ? <BreakdownTable breakdown={view.currentBreakdown} currency={view.currency} /> : null}
 
         <section className="card">

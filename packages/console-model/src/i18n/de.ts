@@ -1508,6 +1508,8 @@ export const de: Messages = {
       checkedSince: (n: number, when: string) => `Gleicher Zustand bei ${n} weiteren ${n === 1 ? 'Prüfung' : 'Prüfungen'}, zuletzt ${when}`,
       checkedBefore: (n: number) => `Nach ${n} ${n === 1 ? 'Prüfung' : 'Prüfungen'} ohne Zustandsänderung`,
       noOpNotExplained: 'Bei Entscheidungen ohne Preisänderung nicht gespeichert',
+      // Шаг 153 (#29): следующие станции того же решения — коротко, полная фраза — у первой
+      notKept: 'Nicht gespeichert',
       noExplanation: 'Zu dieser Entscheidung ist keine Begründung gespeichert',
       snapshotNotUsed: 'Die Strategie verwendet keine Wettbewerbsdaten',
       snapshotSummary: (source: string, observed: string) => `${source}, beobachtet ${observed}`,
@@ -1541,7 +1543,7 @@ export const de: Messages = {
       summaryLabels: { proposed: 'Vorschlag', decision: 'Entscheidung' },
       evidence: { show: (steps: number, remarks: number) => `Alle Belege zeigen – ${steps} Schritte${remarks > 0 ? `, ${remarks} mit Hinweisen` : ''}`, hide: 'Belege ausblenden' },
       headlineNoChange: (text: string) => `Der Preis blieb: ${text}`,
-      nothingSent: 'An den Kanal wurde nichts gesendet', writeMissing: 'Der Preis wurde freigegeben; seine Übertragung wird hier nicht mehr gezeigt — abgeschlossene Übertragungen bleiben etwa einen Tag auf dieser Seite',
+      nothingSent: 'An den Kanal wurde nichts gesendet', noReply: 'Keine Antwort erwartet', replyNotShown: 'Die Antwort wird hier nicht mehr angezeigt', writeMissing: 'Der Preis wurde freigegeben; seine Übertragung wird hier nicht mehr gezeigt — abgeschlossene Übertragungen bleiben etwa einen Tag auf dieser Seite',
       writeVersion: (version: number, price: string) => `Version ${version}: ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status}; Versuche ${attempts}${sent ? `; gesendet ${sent}` : ''}`,
       endReason: 'Beendet, weil', divergence: 'Abweichung',

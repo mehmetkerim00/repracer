@@ -3002,6 +3002,102 @@ test('step 149 (#27): the floor page leads with the floor, the current price and
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
+/**
+ * Шаг 153 (#29, Р-254): одна вспомогательная фраза не стоит на экране дважды. Фраза — предложение из шести и больше слов (числа и время
+ * маскируются, как в правиле строк таблиц шага 96.1) в абзаце, пункте списка или подписи поля вне таблиц, меню и строки состояния; скрытая
+ * часть вступления («Learn more») — тоже на экране. Таблицы держит своё правило шага 96.1. Не считаются: краткий вид квитанции
+ * (`.receipt-summary`, шаг 147: четыре строки — сводки станций доказательств по построению, принято владельцем) и последствие карточки
+ * (`.consequence`: число предложений своей карточки остановки — данные карточки, как ячейка таблицы)
+ */
+const REPEATED_HELP = `(() => {
+  const norm = (t) => t.trim().replace(/\\s+/g, ' ').replace(/\\d+([.,:]\\d+)*/g, '#');
+  const words = (t) => t.split(' ').filter((w) => /\\p{L}{2,}/u.test(w) && !w.includes('#')).length;
+  const sentences = (t) => t.split(/(?<=[.!?])\\s+/).map(norm).filter((x) => words(x) >= 6);
+  const els = [...document.querySelectorAll('.world-content p, .world-content li, .world-content dd')]
+    .filter((e) => !e.closest('table, nav, .status-line, .receipt-summary, .consequence') && !e.classList.contains('consequence') && !e.querySelector('p, li, dd'));
+  const seen = new Map();
+  for (const e of els) for (const x of new Set(sentences(e.textContent))) seen.set(x, (seen.get(x) ?? 0) + 1);
+  return [...seen].filter(([, n]) => n > 1).map(([x, n]) => '×' + n + ' «' + x.slice(0, 110) + '»');
+})()`;
+
+/**
+ * Шаг 153 (#29, UX-16): раскрытое «Learn more» добавляет, а не повторяет. У вступления (`Intro`) скрытая часть не повторяет первую фразу;
+ * у плашки (`Banner`) подробности не повторяют суть — ни целиком, ни фразой из шести и больше слов. Плашки раскрываются нажатием
+ */
+const LEARN_MORE_REPEATS = `(async () => {
+  const norm = (t) => t.trim().replace(/\\s+/g, ' ').replace(/\\d+([.,:]\\d+)*/g, '#').toLowerCase();
+  const words = (t) => t.split(' ').filter((w) => /\\p{L}{2,}/u.test(w) && !w.includes('#')).length;
+  const sentences = (t) => t.split(/(?<=[.!?])\\s+/).map(norm).filter((x) => words(x) >= 6);
+  const out = [];
+  for (const intro of document.querySelectorAll('.world-content .intro p.subtitle')) {
+    const hidden = intro.querySelector('span');
+    if (!hidden) continue;
+    const first = norm(intro.firstChild ? intro.firstChild.textContent : '');
+    const rest = norm(hidden.textContent);
+    if (first && rest.includes(first.replace(/[.!?]$/, ''))) out.push('intro repeats «' + first.slice(0, 80) + '»');
+    for (const x of sentences(hidden.textContent)) if (x === first) out.push('intro repeats «' + x.slice(0, 80) + '»');
+  }
+  for (const banner of document.querySelectorAll('.world-content .banner')) {
+    const button = banner.querySelector(':scope > button.link');
+    if (button && button.getAttribute('aria-expanded') === 'false') { button.click(); await new Promise((r) => setTimeout(r, 50)); }
+    const summary = banner.querySelector('.banner-summary'); const details = banner.querySelector('.banner-details');
+    if (!summary || !details) continue;
+    const a = norm(summary.textContent); const b = norm(details.textContent);
+    if (a && b.includes(a.replace(/[.!?]$/, ''))) out.push('banner details repeat the summary «' + a.slice(0, 80) + '»');
+    const inSummary = new Set(sentences(summary.textContent));
+    for (const x of sentences(details.textContent)) if (inSummary.has(x)) out.push('banner details repeat «' + x.slice(0, 80) + '»');
+  }
+  return [...new Set(out)];
+})()`;
+
+const HELP_ROUTES = ['shadow', 'feed', 'feed/decisions', 'strategies', 'costs', 'protections/people', 'protections/rules', 'products', 'products/bulk',
+  'inventory', 'channels', 'channels/accounts', 'compliance', 'stop'];
+
+test('step 153 (#29): no helper sentence twice on one screen; an expanded «Learn more» adds, never repeats — every console screen, with positive controls', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const visit = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+    await new Promise((x) => setTimeout(x, 300));
+  };
+  const found: Record<string, string[]> = {};
+  const check = async (route: string) => {
+    const f = [...await b.evaluate<string[]>(REPEATED_HELP), ...await b.evaluate<string[]>(LEARN_MORE_REPEATS)];
+    if (f.length) found[route] = f;
+  };
+  for (const route of HELP_ROUTES) { await visit(route); await check(route); }
+  await visit('feed/decisions');
+  const receipt = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
+  if (receipt) { await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`); await settled(b, 'receipt'); await check('decisions/<id>'); }
+  await visit('costs');
+  const bounds = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
+  if (bounds) { await b.evaluate(`(location.hash = ${JSON.stringify(bounds)}, true)`); await settled(b, 'bounds page'); await check('bounds/<id>'); }
+  await visit('products');
+  const competition = await b.evaluate<string | null>(`document.querySelector('.world-content a[href*="/competition/"]')?.getAttribute('href') ?? null`);
+  if (competition) { await b.evaluate(`(location.hash = ${JSON.stringify(competition)}, true)`); await settled(b, 'competition'); await check('competition/<id>'); }
+  assert.deepEqual(found, {}, 'every helper sentence once per screen; «Learn more» adds');
+
+  // Положительные контроли: тот же абзац дважды и подробности плашки, повторяющие суть, — оба правила краснеют
+  await visit('shadow');
+  const sentence = 'Every price your strategy computes is checked against your floor first.';
+  await b.evaluate(`(document.querySelector('.world-content section').insertAdjacentHTML('beforeend', '<p id="c1">' + ${JSON.stringify(sentence)} + '</p><p id="c2">' + ${JSON.stringify(sentence)} + '</p>'), true)`);
+  assert.equal((await b.evaluate<string[]>(REPEATED_HELP)).length, 1, 'control: the same helper sentence twice is found');
+  await b.evaluate(`(document.querySelector('.world-content section').insertAdjacentHTML('beforeend', '<div class="banner"><p class="banner-summary">' + ${JSON.stringify(sentence)} + '</p><p class="banner-details">More: ' + ${JSON.stringify(sentence)} + '</p></div>'), true)`);
+  assert.ok((await b.evaluate<string[]>(LEARN_MORE_REPEATS)).length > 0, 'control: details repeating the summary are found');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 152 (#27, UX-04): Costs & floors — a missing bound is «Not set» in the body font, never «not set: not set»; 1440 fits, 375 keeps the page', async () => {
   const b = browser!;
   const before = b.errors().length;

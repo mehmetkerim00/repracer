@@ -1563,6 +1563,8 @@ export const es: Messages = {
       checkedSince: (n: number, when: string) => `Mismo estado en ${n} ${n === 1 ? 'comprobación más' : 'comprobaciones más'}, la última: ${when}`,
       checkedBefore: (n: number) => `Tras ${n} ${n === 1 ? 'comprobación' : 'comprobaciones'} sin cambio de estado`,
       noOpNotExplained: 'No se conserva para decisiones que no cambiaron el precio',
+      // Шаг 153 (#29): следующие станции того же решения — коротко, полная фраза — у первой
+      notKept: 'No se conserva',
       noExplanation: 'No hay explicación guardada para esta decisión',
       snapshotNotUsed: 'La estrategia no usa datos de la competencia',
       snapshotSummary: (source: string, observed: string) => `${source}, observado ${observed}`,
@@ -1596,7 +1598,7 @@ export const es: Messages = {
       summaryLabels: { proposed: 'Propuesta', decision: 'Decisión' },
       evidence: { show: (steps: number, remarks: number) => `Ver todas las pruebas — ${steps} pasos${remarks > 0 ? `, ${remarks} con observaciones` : ''}`, hide: 'Ocultar las pruebas' },
       headlineNoChange: (text: string) => `El precio se mantuvo: ${text}`,
-      nothingSent: 'No se envió nada al canal', writeMissing: 'El precio se aprobó; su actualización ya no se muestra aquí: las actualizaciones terminadas permanecen en esta pantalla alrededor de un día',
+      nothingSent: 'No se envió nada al canal', noReply: 'No se espera respuesta', replyNotShown: 'La respuesta ya no se muestra aquí', writeMissing: 'El precio se aprobó; su actualización ya no se muestra aquí: las actualizaciones terminadas permanecen en esta pantalla alrededor de un día',
       writeVersion: (version: number, price: string) => `Versión ${version}: ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status}; intentos: ${attempts}${sent ? `; enviado ${sent}` : ''}`,
       endReason: 'Terminó porque', divergence: 'Discrepancia',

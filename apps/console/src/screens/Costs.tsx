@@ -27,7 +27,7 @@ export function CostsScreen({ worldId, section, target = null }: { worldId: stri
       <SectionAnchor id="cost-import" focus={section === 'import'} />
       <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="COSTS" canEdit={view.canEdit} />}</Load>
       <SectionAnchor id="bounds-import" focus={section === 'bounds-import'} />
-      <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="BOUNDS" canEdit={view.canEdit} />}</Load>
+      <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="BOUNDS" canEdit={view.canEdit} shared={false} />}</Load>
     </section>
   );
 }

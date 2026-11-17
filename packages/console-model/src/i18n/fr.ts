@@ -1563,6 +1563,8 @@ export const fr: Messages = {
       checkedSince: (n: number, when: string) => `Même état sur ${n} ${n === 1 ? 'vérification de plus' : 'vérifications de plus'}, la dernière le ${when}`,
       checkedBefore: (n: number) => `Après ${n} ${n === 1 ? 'vérification' : 'vérifications'} sans changement d’état`,
       noOpNotExplained: 'Non conservé pour les décisions qui n’ont pas changé le prix',
+      // Шаг 153 (#29): следующие станции того же решения — коротко, полная фраза — у первой
+      notKept: 'Non conservé',
       noExplanation: 'Aucune explication n’est enregistrée pour cette décision',
       snapshotNotUsed: 'La stratégie n’utilise pas les données de la concurrence',
       snapshotSummary: (source: string, observed: string) => `${source}, observation : ${observed}`,
@@ -1596,7 +1598,7 @@ export const fr: Messages = {
       summaryLabels: { proposed: 'Proposition', decision: 'Décision' },
       evidence: { show: (steps: number, remarks: number) => `Afficher toutes les preuves — ${steps} étapes${remarks > 0 ? `, ${remarks} avec remarques` : ''}`, hide: 'Masquer les preuves' },
       headlineNoChange: (text: string) => `Le prix est resté inchangé : ${text}`,
-      nothingSent: 'Rien n’a été envoyé au canal', writeMissing: 'Le prix a été approuvé ; sa mise à jour n’est plus affichée ici — les mises à jour terminées restent sur cet écran environ une journée',
+      nothingSent: 'Rien n’a été envoyé au canal', noReply: 'Aucune réponse attendue', replyNotShown: 'La réponse n’est plus affichée ici', writeMissing: 'Le prix a été approuvé ; sa mise à jour n’est plus affichée ici — les mises à jour terminées restent sur cet écran environ une journée',
       writeVersion: (version: number, price: string) => `Version ${version} : ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status} ; tentatives ${attempts}${sent ? ` ; envoyé le ${sent}` : ''}`,
       endReason: 'Terminé parce que', divergence: 'Écart',

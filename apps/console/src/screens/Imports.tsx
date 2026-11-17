@@ -133,7 +133,7 @@ export function ImportCheck({ view, onMapping, onEncoding }: {
  */
 export function ImportHistory({ view, controls }: {
   view: ImportHistoryView;
-  controls?: { worldId: string; period: Period; onPeriod: (p: Period) => void; query: ListQuery; onQuery: (q: ListQuery) => void };
+  controls?: { worldId: string; period: Period; onPeriod: (p: Period) => void; query: ListQuery; onQuery: (q: ListQuery) => void; note?: boolean };
 }) {
   const m = useMessages();
   const t = m.ui.imports;
@@ -144,7 +144,7 @@ export function ImportHistory({ view, controls }: {
       {controls ? (
         <div className="toolbar field-toolbar">
           <PeriodPicker value={controls.period} maxDays={IMPORTS_KEEP_DAYS} onChange={controls.onPeriod} />
-          <ExportControl worldId={controls.worldId} screen="imports" query={exportQuery(controls.period, { kind: view.kind })} empty={view.items.length === 0} />
+          <ExportControl worldId={controls.worldId} screen="imports" query={exportQuery(controls.period, { kind: view.kind })} empty={view.items.length === 0} note={controls.note ?? true} />
         </div>
       ) : null}
       {view.items.length === 0 ? <p className="muted empty">{t.historyEmpty}</p> : (
@@ -168,10 +168,17 @@ export function ImportHistory({ view, controls }: {
  * Раздел импорта на своей странице. `stockSources` — у остатков: файл идёт в источник, который ведётся в PriceTrail. `canEdit` — право на
  * вид импорта; шаблон скачивает любой участник
  */
-export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, caption = null }: {
+export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, caption = null, shared = true, exportNote = shared }: {
   worldId: string; kind: ImportKind; canEdit: boolean; stockSources?: ReadonlyArray<{ stockSourceId: string; name: string }>; onApplied?: () => void;
   /** Подпись файла своей страницы (у остатков — какие заголовки понимает разбор в профиле рынка) */
   caption?: string | null;
+  /**
+   * Шаг 153 (#29): общие подсказки импорта (шаблон с текущими значениями, «ничего не меняется до применения», «заголовки — по-английски»)
+   * говорит первый импорт экрана или его выгрузка; второй на том же экране — `shared={false}`: одна фраза не стоит на экране дважды
+   */
+  shared?: boolean;
+  /** Шаг 153 (#29): строку «заголовки — по-английски» у выгрузки журнала импортов уже сказала выгрузка экрана (Inventory) — `false` */
+  exportNote?: boolean;
 }) {
   const m = useMessages();
   const t = m.ui.imports;
@@ -262,8 +269,9 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
           ) : <p className="notice">{t.noStockSource}</p>}
         </FieldGroup>
       ) : null}
-      <FieldGroup caption={t.templateCaption}>
-        <FormActions hint={noSource ? t.noStockSource : null}>
+      <FieldGroup caption={shared ? t.templateCaption : null}>
+        {/* Шаг 153 (#29): нет источника остатков — это говорит плашка выше, один раз; кнопки неактивны рядом с ней */}
+        <FormActions hint={null}>
           <button type="button" onClick={() => template('csv')} disabled={noSource || templateJob !== null}>{t.templateCsv}</button>
           <button type="button" onClick={() => template('xlsx')} disabled={noSource || templateJob !== null}>{t.templateXlsx}</button>
         </FormActions>
@@ -271,8 +279,8 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
       </FieldGroup>
       {canEdit ? (
         <FieldGroup>
-          <Field label={t.fileLabel} caption={t.fileCaption}><FileDrop label={t.file} fileName={file ? file.name : null} disabled={busy} onChoose={(input) => void choose(input)} /></Field>
-          <FormActions hint={view?.view.applyBlocked ?? why}>
+          <Field label={t.fileLabel} caption={shared ? t.fileCaption : null}><FileDrop label={t.file} fileName={file ? file.name : null} disabled={busy} onChoose={(input) => void choose(input)} /></Field>
+          <FormActions hint={view?.view.applyBlocked ?? (noSource ? null : why)}>
             {view && !view.view.applyBlocked ? <button type="button" className="primary" onClick={apply} disabled={busy}>{t.apply}</button> : null}
             <button type="button" className={file && !view ? 'primary' : ''} onClick={() => check()} disabled={why !== null} title={why ?? undefined}>{t.check}</button>
             {view ? <button type="button" onClick={() => { setView(null); setFile(null); setMapping(null); setEncoding(null); }} disabled={busy}>{t.back}</button> : null}
@@ -289,7 +297,7 @@ export function ImportPanel({ worldId, kind, canEdit, stockSources, onApplied, c
           onEncoding={(chosen) => { setEncoding(chosen); setMapping(null); check({ encoding: chosen, mapping: null }); }} />
       ) : null}
       {history ? <ImportHistory view={history} controls={{ worldId, period: historyPeriod, onPeriod: (p) => { setHistoryPeriod(p); setHistoryQuery({ ...historyQuery, offset: 0 }); },
-        query: historyQuery, onQuery: setHistoryQuery }} /> : null}
+        query: historyQuery, onQuery: setHistoryQuery, note: exportNote }} /> : null}
     </section>
   );
 }

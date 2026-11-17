@@ -72,7 +72,7 @@ export function StockScreen({ worldId }: { worldId: string }) {
                 {apiKey ? <p className="notice"><strong>{m.ui.stock.sources.keyOnce}</strong> <code>{apiKey}</code><br /><span className="small muted">{m.ui.stock.sources.keyHint(window.location.origin)}</span></p> : null}
               </FieldGroup>
               {/* Шаг 99 [Р-224]: файл остатков — тем же путём, что остальные импорты: шаблон, примерка, применение ровно примерки, журнал */}
-              <ImportPanel worldId={worldId} kind="STOCK" canEdit={v.canManage} onApplied={refresh}
+              <ImportPanel worldId={worldId} kind="STOCK" canEdit={v.canManage} onApplied={refresh} exportNote={false}
                 caption={market.locales.includes('de') ? m.ui.stock.importFile.hintBilingual : m.ui.stock.importFile.hint}
                 stockSources={v.sources.filter((s) => s.mode === 'INTERNAL_POOL').map((s) => ({ stockSourceId: s.stockSourceId, name: s.name }))} />
               <FieldGroup title={m.ui.stock.enable.title}>

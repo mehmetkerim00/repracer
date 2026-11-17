@@ -1573,6 +1573,8 @@ export const en = {
       checkedSince: (n: number, when: string) => `Same state on ${n} more ${n === 1 ? 'check' : 'checks'}, last ${when}`,
       checkedBefore: (n: number) => `After ${n} ${n === 1 ? 'check' : 'checks'} with no change of state`,
       noOpNotExplained: 'Not kept for decisions that did not change the price',
+      // Шаг 153 (#29): следующие станции того же решения — коротко, полная фраза — у первой
+      notKept: 'Not kept',
       noExplanation: 'No explanation is stored for this decision',
       snapshotNotUsed: 'The strategy does not use competitor data',
       snapshotSummary: (source: string, observed: string) => `${source}, observed ${observed}`,
@@ -1606,7 +1608,7 @@ export const en = {
       summaryLabels: { proposed: 'Proposed', decision: 'Decision' },
       evidence: { show: (steps: number, remarks: number) => `Show full evidence — ${steps} steps${remarks > 0 ? `, ${remarks} with remarks` : ''}`, hide: 'Hide full evidence' },
       headlineNoChange: (text: string) => `The price stayed: ${text}`,
-      nothingSent: 'Nothing was sent to the channel', writeMissing: 'The price was approved; its update is no longer shown here — finished updates stay on this screen for about a day',
+      nothingSent: 'Nothing was sent to the channel', noReply: 'No reply expected', replyNotShown: 'The reply is no longer shown here', writeMissing: 'The price was approved; its update is no longer shown here — finished updates stay on this screen for about a day',
       writeVersion: (version: number, price: string) => `Version ${version}: ${price}`,
       writeDetail: (status: string, attempts: number, sent: string | null) => `${status}; attempts ${attempts}${sent ? `; sent ${sent}` : ''}`,
       endReason: 'Ended because', divergence: 'Divergence',
