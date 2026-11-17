@@ -1090,7 +1090,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             const catalog = await catalogPageFor(query);
             const list = productList(await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog }), m, query, undefined, catalog ?? undefined);
             return ok({
-              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, name: r.unit.name, storefront: r.unit.storefront, color: r.unit.color, swatch: r.unit.swatch, minPrice: r.minPrice, maxPrice: r.maxPrice })),
+              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, name: r.unit.name, storefront: r.unit.storefront, color: r.unit.color, swatch: r.unit.swatch, minPrice: r.minPrice, maxPrice: r.maxPrice, minPriceMissing: r.minPriceMissing, maxPriceMissing: r.maxPriceMissing })),
               page: list.page,
               canEdit: can(viewer.role, 'MANAGE_PRICING'),
             } satisfies BoundsIndexView);

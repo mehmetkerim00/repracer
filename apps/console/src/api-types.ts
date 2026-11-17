@@ -69,6 +69,9 @@ export interface BoundsIndexItem {
   swatch: Swatch | null;
   minPrice: string;
   maxPrice: string;
+  /** Шаг 152 (#27, UX-04): границы нет — «Not set» обычным шрифтом, без моноширинного */
+  minPriceMissing: boolean;
+  maxPriceMissing: boolean;
 }
 
 /** Шаг 23: список границ и право правки по роли зрителя (MANAGE_PRICING) — кнопок без права экран не показывает */

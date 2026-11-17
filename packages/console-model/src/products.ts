@@ -39,6 +39,8 @@ export interface ProductRow {
   feeExpired: string | null;
   floor: FloorCell;
   minPrice: string;
+  /** Шаг 152: минимальной цены нет — слово, а не сумма */
+  minPriceMissing: boolean;
   maxPrice: string;
   strategy: StrategyLabel;
   enabled: StatusCell;
@@ -159,8 +161,13 @@ export function notAssignedText(scope: { strategy: StrategyDefinition | null; as
   return m.ui.products.notAssigned(reasons[a.reason] ?? a.reason);
 }
 
+/**
+ * Шаг 152 (#27, UX-04; скрин владельца): незаданная граница — «Not set» словами, а не «not set: not set»; граница в другой валюте или
+ * базе — по-прежнему с причиной: она задана, но непригодна
+ */
 export function boundText(b: BoundResolution, currency: string, m: Messages): string {
-  return b.status === 'RESOLVED' ? m.money(b.amountMinor, currency) : m.ui.common.boundUnresolved(m.values[b.cause]);
+  if (b.status === 'RESOLVED') return m.money(b.amountMinor, currency);
+  return b.cause === 'MISSING' ? m.ui.products.notSet : m.ui.common.boundUnresolved(m.values[b.cause]);
 }
 
 const ACTIVE_WRITE = new Set(['PENDING', 'DISPATCHED', 'FAILED', 'ACCEPTED', 'BLOCKED']);
@@ -364,6 +371,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       currentPriceMissing: scope.currentPriceMinor === null,
       floor: { amount: floor.minor === null ? p.notSet : money(floor.minor), minor: floor.minor, parts, missing: floor.minor === null },
       minPrice: boundText(scope.bounds.min, scope.currency, m),
+      // Шаг 152: суммы нет — экран не ставит моноширинный шрифт (индекс Costs & floors)
+      minPriceMissing: scope.bounds.min.status !== 'RESOLVED',
       maxPrice: scope.bounds.max.status === 'RESOLVED' ? boundText(scope.bounds.max, scope.currency, m) : p.notSet,
       maxPriceMissing: scope.bounds.max.status !== 'RESOLVED',
       missing,

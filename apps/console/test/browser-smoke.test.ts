@@ -163,6 +163,8 @@ let decisionChip: { chip: string; full: string } | null = null;
 let receiptCompetitors: unknown = null;
 /** Шаг 148: правка ответа Offers — строка с пустыми значениями (в смоук-мире у всех предложений есть цена и границы) */
 let productsPatch: ((body: { rows: Array<Record<string, unknown>> }) => void) | null = null;
+/** Шаг 152: правка ответа индекса Costs & floors — строка без границ (в смоук-мире у всех предложений границы заданы) */
+let boundsPatch: ((body: { items: Array<Record<string, unknown>> }) => void) | null = null;
 
 /** Шаг 139 (BUG-02): решение мира смоука у удержанных строк тени — только на время своего теста (ссылка «Why this price» из тени) */
 let shadowDecisionId: string | null = null;
@@ -293,6 +295,7 @@ before(async () => {
       return r;
     })
     : productsPatch && /\/products(\?|$)/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) productsPatch!(r.body as never); return r; })
+    : boundsPatch && /\/bounds\?/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) boundsPatch!(r.body as never); return r; })
     : decisionChip && /\/decisions\?/.test(req.url) ? currentApi(req).then((r) => {
       const body = r.body as { items?: Array<Record<string, unknown>> };
       if (r.status === 200 && body.items?.length) body.items[0] = { ...body.items[0], trigger: decisionChip };
@@ -2994,6 +2997,47 @@ test('step 149 (#27): the floor page leads with the floor, the current price and
       await waitFor(b, `document.querySelector('details.calc').open`, `${width}: a click opens the calculation`);
     }
   } finally {
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+test('step 152 (#27, UX-04): Costs & floors — a missing bound is «Not set» in the body font, never «not set: not set»; 1440 fits, 375 keeps the page', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const p = en.ui.products;
+  boundsPatch = (body) => {
+    const i = body.items[0];
+    if (i) Object.assign(i, { minPrice: p.notSet, minPriceMissing: true, maxPrice: p.notSet, maxPriceMissing: true });
+  };
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${width}: offers`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+      await settled(b, `${width}: costs & floors`);
+      await waitFor(b, `!!document.querySelector('.costs table tbody tr')`, `${width}: the bounds index`);
+      const seen = await b.evaluate<{ first: Array<{ text: string; mono: boolean }>; debug: string[] }>(`(() => {
+        const row = document.querySelector('.costs table tbody tr');
+        return { first: [...row.querySelectorAll('td.empty-value')].map((td) => ({ text: td.textContent.trim(), mono: td.classList.contains('cur') })),
+          debug: [...document.querySelectorAll('.costs table td')].map((td) => td.textContent).filter((t) => /no value|not set: not set/.test(t)) }; })()`);
+      assert.deepEqual(seen.first, [{ text: p.notSet, mono: false }, { text: p.notSet, mono: false }], `${width}: missing bounds are words in the body font`);
+      assert.deepEqual(seen.debug, [], `${width}: no debug placeholder in the index`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out`);
+    }
+  } finally {
+    boundsPatch = null;
     await b.setViewport(1440, 900);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');

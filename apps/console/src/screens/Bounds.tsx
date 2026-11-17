@@ -278,8 +278,9 @@ export function BoundsIndexView({ worldId, items, embedded = false }: { worldId:
               {items.map((i) => (
                 <tr key={i.writeScopeId}>
                   <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}><UnitName unit={i} /></a></td>
-                  <td className="num money cur" data-label={c.min}>{i.minPrice}</td>
-                  <td className="num money cur" data-label={c.max}>{i.maxPrice}</td>
+                  {/* Шаг 152 (#27, UX-04): пустая граница — «Not set» словами, приглушённо и без моноширинного шрифта сумм */}
+                  <td className={i.minPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.min}>{i.minPrice}</td>
+                  <td className={i.maxPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.max}>{i.maxPrice}</td>
                   <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
                 </tr>
               ))}
