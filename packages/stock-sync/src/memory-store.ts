@@ -11,6 +11,7 @@ import type {
   StockApplyOutcome, StockApplyRow, StockImportTarget,
 } from './store.ts';
 import type { ImportRunInput } from '@repracer/pricing-pipeline';
+import { stockNeedsAttention } from './store.ts';
 
 /** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
 const IN_FLIGHT = ['PENDING', 'DISPATCHED', 'ACCEPTED'];
@@ -371,12 +372,18 @@ export class InMemoryStockStore implements StockStore {
     const rows: StockRow[] = products.map((o) => ({
       productId: o.productId, sku: o.sku, title: o.title ?? null, color: o.color ?? null, gtin: o.gtin ?? null, ...this.availableOfProduct(o.productId),
       channels: [...this.scopes.values()].filter((s) => s.offer.productId === o.productId).map((s) => this.channelRow(s)),
-    })).sort((a, b) => b.available - a.available || b.reserved - a.reserved || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : 1));
+      // Шаг 159 (#26): каналы предложений товара — фильтр «канал», как у PostgreSQL
+      offerChannels: [...new Set(this.offers.filter((x) => x.productId === o.productId).map((x) => x.channel))].sort(),
+    })).sort((a, b) => (query.sort === 'RESERVED' ? b.reserved - a.reserved || b.available - a.available : b.available - a.available || b.reserved - a.reserved)
+      || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : 1));
     const channelRows = rows.flatMap((r) => r.channels);
     // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями» — тем же правилом, что у PostgreSQL
     const needle = query.search?.trim().toLowerCase() ?? '';
     const matched = rows.filter((r) => (needle === '' || r.sku.toLowerCase().includes(needle) || (r.title ?? '').toLowerCase().includes(needle))
-      && (!query.withReservations || r.reserved > 0));
+      && (!query.withReservations || r.reserved > 0)
+      // Шаг 159 (#26): канал предложения и «требует внимания» — одно правило с PostgreSQL (`stockNeedsAttention`)
+      && (!query.channel || (r.offerChannels ?? []).includes(query.channel))
+      && (!query.attention || stockNeedsAttention(r)));
     return {
       items: matched.slice(query.offset, query.offset + query.limit), total: matched.length,
       summary: {

@@ -774,6 +774,8 @@ export const es: Messages = {
       // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями»
       filter: {
         searchLabel: 'Buscar un producto', search: 'Buscar por nombre o SKU', withReservations: 'Solo productos con reservas', apply: 'Buscar', reset: 'Mostrar todo',
+        // Шаг 159 (#26): канал предложения, «требует внимания», порядок
+        channelLabel: 'Canal', allChannels: 'Todos los canales', attention: 'Requiere atención', attentionCaption: 'Discrepancia, inventario por debajo del mínimo para publicar o inventario gestionado por el canal.', sortLabel: 'Ordenar por', sorts: { AVAILABLE: 'Disponible', RESERVED: 'Reservado' },
         matched: (n: number, total: number) => `${n} de ${total} productos coinciden.`,
         none: 'Ningún producto coincide con la búsqueda o el filtro.',
       },

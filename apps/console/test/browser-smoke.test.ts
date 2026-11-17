@@ -3127,6 +3127,57 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 159 (#26): Inventory filters by offer channel and «needs attention» and sorts by reserved — across the catalog, and «Show all» clears them', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const f = en.ui.stock.filter;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/inventory`)}, true)`);
+  await settled(b, 'inventory');
+  await waitFor(b, `!!document.querySelector('table.stock-table tbody tr')`, 'the stock table');
+  const field = (label: string) => `[...document.querySelectorAll('.stock .filters .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
+  const options = await b.evaluate<string[]>(`[...${field(f.channelLabel)}.querySelectorAll('option')].map((o) => o.textContent.trim())`);
+  assert.equal(options[0], f.allChannels, 'the channel filter starts with all channels');
+  assert.ok(options.length >= 2, `the channels of the workspace accounts: ${options.join(' | ')}`);
+  const rows = () => b.evaluate<Array<{ sku: string; reserved: number; available: number }>>(`[...document.querySelectorAll('table.stock-table tbody tr')].map((tr) => ({
+    sku: tr.querySelector('td.product').textContent, reserved: Number(tr.children[2].textContent), available: Number(tr.children[3].textContent) }))`);
+  const select = async (label: string, value: string, what: string) => {
+    await b.evaluate(`(() => { const s = ${field(label)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ${JSON.stringify(value)}); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await settled(b, what);
+  };
+  // Порядок по резервам — по всему каталогу запросом: строки страницы идут по убыванию резервов, при равенстве — доступного
+  await select(f.sortLabel, 'RESERVED', 'sorted by reserved');
+  const sorted = await rows();
+  assert.ok(sorted.every((r, i) => i === 0 || sorted[i - 1]!.reserved > r.reserved || (sorted[i - 1]!.reserved === r.reserved && sorted[i - 1]!.available >= r.available)), `sorted by reserved: ${sorted.map((r) => r.reserved).join(',')}`);
+  // Канал предложения: выборка названа «N of M products match»
+  const channel = await b.evaluate<string>(`[...${field(f.channelLabel)}.querySelectorAll('option')][1].value`);
+  await select(f.channelLabel, channel, `channel ${channel}`);
+  await waitFor(b, `/products match/.test(document.querySelector('.stock .section-sub')?.textContent ?? '')`, 'the filter names its count');
+  // «Требует внимания» — галочкой, с пояснением под ней
+  await b.evaluate(`(() => { const c = [...document.querySelectorAll('.stock .filters .check-field')].find((x) => x.textContent.includes(${JSON.stringify(f.attention)})); c.querySelector('input').click(); return true; })()`);
+  await settled(b, 'needs attention');
+  assert.ok(await b.evaluate<boolean>(`document.querySelector('.stock .filters').textContent.includes(${JSON.stringify(f.attentionCaption)})`), 'the attention filter says what it means');
+  assert.ok(await b.evaluate<boolean>(`[...document.querySelectorAll('.stock .filters .check-field input')].some((i) => i.checked)`), 'needs attention is on');
+  // «Show all» снимает всё
+  await b.evaluate(`([...document.querySelectorAll('.stock .filters button')].find((x) => x.textContent.trim() === ${JSON.stringify(f.reset)}).click(), true)`);
+  await settled(b, 'reset');
+  assert.deepEqual(await b.evaluate<[string, string, boolean]>(`[${field(f.channelLabel)}.querySelector('select').value, ${field(f.sortLabel)}.querySelector('select').value,
+    [...document.querySelectorAll('.stock .filters .check-field input')].some((i) => i.checked)]`), ['', 'AVAILABLE', false], '«Show all» clears the channel, the order and the checkboxes');
+  for (const width of [375, 1440]) {
+    await b.setViewport(width, 900);
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 158 (#26): Inventory — the stock table, then divergences, then synchronization; sources, the stock file and returns fold below; empty divergences say «agree»', async () => {
   const b = browser!;
   const before = b.errors().length;

@@ -1,5 +1,6 @@
 import type { ImportRunInput, ImportRunRow } from '@repracer/pricing-pipeline';
 import type { Instant, OrderLine } from '@repracer/channel-port';
+import type { StockAllocation } from './published.ts';
 
 /** Участник, от чьего имени пишется административная запись [Р-97] */
 export interface StockActor {
@@ -214,6 +215,8 @@ export interface StockRow {
    * наше количество не входит и нашей записи не касается [Р-6]
    */
   channelManaged?: Array<{ channel: string; marketplace: string; quantity: number; observedAt: Instant }>;
+  /** Шаг 159 (#26): каналы действующих предложений товара (KAUFLAND, AMAZON…) — фильтр «канал» экрана остатков, по алфавиту */
+  offerChannels?: string[];
 }
 
 export interface StockSummary {
@@ -243,6 +246,32 @@ export interface StockPageQuery {
   limit: number;
   search?: string | null;
   withReservations?: boolean;
+  /** Шаг 159 (#26): порядок — по доступному (по умолчанию, шаг 84.1) или по резервам */
+  sort?: StockSort;
+  /** Шаг 159 (#26): только товары с предложением этого канала (KAUFLAND, AMAZON, EBAY, WALMART) */
+  channel?: string | null;
+  /** Шаг 159 (#26): только товары, которые требуют внимания, — правило `stockNeedsAttention` */
+  attention?: boolean;
+}
+
+export type StockSort = 'AVAILABLE' | 'RESERVED';
+
+/**
+ * Шаг 159 (#26): товар требует внимания, если хотя бы одно из трёх:
+ *  - количество в канале расходится с нашим (последняя запись не применена, `divergence`);
+ *  - остатком у канала управляет сам канал (FBA, FBK — `channelManaged`);
+ *  - у включённой синхронизации есть что опубликовать, но это меньше порога выставления — канал покажет ноль.
+ * Одно правило у хранилища в памяти, у экрана и у теста равенства с запросом PostgreSQL
+ */
+export function stockNeedsAttention(row: Pick<StockRow, 'available' | 'channels' | 'channelManaged'>): boolean {
+  if ((row.channelManaged ?? []).length > 0) return true;
+  return row.channels.some((c) => c.divergence !== null || (c.syncEnabled && c.allocation != null && belowMinimumToList(row.available, c.allocation)));
+}
+
+/** Шаг 159: есть что опубликовать (после буфера и потолка), но меньше порога выставления — канал покажет ноль */
+export function belowMinimumToList(available: number, a: StockAllocation): boolean {
+  const q = Math.min(a.maxQuantity ?? Number.MAX_SAFE_INTEGER, Math.max(0, available - a.bufferUnits));
+  return a.minQuantityToList > 0 && q > 0 && q < a.minQuantityToList;
 }
 
 export interface StockDivergenceRow {

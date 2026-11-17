@@ -743,6 +743,8 @@ export const de: Messages = {
       columns: { product: 'Produkt', onHand: 'Physisch', reserved: 'Reserviert', available: 'Verfügbar', channels: 'Kanäle' },
       filter: {
         searchLabel: 'Produkt suchen', search: 'Nach Name oder SKU suchen', withReservations: 'Nur Produkte mit Reservierungen', apply: 'Suchen', reset: 'Alle zeigen',
+        // Шаг 159 (#26): канал предложения, «требует внимания», порядок
+        channelLabel: 'Kanal', allChannels: 'Alle Kanäle', attention: 'Braucht Aufmerksamkeit', attentionCaption: 'Abweichung, Bestand unter dem Mindestbestand zum Einstellen oder Bestand, den der Kanal verwaltet.', sortLabel: 'Sortieren nach', sorts: { AVAILABLE: 'Verfügbar', RESERVED: 'Reserviert' },
         matched: (n: number, total: number) => `${n} von ${total} Produkten passen.`,
         none: 'Kein Produkt passt zur Suche oder zum Filter.',
       },

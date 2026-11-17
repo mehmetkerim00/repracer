@@ -301,6 +301,18 @@ function roleShown(role: Viewer['role'], m: Messages): string | null {
   return role === 'GUEST' ? null : m.values[role];
 }
 
+/**
+ * Шаг 159 (#26): фильтр экрана остатков сверх поиска — канал предложения (только каналы аккаунтов мира), «требует внимания» (`attention=1`),
+ * порядок (`sort=reserved`). Один разбор у экрана и у выгрузки [Р-229]; неверный параметр — null, и маршрут отвечает 400
+ */
+function stockFilterOf(params: URLSearchParams, channels: readonly string[]): { channel?: string; attention?: boolean; sort?: 'AVAILABLE' | 'RESERVED' } | null {
+  const channel = params.get('channel');
+  const attention = params.get('attention');
+  const sort = params.get('sort');
+  if ((channel !== null && !channels.includes(channel)) || (attention !== null && attention !== '1') || (sort !== null && sort !== 'reserved' && sort !== 'available')) return null;
+  return { ...(channel !== null ? { channel } : {}), ...(attention === '1' ? { attention: true } : {}), ...(sort === 'reserved' ? { sort: 'RESERVED' as const } : {}) };
+}
+
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {
   const localeCookie = (l: Locale) => `${LOCALE_COOKIE}=${l}; SameSite=Strict; Path=/; Max-Age=31536000`;
   const market = marketScope(services.market ?? 'global');
@@ -996,7 +1008,10 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const search = (url.searchParams.get('q') ?? '').trim();
           const reservedParam = url.searchParams.get('reserved');
           if (search.length > 100 || (reservedParam !== null && reservedParam !== '1')) return fail(400, 'BAD_PAGE', s.badRequest);
-          const filter = { search: search === '' ? null : search, withReservations: reservedParam === '1' };
+          // Шаг 159 (#26): канал предложения (из каналов аккаунтов мира), «требует внимания», порядок; неверное — отказ, а не «всё»
+          const stockExtra = stockFilterOf(url.searchParams, world.accounts.map((a) => a.channel));
+          if (!stockExtra) return fail(400, 'BAD_PAGE', s.badRequest);
+          const filter = { search: search === '' ? null : search, withReservations: reservedParam === '1', ...stockExtra };
           // Смещение за концом подтягивается ДО выборки — иначе подпись «151–200 из 200» стоит над пустой таблицей
           const probe = await live.stock.stockPage(world.tenantId, { offset: 0, limit: 1, ...filter });
           const clamped = { ...query, offset: clampOffset(query, probe.total) };
@@ -1330,8 +1345,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         case 'inventory': {
           const reserved = params.get('reserved');
           if (reserved !== null && reserved !== '1') return null;
-          return { query: { stock: { ...(searchText ? { search: searchText } : {}), ...(reserved === '1' ? { withReservations: true } : {}) } },
-            filters: { search: searchText, with_reservations: reserved === '1' ? 'yes' : '' }, period: null, periodPart: day(now) };
+          // Шаг 159 (#26): что видишь — то и выгружаешь [Р-229]: канал, «требует внимания» и порядок — тем же разбором, что у экрана
+          const extra = stockFilterOf(params, world.accounts.map((a) => a.channel));
+          if (!extra) return null;
+          return { query: { stock: { ...(searchText ? { search: searchText } : {}), ...(reserved === '1' ? { withReservations: true } : {}), ...extra } },
+            filters: { search: searchText, with_reservations: reserved === '1' ? 'yes' : '', channel: extra.channel ?? '', needs_attention: extra.attention ? 'yes' : '', sort: (extra.sort ?? 'AVAILABLE').toLowerCase() },
+            period: null, periodPart: day(now) };
         }
         case 'imports':
         case 'audit-log': {

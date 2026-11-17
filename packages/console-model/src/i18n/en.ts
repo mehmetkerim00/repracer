@@ -776,6 +776,8 @@ export const en = {
       // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями»
       filter: {
         searchLabel: 'Find a product', search: 'Search by name or SKU', withReservations: 'Only products with reservations', apply: 'Search', reset: 'Show all',
+        // Шаг 159 (#26): канал предложения, «требует внимания», порядок
+        channelLabel: 'Channel', allChannels: 'All channels', attention: 'Needs attention', attentionCaption: 'Divergence, stock below the minimum to list, or stock managed by the channel.', sortLabel: 'Sort by', sorts: { AVAILABLE: 'Available', RESERVED: 'Reserved' },
         matched: (n: number, total: number) => `${n} of ${total} products match.`,
         none: 'No product matches the search or the filter.',
       },

@@ -1,5 +1,5 @@
 import { can } from '@repracer/pricing-model';
-import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSourceRow } from '@repracer/stock-sync';
+import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSort, StockSourceRow } from '@repracer/stock-sync';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, storefrontChip, storefrontName, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
@@ -83,7 +83,11 @@ export interface StockView {
   rows: StockRowView[];
   page: PageInfo;
   /** Шаг 69 (K8): поиск и фильтр, которыми построена страница; `matchedText` — только когда они заданы */
-  filter: { search: string; withReservations: boolean; matchedText: string | null; noneText: string | null };
+  filter: {
+    search: string; withReservations: boolean; matchedText: string | null; noneText: string | null;
+    /** Шаг 159 (#26): канал предложения, «требует внимания», порядок; варианты канала — каналы аккаунтов мира словами */
+    channel: string | null; attention: boolean; sort: StockSort; channelOptions: Array<{ value: string; label: string }>;
+  };
   sources: Array<StockSourceRow & { modeText: string; productsText: string }>;
   /** Ловушки каналов аккаунтов мира — до включения синхронизации */
   traps: StockTrap[];
@@ -170,10 +174,10 @@ export function channelCell(c: StockChannelRow, m: Messages, world: Pick<StandWo
 }
 
 export function stockView(world: StandWorld, page: StockPage, query: ListQuery, sources: readonly StockSourceRow[], m: Messages,
-  filter: { search?: string | null; withReservations?: boolean } = {}): StockView {
+  filter: { search?: string | null; withReservations?: boolean; channel?: string | null; attention?: boolean; sort?: StockSort } = {}): StockView {
   const t = m.ui.stock;
   const search = filter.search?.trim() ?? '';
-  const filtered = search !== '' || filter.withReservations === true;
+  const filtered = search !== '' || filter.withReservations === true || (filter.channel ?? null) !== null || filter.attention === true;
   const channelName = (channel: string) => (m.values as Record<string, string | undefined>)[channel] ?? channel;
   const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m, world, r.available)),
     channelManaged: (r.channelManaged ?? []).map((c) => ({
@@ -185,6 +189,8 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
     ...stockLegend(page, rows, m),
     filter: {
       search, withReservations: filter.withReservations === true,
+      channel: filter.channel ?? null, attention: filter.attention === true, sort: filter.sort ?? 'AVAILABLE',
+      channelOptions: [...new Set(world.accounts.map((a) => a.channel))].sort().map((c) => ({ value: c, label: channelName(c) })),
       matchedText: filtered ? t.filter.matched(page.total, page.summary.products) : null,
       noneText: filtered && page.total === 0 ? t.filter.none : null,
     },

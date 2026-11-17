@@ -887,6 +887,31 @@ export class PgStockStore implements StockStore {
      WHERE ss.tenant_id = $1 AND ss.latest_version_dispatched > 0 AND ss.latest_version_applied < ss.latest_version_dispatched
        AND NOT EXISTS (SELECT 1 FROM tenant_data.channel_write w WHERE w.tenant_id = ss.tenant_id AND w.write_scope_id = ss.write_scope_id)`;
 
+  /**
+   * Шаг 159 (#26): товары, требующие внимания, — правило `stockNeedsAttention` (stock-sync) запросом: три причины одним множеством.
+   * Расхождение — по последней записи КАЖДОЙ единицы количества тем же `DIVERGED_SQL`, что бейдж строки (не по кандидатам списка: строка
+   * говорит о единице, а не о сводке); остаток у канала — наблюдение предложения CHANNEL; порог выставления — `belowMinimumToList`
+   */
+  private static readonly ATTENTION_SQL = `
+    SELECT ws.product_id FROM tenant_data.write_scope ws
+      CROSS JOIN LATERAL (SELECT ws.write_scope_id) t
+      JOIN LATERAL (${PgStockStore.LAST_WRITE_SQL}) lw ON true
+     WHERE ws.tenant_id = $1 AND ws.field = 'QUANTITY' AND ws.status <> 'RETIRED' AND ${PgStockStore.DIVERGED_SQL}
+    UNION
+    SELECT om.product_id FROM tenant_data.offer_mapping om
+      JOIN channel_data.channel_quantity_current o ON o.tenant_id = om.tenant_id AND o.offer_mapping_id = om.offer_mapping_id
+     WHERE om.tenant_id = $1 AND om.fulfillment = 'CHANNEL' AND om.status <> 'ENDED'
+    UNION
+    SELECT s.product_id FROM tenant_data.write_scope s
+      JOIN (SELECT DISTINCT ON (a.channel_account_id) a.channel_account_id, a.buffer_units, a.max_quantity, a.min_quantity_to_list
+              FROM tenant_data.stock_allocation a WHERE a.tenant_id = $1 AND a.scope_type = 'CHANNEL_ACCOUNT' ORDER BY a.channel_account_id, a.version DESC) al
+        ON al.channel_account_id = s.channel_account_id
+      CROSS JOIN LATERAL (SELECT greatest(
+          coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = s.tenant_id AND sp.product_id = s.product_id), 0)
+        - coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = s.tenant_id AND r.product_id = s.product_id AND ${PgStockStore.RESERVED_SQL}), 0), 0) AS available) av
+     WHERE s.tenant_id = $1 AND s.field = 'QUANTITY' AND s.status <> 'RETIRED' AND s.quantity_sync_enabled AND al.min_quantity_to_list > 0
+       AND least(coalesce(al.max_quantity, 2147483647), greatest(av.available - al.buffer_units, 0)) BETWEEN 1 AND al.min_quantity_to_list - 1`;
+
   /** Счёт расхождений для сводки экрана: те же кандидаты и то же правило, что у списка */
   private static divergedCountSql(): string {
     return `(SELECT count(*) FROM (${PgStockStore.DIVERGENCE_CANDIDATES_SQL}) t
@@ -924,10 +949,19 @@ export class PgStockStore implements StockStore {
        * его товаров (50 000 строк — доли секунды), а btree подстроку не ищет
        */
       const search = query.search?.trim() ? query.search.trim().replace(/[\\%_]/g, (c) => `\\${c}`) : null;
+      /**
+       * Шаг 159 (#26): канал — у товара действующее предложение этого канала (как `offerChannels` строки); «требует внимания» — правило
+       * `stockNeedsAttention` (stock-sync) одним множеством товаров: расхождение по последней записи единицы количества (тот же `DIVERGED_SQL`,
+       * что у бейджа строки), остаток у канала (наблюдение предложения CHANNEL, как `channelManaged`) и «есть что опубликовать, но меньше порога
+       * выставления» (`belowMinimumToList`). Подзапрос множества не зависит от строки — считается один раз на запрос
+       */
       const matches = `p.tenant_id = $1
              AND ($2::text IS NULL OR p.sku ILIKE '%' || $2 || '%' OR p.title ILIKE '%' || $2 || '%')
-             AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}))`;
-      const filter = [tenantId, search, query.withReservations === true];
+             AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}))
+             AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM tenant_data.offer_mapping om JOIN tenant_data.channel_account ca ON ca.tenant_id = om.tenant_id AND ca.channel_account_id = om.channel_account_id
+                                               WHERE om.tenant_id = p.tenant_id AND om.product_id = p.product_id AND om.status <> 'ENDED' AND ca.channel = $4))
+             AND (NOT $5::boolean OR p.product_id IN (${PgStockStore.ATTENTION_SQL}))`;
+      const filter = [tenantId, search, query.withReservations === true, query.channel ?? null, query.attention === true];
       /**
        * Шаг 84.1: сначала товары, которые есть чем продавать, — по убыванию доступного, при равенстве — по резервам, затем по SKU; нули —
        * вниз (у демо прежний порядок по SKU ставил наверх товары США без остатка, и экран открывался строками нулей). Остаток и резервы —
@@ -939,8 +973,9 @@ export class PgStockStore implements StockStore {
                   coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
                   coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
              FROM tenant_data.product p WHERE ${matches}) q
-          ORDER BY greatest(q.on_hand - q.reserved, 0) DESC, q.reserved DESC, q.sku, q.product_id LIMIT $4 OFFSET $5`, [...filter, query.limit, query.offset]);
-      const filtered = search !== null || query.withReservations === true;
+          ORDER BY ${query.sort === 'RESERVED' ? 'q.reserved DESC, greatest(q.on_hand - q.reserved, 0) DESC' : 'greatest(q.on_hand - q.reserved, 0) DESC, q.reserved DESC'}, q.sku, q.product_id
+          LIMIT $6 OFFSET $7`, [...filter, query.limit, query.offset]);
+      const filtered = search !== null || query.withReservations === true || (query.channel ?? null) !== null || query.attention === true;
       const { rows: [matched] } = filtered
         ? await tx.query(`SELECT count(*)::int AS n FROM tenant_data.product p WHERE ${matches}`, filter)
         : { rows: [null] };
@@ -957,11 +992,19 @@ export class PgStockStore implements StockStore {
            JOIN channel_data.channel_quantity_current o ON o.tenant_id = om.tenant_id AND o.offer_mapping_id = om.offer_mapping_id
           WHERE om.tenant_id = $1 AND om.product_id = ANY($2::uuid[]) AND om.fulfillment = 'CHANNEL' AND om.status <> 'ENDED'
           ORDER BY om.channel, om.marketplace`, [tenantId, ids]);
+      // Шаг 159 (#26): каналы действующих предложений товара — фильтр «канал» экрана и правило равенства с ним
+      const { rows: offerChannels } = ids.length === 0 ? { rows: [] as Row[] } : await tx.query(
+        `SELECT DISTINCT om.product_id, ca.channel FROM tenant_data.offer_mapping om
+           JOIN tenant_data.channel_account ca ON ca.tenant_id = om.tenant_id AND ca.channel_account_id = om.channel_account_id
+          WHERE om.tenant_id = $1 AND om.product_id = ANY($2::uuid[]) AND om.status <> 'ENDED' ORDER BY ca.channel`, [tenantId, ids]);
+      const channelsOf = new Map<string, string[]>();
+      for (const c of offerChannels) channelsOf.set(c.product_id, [...(channelsOf.get(c.product_id) ?? []), c.channel as string]);
       const managedOf = new Map<string, NonNullable<StockRow['channelManaged']>>();
       for (const m of managed) managedOf.set(m.product_id, [...(managedOf.get(m.product_id) ?? []), { channel: m.channel, marketplace: m.marketplace, quantity: Number(m.quantity), observedAt: iso(m.observed_at) }]);
       const items: StockRow[] = products.map((p) => ({
         productId: p.product_id, sku: p.sku, title: p.title ?? null, color: p.color ?? null, gtin: p.gtin ?? null, onHand: Number(p.on_hand), reserved: Number(p.reserved), available: availableOf(Number(p.on_hand), Number(p.reserved)),
         channels: byProduct.get(p.product_id) ?? [],
+        offerChannels: channelsOf.get(p.product_id) ?? [],
         ...(managedOf.has(p.product_id) ? { channelManaged: managedOf.get(p.product_id)! } : {}),
       }));
       const { rows: [s] } = await tx.query(

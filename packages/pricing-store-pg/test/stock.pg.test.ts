@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
+import { stockNeedsAttention } from '@repracer/stock-sync';
 import { createPool, PgPricingStore, PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
@@ -436,6 +437,30 @@ test('step 52: the channel managed quantity of a channel fulfilled offer reaches
  * Шаг 53 (ревью шага 52, находка 11): после отвергнутой версии сравнение идёт с тем, что канал ДЕРЖИТ (последняя применённая версия).
  * Остаток вернулся к применённому значению — запись не создаётся; остался другим — создаётся
  */
+/**
+ * Шаг 159 (#26): страница остатков фильтруется по каналу предложения и по «требует внимания» и сортируется по резервам — по всему каталогу,
+ * запросом базы. Правило экрана одно (`stockNeedsAttention`, каналы предложений строки): выборка базы равна правилу, применённому к полному
+ * списку. Мир этого файла к этому моменту несёт все три причины: отказанная каналом версия количества (шаг 51), порог выставления выше
+ * публикуемого (шаг 178) и остаток у канала (шаг 52)
+ */
+test('step 159 (#26): the stock page filters by offer channel and «needs attention» and sorts by reserved — the database equals the screen rule', async () => {
+  const all = (await store.stockPage(world.tenantId, { offset: 0, limit: 500 })).items;
+  const ids = (rows: readonly { productId: string }[]) => rows.map((r) => r.productId).sort();
+  const expected = all.filter((r) => stockNeedsAttention(r));
+  assert.ok(expected.length > 0 && expected.length < all.length, `the world has offers needing attention and offers that do not: ${expected.length} of ${all.length}`);
+  const attention = await store.stockPage(world.tenantId, { offset: 0, limit: 500, attention: true });
+  assert.deepEqual([ids(attention.items), attention.total], [ids(expected), expected.length], 'needs attention: the database equals the rule');
+  for (const channel of ['KAUFLAND', 'AMAZON']) {
+    const page = await store.stockPage(world.tenantId, { offset: 0, limit: 500, channel });
+    const rule = all.filter((r) => (r.offerChannels ?? []).includes(channel));
+    assert.deepEqual([ids(page.items), page.total], [ids(rule), rule.length], `channel ${channel}: the database equals the rule`);
+  }
+  assert.ok(all.every((r) => (r.offerChannels ?? []).length > 0), 'every product of this world has an offer channel');
+  const byReserved = (await store.stockPage(world.tenantId, { offset: 0, limit: 500, sort: 'RESERVED' })).items;
+  const ruleOrder = [...all].sort((a, b) => b.reserved - a.reserved || b.available - a.available || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0));
+  assert.deepEqual(byReserved.map((r) => r.sku), ruleOrder.map((r) => r.sku), 'sorted by reserved, then available, then SKU');
+});
+
 test('step 53: after a refused version the value the channel already holds is not sent again', async () => {
   const queue = new PgWriteQueueStore(db.pool('svc_app', 1));
   const account = world.ids.dbId(KAUFLAND);

@@ -20,8 +20,8 @@ export function StockScreen({ worldId }: { worldId: string }) {
   const market = useContext(MarketContext);
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
   // Шаг 69 (K8): поиск и фильтр — параметры запроса; новая выборка начинается с первой страницы
-  const [filter, setFilter] = useState<{ search: string; withReservations: boolean }>({ search: '', withReservations: false });
-  const filterParams = `${filter.search ? `&q=${encodeURIComponent(filter.search)}` : ''}${filter.withReservations ? '&reserved=1' : ''}`;
+  const [filter, setFilter] = useState<StockFilter>(NO_FILTER);
+  const filterParams = stockFilterParams(filter);
   const [view, retry] = useResource<StockView>(`${worldPath(worldId, 'stock')}?offset=${query.offset}&limit=${query.limit}${filterParams}`, m.locale);
   const [divergences, retryDivergences] = useResource<StockDivergencesView>(worldPath(worldId, 'stock', 'divergences'), m.locale);
   const [error, setError] = useState<string | null>(null);
@@ -119,14 +119,24 @@ export function StockScreen({ worldId }: { worldId: string }) {
 }
 
 /** Экран без запросов — то, что отрисовывает тест из ответа сервера */
+/** Шаг 159 (#26): фильтр экрана остатков — поиск, «с резервами», канал предложения, «требует внимания», порядок; параметры — одни у экрана и выгрузки */
+export interface StockFilter { search: string; withReservations: boolean; channel: string | null; attention: boolean; sort: 'AVAILABLE' | 'RESERVED' }
+const NO_FILTER: StockFilter = { search: '', withReservations: false, channel: null, attention: false, sort: 'AVAILABLE' };
+function stockFilterParams(f: StockFilter): string {
+  return `${f.search ? `&q=${encodeURIComponent(f.search)}` : ''}${f.withReservations ? '&reserved=1' : ''}${f.channel ? `&channel=${encodeURIComponent(f.channel)}` : ''}`
+    + `${f.attention ? '&attention=1' : ''}${f.sort === 'RESERVED' ? '&sort=reserved' : ''}`;
+}
+
 export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: {
   view: StockView; worldId: string; query: ListQuery; onQuery: (q: ListQuery) => void;
-  onFilter?: (f: { search: string; withReservations: boolean }) => void;
+  onFilter?: (f: StockFilter) => void;
 }) {
   const m = useMessages();
   const t = m.ui.stock;
   const [search, setSearch] = useState(v.filter.search);
   const [withReservations, setWithReservations] = useState(v.filter.withReservations);
+  // Шаг 159 (#26): канал, «требует внимания» и порядок применяются сразу; поиск — кнопкой, как прежде
+  const current = (over: Partial<StockFilter> = {}): StockFilter => ({ search: search.trim(), withReservations, channel: v.filter.channel, attention: v.filter.attention, sort: v.filter.sort, ...over });
   return (
     <section className="stock">
       {/* Шаг 96 (В19): страница остатков — Inventory; заголовок — тот же текст, что пункт меню */}
@@ -147,15 +157,30 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
       )}
       {onFilter && (v.rows.length > 0 || v.filter.matchedText) ? (
         // Шаг 94: фильтр — поле стандарта с подписью над ним, галочка — своей ячейкой, кнопки — в конце ряда
-        <form className="filters toolbar field-toolbar" onSubmit={(e) => { e.preventDefault(); onFilter({ search: search.trim(), withReservations }); }}>
+        <form className="filters toolbar field-toolbar" onSubmit={(e) => { e.preventDefault(); onFilter(current()); }}>
           <Field label={t.filter.searchLabel}><input type="search" value={search} placeholder={t.filter.search} onChange={(e) => setSearch(e.currentTarget.value)} /></Field>
-          <CheckField label={t.filter.withReservations} checked={withReservations} onChange={(on) => { setWithReservations(on); onFilter({ search: search.trim(), withReservations: on }); }} />
+          {/* Шаг 159 (#26): канал предложения и порядок — по всему каталогу запросом базы */}
+          <Field label={t.filter.channelLabel}>
+            <select value={v.filter.channel ?? ''} onChange={(e) => onFilter(current({ channel: e.currentTarget.value === '' ? null : e.currentTarget.value }))}>
+              <option value="">{t.filter.allChannels}</option>
+              {v.filter.channelOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+          <Field label={t.filter.sortLabel}>
+            <select value={v.filter.sort} onChange={(e) => onFilter(current({ sort: e.currentTarget.value as StockFilter['sort'] }))}>
+              <option value="AVAILABLE">{t.filter.sorts.AVAILABLE}</option>
+              <option value="RESERVED">{t.filter.sorts.RESERVED}</option>
+            </select>
+          </Field>
+          <CheckField label={t.filter.withReservations} checked={withReservations} onChange={(on) => { setWithReservations(on); onFilter(current({ withReservations: on })); }} />
+          <CheckField label={t.filter.attention} caption={t.filter.attentionCaption} checked={v.filter.attention} onChange={(on) => onFilter(current({ attention: on }))} />
           <div className="form-actions-row">
             <button type="submit">{t.filter.apply}</button>
-            {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter({ search: '', withReservations: false }); }}>{t.filter.reset}</button> : null}
+            {v.filter.matchedText ? <button type="button" onClick={() => { setSearch(''); setWithReservations(false); onFilter(NO_FILTER); }}>{t.filter.reset}</button> : null}
           </div>
-          {/* Шаг 104 [Р-229]: выгрузка — по ПРИМЕНЁННОМУ фильтру: тем товарам, что в таблице */}
-          <ExportControl worldId={worldId} screen="inventory" query={exportQuery(null, { q: v.filter.search, reserved: v.filter.withReservations ? '1' : undefined })} empty={v.rows.length === 0} />
+          {/* Шаг 104 [Р-229]: выгрузка — по ПРИМЕНЁННОМУ фильтру: тем товарам, что в таблице; шаг 159 — и по каналу, вниманию, порядку */}
+          <ExportControl worldId={worldId} screen="inventory" query={exportQuery(null, { q: v.filter.search, reserved: v.filter.withReservations ? '1' : undefined,
+            channel: v.filter.channel ?? undefined, attention: v.filter.attention ? '1' : undefined, sort: v.filter.sort === 'RESERVED' ? 'reserved' : undefined })} empty={v.rows.length === 0} />
         </form>
       ) : null}
       {v.filter.matchedText ? <Help className="section-sub" text={v.filter.matchedText} /> : null}
