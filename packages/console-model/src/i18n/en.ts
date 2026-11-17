@@ -1394,7 +1394,7 @@ export const en = {
       bulkEdit: 'Bulk operations',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,
       clock: (now: string) => `Simulated time: ${now}.`,
-      columns: { unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'BB share 7d' },
+      columns: { margin: 'Margin', health: 'Health', unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'BB share 7d' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'What to do',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart hides this offer because the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''}. To show it again, bring the walmart.com price close to that price — only if your floor allows. TMPrice never changes the price for this on its own.`,
@@ -1406,6 +1406,8 @@ export const en = {
       competitorBadge: 'competitor data',
       why: 'Why this price', bounds: 'Bounds and floor', noDecisions: 'no decisions yet', enable: 'Enable',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      // Шаг 162 (#27): маржа без себестоимости — словами
+      noUnitCost: 'No unit cost',
       noPriceYet: 'No price yet', notSet: 'Not set', feeExpired: 'Fee estimate expired — signed loss may be stale',
       missingTitle: 'To switch it on, add:', missingItems: { UNIT_COST: 'Unit cost and fees', MIN_PRICE: 'Minimum price', MAX_PRICE: 'Maximum price' },
       floorNoMin: 'Minimum price is not set',

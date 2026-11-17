@@ -390,8 +390,8 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
   await settled(b, 'products (control)');
   assert.ok((await stickyTables()).length > 0, 'the products screen of the smoke world has a table with a pinned column');
   // Шаг 93: правило видит колонку «Channel says» — она есть у смоук-мира; контроль — прежняя растянутая колонка (до шага 89) краснеет
-  assert.ok(await b.evaluate<boolean>(`!!document.querySelector('table.products.with-channel td.channel-says .badge')`), 'the smoke world has the «Channel says» column');
-  await b.evaluate(`(document.head.insertAdjacentHTML('beforeend', '<style id="wide-channel">table.products td.channel-says .cell { max-width: none; } table.products td.channel-says .badge, table.products td.channel-says .cell-detail, table.products.with-channel td.strategy { white-space: nowrap; }</style>'), true)`);
+  assert.ok(await b.evaluate<boolean>(`!!document.querySelector('table.products.with-health td.health .badge')`), 'the smoke world has the Health column (step 162: the channel notes of «Channel says» live in it)');
+  await b.evaluate(`(document.head.insertAdjacentHTML('beforeend', '<style id="wide-channel">table.products td.health .cell { max-width: none; } table.products td.health .badge, table.products td.health .cell-detail, table.products.with-health td.strategy { white-space: nowrap; }</style>'), true)`);
   const stretched = await stickyTables();
   assert.ok(stretched[0]!.table > stretched[0]!.wrap + 1, `control: the stretched «Channel says» column of step 89 must overflow — ${JSON.stringify(stretched)}`);
   await b.evaluate(`(document.getElementById('wide-channel').remove(), true)`);
@@ -2072,10 +2072,10 @@ test('step 102 (C): the floor page enables clearance with the loss per piece; th
   }
   await b.setColorScheme('light');
   await b.setViewport(1440, 900);
-  // Offers: пилюля у названия предложения
+  // Offers: пилюля распродажи — шаг 162 (#27): в колонке Health, а не у названия
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
   await settled(b, 'offers with clearance');
-  assert.equal(await b.evaluate<number>(`document.querySelectorAll('.world-content td.offer .badge.tone-warn').length`), 1, 'the offer in clearance carries the pill on Offers');
+  assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('.world-content td.health .badge.tone-warn')].filter((x) => x.textContent.trim() === ${JSON.stringify(en.ui.products.clearancePill)}).length`), 1, 'the offer in clearance carries the pill on Offers');
   // Выключение — одним нажатием
   await b.evaluate(`(location.hash = ${JSON.stringify(boundsHref)}, true)`);
   await settled(b, 'floor page again');
@@ -2097,7 +2097,8 @@ test('step 102 (C): the floor page enables clearance with the loss per piece; th
   try {
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
     await settled(b, 'offers with a floor above the ceiling');
-    const frozen = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.offer .badge.tone-stop')].map((x) => x.textContent.trim())`);
+    // Шаг 162 (#27): пометка «пол выше потолка» — первой в колонке Health (важнейшая)
+    const frozen = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.health > .cell .badge.tone-stop')].map((x) => x.textContent.trim())`);
     assert.ok(frozen.includes(en.ui.products.floorAboveCeiling), `the frozen offer is marked on Offers — ${JSON.stringify(frozen)}`);
     await b.evaluate(`(location.hash = ${JSON.stringify(boundsHref)}, true)`);
     await settled(b, 'floor page with a floor above the ceiling');
@@ -2371,7 +2372,8 @@ test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab;
       await go(`bounds/${encodeURIComponent(step107.insideScopeId)}`);
       assert.equal(await b.evaluate<number>(`document.querySelectorAll('section.channel-bounds .notice.warn').length`), 0, `${m.locale}: no warning without a conflict`);
       await go('products');
-      const pills = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.offer .badge.tone-warn')].map((x) => x.textContent.trim())`);
+      // Шаг 162 (#27): пометка конфликта рамок — в колонке Health
+      const pills = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.health .badge.tone-warn')].map((x) => x.textContent.trim())`);
       assert.deepEqual(pills.filter((x) => x === m.ui.products.belowChannelMin), [m.ui.products.belowChannelMin], `${m.locale}: the pill on Offers — ${pills.join(' | ')}`);
       if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
     }
@@ -3126,6 +3128,54 @@ const LONG_HELP = `(() => {
   }
   return out;
 })()`;
+
+test('step 162 (#27): Offers — Margin at the current price by default; Health shows the most important mark of a row with «+N», and the marks leave the offer cell', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const p = en.ui.products;
+  productsPatch = (body) => {
+    const r = body.rows[0]!;
+    Object.assign(r, { frozen: p.floorAboveCeiling, clearance: p.clearancePill, health: { tone: 'stop', text: p.floorAboveCeiling, more: [{ tone: 'warn', text: p.clearancePill }] } });
+  };
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  try {
+    await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/shadow`)}, true)`);
+      await settled(b, `${width}: shadow`);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, `${width}: offers`);
+      await waitFor(b, `!!document.querySelector('table.products tbody tr')`, `${width}: the offers table`);
+      const seen = await b.evaluate<{ heads: string[]; margins: string[]; health: string; more: string; moreTitle: string; offerBadges: string[] }>(`(() => {
+        const t = document.querySelector('table.products'); const first = t.querySelector('tbody tr');
+        const more = first.querySelector('td.health details.health-more');
+        return { heads: [...t.querySelectorAll('thead th')].map((h) => h.textContent.trim()), margins: [...t.querySelectorAll('tbody td.margin')].map((td) => td.textContent.trim()),
+          health: first.querySelector('td.health > .cell .badge')?.textContent.trim() ?? '', more: more ? more.querySelector('summary').textContent.trim() : '',
+          moreTitle: more ? [...more.querySelectorAll('li .badge')].map((x) => x.textContent.trim()).join('; ') : '',
+          offerBadges: [...first.querySelectorAll('td.offer .badge')].map((x) => x.textContent.trim()) }; })()`);
+      assert.ok(seen.heads.includes(p.columns.margin) && seen.heads.includes(p.columns.health), `${width}: Margin by default, Health with something to say — ${seen.heads.join(' | ')}`);
+      assert.ok(seen.margins.length > 0 && seen.margins.every((x) => /%$/.test(x) || x === p.noUnitCost || x === '–'), `${width}: margins — ${seen.margins.slice(0, 5).join(' | ')}`);
+      assert.deepEqual([seen.health, seen.more, seen.moreTitle], [p.floorAboveCeiling, '+1', p.clearancePill], `${width}: the most important mark first, the rest behind +N with the same content`);
+      assert.deepEqual(seen.offerBadges, [], `${width}: the marks left the offer cell`);
+      if (width === 1440) assert.ok(await b.evaluate<boolean>(`(() => { const t = document.querySelector('table.products'); return t.scrollWidth <= t.parentElement.clientWidth + 1; })()`), '1440: the table fits its frame');
+      else assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), '375: no sideways scroll');
+    }
+  } finally {
+    productsPatch = null;
+    await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
 
 test('step 161 (#29): every Stop pricing card opens with one header — title, state pill, action — and the consequence right under it', async () => {
   const b = browser!;

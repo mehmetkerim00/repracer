@@ -1334,7 +1334,7 @@ export const de: Messages = {
       bulkEdit: 'Massenvorgänge',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Gesamt ${t.total}: an ${t.enabled}, in Arbeit ${t.applying}, gestoppt ${t.stopped}, aus ${t.off}.`,
       clock: (now: string) => `Simulierte Zeit: ${now}.`,
-      columns: { unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil 7 T' },
+      columns: { margin: 'Marge', health: 'Zustand', unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil 7 T' },
       whatToDo: 'Was tun',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. TMPrice ändert den Preis dafür nie von sich aus.`,
       conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten', compact: 'Kompakte Zeilen' },
@@ -1345,6 +1345,8 @@ export const de: Messages = {
       competitorBadge: 'Wettbewerbsdaten',
       why: 'Warum dieser Preis', bounds: 'Grenzen und Untergrenze', noDecisions: 'noch keine Entscheidungen', enable: 'Aktivieren',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      // Шаг 162 (#27): маржа без себестоимости — словами
+      noUnitCost: 'Keine Stückkosten',
       noPriceYet: 'Noch kein Preis', notSet: 'Nicht gesetzt', feeExpired: 'Gebührenschätzung abgelaufen — der bestätigte Verlust kann veraltet sein',
       missingTitle: 'Zum Einschalten fehlt:', missingItems: { UNIT_COST: 'Stückkosten und Gebühren', MIN_PRICE: 'Mindestpreis', MAX_PRICE: 'Höchstpreis' },
       floorNoMin: 'Mindestpreis ist nicht gesetzt',

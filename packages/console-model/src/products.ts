@@ -1,5 +1,5 @@
-import { can, COMPETITOR_DERIVED_RULES, type BoundResolution, type StrategyDefinition } from '@repracer/pricing-model';
-import { effectiveFloor } from './bounds.ts';
+import { can, COMPETITOR_DERIVED_RULES, marginBpAtPrice, type BoundResolution, type StrategyDefinition } from '@repracer/pricing-model';
+import { costInScopeCurrency, effectiveFloor } from './bounds.ts';
 import { channelBoundsPill, channelBoundsUnread } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
@@ -24,6 +24,9 @@ export interface FloorCell {
   /** Из чего складывается: min_price и цена минимальной маржи */
   parts: string;
 }
+
+/** Шаг 162 (#27): пункт Health — тон, слова, пояснение и «что делать» (у заметок канала, шаг 96) */
+export interface HealthItem { tone: StatusCell['tone']; text: string; detail?: string; short?: string; whatToDo?: { label: string; text: string } }
 
 /** Шаг 148 (#27, UX-05): чего не хватает для включения автоцены — окно отказа называет каждое со ссылкой */
 export type MissingSetup = 'UNIT_COST' | 'MIN_PRICE' | 'MAX_PRICE';
@@ -62,6 +65,14 @@ export interface ProductRow {
   frozen: string | null;
   /** Шаг 107 [Р-233]: конфликт с рамками цены канала — «Below the channel minimum» / «Above the channel maximum»; null — конфликта нет */
   channelBounds: string | null;
+  /** Шаг 162 (#27): маржа при текущей цене — функцией Gate; без цены — прочерк, без себестоимости — словами (обычным шрифтом) */
+  margin: { text: string; missing: boolean; bp: number | null };
+  /**
+   * Шаг 162 (#27): Health — ошибки и блокировки строки одной колонкой: заметки канала (Automate Pricing, рамки канала, «не продаётся», Walmart,
+   * PRICING_HEALTH — прежняя колонка «Issues from the channel» с их «что делать») и пометки строки (пол выше потолка, конфликт рамок, истёкшая
+   * комиссия, распродажа). Важнейшая (stop) первой, остальные — «+N» с тем же содержимым; сказать нечего — null
+   */
+  health: (HealthItem & { more: HealthItem[] }) | null;
   /** Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию новому предложению — причина словами, иначе null */
   notAssigned: string | null;
   /** Шаг 105 [Р-230]: колонки Buy Box — только когда зритель их включил (их считают по снимку и отрезкам; выключенные — не нужны) */
@@ -364,7 +375,34 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
           : floor.source === 'BREAK_EVEN' ? p.floorFromBreakEven(money(floor.minMinor))
             : floor.source === 'MARGIN' ? p.floorFromMargin(m.percentBp(floor.minMarginBp!), money(floor.marginFloorMinor), money(floor.minMinor))
               : p.floorFromMin(money(floor.minMinor));
+    // Шаг 162 (#27): маржа при текущей цене — та же функция, что у Gate и разбивки пола; себестоимость — в валюте предложения курсом ЕЦБ
+    const margin = (() => {
+      if (scope.currentPriceMinor === null) return { text: '–', missing: true, bp: null };
+      const c = costInScopeCurrency(scope, world);
+      if (!('cost' in c)) return { text: p.noUnitCost, missing: true, bp: null };
+      const bp = marginBpAtPrice(c.cost, scope.currentPriceMinor);
+      return bp === null ? { text: '–', missing: true, bp: null } : { text: m.percentBp(bp), missing: false, bp };
+    })();
+    const clearancePill = scope.clearance ? p.clearancePill : null;
+    const frozenPill = floor.aboveCeiling ? p.floorAboveCeiling : null;
+    const boundsPill = channelBoundsPill(world, scope, m);
+    const feePill = scope.clearance && scope.cost === null ? p.feeExpired : null;
+    const notes = channelNotes(world, scope, m);
+    // Короткая строка тесной ячейки — та же, что была у колонки заметок канала (шаг 89); полное пояснение — подсказкой
+    const noteItem = (n: ChannelNote): HealthItem => ({ tone: n.tone, text: n.label, ...(n.detail ? { detail: n.detail } : {}), ...(n.short ? { short: n.short } : {}), ...(n.whatToDo ? { whatToDo: n.whatToDo } : {}) });
+    // Порядок важности: блокировки (stop) — пол выше потолка, затем блокирующие заметки канала; затем внимание — конфликт рамок, прочие заметки,
+    // истёкшая комиссия, распродажа
+    const marks: HealthItem[] = [
+      ...(frozenPill ? [{ tone: 'stop' as const, text: frozenPill }] : []),
+      ...notes.filter((n) => n.tone === 'stop').map(noteItem),
+      ...(boundsPill ? [{ tone: 'warn' as const, text: boundsPill }] : []),
+      ...notes.filter((n) => n.tone !== 'stop').map(noteItem),
+      ...(feePill ? [{ tone: 'warn' as const, text: feePill }] : []),
+      ...(clearancePill ? [{ tone: 'warn' as const, text: clearancePill }] : []),
+    ];
     return {
+      margin,
+      health: marks.length === 0 ? null : { ...marks[0]!, more: marks.slice(1) },
       unit: unitOf(world, scope, m),
       // Шаг 148 (#27, UX-04): пустое — словами («No price yet», «Not set»), а не «no value» и «not set: not set»
       currentPrice: scope.currentPriceMinor === null ? p.noPriceYet : money(scope.currentPriceMinor),
@@ -376,7 +414,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       maxPrice: scope.bounds.max.status === 'RESOLVED' ? boundText(scope.bounds.max, scope.currency, m) : p.notSet,
       maxPriceMissing: scope.bounds.max.status !== 'RESOLVED',
       missing,
-      feeExpired: scope.clearance && scope.cost === null ? p.feeExpired : null,
+      feeExpired: feePill,
       strategy: strategyLabel(scope.strategy, scope.currency, m),
       enabled: enabledCell(scope, m, world, options.writeModes?.get(scope.channelAccountId) === 'SHADOW'),
       applying: applyingCell(scope, state.writes, m),
@@ -388,10 +426,10 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       canEnable: scope.pricingMode === 'OFF' && can(world.viewer.role, 'ENABLE_REPRICING') && !channelNotes(world, scope, m).some(noteBlocksPricing),
       // Шаг 118: выключить можно всегда, когда движок включён — ценообразование канала выключению не мешает (как база, Р-120)
       canDisable: scope.pricingMode === 'ENGINE' && can(world.viewer.role, 'ENABLE_REPRICING'),
-      channelNotes: channelNotes(world, scope, m),
-      clearance: scope.clearance ? p.clearancePill : null,
-      frozen: floor.aboveCeiling ? p.floorAboveCeiling : null,
-      channelBounds: channelBoundsPill(world, scope, m),
+      channelNotes: notes,
+      clearance: clearancePill,
+      frozen: frozenPill,
+      channelBounds: boundsPill,
       notAssigned: notAssignedText(scope, m),
       ...(options.buybox ? { buybox: options.buybox.get(scope.writeScopeId) ?? null } : {}),
     };

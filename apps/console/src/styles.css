@@ -455,7 +455,8 @@ table.products tbody tr:hover td.offer { background: var(--surface-muted); }
 .product-ref { font-size: var(--font-size-xs); color: var(--text-3); margin-top: var(--base-size-2); font-weight: var(--weight-normal); }
 /* шаг 112: во второй строке Offers — цвет товара, затем идентификатор товара в канале именем канала (ASIN, Walmart ID); разделитель — в тексте */
 /* откуда пол — пояснение переносится, а не раздвигает таблицу */
-td.floor .floor-parts { white-space: normal; min-width: 120px; max-width: 200px; margin-left: auto; }
+/* шаг 162 (#27): колонке маржи нужно место на 1440 — подпись пола переносится раньше (было 120px); по замеру на демо США с полосой прокрутки */
+td.floor .floor-parts { white-space: normal; min-width: 88px; max-width: 200px; margin-left: auto; }
 /* шаг 79: вид таблицы товаров — выбор колонок (меню) и компактные строки */
 .view-options { display: inline-flex; align-items: center; gap: var(--space-4); }
 details.column-picker { position: relative; }
@@ -477,9 +478,10 @@ details.column-picker .menu .check-field > label, .view-options .check-field > l
 td.status-cell .cell + .cell { margin-top: var(--space-1); }
 /* шаг 89: колонка «Channel says» (снят с публикации Walmart) — длинная пилюля и пояснение переносятся, стратегия тоже: таблица
    с этой колонкой помещается в рамку при 1440, а без неё вид прежний */
-table.products td.channel-says .cell { min-width: 150px; max-width: 180px; }
-table.products td.channel-says .badge { white-space: normal; }
-table.products.with-channel td.strategy { white-space: normal; min-width: 140px; }
+/* шаг 162 (#27): Health (прежняя колонка заметок канала) — пометки переносятся, а не растягивают таблицу на 1440 */
+table.products td.health .cell { min-width: 100px; max-width: 140px; }
+table.products td.health .badge { white-space: normal; max-width: 100%; border-radius: var(--radius); }
+table.products.with-health td.strategy { white-space: normal; min-width: 120px; }
 table.products.compact td { padding-top: var(--base-size-6); padding-bottom: var(--base-size-6); }
 table.products.compact .product-ref .channel-ids, table.products.compact .product-ref .badge, table.products.compact .floor-parts, table.products.compact .cell-detail, table.products.compact a.secondary-link { display: none; }
 .product-ref .badge { margin-left: var(--space-1); }
@@ -918,7 +920,8 @@ main.page.world > .card.not-found { margin: var(--space-7) auto; width: calc(100
  * своя ширина, в лентах пилюли идут столбиком, время переносится по «·», длинные немецкие заголовки переносятся по слогам
  */
 table.products td.status-cell .cell { min-width: 96px; }
-table.products td.offer { min-width: 200px; }
+/* шаг 162 (#27): колонке маржи нужно место на 1440 — название переносится раньше (было 200px) */
+table.products td.offer { min-width: 188px; }
 td.pills .badge { display: block; width: fit-content; }
 table.dense td.nowrap:has(.when) { white-space: normal; min-width: 96px; max-width: 120px; }
 table.dense td.nowrap .when { white-space: normal; }

@@ -1387,7 +1387,7 @@ export const es: Messages = {
       bulkEdit: 'Operaciones masivas',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: activadas ${t.enabled}, en curso ${t.applying}, detenidas ${t.stopped}, desactivadas ${t.off}.`,
       clock: (now: string) => `Hora simulada: ${now}.`,
-      columns: { unit: 'Oferta', current: 'Precio actual', floor: 'Piso vigente', ceiling: 'Precio máximo', strategy: 'Estrategia', enabled: 'Activado', applying: 'En curso', lastChange: 'Último cambio', nextCheck: 'Próxima revisión', channel: 'Problemas del canal', status: 'Estado', bbHolder: 'Titular de la Buy Box', bbPrice: 'Precio de la Buy Box', bbGap: 'Diferencia', bbShare: 'Cuota de Buy Box 7 d' },
+      columns: { margin: 'Margen', health: 'Estado', unit: 'Oferta', current: 'Precio actual', floor: 'Piso vigente', ceiling: 'Precio máximo', strategy: 'Estrategia', enabled: 'Activado', applying: 'En curso', lastChange: 'Último cambio', nextCheck: 'Próxima revisión', channel: 'Problemas del canal', status: 'Estado', bbHolder: 'Titular de la Buy Box', bbPrice: 'Precio de la Buy Box', bbGap: 'Diferencia', bbShare: 'Cuota de Buy Box 7 d' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Qué hacer',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart oculta esta oferta porque el mismo producto está más barato en otro lugar${elsewhere ? ` (${elsewhere})` : ''}. Para que vuelva a mostrarse, acerque el precio en walmart.com a ese precio, solo si su piso lo permite. TMPrice nunca cambia el precio por esto por su cuenta.`,
@@ -1399,6 +1399,8 @@ export const es: Messages = {
       competitorBadge: 'datos de la competencia',
       why: 'Por qué este precio', bounds: 'Límites y piso', noDecisions: 'aún sin decisiones', enable: 'Activar',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      // Шаг 162 (#27): маржа без себестоимости — словами
+      noUnitCost: 'Sin costo unitario',
       noPriceYet: 'Aún sin precio', notSet: 'Sin definir', feeExpired: 'La estimación de comisiones venció: la pérdida firmada puede estar desactualizada',
       missingTitle: 'Para activarlo, agregue:', missingItems: { UNIT_COST: 'Costo unitario y comisiones', MIN_PRICE: 'Precio mínimo', MAX_PRICE: 'Precio máximo' },
       floorNoMin: 'El precio mínimo no está definido',

@@ -1387,7 +1387,7 @@ export const fr: Messages = {
       bulkEdit: 'Opérations groupées',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total} : activées ${t.enabled}, en cours ${t.applying}, arrêtées ${t.stopped}, désactivées ${t.off}.`,
       clock: (now: string) => `Heure simulée : ${now}.`,
-      columns: { unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box 7 j' },
+      columns: { margin: 'Marge', health: 'État', unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box 7 j' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Que faire',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart masque cette offre parce que le même produit est moins cher ailleurs${elsewhere ? ` (${elsewhere})` : ''}. Pour qu’elle réapparaisse, rapprochez le prix walmart.com de ce prix — seulement si votre plancher le permet. TMPrice ne modifie jamais le prix de lui-même pour cette raison.`,
@@ -1399,6 +1399,8 @@ export const fr: Messages = {
       competitorBadge: 'données de la concurrence',
       why: 'Pourquoi ce prix', bounds: 'Limites et plancher', noDecisions: 'pas encore de décision', enable: 'Activer',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
+      // Шаг 162 (#27): маржа без себестоимости — словами
+      noUnitCost: 'Pas de coût unitaire',
       noPriceYet: 'Pas encore de prix', notSet: 'Non défini', feeExpired: 'Estimation des frais expirée : la perte signée peut être obsolète',
       missingTitle: 'Pour l’activer, ajoutez :', missingItems: { UNIT_COST: 'Coût unitaire et frais', MIN_PRICE: 'Prix minimum', MAX_PRICE: 'Prix maximum' },
       floorNoMin: 'Le prix minimum n’est pas défini',

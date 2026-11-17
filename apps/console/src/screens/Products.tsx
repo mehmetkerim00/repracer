@@ -11,7 +11,7 @@ import { Octicon } from '../icons.tsx';
  * Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда. Шаг 105 [Р-230]: колонки Buy Box —
  * держатель, цена, разрыв, доля за 7 дней — по умолчанию выключены; включённые — сортируют весь каталог и попадают в выгрузку
  */
-const OPTIONAL_COLUMNS = ['ceiling', 'strategy', 'lastChange', 'nextCheck', 'channel', 'bbHolder', 'bbPrice', 'bbGap', 'bbShare'] as const;
+const OPTIONAL_COLUMNS = ['margin', 'ceiling', 'strategy', 'health', 'lastChange', 'nextCheck', 'bbHolder', 'bbPrice', 'bbGap', 'bbShare'] as const;
 type OptionalColumn = (typeof OPTIONAL_COLUMNS)[number];
 const BUYBOX_COLUMNS = ['bbHolder', 'bbPrice', 'bbGap', 'bbShare'] as const;
 const SORT_OF: Record<(typeof BUYBOX_COLUMNS)[number], OfferSortKeyValue> = { bbHolder: 'holder', bbPrice: 'price', bbGap: 'gap', bbShare: 'share' };
@@ -42,7 +42,9 @@ export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string
 function defaultColumns(view: ProductListView): Record<OptionalColumn, boolean> {
   // Шаг 148 (#27): по умолчанию — предложение, статус, цена, держатель Buy Box, пол, стратегия; максимальная цена — за «Columns» (её
   // называют окно включения, страница пола и выгрузка)
-  return { ceiling: false, strategy: true, lastChange: false, nextCheck: false, channel: view.rows.some((r) => r.channelNotes.length > 0), ...BUYBOX_DEFAULTS };
+  // Шаг 162 (#27): маржа при текущей цене — по умолчанию; Health (с заметками канала — прежней колонкой «Issues from the channel») — когда на
+  // странице есть что сказать: колонка из прочерков — находка шага 96.2
+  return { margin: true, ceiling: false, strategy: true, health: view.rows.some((r) => r.health !== null), lastChange: false, nextCheck: false, ...BUYBOX_DEFAULTS };
 }
 /** Выбор колонок и плотность — удобство одного зрителя: браузерное хранилище, без него — умолчания (шаг 79) */
 function readView(view: ProductListView): { columns: Record<OptionalColumn, boolean>; compact: boolean } {
@@ -167,16 +169,17 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
             <CheckField label={p.viewOptions.compact} checked={shown.compact} onChange={(on) => update({ ...shown, compact: on })} />
           </span>
         </div>
-        <table className={`products sticky-end${shown.compact ? ' compact' : ''}${col.channel ? ' with-channel' : ''}`}>
+        <table className={`products sticky-end${shown.compact ? ' compact' : ''}${col.health ? ' with-health' : ''}`}>
           <thead>
             <tr>
               {/* Шаг 79 (ревью): статус — сразу после предложения: широкая таблица листается под закреплённой колонкой действий, и статус не прячется */}
               <th>{c.unit}</th><th>{c.status}</th><th className="num">{c.current}</th>
               {/* Шаг 105: колонки Buy Box — рядом с текущей ценой (разрыв — наша цена минус Buy Box): включённые видны без прокрутки таблицы */}
               {col.bbHolder ? sortHead('bbHolder', false) : null}{col.bbPrice ? sortHead('bbPrice', true) : null}{col.bbGap ? sortHead('bbGap', true) : null}{col.bbShare ? sortHead('bbShare', true) : null}
+              {col.margin ? <th className="num">{c.margin}</th> : null}
               <th className="num">{c.floor}</th>{col.ceiling ? <th className="num">{c.ceiling}</th> : null}
-              {col.strategy ? <th>{c.strategy}</th> : null}{col.lastChange ? <th>{c.lastChange}</th> : null}
-              {col.nextCheck ? <th>{c.nextCheck}</th> : null}{col.channel ? <th>{c.channel}</th> : null}<th />
+              {col.strategy ? <th>{c.strategy}</th> : null}{col.health ? <th>{c.health}</th> : null}{col.lastChange ? <th>{c.lastChange}</th> : null}
+              {col.nextCheck ? <th>{c.nextCheck}</th> : null}<th />
             </tr>
           </thead>
           <tbody>
@@ -184,14 +187,11 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
               <tr key={r.unit.writeScopeId}>
                 <td className="offer">
                   <strong><UnitName unit={r.unit} variant={false} /></strong>
-                  {/* Шаг 102 [Р-227]: режим распродажи — пилюлей attention у названия */}
-                  {r.clearance ? <> <Badge tone="warn">{r.clearance}</Badge></> : null}
-                  {/* Шаг 148 (шаг 142): распродажа без действующей оценки комиссии — подписанный убыток может быть устаревшим */}
-                  {r.feeExpired ? <> <Badge tone="warn">{r.feeExpired}</Badge></> : null}
-                  {/* Шаг 102: пол выше потолка — цены заморожены законно, но не молча */}
-                  {r.frozen ? <> <Badge tone="stop">{r.frozen}</Badge></> : null}
-                  {/* Шаг 107 [Р-233]: конфликт с рамками цены, заданными продавцом в канале — подробности на странице пола */}
-                  {r.channelBounds ? <> <Badge tone="warn">{r.channelBounds}</Badge></> : null}
+                  {/*
+                    * Шаг 162 (#27): пометки строки (распродажа — шаг 102, истёкшая комиссия — шаг 142, пол выше потолка — шаг 102, рамки канала —
+                    * шаг 107) переехали в колонку Health: важнейшая первой, остальные — «+N». Колонка скрыта — пометки остаются у названия
+                    */}
+                  {!col.health ? [r.frozen, r.channelBounds, r.feeExpired, r.clearance].map((x, i) => (x ? <span key={i}> <Badge tone={i === 0 ? 'stop' : 'warn'}>{x}</Badge></span> : null)) : null}
                   {/* Шаг 78: номер товара канала — приглушённо, состояние — отдельной пилюлей */}
                   {/* Шаг 79: «новый» — обычное состояние, пилюлю не показываем; иное — словами на языке экрана, а не кодом канала */}
                   {/* Шаг 112 [Р-238]: вторая строка — цвет товара (кружок и слово), затем идентификатор товара в канале его именем (ASIN,
@@ -203,6 +203,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                 {/* Шаг 148 (#27, UX-04): пустое — словами и обычным шрифтом; моноширинный — только у сумм */}
                 <td className={`num money${r.currentPriceMissing ? ' muted empty-value' : ' cur'}`}>{r.currentPrice}</td>
                 {bbOn ? bbCells(r.buybox) : null}
+                {/* Шаг 162 (#27): маржа при текущей цене — функцией Gate; пусто — словами и обычным шрифтом */}
+                {col.margin ? <td className={`num margin${r.margin.missing ? ' muted empty-value' : ''}`}>{r.margin.text}</td> : null}
                 <td className={`num floor${r.floor.missing ? '' : ' cur'}`}>
                   {r.floor.missing ? <span className="muted empty-value">{r.floor.amount}</span> : <strong>{r.floor.amount}</strong>}
                   <div className="muted small floor-parts">{r.floor.parts}</div>
@@ -214,15 +216,23 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                   {/* Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию — причина словами под именем */}
                   {r.notAssigned ? <div className="muted small">{r.notAssigned}</div> : null}
                 </td> : null}
+                {/*
+                  * Шаг 162 (#27): Health — важнейшее первым, с пояснением и «что делать» (шаг 96); остальное — «+N» с тем же содержимым. Колонка
+                  * «Issues from the channel» влилась сюда: заметки канала — ошибки и блокировки предложения
+                  */}
+                {col.health ? <td className="health">{r.health ? <>
+                  <Cell cell={{ tone: r.health.tone, label: r.health.text, detail: r.health.detail ?? '', ...(r.health.short ? { short: r.health.short } : {}) }} />
+                  {r.health.whatToDo ? <details className="what-to-do"><summary>{r.health.whatToDo.label}</summary><p>{r.health.whatToDo.text}</p></details> : null}
+                  {r.health.more.length > 0 ? (
+                    <details className="what-to-do health-more"><summary>+{r.health.more.length}</summary>
+                      <ul className="plain">{r.health.more.map((x) => (
+                        <li key={x.text}><Cell cell={{ tone: x.tone, label: x.text, detail: x.detail ?? '', ...(x.short ? { short: x.short } : {}) }} />{x.whatToDo ? <p className="small">{x.whatToDo.label}: {x.whatToDo.text}</p> : null}</li>
+                      ))}</ul>
+                    </details>
+                  ) : null}
+                </> : <span className="muted">–</span>}</td> : null}
                 {col.lastChange ? <td><Cell cell={r.lastChange} /></td> : null}
                 {col.nextCheck ? <td><Cell cell={r.nextCheck} /></td> : null}
-                {col.channel ? <td className="channel-says">{r.channelNotes.length === 0 ? '–' : r.channelNotes.map((n) => (
-                  <div key={n.code}>
-                    <Cell cell={n} />
-                    {/* Шаг 96 (А6): у пилюли — короткое «что делать», раскрывается на месте */}
-                    {n.whatToDo ? <details className="what-to-do"><summary>{n.whatToDo.label}</summary><p>{n.whatToDo.text}</p></details> : null}
-                  </div>
-                ))}</td> : null}
                 {/* Шаг 78: одна колонка действий — основная «Why this price», под ней мелкая вторичная «Bounds» */}
                 <td className="actions">
                   {r.latestDecisionId
