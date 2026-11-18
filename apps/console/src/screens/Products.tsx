@@ -243,7 +243,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                   {/* Шаг 97 [E]: страница конкурентов предложения — ссылкой из строки, не пунктом меню */}
                   <a className="secondary-link" href={href(view.worldId, 'competition', r.unit.writeScopeId)}>{m.ui.competition.link}</a>
                   {/* Шаг 169 (#36): ответ из сохранённых решений предложения — почему цена не менялась */}
-                  <a className="secondary-link" href={href(view.worldId, 'unchanged', r.unit.writeScopeId)}>{m.ui.unchanged.link}</a>
+                  <a className="secondary-link wrap-link" href={href(view.worldId, 'unchanged', r.unit.writeScopeId)}>{m.ui.unchanged.link}</a>
                   {r.canEnable && onEnable ? <button type="button" onClick={() => onEnable(r)}>{p.enable}</button> : null}
                   {/* Шаг 118: «этот SKU не трогай» — выключение автоцены одного предложения, обратно — «Enable» */}
                   {r.canDisable && onDisable ? <button type="button" onClick={() => onDisable(r)}>{m.ui.enabled.disable.button}</button> : null}

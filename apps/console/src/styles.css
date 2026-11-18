@@ -453,6 +453,8 @@ table.dense th { white-space: normal; }
 p.notice[role='note'] { background: var(--warning-soft); color: var(--warning); border-color: var(--warning-border); }
 td.actions > * { display: block; width: fit-content; }
 td.actions > * + * { margin-top: var(--space-1); }
+/* Шаг 169 (#36): длинная ссылка колонки действий переносится — колонка не шире «Why this price →», таблица Offers помещается в 1440 */
+td.actions > a.wrap-link { white-space: normal; max-width: 7.5rem; }
 
 /* Товары: 11 колонок — у предложения и стратегии своя ширина; пояснение к спокойному статусу — подсказкой, тревожное видно сразу */
 table.products td.offer { min-width: 220px; }
