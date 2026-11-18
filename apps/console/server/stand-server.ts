@@ -11,7 +11,7 @@ import {
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
-  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, unchangedView, readinessFactsOf, readinessView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue, type OfferSetupFilter,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, unchangedView, readinessFactsOf, readinessView, moneyCounts, overviewView, DECISION_CAUSES, OFFER_MONEY_FILTERS, type DecisionCause, type OfferMoneyFilter, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue, type OfferSetupFilter,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
   ATTENTION_FILTERS, attentionCounts, freshnessItems, statusLineView, statusStops, type AttentionFilter,
 } from '@repracer/console-model';
@@ -822,6 +822,21 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       return w;
     };
     const facts = (query: ConsoleCatalogFactsQuery): Promise<ConsoleCatalogFacts | null> => targeted ? targeted.consoleCatalogFacts!(live.tenantId, query) : Promise.resolve(null);
+    /** Шаг 146 (#34): строка состояния — одна функция у её маршрута и у Daily Overview (шаг 171): те же числа тем же расчётом */
+    const statusLine = async () => {
+      const now = live.clock.iso();
+      const [world, accounts, freshness, f] = await Promise.all([
+        load([]), live.store.channelAccounts(live.tenantId),
+        live.store.competitorFreshness ? live.store.competitorFreshness(live.tenantId) : Promise.resolve(null),
+        facts({ attention: { now: now as never } }),
+      ]);
+      const stops = statusStops(world, m);
+      return statusLineView({
+        worldId: live.id, now, accounts, tenantStop: stops.tenant, activeStops: stops.active, freshness,
+        // Без базы мир — каталог целиком (`load` без списка единиц)
+        attention: f?.attention ?? attentionCounts(targeted ? await load(null) : world, m),
+      }, m);
+    };
     const catalogPageFor = (query: ListQuery): Promise<ConsoleCatalogPage | null> =>
       targeted ? targeted.consoleCatalogPage!(live.tenantId, live.clock.iso() as never, query) : Promise.resolve(null);
     /**
@@ -855,6 +870,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const attention = params.get('attention');
       // Шаг 170 (#35): чего не хватает для включения — стратегии или границ
       const setup = params.get('setup');
+      // Шаг 171 (#34): финансовые исключения
+      const money = params.get('money');
       const q = (params.get('q') ?? '').trim();
       const sort = params.get('sort');
       const dir = params.get('dir');
@@ -862,11 +879,12 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (q.length > 100 || (holder !== null && !(OFFER_HOLDER_FILTERS as readonly string[]).includes(holder)) || (pricing !== null && !(OFFER_PRICING_FILTERS as readonly string[]).includes(pricing)) || (sort !== null && !(OFFER_SORT_KEYS as readonly string[]).includes(sort))
         || (attention !== null && !(ATTENTION_FILTERS as readonly string[]).includes(attention))
         || (setup !== null && !(OFFER_SETUP_FILTERS as readonly string[]).includes(setup))
+        || (money !== null && !(OFFER_MONEY_FILTERS as readonly string[]).includes(money))
         || (dir !== null && dir !== 'asc' && dir !== 'desc') || (bb !== null && bb !== '1')) return null;
       const [acc, mk] = storefront.split('|');
       const sf = storefront === '' ? null : acc && mk && live.accounts.some((a) => a.channelAccountId === acc && a.marketplaces.includes(mk)) ? { channelAccountId: acc, marketplace: mk } : undefined;
       if (sf === undefined) return null;
-      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, attention: attention as AttentionFilter | null, setup: setup as OfferSetupFilter | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
+      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, attention: attention as AttentionFilter | null, setup: setup as OfferSetupFilter | null, money: money as OfferMoneyFilter | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
         sort: sort ? { key: sort as NonNullable<OfferQuery['sort']>['key'], dir: (dir ?? 'asc') as 'asc' | 'desc' } : null, bb: bb === '1' };
     };
     const offerDeps = () => ({ store: live.store, tenantId: live.tenantId, now: live.clock.iso(), useDatabase: targeted !== null, world: () => load(null), m,
@@ -1035,18 +1053,23 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
          */
         case 'status': {
           if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
-          const now = live.clock.iso();
-          const [world, accounts, freshness, f] = await Promise.all([
-            load([]), live.store.channelAccounts(live.tenantId),
-            live.store.competitorFreshness ? live.store.competitorFreshness(live.tenantId) : Promise.resolve(null),
-            facts({ attention: { now: now as never } }),
+          return ok(await statusLine());
+        }
+        /**
+         * Шаг 171 (#34, ярус 2): Daily Overview — строка состояния, решения окна по причине (тем же правилом, что фильтр причины журнала),
+         * опасные предложения отчёта Protections того же периода и финансовые исключения (на PostgreSQL — фактами базы, без неё — правилом
+         * экрана). Окно — последние 24 часа (отметка визита — шаг 172)
+         */
+        case 'overview': {
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          const period = { preset: '24h' } as const;
+          const range = periodRange(period, live.clock.iso(), display?.timeZone ?? null, HOT_DECISIONS_DAYS);
+          const [status, causes, slice, f] = await Promise.all([
+            statusLine(), live.store.decisionCauses(live.tenantId, range.since as never),
+            live.store.interventions(live.tenantId, range.since as never, range.until as never), facts({ money: { now: live.clock.iso() as never } }),
           ]);
-          const stops = statusStops(world, m);
-          return ok(statusLineView({
-            worldId: live.id, now, accounts, tenantStop: stops.tenant, activeStops: stops.active, freshness,
-            // Без базы мир — каталог целиком (`load` без списка единиц)
-            attention: f?.attention ?? attentionCounts(targeted ? await load(null) : world, m),
-          }, m));
+          const dangerous = dangerousReport(await load(sliceScopeIds(slice)), slice, range, periodPhrase(period, m), m).count;
+          return ok(overviewView({ worldId: live.id, period, status, causes, dangerous, money: f?.money ?? moneyCounts(await load(null)) }, m));
         }
         /**
          * Шаг 170 (#35): чеклист готовности к бою — один ответ у блока Shadow mode и у формы перевода. «Нельзя» — правила стража журнала режимов
@@ -1079,7 +1102,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const oq = parseOfferQuery(url.searchParams);
           if (!query || !oq) return fail(400, 'BAD_PAGE', s.badRequest);
           // Шаг 105 [Р-230]: фильтр строки и сортировка по колонке Buy Box — выборкой по всему каталогу (база или правило экрана)
-          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, attention: oq.attention ?? null, setup: oq.setup ?? null, holder: oq.holder, q: oq.q };
+          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, attention: oq.attention ?? null, setup: oq.setup ?? null, money: oq.money ?? null, holder: oq.holder, q: oq.q };
           const deps = offerDeps();
           const catalog = filterActive(filter) || oq.sort ? await selectOffers(deps, oq, query) : await catalogPageFor(query);
           const world = await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog });
@@ -1105,15 +1128,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
              */
             const period = parsePeriod(url.searchParams);
             const outcomeParam = url.searchParams.get('outcome');
+            // Шаг 171 (#34): причина решения — группа карточки «What changed» Daily Overview
+            const causeParam = url.searchParams.get('cause');
             const searchText = (url.searchParams.get('q') ?? '').trim().toLowerCase();
-            if (period === null || searchText.length > 100 || (outcomeParam !== null && !(outcomeParam in DECISION_OUTCOME_GROUPS))) return fail(400, 'BAD_PAGE', s.badRequest);
+            if (period === null || searchText.length > 100 || (outcomeParam !== null && !(outcomeParam in DECISION_OUTCOME_GROUPS))
+              || (causeParam !== null && !(DECISION_CAUSES as readonly string[]).includes(causeParam))) return fail(400, 'BAD_PAGE', s.badRequest);
             // Шаг 96 (Б11): поиск по мере ввода фильтрует список — найденными предложениями, как у журнала записей
             const decisionSearch = searchText === '' ? null : await searchOffers(searchText, SEARCH_FILTER_LIMIT);
             const range = period ? periodRange(period, live.clock.iso(), display?.timeZone ?? null, HOT_DECISIONS_DAYS) : null;
             // верхняя граница — только у своего диапазона дат (одно правило с тенью и журналом — `upperOf`)
             const filter = { ...(scopeFilter ? { writeScopeId: scopeFilter } : {}), ...(decisionSearch ? { writeScopeIds: decisionSearch.ids } : {}),
               ...(period && range ? { since: range.since as never, ...upperOf(period, range) } : {}),
-              ...(outcomeParam ? { outcome: outcomeParam as DecisionOutcomeGroup } : {}) };
+              ...(outcomeParam ? { outcome: outcomeParam as DecisionOutcomeGroup } : {}), ...(causeParam ? { cause: causeParam as DecisionCause } : {}) };
             const probe = await live.store.decisionPage(live.tenantId, { offset: 0, limit: 1, ...filter });
             const clamped = { ...query, offset: clampOffset(query, probe.total) };
             const page = await live.store.decisionPage(live.tenantId, { ...clamped, ...filter });
@@ -1390,7 +1416,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const { storefrontValue: _sv, bb, ...query } = oq;
           return {
             query: { offers: { query, accounts: accountCompetitors(), shareRange: { since: range.since, until: range.until }, buybox: exportScreen === 'offers' && bb } },
-            filters: { storefront: sf, repricing: oq.pricing ?? '', needs_attention: oq.attention ?? '', setup: oq.setup ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
+            filters: { storefront: sf, repricing: oq.pricing ?? '', needs_attention: oq.attention ?? '', setup: oq.setup ?? '', money: oq.money ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
               ...(exportScreen === 'offers' ? { buy_box_columns: bb ? 'on' : '' } : {}) },
             period: null, periodPart: day(now),
           };

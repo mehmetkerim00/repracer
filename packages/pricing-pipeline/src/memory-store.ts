@@ -5,8 +5,8 @@ import { listingStatusStep, type LatestListingState } from './listing-status.ts'
 import { prioritizedWindow } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, FeeExpiryNotice, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow, FreshnessRow } from './store.ts';
-import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
-import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FloorHoldEpisodeRow, type FloorHoldTotals, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
+import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_CAUSES, decisionCause, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
+import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionCause, type DecisionCauseCount, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FloorHoldEpisodeRow, type FloorHoldTotals, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
 import { offerIdentityOf, type CompetitorQuery, type CompetitorSnapshot, type CompetitorSourceDescriptor, type DiscoveryCatalogNote, type FieldWrite, type Instant, type ListingStatusObservation, type OfferIdentity, type PriceBasis, type PricingHealthObservation, type WriteOutcome, type WriteRetryRule } from '@repracer/channel-port';
@@ -2741,12 +2741,41 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
   private static newestFirst = (a: { decidedAt: string; decisionId: string }, b: { decidedAt: string; decisionId: string }) =>
     Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.decisionId.localeCompare(a.decisionId);
 
+  /**
+   * Шаг 171 (#34): причина каждого решения — правило `decisionCause`; предыдущее решение предложения — по (момент, номер), как у базы.
+   * Карта строится на запрос: причина нужна фильтру журнала и карточке Overview
+   */
+  private causes(): Map<string, DecisionCause> {
+    const byScope = new Map<string, ConsoleDecisionRow[]>();
+    for (const d of this.decisions) (byScope.get(d.writeScopeId) ?? byScope.set(d.writeScopeId, []).get(d.writeScopeId)!).push(d);
+    const out = new Map<string, DecisionCause>();
+    for (const list of byScope.values()) {
+      const ordered = [...list].sort((a, b) => Date.parse(a.decidedAt) - Date.parse(b.decidedAt) || a.decisionId.localeCompare(b.decisionId));
+      ordered.forEach((d, i) => {
+        const prev = i > 0 ? ordered[i - 1]! : null;
+        out.set(d.decisionId, decisionCause(d, prev ? { strategyId: prev.strategyId ?? null, strategyVersion: prev.strategyVersion ?? null } : null));
+      });
+    }
+    return out;
+  }
+
+  async decisionCauses(_tenantId: string, since: Instant, until?: Instant): Promise<DecisionCauseCount[]> {
+    const causes = this.causes();
+    const inWindow = this.decisions.filter((d) => Date.parse(d.decidedAt) >= Date.parse(since) && (!until || Date.parse(d.decidedAt) < Date.parse(until)));
+    return DECISION_CAUSES.map((cause) => {
+      const rows = inWindow.filter((d) => causes.get(d.decisionId) === cause);
+      return { cause, decisions: rows.length, offers: new Set(rows.map((d) => d.writeScopeId)).size };
+    }).filter((x) => x.decisions > 0);
+  }
+
   async decisionPage(_tenantId: string, query: DecisionPageQuery): Promise<DecisionPage> {
     // Шаг 96: окно [since, until) и группа исхода — тем же правилом, что у базы (`DECISION_OUTCOME_GROUPS`)
     const outcomes = query.outcome ? (DECISION_OUTCOME_GROUPS[query.outcome] as readonly string[]) : null;
+    // Шаг 171 (#34): причина решения — правилом `decisionCause`, как у базы
+    const causes = query.cause ? this.causes() : null;
     const all = this.decisions.filter((d) => (!query.writeScopeId || d.writeScopeId === query.writeScopeId) && (!query.writeScopeIds || query.writeScopeIds.includes(d.writeScopeId))
       && (!query.since || Date.parse(d.decidedAt) >= Date.parse(query.since)) && (!query.until || Date.parse(d.decidedAt) < Date.parse(query.until))
-      && (outcomes === null || outcomes.includes(d.outcome))).sort(InMemoryPricingStore.newestFirst);
+      && (outcomes === null || outcomes.includes(d.outcome)) && (causes === null || causes.get(d.decisionId) === query.cause)).sort(InMemoryPricingStore.newestFirst);
     return { items: all.slice(query.offset, query.offset + query.limit).map((d) => ({ ...d })), total: all.length };
   }
 

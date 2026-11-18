@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import { ATTENTION_FILTERS, can, LOCALES, messagesFor, parsePeriod, type AttentionFilter, type Locale, type MemberRole, type Period } from '@repracer/console-model';
+import { ATTENTION_FILTERS, can, DECISION_CAUSES, type DecisionCause, LOCALES, messagesFor, parsePeriod, type AttentionFilter, type Locale, type MemberRole, type Period } from '@repracer/console-model';
 import type { SessionView, StandToken, WorldSummary } from './api-types.ts';
 import { requestJson, setAccessToken, useResource, type Resource } from './api.ts';
 import { Badge, ErrorBox, errorText, href, Intro, Load, MarketContext, MessagesContext, NotFound, noteNavigation, SectionAnchor, useMessages, WORKSPACES_HREF } from './components.tsx';
@@ -11,6 +11,7 @@ import { ExportContext } from './export.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { CompetitionScreen } from './screens/Competition.tsx';
 import { UnchangedScreen } from './screens/Unchanged.tsx';
+import { OverviewScreen } from './screens/Overview.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { CostsScreen } from './screens/Costs.tsx';
@@ -93,7 +94,9 @@ const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: '
 /** Шаг 77: экраны мира — группами боковой панели (порядок групп и экранов — порядок показа продукта) */
 /** Шаг 95 [Р-217]: 9 пунктов вместо 14 — функции те же, лишних дверей нет; Omnibus — только где действует правило ЕС */
 // Шаг 96 (аудит В19): Offers — в разделе Pricing; раздел и страница остатков — Inventory
+// Шаг 171 (#34, ярус 2): Daily Overview — первым пунктом, своим блоком (раздел из одного пункта заголовка не имеет)
 const NAV_GROUPS = [
+  ['start', ['overview']],
   ['overview', ['shadow']],
   ['pricing', ['feed', 'strategies', 'costs', 'protections', 'products']],
   ['stock', ['inventory']],
@@ -113,7 +116,7 @@ const NavContext = createContext<NavState>({ open: false, setOpen: () => undefin
  * docs/evidence/step96-ux.md; смоук утверждает, что иконки не повторяются
  */
 export const NAV_ICONS: Readonly<Record<string, string>> = {
-  shadow: 'eye', feed: 'history', strategies: 'goal', costs: 'tag', protections: 'shield-check',
+  overview: 'home', shadow: 'eye', feed: 'history', strategies: 'goal', costs: 'tag', protections: 'shield-check',
   products: 'list-unordered', inventory: 'package', channels: 'plug', compliance: 'law', stop: 'stop',
 };
 
@@ -298,10 +301,13 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       {redirectTo ? null : <StatusLine worldId={world.id} screen={[route.screen, route.param, route.param2, route.param3].filter(Boolean).join('/')} />}
       {redirectTo ? null
         // Шаг 170 (#35): `shadow/properties` — пункт чеклиста о свойстве витрины раскрывает блок проверок магазинов
+        : route.screen === 'overview' ? <OverviewScreen worldId={world.id} />
         : route.screen === 'shadow' ? <ShadowScreen key={route.param ?? ''} worldId={world.id} focus={route.param === 'properties' ? 'properties' : null} />
         // Шаг 145: `feed/held/<период>` — клик по плитке «Held back» тени: журнал с группой «Held by shadow mode» и тем же периодом
-        : route.screen === 'feed' ? <FeedScreen key={`${route.param}|${route.param2}`} worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'}
-            initialStatus={route.param === 'held' ? 'SHADOW_HELD' : undefined} initialPeriod={periodOfPath(route.param2)} />
+        : route.screen === 'feed' ? <FeedScreen key={`${route.param}|${route.param2}|${route.param3}`} worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'}
+            initialStatus={route.param === 'held' ? 'SHADOW_HELD' : undefined} initialPeriod={periodOfPath(route.param2)}
+            // Шаг 171 (#34): `feed/decisions/<период>/<причина>` — группа карточки «What changed» Daily Overview
+            initialCause={route.param === 'decisions' && (DECISION_CAUSES as readonly string[]).includes(route.param3 ?? '') ? route.param3 as DecisionCause : undefined} />
         : route.screen === 'decisions' && route.param ? <TraceScreen worldId={world.id} decisionId={route.param} />
         : route.screen === 'strategies' ? <StrategiesScreen worldId={world.id} />
         : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} target={route.param2 ?? null} />

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type OverviewView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -491,6 +491,28 @@ test('step 166: the stock screen and its export take sort=to_publish only with a
   const without = await call(auth, 'GET', `${api(w, 'stock')}?sort=to_publish`);
   assert.equal(without.status, 400, JSON.stringify(without.body));
   assert.equal((without.body as { error: { code: string } }).error.code, 'BAD_PAGE');
+});
+
+/**
+ * Шаг 171 (#34, ярус 2): Daily Overview без базы — группы причин за 24 часа: число группы — `total` журнала решений с фильтром этой причины
+ * того же окна; неверная причина и неверный фильтр Money — 400; гость читает Overview
+ */
+test('step 171 (#34): Overview without a database — every cause group is the journal of that cause in the same window; bad cause or Money is 400', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const view = await get<OverviewView>(owner, api(id, 'overview'));
+  assert.deepEqual(Object.keys(view).filter((k) => ['working', 'changed', 'risk', 'action'].includes(k)).sort(), ['action', 'changed', 'risk', 'working']);
+  assert.ok(view.changed.groups.length > 0, `the world has decisions in the last 24 hours: ${view.changed.empty}`);
+  for (const g of view.changed.groups) {
+    const page = await get<DecisionListView>(owner, `${api(id, 'decisions')}?offset=0&limit=1&period=24h&cause=${g.cause}`);
+    assert.equal(page.page.total, g.decisions, `${g.cause}: the group is the journal of that cause`);
+  }
+  for (const url of [`${api(id, 'decisions')}?cause=EVERYTHING`, `${api(id, 'products')}?money=RICH`]) {
+    const bad = await call(owner, 'GET', url);
+    assert.deepEqual([bad.status, (bad.body as { error: { code: string } }).error.code], [400, 'BAD_PAGE'], url);
+  }
+  const markup = await html('/src/screens/Overview.tsx', 'OverviewView', { view }, 'en');
+  for (const q of Object.values(messagesFor('en').ui.overview.questions)) assert.ok(markup.includes(q.replace(/'/g, '&#x27;')), q);
 });
 
 /**

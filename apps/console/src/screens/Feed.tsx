@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodPhrase, periodSearch, type DecisionListView, type FeedQuery, type FeedStatusGroup, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
+import { DECISION_CAUSES, FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, type DecisionCause, periodPhrase, periodSearch, type DecisionListView, type FeedQuery, type FeedStatusGroup, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
 import { UnchangedHint } from './Unchanged.tsx';
@@ -119,7 +119,7 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
   );
 }
 
-export function FeedScreen({ worldId, kind, initialStatus, initialPeriod }: { worldId: string; kind: FeedKind; initialStatus?: FeedStatusGroup; initialPeriod?: Period }) {
+export function FeedScreen({ worldId, kind, initialStatus, initialPeriod, initialCause }: { worldId: string; kind: FeedKind; initialStatus?: FeedStatusGroup; initialPeriod?: Period; initialCause?: DecisionCause }) {
   const m = useMessages();
   const f = m.ui.feed;
   // Шаг 96: период и поиск — общие для обоих видов журнала: переключение вида их не сбрасывает. Шаг 145: клик по плитке тени задаёт оба
@@ -131,7 +131,7 @@ export function FeedScreen({ worldId, kind, initialStatus, initialPeriod }: { wo
       <h2>{f.pageTitle}</h2>
       <p className="subtitle">{m.ui.app.subtitles.feed}</p>
       {kind === 'decisions'
-        ? <DecisionJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} />
+        ? <DecisionJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} initialCause={initialCause} />
         : <WriteJournal worldId={worldId} onKind={onKind} period={period} onPeriod={setPeriod} search={search} onSearch={setSearch} initialStatus={initialStatus} />}
     </section>
   );
@@ -179,17 +179,19 @@ function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch, ini
   );
 }
 
-type DecisionQuery = ListQuery & { writeScopeId?: string; outcome?: 'CHANGED' | 'NO_CHANGE' | 'REJECTED' };
+// Шаг 171 (#34): `cause` — причина решения, группа карточки «What changed» Daily Overview
+type DecisionQuery = ListQuery & { writeScopeId?: string; outcome?: 'CHANGED' | 'NO_CHANGE' | 'REJECTED'; cause?: DecisionCause };
 
 /** Все решения журнала — страницами базы [Р-154]; строка ведёт на квитанцию решения «Why this price» */
-function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch }: JournalProps) {
+function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch, initialCause }: JournalProps & { initialCause?: DecisionCause }) {
   const m = useMessages();
   const f = m.ui.feed;
-  const [query, setQuery] = useState<DecisionQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [query, setQuery] = useState<DecisionQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT, ...(initialCause ? { cause: initialCause } : {}) });
   const [pickerCount, setPickerCount] = useState<string | null>(null);
   const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit) });
   if (query.writeScopeId) params.set('writeScopeId', query.writeScopeId);
   if (query.outcome) params.set('outcome', query.outcome);
+  if (query.cause) params.set('cause', query.cause);
   if (search) params.set('q', search);
   const [resource, retry] = useResource<DecisionListView>(`${worldPath(worldId, 'decisions')}?${params.toString()}&${periodSearch(period)}`, m.locale);
   const reset = (patch: Partial<DecisionQuery>) => setQuery({ ...query, ...patch, offset: 0 });
@@ -207,6 +209,15 @@ function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch }
         }}>
           <option value="">{f.outcome.all}</option>
           {(['CHANGED', 'NO_CHANGE', 'REJECTED'] as const).map((o) => <option key={o} value={o}>{f.outcome[o]}</option>)}
+        </select></Field>
+        {/* Шаг 171 (#34): причина решения — та же группировка, что карточка «What changed» Daily Overview */}
+        <Field label={f.cause.label}><select value={query.cause ?? ''} onChange={(e) => {
+          const cause = (e.target.value || undefined) as DecisionCause | undefined;
+          const { cause: _was, ...rest } = query;
+          setQuery({ ...rest, offset: 0, ...(cause ? { cause } : {}) });
+        }}>
+          <option value="">{f.cause.all}</option>
+          {DECISION_CAUSES.map((c) => <option key={c} value={c}>{m.ui.overview.causes[c]}</option>)}
         </select></Field>
         {pickerCount ? <span className="filters-count">{pickerCount}</span> : null}
         <ExportControl worldId={worldId} screen="decisions" query={exportQuery(period, { writeScopeId: query.writeScopeId, outcome: query.outcome, q: search })} />

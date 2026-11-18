@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
+import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_MONEY_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ColorVariant, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ReasonLine, SellerName, UnitName, useMessages } from '../components.tsx';
@@ -19,8 +19,9 @@ const VIEW_KEY = 'repracer.products.view';
 
 /** Шаг 105: фильтр строки и сортировка экрана Offers — то, что уходит в адрес экрана и в обе выгрузки */
 // Шаг 170 (#35): `setup` — чего не хватает для включения (стратегии или границ)
-export interface OfferUiQuery { storefront: string; pricing: string; attention: string; setup: string; holder: string; q: string; sort: OfferSort | null }
-export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', attention: '', setup: '', holder: '', q: '', sort: null };
+// Шаг 171 (#34): `money` — финансовые исключения (распродажа, цена ниже безубыточности)
+export interface OfferUiQuery { storefront: string; pricing: string; attention: string; setup: string; money: string; holder: string; q: string; sort: OfferSort | null }
+export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', attention: '', setup: '', money: '', holder: '', q: '', sort: null };
 /**
  * Шаг 170 (#35): выборка Offers из адреса — `products/filter/<параметры>` (пункт чеклиста готовности ведёт в свою выборку): витрина, автоцена,
  * причина внимания и setup; незнакомые значения отбрасывает сервер (400), здесь — только поля экрана
@@ -28,7 +29,7 @@ export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', atten
 export function offerQueryOfPath(part: string | null | undefined): OfferUiQuery | undefined {
   if (!part || !part.includes('=')) return undefined;
   const p = new URLSearchParams(part);
-  return { ...NO_OFFER_QUERY, storefront: p.get('storefront') ?? '', pricing: p.get('pricing') ?? '', attention: p.get('attention') ?? '', setup: p.get('setup') ?? '' };
+  return { ...NO_OFFER_QUERY, storefront: p.get('storefront') ?? '', pricing: p.get('pricing') ?? '', attention: p.get('attention') ?? '', setup: p.get('setup') ?? '', money: p.get('money') ?? '' };
 }
 /** Шаг 148 (#27): один сигнал конкуренции по умолчанию — держатель Buy Box; остальные колонки Buy Box — за «Columns» */
 const BUYBOX_DEFAULTS: Readonly<Record<(typeof BUYBOX_COLUMNS)[number], boolean>> = { bbHolder: true, bbPrice: false, bbGap: false, bbShare: false };
@@ -42,7 +43,7 @@ export function storedBuyboxColumns(): boolean {
 }
 /** Адрес экрана и запрос выгрузки: пустые поля не передаются */
 export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string> {
-  return exportQuery(null, { storefront: q.storefront, pricing: q.pricing, attention: q.attention, setup: q.setup, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
+  return exportQuery(null, { storefront: q.storefront, pricing: q.pricing, attention: q.attention, setup: q.setup, money: q.money, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
 }
 /**
  * «Следующая проверка» у всех предложений сейчас одна и та же («нет данных») — по умолчанию скрыта; «Канал сообщает» — когда есть что
@@ -152,6 +153,13 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
               <select value={offerQuery.setup} onChange={(e) => onOfferQuery({ ...offerQuery, setup: e.currentTarget.value })}>
                 <option value="">{f.anySetup}</option>
                 {OFFER_SETUP_FILTERS.map((v) => <option key={v} value={v}>{f.setupValues[v]}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 171 (#34): финансовые исключения — выборка очереди «What needs action» Daily Overview */}
+            <Field label={f.money}>
+              <select value={offerQuery.money} onChange={(e) => onOfferQuery({ ...offerQuery, money: e.currentTarget.value })}>
+                <option value="">{f.anyMoney}</option>
+                {OFFER_MONEY_FILTERS.map((v) => <option key={v} value={v}>{f.moneyValues[v]}</option>)}
               </select>
             </Field>
             <Field label={f.holder}>

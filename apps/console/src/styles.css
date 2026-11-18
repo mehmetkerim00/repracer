@@ -1365,6 +1365,18 @@ output.field-value { display: flex; align-items: center; min-height: var(--contr
 .status-dot.dot-ok { background: var(--success); }
 .status-dot.dot-warn { background: var(--warning); }
 .status-dot.dot-stop { background: var(--danger); }
+/* Шаг 171 (#34, ярус 2): Daily Overview — четыре карточки-вопроса сеткой (две колонки на ≥ 1012 px), строки — точка тона и ссылка в выборку */
+.overview-window { margin: 0 0 var(--space-3); }
+.overview-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+@media (width >= 63.25rem) { .overview-grid { grid-template-columns: 1fr 1fr; } }
+/* отступ соседних карточек (:is(…) + :is(…)) в сетке не нужен — ряд держит gap */
+.overview .overview-grid > .card { margin: 0; }
+.overview-card h3 { margin: 0 0 var(--space-2); }
+.overview-card > p.muted.small { margin: 0 0 var(--space-2); }
+.overview-lines { list-style: none; margin: 0; padding: 0; }
+.overview-lines li { display: flex; align-items: baseline; gap: var(--space-2); }
+.overview-lines li + li { margin-top: var(--space-2); }
+.overview-lines .status-dot { transform: translateY(-1px); }
 .status-reasons { display: inline-flex; flex-wrap: wrap; gap: 0 var(--space-2); }
 .status-reasons a { color: var(--text-2); }
 .status-reasons a + a::before { content: '·'; margin-right: var(--space-2); color: var(--text-3); }

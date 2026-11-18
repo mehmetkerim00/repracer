@@ -486,9 +486,10 @@ export const fr: Messages = {
         signInFirst: 'Connectez-vous pour accepter l’invitation.',
       },
       signIn: 'Se connecter',
-      navGroups: { overview: 'Aperçu', pricing: 'Prix', stock: 'Stocks', account: 'Espace de travail' },
+      navGroups: { start: 'Début', overview: 'Aperçu', pricing: 'Prix', stock: 'Stocks', account: 'Espace de travail' },
       // Шаг 79: подзаголовок страницы — одно предложение у экранов без своего вступления
       subtitles: {
+        overview: 'Quatre questions sur votre espace de travail — répondues à partir de ce que nous avons enregistré, rien n’est deviné.',
         shadow: 'Ce que le moteur ferait sur vos canaux — avant que quoi que ce soit ne soit envoyé à vos boutiques.',
         compliance: 'Preuves de vos prix antérieurs pour les remises sur les sites de l’UE (Omnibus).',
         products: 'Chaque offre avec son prix, ses limites et sa stratégie — une ligne par offre.',
@@ -513,6 +514,8 @@ export const fr: Messages = {
         costs: 'Coûts et planchers', protections: 'Protections', channels: 'Canaux',
         // Шаг 96 (В19): страница и пункт остатков — Inventory; Offers — в разделе Pricing
         inventory: 'Stocks',
+        // Шаг 171 (#34): первый пункт меню — Daily Overview
+        overview: 'Aperçu',
         // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
         unchanged: 'Pourquoi mon prix n’a-t-il pas changé ?' },
       loading: (seconds: number) => `Chargement… Sans réponse dans les ${seconds} s, une erreur s’affiche.`,
@@ -1432,6 +1435,8 @@ export const fr: Messages = {
         matched: (n: number, total: number) => `${n} offres sur ${total} correspondent au filtre`,
         attention: 'Demande de l’attention', anyAttention: 'Toutes les offres',
         attentionValues: { ANY: 'N’importe quel motif', NO_UNIT_COST: 'Sans coût unitaire ni frais', AUTOMATED_PRICING: 'Tarification automatique Amazon active', CHANNEL_BOUNDS: 'Limites Amazon non lues', NOT_BUYABLE: 'Non achetable', TURNED_OFF: 'Désactivée' },
+        // Шаг 171 (#34): финансовые исключения
+        money: 'Argent', anyMoney: 'Toutes', moneyValues: { CLEARANCE: 'Déstockage actif', BELOW_BREAK_EVEN: 'Sous le seuil de rentabilité' },
         // Шаг 170 (#35): чего не хватает для включения
         setup: 'Configuration', anySetup: 'Toutes', setupValues: { NO_STRATEGY: 'Sans stratégie', NO_BOUNDS: 'Sans prix minimum ou maximum' },
       },
@@ -1489,6 +1494,28 @@ export const fr: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 171 (#34, ярус 2): Daily Overview — четыре вопроса из сохранённого, без генерации текста
+    overview: {
+      questions: { working: 'Tout fonctionne-t-il ?', changed: 'Qu’est-ce qui a changé et pourquoi ?', risk: 'Où est le risque ?', action: 'Qu’est-ce qui demande une action ?' },
+      window: (period: string) => `Compté ${period}.`,
+      windowNote: 'Nous ne conservons pas encore vos visites : ce sont donc les dernières 24 heures, et non depuis votre dernière visite.',
+      liveNote: 'La vue en direct arrive avec votre premier compte en direct ; d’ici là, ce sont les mêmes quatre questions.',
+      changedShadow: (period: string) => `Décisions ${period}, par cause — calculées en mode fantôme ; rien n’a été envoyé à votre boutique.`,
+      changedLive: (period: string) => `Décisions ${period}, par cause.`,
+      counted: (decisions: number, offers: number) => `${decisions} ${decisions === 1 ? 'décision' : 'décisions'} sur ${offers} ${offers === 1 ? 'offre' : 'offres'}`,
+      causes: { STOPS: 'Arrêts et pauses', DATA_QUALITY: 'Qualité des données', FLOOR_HOLDS: 'Prix plancher tenu', STRATEGY_CHANGE: 'Changement de stratégie', COST_CHANGE: 'Coût unitaire et frais', COMPETITORS: 'Concurrence', OTHER: 'Vérifications planifiées et autres' },
+      noChanges: (period: string) => `Aucune décision n’a été enregistrée ${period}.`,
+      risk: {
+        dangerous: (n: number) => `${n === 1 ? '1 proposition dangereuse a été arrêtée' : `${n} propositions dangereuses ont été arrêtées`} par vos limites (plus de 10 % au-delà d’une limite)`,
+        stale: (text: string) => `Les données de la concurrence sont anciennes — ${text}`,
+      },
+      noRisk: (period: string) => `Rien de risqué ${period} : aucune proposition dangereuse, et les données de la concurrence ne sont pas anciennes.`,
+      money: {
+        CLEARANCE: (n: number) => `${n === 1 ? '1 offre est' : `${n} offres sont`} en déstockage — vente sous le seuil de rentabilité, volontairement`,
+        BELOW_BREAK_EVEN: (n: number) => `${n === 1 ? '1 offre a' : `${n} offres ont`} un prix sous le seuil de rentabilité`,
+      },
+      noAction: 'Rien ne demande votre action.',
+    },
     // Шаг 170 (#35): чеклист готовности к бою — «нельзя» (перевод откажет) и «не стоит» (советуем), у каждого пункта — своя выборка
     readiness: {
       title: 'Prêt à envoyer les prix ?',
@@ -2129,6 +2156,8 @@ export const fr: Messages = {
     },
     feed: {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
+      // Шаг 171 (#34): причина решения — выборка группы карточки «What changed» Daily Overview
+      cause: { label: 'Motif', all: 'Tout motif' },
       kind: { label: 'Type', writes: 'Changements proposés', decisions: 'Décisions de prix', writesCaption: 'Changements de prix proposés par le moteur : envoyés à une boutique, retenus en mode fantôme ou arrêtés.', decisionsCaption: 'Chaque décision de prix, avec ou sans changement proposé. Le statut ne concerne que les changements.' },
       countsLead: (phrase: string) => `Changements ${phrase}, par statut :`,
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)

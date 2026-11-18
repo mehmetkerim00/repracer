@@ -53,8 +53,8 @@ import type {
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded, FeeExpiryNotice,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason, PricingSwitchRef } from '@repracer/pricing-pipeline';
-import { ATTENTION_REASONS, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
-import type { AttentionCounts, AttentionFilter, AttentionReason, FreshnessRow, OfferSetupFilter, ReadinessFacts } from '@repracer/pricing-pipeline';
+import { ATTENTION_REASONS, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DATA_QUALITY_CODES, DECISION_CAUSES, DECISION_OUTCOME_GROUPS, FLOOR_REJECTIONS, OFFER_MONEY_FILTERS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
+import type { AttentionCounts, AttentionFilter, AttentionReason, DecisionCauseCount, FreshnessRow, OfferMoneyFilter, OfferSetupFilter, ReadinessFacts } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 import { IMPORT_RUN_COLUMNS, importRunRow, insertImportRun } from './import-runs.ts';
@@ -285,6 +285,36 @@ const ATTENTION_SQL: Readonly<Record<AttentionReason, (now: () => string) => str
  * `pricing_strategy_id`) или минимальная либо максимальная цена не разрешается (`bounds.*.status` — последние версии уровней единицы и товара
  * той же валюты и базы, как `BOUNDS_ROWS`; то же — функции `effective_min_price` / `effective_max_price`)
  */
+/**
+ * Шаг 171 (#34): финансовые исключения фильтра Money — правило экрана: режим распродажи действует (`active_clearance`, как `clearance` строки
+ * каталога), цена ниже безубыточности вне распродажи (текущая цена — как `currentPriceMinor` каталога, безубыточность — `break_even_floor`)
+ */
+const CURRENT_PRICE_SQL = `CASE WHEN ss.latest_version_accepted > 0 AND ss.last_sent_amount_minor IS NOT NULL THEN ss.last_sent_amount_minor
+       ELSE (SELECT o.observed_amount_minor FROM channel_data.observed_channel_state o WHERE o.tenant_id = s.tenant_id AND o.write_scope_id = s.write_scope_id AND o.field = 'PRICE') END`;
+const CLEARANCE_ON_SQL = (now: string) => `EXISTS (SELECT 1 FROM tenant_data.active_clearance(s.tenant_id, s.write_scope_id, ${now}::timestamptz))`;
+const MONEY_SQL: Readonly<Record<OfferMoneyFilter, (now: () => string) => string>> = {
+  CLEARANCE: (now) => CLEARANCE_ON_SQL(now()),
+  BELOW_BREAK_EVEN: (now) => `(NOT ${CLEARANCE_ON_SQL(now())} AND (${CURRENT_PRICE_SQL}) < (SELECT b.floor_minor FROM tenant_data.break_even_floor(s.tenant_id, s.write_scope_id, ${now()}::timestamptz) b))`,
+};
+
+/**
+ * Шаг 171 (#34): причина решения — правило `decisionCause` (pricing-pipeline) выражением над строкой решения `d`; предыдущее решение
+ * предложения — по (момент, номер), индекс (tenant_id, write_scope_id, decided_at DESC) из 0117
+ */
+const DECISION_CAUSE_SQL = `CASE
+    WHEN d.outcome = 'HELD' THEN 'STOPS'
+    WHEN d.no_change_reason = ANY ('{${DATA_QUALITY_CODES.join(',')}}'::text[]) THEN 'DATA_QUALITY'
+    WHEN d.rule_code = 'FLOOR_RAISE' OR d.rejection_reason = ANY ('{${FLOOR_REJECTIONS.join(',')}}'::text[])
+      OR (d.outcome = 'APPROVED' AND d.final_amount_minor IS NOT NULL AND d.final_amount_minor = d.effective_floor_minor) THEN 'FLOOR_HOLDS'
+    WHEN EXISTS (SELECT 1 FROM (SELECT p.pricing_strategy_id, p.pricing_strategy_version FROM channel_data.price_decision p
+                                 WHERE p.tenant_id = d.tenant_id AND p.write_scope_id = d.write_scope_id
+                                   AND (p.decided_at, p.price_decision_id) < (d.decided_at, d.price_decision_id)
+                                 ORDER BY p.decided_at DESC, p.price_decision_id DESC LIMIT 1) prev
+                  WHERE (prev.pricing_strategy_id, prev.pricing_strategy_version) IS DISTINCT FROM (d.pricing_strategy_id, d.pricing_strategy_version)) THEN 'STRATEGY_CHANGE'
+    WHEN d.trigger_type = 'COST_CHANGE' THEN 'COST_CHANGE'
+    WHEN d.trigger_type = 'COMPETITOR_CHANGE' THEN 'COMPETITORS'
+    ELSE 'OTHER' END`;
+
 const SETUP_SQL: Readonly<Record<OfferSetupFilter, string>> = {
   NO_STRATEGY: `s.pricing_strategy_id IS NULL`,
   NO_BOUNDS: `(tenant_data.effective_min_price(s.tenant_id, s.write_scope_id) IS NULL OR tenant_data.effective_max_price(s.tenant_id, s.write_scope_id) IS NULL)`,
@@ -3063,6 +3093,8 @@ export class PgPricingStore implements PricingStore {
     if (f.attention) { const at = f.attention.now; let ref: string | null = null; where.push(attentionWhere(f.attention.filter, () => (ref ??= p(at)))); }
     // Шаг 170 (#35): чего не хватает для включения — те же фрагменты, что факты чеклиста готовности
     if (f.setup) where.push(SETUP_SQL[f.setup]);
+    // Шаг 171 (#34): финансовые исключения — те же фрагменты, что итоги очереди «What needs action»
+    if (f.money) { const at = f.money.now; let ref: string | null = null; where.push(MONEY_SQL[f.money.filter](() => (ref ??= p(at)))); }
     const search = f.search && f.search.q !== '' ? f.search : null;
     const label = search
       ? `, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref, coalesce(p.gtin, '') AS gtin, coalesce(p.title, p.sku) AS product,
@@ -3354,7 +3386,15 @@ export class PgPricingStore implements PricingStore {
           blockingBounds: blocking.map((r) => ({ channelAccountId: String(r.channel_account_id), total: Number(r.total) })),
         };
       }
-      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed, attention, readiness };
+      let money: Record<OfferMoneyFilter, number> | null = null;
+      if (query.money) {
+        // Шаг 171 (#34): финансовые исключения — теми же фрагментами, что фильтр Money Offers
+        const { rows: [r] } = await tx.query(
+          `WITH sc AS (SELECT ${OFFER_MONEY_FILTERS.map((x) => `${MONEY_SQL[x](() => '$2')} AS ${x.toLowerCase()}`).join(', ')} ${SCOPE_FROM})
+           SELECT ${OFFER_MONEY_FILTERS.map((x) => `count(*) FILTER (WHERE ${x.toLowerCase()})::int AS ${x.toLowerCase()}`).join(', ')} FROM sc`, [tenantId, query.money.now]);
+        money = Object.fromEntries(OFFER_MONEY_FILTERS.map((x) => [x, Number(r![x.toLowerCase()])])) as Record<OfferMoneyFilter, number>;
+      }
+      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed, attention, readiness, money };
     });
   }
 
@@ -3381,6 +3421,8 @@ export class PgPricingStore implements PricingStore {
         if (query.since) add((n) => `d.decided_at >= $${n}::timestamptz`, query.since);
         if (query.until) add((n) => `d.decided_at < $${n}::timestamptz`, query.until);
         if (query.outcome) add((n) => `d.outcome = ANY($${n}::text[])`, [...DECISION_OUTCOME_GROUPS[query.outcome]]);
+        // Шаг 171 (#34): причина решения — выражение правила `decisionCause`
+        if (query.cause) add((n) => `(${DECISION_CAUSE_SQL}) = $${n}`, query.cause);
         return { sql: where.join(' AND '), values };
       };
       const page = conditions(4);
@@ -3391,6 +3433,19 @@ export class PgPricingStore implements PricingStore {
         tx.query(`SELECT count(*)::int AS n FROM channel_data.price_decision d WHERE ${counted.sql}`, [tenantId, ...counted.values]),
       ]);
       return { items: rows.map(decisionRow), total: Number(count!.n) };
+    });
+  }
+
+  /** Шаг 171 (#34): решения окна по причине — строки журнала и уникальные предложения, тем же выражением, что фильтр причины */
+  async decisionCauses(tenantId: string, since: Instant, until?: Instant): Promise<DecisionCauseCount[]> {
+    return inTenant(this.admin('decisionCauses'), tenantId, async (tx) => {
+      const { rows } = await tx.query(
+        `SELECT cause, count(*)::int AS decisions, count(DISTINCT write_scope_id)::int AS offers
+           FROM (SELECT d.write_scope_id, (${DECISION_CAUSE_SQL}) AS cause FROM channel_data.price_decision d
+                  WHERE d.tenant_id = $1 AND d.decided_at >= $2::timestamptz AND ($3::timestamptz IS NULL OR d.decided_at < $3::timestamptz)) x
+          GROUP BY cause`, [tenantId, since, until ?? null]);
+      const by = new Map(rows.map((r) => [String(r.cause), r]));
+      return DECISION_CAUSES.flatMap((cause) => { const r = by.get(cause); return r ? [{ cause, decisions: Number(r.decisions), offers: Number(r.offers) }] : []; });
     });
   }
 

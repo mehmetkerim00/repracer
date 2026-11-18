@@ -4,7 +4,7 @@ import { channelBoundsPill, channelBoundsUnread } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
-import type { AttentionFilter, AttentionReason, ConsoleCatalogPage, OfferPricingFilterValue, OfferSetupFilter, ScopeDecisionStats } from '@repracer/pricing-pipeline';
+import type { AttentionFilter, AttentionReason, ConsoleCatalogPage, OfferMoneyFilter, OfferPricingFilterValue, OfferSetupFilter, ScopeDecisionStats } from '@repracer/pricing-pipeline';
 // Шаг 168: одно правило «требует внимания» со строкой состояния (status-line берёт channelNotes отсюда — вызов во время работы, не при загрузке)
 import { attentionReasons } from './status-line.ts';
 import { storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferSort } from './offer-buybox.ts';
@@ -95,6 +95,8 @@ export interface OfferFilter {
   attention: AttentionFilter | null;
   /** Шаг 170 (#35): чего не хватает для включения — стратегии или границ; null — все. Необязательное: прежние вызовы его не передают */
   setup?: OfferSetupFilter | null;
+  /** Шаг 171 (#34): финансовые исключения; null — все */
+  money?: OfferMoneyFilter | null;
   holder: OfferHolderFilterValue | null;
   q: string;
 }
@@ -461,8 +463,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
   };
 }
 
-export const NO_FILTER: OfferFilter = { storefront: null, pricing: null, attention: null, setup: null, holder: null, q: '' };
-export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.pricing !== null || f.attention !== null || (f.setup ?? null) !== null || f.holder !== null || f.q !== '';
+export const NO_FILTER: OfferFilter = { storefront: null, pricing: null, attention: null, setup: null, money: null, holder: null, q: '' };
+export const filterActive = (f: OfferFilter): boolean => f.storefront !== null || f.pricing !== null || f.attention !== null || (f.setup ?? null) !== null || (f.money ?? null) !== null || f.holder !== null || f.q !== '';
 
 /** Итоги каталога целиком — правило экрана Offers без базы; на PostgreSQL их считает база (`consoleCatalogPage`) */
 export function catalogTotals(world: StandWorld, m: Messages): { total: number; enabled: number; applying: number; stopped: number; off: number } {

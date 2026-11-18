@@ -1123,6 +1123,8 @@ export interface PricingStore {
   competitorFreshness?(tenantId: string): Promise<FreshnessRow[]>;
   // --- Р-154 (шаг 35): потоки — страницами, окнами, агрегатами -----------------------------------------------------
   decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
+  /** Шаг 171 (#34): решения окна [since, until) по причине — тем же правилом, что фильтр причины журнала */
+  decisionCauses(tenantId: string, since: Instant, until?: Instant): Promise<DecisionCauseCount[]>;
   decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
   /**
    * Шаг 97 [Р-220]: отрезки держателя Buy Box предложения единицы, задевающие период [from, to) (и последний до него — его состояние
@@ -1512,6 +1514,36 @@ export interface ConsoleState {
 export const DECISION_OUTCOME_GROUPS = { CHANGED: ['APPROVED', 'CLAMPED_FLOOR', 'CLAMPED_CEILING'], NO_CHANGE: ['NO_CHANGE'], REJECTED: ['REJECTED', 'HELD'] } as const;
 export type DecisionOutcomeGroup = keyof typeof DECISION_OUTCOME_GROUPS;
 
+/**
+ * Шаг 171 (#34, ярус 2): причина решения для Daily Overview — одна на решение, первая подошедшая по порядку списка; только сохранённые поля
+ * решения, ничего задним числом. Одно правило у базы (`DECISION_CAUSE_SQL` хранилища PostgreSQL) и у памяти (`decisionCause`); равенство на
+ * мирах стенда держит тест. `prev` — стратегия предыдущего решения того же предложения (нет — смены стратегии нет)
+ */
+export const DECISION_CAUSES = ['STOPS', 'DATA_QUALITY', 'FLOOR_HOLDS', 'STRATEGY_CHANGE', 'COST_CHANGE', 'COMPETITORS', 'OTHER'] as const;
+export type DecisionCause = (typeof DECISION_CAUSES)[number];
+/** «Не рассчитано» и нет данных конкурентов нужной полноты — качество данных, а не решение рынка */
+export const DATA_QUALITY_CODES = ['COMPETITOR_REQUIREMENT_NOT_MET', 'COST_INPUTS_MISSING', 'MARGIN_UNATTAINABLE', 'BOUNDS_INVALID', 'ENGINE_CURRENCY_MISMATCH',
+  'INVALID_STRATEGY_PARAMS', 'NO_COMPETITOR_OFFERS', 'BUYBOX_HOLDER_REQUIRED'] as const;
+/** Отказ Gate ниже пола — удержание пола (выше потолка — не пол) */
+export const FLOOR_REJECTIONS = ['BELOW_MIN_PRICE', 'BELOW_MARGIN_FLOOR'] as const;
+
+export function decisionCause(
+  d: { outcome: string; noChangeReason?: string | null; rejectionReason?: string | null; ruleCode?: string | null; trigger?: string | null; finalMinor: number | null; effectiveFloorMinor: number | null; strategyId?: string | null; strategyVersion?: number | null },
+  prev: { strategyId: string | null; strategyVersion: number | null } | null,
+): DecisionCause {
+  if (d.outcome === 'HELD') return 'STOPS';
+  if (d.noChangeReason && (DATA_QUALITY_CODES as readonly string[]).includes(d.noChangeReason)) return 'DATA_QUALITY';
+  if (d.ruleCode === 'FLOOR_RAISE' || (d.rejectionReason && (FLOOR_REJECTIONS as readonly string[]).includes(d.rejectionReason))
+    || (d.outcome === 'APPROVED' && d.finalMinor !== null && d.finalMinor === d.effectiveFloorMinor)) return 'FLOOR_HOLDS';
+  if (prev && ((prev.strategyId ?? null) !== (d.strategyId ?? null) || (prev.strategyVersion ?? null) !== (d.strategyVersion ?? null))) return 'STRATEGY_CHANGE';
+  if (d.trigger === 'COST_CHANGE') return 'COST_CHANGE';
+  if (d.trigger === 'COMPETITOR_CHANGE') return 'COMPETITORS';
+  return 'OTHER';
+}
+
+/** Шаг 171: решения окна по причине — строк журнала и уникальных предложений */
+export interface DecisionCauseCount { cause: DecisionCause; decisions: number; offers: number }
+
 export interface DecisionPageQuery {
   offset: number;
   limit: number;
@@ -1522,6 +1554,8 @@ export interface DecisionPageQuery {
   since?: Instant;
   until?: Instant;
   outcome?: DecisionOutcomeGroup;
+  /** Шаг 171 (#34): причина решения — группа карточки «What changed» Daily Overview */
+  cause?: DecisionCause;
 }
 
 export interface DecisionPage {
@@ -1585,6 +1619,8 @@ export interface OfferPageFilter {
   holder?: OfferHolderFilter;
   /** Шаг 170 (#35): чего не хватает для включения — стратегии или минимальной и максимальной цены */
   setup?: OfferSetupFilter;
+  /** Шаг 171 (#34): финансовые исключения — распродажа или цена ниже безубыточности (момент — для оценки комиссии и курса) */
+  money?: { filter: OfferMoneyFilter; now: Instant };
   /** Поиск — по подписи экрана, SKU, ключу канала и EAN, как у поиска предложения (`consoleCatalogFacts.search`) */
   search?: { q: string; labelTemplate: string; marketplaceWords: Readonly<Record<string, string>>; channelNames: Readonly<Record<string, string>>; unknownChannel: string };
   sort?: { key: OfferSortKey; dir: 'asc' | 'desc' };
@@ -1594,6 +1630,13 @@ export interface OfferPageFilter {
   /** Посчитать строки выгрузки конкурентов (потолок 50 000 — до создания задания) */
   countCompetitorRows?: boolean;
 }
+
+/**
+ * Шаг 171 (#34): фильтр Offers «Money» — финансовые исключения: действующий режим распродажи (`CLEARANCE`, Р-227) и текущая цена ниже
+ * безубыточности вне распродажи (`BELOW_BREAK_EVEN`). Одно правило у базы и экрана; очередь «What needs action» Daily Overview считает им же
+ */
+export const OFFER_MONEY_FILTERS = ['CLEARANCE', 'BELOW_BREAK_EVEN'] as const;
+export type OfferMoneyFilter = (typeof OFFER_MONEY_FILTERS)[number];
 
 /**
  * Шаг 170 (#35): фильтр Offers «Setup» — чего не хватает предложению для включения: стратегии (`NO_STRATEGY`) или действующей минимальной или
@@ -1667,6 +1710,8 @@ export interface ConsoleCatalogFactsQuery {
   attention?: { now: Instant };
   /** Шаг 170 (#35): факты готовности к бою по витринам — теми же фрагментами, что фильтры Offers; рамки — функцией стража перевода */
   readiness?: { now: Instant };
+  /** Шаг 171 (#34): сколько предложений в каждом финансовом исключении — теми же фрагментами, что фильтр Money */
+  money?: { now: Instant };
 }
 
 /**
@@ -1703,6 +1748,7 @@ export interface ConsoleCatalogFacts {
   keyed: Array<{ marketplace: string; channelProductRef: string; condition: string; writeScopeId: string }> | null;
   attention?: AttentionCounts | null;
   readiness?: ReadinessFacts | null;
+  money?: Record<OfferMoneyFilter, number> | null;
 }
 
 export interface ScopeDecisionStats {

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { ATTENTION_FILTERS, ATTENTION_REASONS, OFFER_SETUP_FILTERS, type DecisionListView, type ReadinessView, type ProductListView, type StatusLineView, type StopView, type StrategyListView } from '@repracer/console-model';
+import { ATTENTION_FILTERS, ATTENTION_REASONS, OFFER_MONEY_FILTERS, OFFER_SETUP_FILTERS, type DecisionListView, type OverviewView, type ReadinessView, type ProductListView, type StatusLineView, type StopView, type StrategyListView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { PgIdentityDirectory } from '@repracer/identity/pg';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
 import { createPool } from '@repracer/pricing-store-pg';
+import { decisionCause, DECISION_CAUSES, type DecisionCause } from '@repracer/pricing-pipeline';
 import type { StandToken } from '../src/api-types.ts';
 import { createStandApi } from '../server/stand-server.ts';
 import { parseCsv } from '@repracer/cost-import';
@@ -281,6 +282,58 @@ test('step 170 (#35): readiness — the database equals the screen rule on every
   assert.equal(created, 1, 'the new offer of discovery is in the catalog');
   assert.ok(seen.worlds > 0 && seen.items > 0 && seen.links > 0 && seen.setup >= 2, `every part met data: ${JSON.stringify({ ...seen, codes: [...seen.codes] })}`);
   for (const code of ['NO_STRATEGY', 'NO_BOUNDS', 'NO_UNIT_COST', 'OFFERS_OFF']) assert.ok(seen.codes.has(code), `${code} met data: ${[...seen.codes].join(', ')}`);
+});
+
+/**
+ * Шаг 171 (#34, ярус 2): Daily Overview на PostgreSQL. Причины решений считает база выражением `DECISION_CAUSE_SQL` — оно равно правилу
+ * `decisionCause` над теми же строками журнала (предыдущее решение предложения — по моменту и номеру); число каждой группы — `total` журнала с
+ * фильтром этой причины того же окна; финансовые исключения — база = правило экрана (ответы двух серверов равны), число строки очереди —
+ * `total` Offers с фильтром Money
+ */
+test('step 171 (#34): Overview — the database causes equal the rule over the same decisions; every number is the selection it links to; Money alike', { timeout: 20 * 60_000 }, async () => {
+  const r = await targeted({ method: 'POST', url: '/api/stand-issuer/token', body: { role: 'OWNER' } });
+  const auth = { authorization: `Bearer ${(r.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
+  const both = async (url: string) => {
+    const [a, b] = await Promise.all([targeted({ method: 'GET', url, body: null, ...auth }), full({ method: 'GET', url, body: null, ...auth })]);
+    assert.equal(a.status, 200, `${url}: ${JSON.stringify(a.body).slice(0, 300)}`);
+    assert.deepEqual(a.body, b.body, `${url}: database = screen rule`);
+    return a.body;
+  };
+  const seen = { worlds: 0, groups: 0, causes: new Set<string>(), money: 0 };
+  for (const live of worlds) {
+    if (!live.store.consoleCatalogFacts) continue;
+    const api = (path: string) => `/api/worlds/${encodeURIComponent(live.id)}/${path}`;
+    const view = (await both(api('overview'))) as OverviewView;
+    seen.worlds += 1;
+    // Правило над строками журнала: все решения буфера, предыдущее — по (момент, номер) предложения
+    const since = new Date(Date.parse(live.clock.iso()) - 24 * 3_600_000).toISOString();
+    const all = (await live.store.decisionPage(live.tenantId, { offset: 0, limit: 100_000 })).items;
+    const ordered = [...all].sort((a, b) => Date.parse(a.decidedAt) - Date.parse(b.decidedAt) || (a.decisionId < b.decisionId ? -1 : a.decisionId > b.decisionId ? 1 : 0));
+    const prevOf = new Map<string, { strategyId: string | null; strategyVersion: number | null } | null>();
+    const lastByScope = new Map<string, { strategyId: string | null; strategyVersion: number | null }>();
+    for (const d of ordered) { prevOf.set(d.decisionId, lastByScope.get(d.writeScopeId) ?? null); lastByScope.set(d.writeScopeId, { strategyId: d.strategyId ?? null, strategyVersion: d.strategyVersion ?? null }); }
+    const expected = new Map<DecisionCause, { decisions: number; offers: Set<string> }>();
+    for (const d of all.filter((x) => Date.parse(x.decidedAt) >= Date.parse(since))) {
+      const c = decisionCause(d, prevOf.get(d.decisionId) ?? null);
+      const e = expected.get(c) ?? { decisions: 0, offers: new Set<string>() };
+      e.decisions += 1; e.offers.add(d.writeScopeId); expected.set(c, e);
+    }
+    const counted = await live.store.decisionCauses(live.tenantId, since as never);
+    assert.deepEqual(counted, DECISION_CAUSES.flatMap((c) => { const e = expected.get(c); return e ? [{ cause: c, decisions: e.decisions, offers: e.offers.size }] : []; }),
+      `${live.id}: causes by the database = the rule over the same decisions`);
+    for (const g of view.changed.groups) {
+      const page = (await both(api(`decisions?offset=0&limit=1&period=24h&cause=${g.cause}`))) as DecisionListView;
+      assert.equal(page.page.total, g.decisions, `${live.id} ${g.cause}: the group is the journal of that cause`);
+      seen.groups += 1; seen.causes.add(g.cause);
+    }
+    for (const line of view.action.items.filter((x) => x.target[1] === 'filter')) {
+      const page = (await both(api(`products?offset=0&limit=1&${line.target[2]}`))) as ProductListView;
+      assert.equal(page.page.total, line.count, `${live.id}: ${line.target[2]} is the Offers selection it links to`);
+      seen.money += 1;
+    }
+    for (const money of OFFER_MONEY_FILTERS) await both(api(`products?offset=0&limit=50&money=${money}`));
+  }
+  assert.ok(seen.worlds > 0 && seen.groups > 0 && seen.causes.size >= 2 && seen.money > 0, `every part met data: ${JSON.stringify({ ...seen, causes: [...seen.causes] })}`);
 });
 
 /**

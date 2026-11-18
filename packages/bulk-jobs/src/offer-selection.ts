@@ -1,9 +1,9 @@
 import {
-  attentionReasons, catalogTotals, setupGaps, channelOf, competitionRowOffers, matchesAttention, matchesHolder, orderedOffers, offerBuyboxCells, offerMatchesSearch, sortOffers, type BuyboxCells, type Messages, type OfferHolderFilterValue, type OfferSort,
+  attentionReasons, catalogTotals, moneyExceptions, setupGaps, channelOf, competitionRowOffers, matchesAttention, matchesHolder, orderedOffers, offerBuyboxCells, offerMatchesSearch, sortOffers, type BuyboxCells, type Messages, type OfferHolderFilterValue, type OfferSort,
   type StandWorld,
 } from '@repracer/console-model';
 import type { Instant } from '@repracer/channel-port';
-import { PRICING_MODE_OF_FILTER, type AttentionFilter, type OfferSetupFilter, type CompetitionData, type CompetitionDataRow, type ConsoleCatalogPage, type OfferPricingFilterValue, type PricingStore } from '@repracer/pricing-pipeline';
+import { PRICING_MODE_OF_FILTER, type AttentionFilter, type OfferMoneyFilter, type OfferSetupFilter, type CompetitionData, type CompetitionDataRow, type ConsoleCatalogPage, type OfferPricingFilterValue, type PricingStore } from '@repracer/pricing-pipeline';
 
 /**
  * Шаг 105 [Р-230]: какие предложения показывает Offers и в каком порядке — витрина, держатель Buy Box, поиск и сортировка по колонкам
@@ -26,6 +26,8 @@ export interface OfferQuery {
   attention?: AttentionFilter | null;
   /** Шаг 170 (#35): чего не хватает для включения — стратегии или границ; null — все */
   setup?: OfferSetupFilter | null;
+  /** Шаг 171 (#34): финансовые исключения — распродажа или цена ниже безубыточности; null — все */
+  money?: OfferMoneyFilter | null;
   holder: OfferHolderFilterValue | null;
   /** Поиск — в нижнем регистре и без пробелов по краям; пусто — без поиска */
   q: string;
@@ -91,6 +93,7 @@ export async function selectOffers(deps: OfferSelectionDeps, query: OfferQuery, 
         ...(query.pricing ? { pricing: query.pricing } : {}),
         ...(query.attention ? { attention: { filter: query.attention, now: deps.now as Instant } } : {}),
         ...(query.setup ? { setup: query.setup } : {}),
+        ...(query.money ? { money: { filter: query.money, now: deps.now as Instant } } : {}),
         ...(query.holder ? { holder: query.holder } : {}),
         ...(query.q !== '' ? { search: { q: query.q, labelTemplate: m.ui.common.unitLabel('{p}', '{s}'), marketplaceWords: m.ui.connections.marketplaces as Readonly<Record<string, string>>, channelNames,
           unknownChannel: (m.values as Record<string, string | undefined>).UNKNOWN_CHANNEL ?? 'UNKNOWN_CHANNEL' } } : {}),
@@ -110,6 +113,8 @@ export async function selectOffers(deps: OfferSelectionDeps, query: OfferQuery, 
   if (query.attention) scopes = scopes.filter((s) => matchesAttention(attentionReasons(world, s, m), query.attention!));
   // Шаг 170 (#35): правило экрана фильтра Setup — то же, что считает чеклист готовности
   if (query.setup) scopes = scopes.filter((s) => setupGaps(s).includes(query.setup!));
+  // Шаг 171 (#34): правило экрана фильтра Money — то же, что считает очередь «What needs action»
+  if (query.money) scopes = scopes.filter((s) => moneyExceptions(world, s).includes(query.money!));
   if (query.q !== '') scopes = scopes.filter((s) => offerMatchesSearch(world, s, query.q, m));
   let competitorRows: number | undefined;
   if (query.holder || query.sort || options.countCompetitorRows) {

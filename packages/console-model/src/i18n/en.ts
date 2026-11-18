@@ -486,9 +486,10 @@ export const en = {
         signInFirst: 'Sign in to accept the invitation.',
       },
       signIn: 'Sign in',
-      navGroups: { overview: 'Overview', pricing: 'Pricing', stock: 'Inventory', account: 'Workspace' },
+      navGroups: { start: 'Start', overview: 'Overview', pricing: 'Pricing', stock: 'Inventory', account: 'Workspace' },
       // Шаг 79: подзаголовок страницы — одно предложение у экранов без своего вступления
       subtitles: {
+        overview: 'Four questions about your workspace — answered from what we stored, nothing is guessed.',
         shadow: 'What the engine would do on your channels — before anything is sent to your stores.',
         compliance: 'Evidence of your prior prices for discounts on EU storefronts (Omnibus).',
         products: 'Every offer with its price, bounds and strategy — one row per offer.',
@@ -514,6 +515,8 @@ export const en = {
         costs: 'Costs & floors', protections: 'Protections', channels: 'Channels',
         // Шаг 96 (В19): страница и пункт остатков — Inventory; Offers — в разделе Pricing
         inventory: 'Inventory',
+        // Шаг 171 (#34): первый пункт меню — Daily Overview
+        overview: 'Overview',
         // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
         unchanged: 'Why didn\'t my price change?' },
       loading: (seconds: number) => `Loading… If there is no answer within ${seconds} s, an error is shown.`,
@@ -1439,6 +1442,8 @@ export const en = {
         matched: (n: number, total: number) => `${n} of ${total} offers match the filter`,
         attention: 'Needs attention', anyAttention: 'All offers',
         attentionValues: { ANY: 'Any reason', NO_UNIT_COST: 'No unit cost or fees', AUTOMATED_PRICING: 'Amazon repricer on', CHANNEL_BOUNDS: 'Amazon bounds not read', NOT_BUYABLE: 'Not buyable', TURNED_OFF: 'Turned off' },
+        // Шаг 171 (#34): финансовые исключения
+        money: 'Money', anyMoney: 'Any', moneyValues: { CLEARANCE: 'Clearance on', BELOW_BREAK_EVEN: 'Below break-even' },
         // Шаг 170 (#35): чего не хватает для включения
         setup: 'Setup', anySetup: 'Any', setupValues: { NO_STRATEGY: 'No strategy', NO_BOUNDS: 'No minimum or maximum price' },
       },
@@ -1498,6 +1503,28 @@ export const en = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 171 (#34, ярус 2): Daily Overview — четыре вопроса из сохранённого, без генерации текста
+    overview: {
+      questions: { working: 'Is everything working?', changed: 'What changed and why?', risk: 'Where is the risk?', action: 'What needs action?' },
+      window: (period: string) => `Counted ${period}.`,
+      windowNote: 'We do not keep your visits yet, so this is the last 24 hours rather than since your last visit.',
+      liveNote: 'The live view of Overview comes with your first live account; until then these are the same four questions.',
+      changedShadow: (period: string) => `Decisions ${period}, by cause — calculated in shadow mode; nothing was sent to your store.`,
+      changedLive: (period: string) => `Decisions ${period}, by cause.`,
+      counted: (decisions: number, offers: number) => `${decisions} ${decisions === 1 ? 'decision' : 'decisions'} on ${offers} ${offers === 1 ? 'offer' : 'offers'}`,
+      causes: { STOPS: 'Stops and pauses', DATA_QUALITY: 'Data quality', FLOOR_HOLDS: 'Floor holds', STRATEGY_CHANGE: 'Strategy change', COST_CHANGE: 'Unit cost and fees', COMPETITORS: 'Competitors', OTHER: 'Scheduled checks and other' },
+      noChanges: (period: string) => `No decision was recorded ${period}.`,
+      risk: {
+        dangerous: (n: number) => `${n === 1 ? '1 dangerous proposal was' : `${n} dangerous proposals were`} stopped by your bounds (more than 10% beyond a bound)`,
+        stale: (text: string) => `Competitor data is stale — ${text}`,
+      },
+      noRisk: (period: string) => `Nothing risky ${period}: no dangerous proposal, and competitor data is not stale.`,
+      money: {
+        CLEARANCE: (n: number) => `${n === 1 ? '1 offer is' : `${n} offers are`} in clearance — selling below break-even on purpose`,
+        BELOW_BREAK_EVEN: (n: number) => `${n === 1 ? '1 offer is' : `${n} offers are`} priced below break-even`,
+      },
+      noAction: 'Nothing needs your action.',
+    },
     // Шаг 170 (#35): чеклист готовности к бою — «нельзя» (перевод откажет) и «не стоит» (советуем), у каждого пункта — своя выборка
     readiness: {
       title: 'Ready to send prices?',
@@ -2146,6 +2173,8 @@ export const en = {
     feed: {
       /** Шаг 95 [Р-217]: единственный журнал цен — записи в канал или все решения (с записью и без) */
       // Шаг 145 (аудит UX): «sent» — только о настоящих отправках; в тени цены не уходят
+      // Шаг 171 (#34): причина решения — выборка группы карточки «What changed» Daily Overview
+      cause: { label: 'Cause', all: 'Any cause' },
       kind: { label: 'Kind', writes: 'Proposed updates', decisions: 'Price decisions', writesCaption: 'Price updates the engine proposed: sent to a store, held back in shadow mode, or stopped.', decisionsCaption: 'Every price decision, with or without a proposed update. Status belongs to updates only.' },
       countsLead: (phrase: string) => `Updates ${phrase}, by status:`,
       // Шаг 96: решения — с периодом и исходом (вариант шага 95 принят)

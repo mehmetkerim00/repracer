@@ -418,9 +418,10 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
  * выдвижной панелью, которую закрывают выбор пункта, крестик, клик мимо и Esc; при 1012 и шире — прежняя боковая панель без кнопки меню
  */
 /** Шаг 95 [Р-217]: меню из 9 пунктов в профиле us (в eu у пространства с витриной ЕС перед «Stop pricing» — Omnibus) */
-const MENU_US = ['shadow', 'feed', 'strategies', 'costs', 'protections', 'products', 'inventory', 'channels', 'stop'];
+// Шаг 171 (#34, решение владельца): Overview — первым пунктом; пунктов 10, с Omnibus в ЕС — 11
+const MENU_US = ['overview', 'shadow', 'feed', 'strategies', 'costs', 'protections', 'products', 'inventory', 'channels', 'stop'];
 /** Шаг 95 [Р-217]: экраны меню из 9 пунктов и их вкладки; последним — Costs & floors (на нём проверяется навигация ниже) */
-const SCREENS = ['shadow', 'products', 'products/bulk', 'inventory', 'feed', 'feed/decisions', 'protections', 'protections/people', 'stop', 'channels', 'strategies', 'compliance', 'costs'];
+const SCREENS = ['overview', 'shadow', 'products', 'products/bulk', 'inventory', 'feed', 'feed/decisions', 'protections', 'protections/people', 'stop', 'channels', 'strategies', 'compliance', 'costs'];
 const WIDTHS: ReadonlyArray<readonly [number, number]> = [[375, 812], [768, 1024], [1012, 800], [1440, 900]];
 
 /** Ширина прокрутки документа против ширины окна (без полосы прокрутки) и элементы, которые торчат за окно не внутри своей рамки прокрутки */
@@ -764,7 +765,7 @@ test('step 86, step 98 (Р-223): every menu item and the heading of its page are
     const links = await b.evaluate<Array<{ text: string; href: string }>>(
       `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
     // Шаг 95 [Р-217]: девять пунктов и Omnibus — у смоук-мира витрины ЕС
-    assert.deepEqual(links.map((l) => l.href.split('/')[3]), [...MENU_US.slice(0, 8), 'compliance', 'stop'], `${m.locale}: the menu of nine items and Omnibus`);
+    assert.deepEqual(links.map((l) => l.href.split('/')[3]), [...MENU_US.slice(0, 9), 'compliance', 'stop'], `${m.locale}: the menu of ten items and Omnibus`);
     assert.ok(links.some((l) => l.text === m.ui.app.screens.feed), `${m.locale}: the navigation speaks the screen language`);
     const mismatches: string[] = [];
     for (const l of links) {
@@ -885,8 +886,9 @@ test('step 95 (Р-217): nine menu items; every old address leads to its new plac
   const fields = await b.evaluate<string[]>(`[...document.querySelectorAll('.toolbar .field-label')].map((l) => l.textContent.trim())`);
   // Шаг 96: у решений — период и исход (вариант шага 95 принят); статус — только у записей
   // Шаг 104: последним — «Export» того, что показывает экран
-  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.period.label, en.ui.feed.filters.offer, en.ui.feed.outcome.label, en.ui.export.button],
-    'decisions: kind, period, offer and outcome — status belongs to price writes; export last');
+  // Шаг 171 (#34): «Cause» — после исхода: группа карточки «What changed» Daily Overview
+  assert.deepEqual(fields, [en.ui.feed.kind.label, en.ui.period.label, en.ui.feed.filters.offer, en.ui.feed.outcome.label, en.ui.feed.cause.label, en.ui.export.button],
+    'decisions: kind, period, offer, outcome and cause — status belongs to price writes; export last');
   const receipt = await b.evaluate<string>(`document.querySelector('.world-content table a.row-link').getAttribute('href')`);
   await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`);
   await settled(b, 'receipt');
@@ -1008,7 +1010,8 @@ test('step 96.1: the period is one date-range control — dates on the button, t
   // Меню: у раздела из одного пункта заголовка нет, у остальных — есть
   const groups = await b.evaluate<Array<{ title: string | null; items: number }>>(`[...document.querySelectorAll('.nav-group')].map((g) => ({ title: g.querySelector('.group-title')?.textContent.trim() ?? null, items: g.querySelectorAll('a').length }))`);
   assert.ok(groups.every((g) => (g.items === 1) === (g.title === null)), `a title only above a section of several items — ${JSON.stringify(groups)}`);
-  assert.deepEqual(groups.filter((g) => g.items === 1).length, 2, `Overview and Inventory are sections of one item — ${JSON.stringify(groups)}`);
+  // Шаг 171 (#34): Overview (Daily Overview) — свой блок первым; Shadow mode и Inventory — по-прежнему блоки из одного пункта
+  assert.deepEqual(groups.filter((g) => g.items === 1).length, 3, `Overview, Shadow mode and Inventory are sections of one item — ${JSON.stringify(groups)}`);
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/feed`)}, true)`);
   await settled(b, 'feed');
   const trigger = () => b.evaluate<{ text: string; expanded: string | null; label: string | null; focused: boolean }>(`(() => { const x = document.querySelector('.drp-trigger');
@@ -1356,7 +1359,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
       'us: a workspace whose storefronts are all European is not offered; an empty one is');
     const links = await b.evaluate<Array<{ text: string; href: string }>>(
       `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
-    assert.deepEqual(links.map((l) => l.href.split('/')[3]), MENU_US, `us: nine menu items, no Omnibus — ${links.map((l) => l.text).join(', ')}`);
+    assert.deepEqual(links.map((l) => l.href.split('/')[3]), MENU_US, `us: ten menu items, no Omnibus — ${links.map((l) => l.text).join(', ')}`);
     for (const l of links) {
       await b.evaluate(`(location.hash = ${JSON.stringify(l.href)}, true)`);
       await settled(b, `us ${l.text}`);
@@ -1465,8 +1468,8 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
   const t = en.ui.imports;
   // Шаг 158 (#26): на Inventory импорт — раскрываемым разделом, его заголовок — строка раскрытия, а не свой h3
   const headings = () => b.evaluate<string[]>(`[...document.querySelectorAll('.import-panel')].map((p) => (p.querySelector(':scope > h3') ?? p.closest('details')?.querySelector(':scope > summary'))?.textContent.trim() ?? '')`);
-  // Меню прежнее — девять пунктов и Omnibus; импорты — разделами страниц
-  assert.equal((await b.evaluate<number>(`document.querySelectorAll('.nav-group a').length`)), 10, 'the menu does not grow');
+  // Меню прежнее — десять пунктов (шаг 171: Overview) и Omnibus; импорты — разделами страниц
+  assert.equal((await b.evaluate<number>(`document.querySelectorAll('.nav-group a').length`)), 11, 'the menu does not grow');
   await visit('costs');
   assert.deepEqual(await headings(), [t.titles.COSTS, t.titles.BOUNDS], 'Costs & floors holds the unit-cost and the bounds imports');
   await visit('strategies');
@@ -2290,8 +2293,8 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
     if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
     await go('products');
     const p = m.ui.products;
-    // Шаг 146 (#34): поле «Needs attention» — после «Repricing»; шаг 170 (#35): «Setup» — после него
-    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.attention, p.filters.setup, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
+    // Шаг 146 (#34): поле «Needs attention» — после «Repricing»; шаг 170 (#35): «Setup» — после него; шаг 171 (#34): «Money» — после «Setup»
+    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.attention, p.filters.setup, p.filters.money, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
     // Колонки Buy Box выключены по умолчанию и есть в выборе Columns
     const shown = await b.evaluate<string[]>(headers);
     // Шаг 148 (#27): один сигнал конкуренции по умолчанию — держатель Buy Box; остальные колонки Buy Box и Maximum price — за «Columns»
@@ -3146,6 +3149,72 @@ const LONG_HELP = `(() => {
   }
   return out;
 })()`;
+
+/**
+ * Шаг 171 (#34, ярус 2; Р-254): Daily Overview — первый пункт меню, заголовок = пункт меню; четыре карточки-вопроса (две колонки на 1440, одна
+ * на 375); группа причины открывает журнал решений с фильтром этой причины и тем же окном, и в журнале ровно столько решений, сколько в
+ * карточке; обе темы, без бокового прокрута
+ */
+test('step 171 (#34): Overview — the first menu item; four question cards; a cause group opens the decision journal of that cause with the same number', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const t = en.ui.overview;
+  const first = await b.evaluate<{ text: string; href: string }>(`(() => { const a = document.querySelector('.nav-group a'); return { text: a.textContent.trim(), href: a.getAttribute('href') }; })()`);
+  assert.deepEqual([first.text, first.href.split('/')[3]], [en.ui.app.screens.overview, 'overview'], 'Overview is the first menu item');
+  try {
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/overview`)}, true)`);
+        await settled(b, `${scheme} ${width}: overview`);
+        await waitFor(b, `document.querySelectorAll('.overview-card').length === 4`, `${scheme} ${width}: four cards`);
+        // Находка снимков шага 171: отступ соседних карточек сдвигал правую карточку ряда на 12 px — у карточек одного ряда одна линия верха
+        const seen = await b.evaluate<{ heading: string; questions: string[]; columns: number; rows: number; lines: number }>(`(() => {
+          const cards = [...document.querySelectorAll('.overview-card')];
+          return { heading: document.querySelector('.world-content h2').textContent.trim(), questions: cards.map((c) => c.querySelector('h3').textContent.trim()),
+            columns: new Set(cards.map((c) => Math.round(c.getBoundingClientRect().left))).size, rows: new Set(cards.map((c) => Math.round(c.getBoundingClientRect().top))).size,
+            lines: document.querySelectorAll('.overview-card li a').length }; })()`);
+        assert.equal(seen.rows, width === 1440 ? 2 : 4, `${scheme} ${width}: cards of one row share their top`);
+        assert.equal(seen.heading, en.ui.app.screens.overview, `${scheme} ${width}: the heading is the menu item`);
+        assert.deepEqual(seen.questions, [t.questions.working, t.questions.changed, t.questions.risk, t.questions.action], `${scheme} ${width}: four questions`);
+        assert.equal(seen.columns, width === 1440 ? 2 : 1, `${scheme} ${width}: columns`);
+        assert.ok(seen.lines > 0, `${scheme} ${width}: every line leads to its selection`);
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out`);
+      }
+    }
+    await b.setColorScheme('light');
+    await b.setViewport(1440, 900);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/overview`)}, true)`);
+    await settled(b, 'overview');
+    await waitFor(b, `document.querySelectorAll('.overview-card').length === 4`, 'four cards');
+    const group = await b.evaluate<{ cause: string; text: string } | null>(`(() => { const li = document.querySelector('.overview-causes li'); return li ? { cause: li.dataset.cause, text: li.textContent.trim() } : null; })()`);
+    assert.ok(group, 'the smoke world has decisions in the last 24 hours');
+    const decisions = Number(/· (\d+) decision/.exec(group.text)?.[1]);
+    await b.evaluate(`(document.querySelector('.overview-causes li a').click(), true)`);
+    await waitFor(b, `location.hash.includes('/feed/decisions/') && !!document.querySelector('.world-content select')`, 'the group opens the decision journal');
+    await settled(b, 'journal of the cause');
+    const journal = await b.evaluate<{ hash: string; cause: string; pager: string }>(`({ hash: location.hash, cause: [...document.querySelectorAll('.world-content select')].map((s) => s.value).find((v) => v === ${JSON.stringify(group.cause)}) ?? '',
+      pager: document.querySelector('.world-content .buttons .small')?.textContent.trim() ?? '' })`);
+    assert.equal(journal.cause, group.cause, `the journal is filtered by the cause: ${journal.hash}`);
+    assert.match(journal.hash, /period%3D24h|period=24h/, 'the same window');
+    assert.ok(journal.pager.endsWith(` ${decisions}`), `the journal holds ${decisions} decisions: «${journal.pager}»`);
+  } finally {
+    await b.setColorScheme(null);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
 
 /**
  * Шаг 170 (#35, Р-254): чеклист готовности на Shadow mode — у карточки аккаунта в тени: «Stops the switch» и «Worth fixing first» раздельно,

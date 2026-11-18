@@ -464,8 +464,9 @@ export const de: Messages = {
         signInFirst: 'Melden Sie sich an, um die Einladung anzunehmen.',
       },
       signIn: 'Anmelden',
-      navGroups: { overview: 'Überblick', pricing: 'Preise', stock: 'Lagerbestand', account: 'Arbeitsbereich' },
+      navGroups: { start: 'Start', overview: 'Überblick', pricing: 'Preise', stock: 'Lagerbestand', account: 'Arbeitsbereich' },
       subtitles: {
+        overview: 'Vier Fragen zu Ihrem Arbeitsbereich — beantwortet aus dem Gespeicherten, nichts wird erraten.',
         shadow: 'Was die Preisautomatik in Ihren Kanälen tun würde — bevor etwas an Ihre Shops gesendet wird.',
         compliance: 'Nachweise Ihrer früheren Preise für Rabatte auf EU-Storefronts (Omnibus).',
         products: 'Jedes Angebot mit Preis, Grenzen und Strategie — eine Zeile pro Angebot.',
@@ -488,6 +489,8 @@ export const de: Messages = {
       screens: { connections: 'Kanalkonten', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Angebote', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Stückkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge',
         costs: 'Kosten & Untergrenzen', protections: 'Schutz', channels: 'Kanäle',
         inventory: 'Lagerbestand',
+        // Шаг 171 (#34): первый пункт меню — Daily Overview
+        overview: 'Überblick',
         // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
         unchanged: 'Warum hat sich mein Preis nicht geändert?' },
       loading: (seconds: number) => `Daten werden geladen. Ohne Antwort innerhalb von ${seconds} s wird ein Fehler angezeigt.`,
@@ -1378,6 +1381,8 @@ export const de: Messages = {
         matched: (n: number, total: number) => `${n} von ${total} Angeboten passen zum Filter`,
         attention: 'Erfordert Aufmerksamkeit', anyAttention: 'Alle Angebote',
         attentionValues: { ANY: 'Beliebiger Grund', NO_UNIT_COST: 'Ohne Stückkosten oder Gebühren', AUTOMATED_PRICING: 'Amazon-Repricer an', CHANNEL_BOUNDS: 'Amazon-Grenzen nicht gelesen', NOT_BUYABLE: 'Nicht kaufbar', TURNED_OFF: 'Ausgeschaltet' },
+        // Шаг 171 (#34): финансовые исключения
+        money: 'Geld', anyMoney: 'Alle', moneyValues: { CLEARANCE: 'Abverkauf an', BELOW_BREAK_EVEN: 'Unter Break-even' },
         // Шаг 170 (#35): чего не хватает для включения
         setup: 'Einrichtung', anySetup: 'Alle', setupValues: { NO_STRATEGY: 'Ohne Strategie', NO_BOUNDS: 'Ohne Mindest- oder Höchstpreis' },
       },
@@ -1435,6 +1440,28 @@ export const de: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 171 (#34, ярус 2): Daily Overview — четыре вопроса из сохранённого, без генерации текста
+    overview: {
+      questions: { working: 'Läuft alles?', changed: 'Was hat sich geändert und warum?', risk: 'Wo liegt das Risiko?', action: 'Was erfordert eine Aktion?' },
+      window: (period: string) => `Gezählt ${period}.`,
+      windowNote: 'Wir speichern Ihre Besuche noch nicht, daher sind das die letzten 24 Stunden statt seit Ihrem letzten Besuch.',
+      liveNote: 'Die Live-Ansicht der Übersicht kommt mit Ihrem ersten Live-Konto; bis dahin sind es dieselben vier Fragen.',
+      changedShadow: (period: string) => `Entscheidungen ${period}, nach Ursache — im Schattenmodus berechnet; an Ihren Shop wurde nichts gesendet.`,
+      changedLive: (period: string) => `Entscheidungen ${period}, nach Ursache.`,
+      counted: (decisions: number, offers: number) => `${decisions} ${decisions === 1 ? 'Entscheidung' : 'Entscheidungen'} zu ${offers} ${offers === 1 ? 'Angebot' : 'Angeboten'}`,
+      causes: { STOPS: 'Stopps und Pausen', DATA_QUALITY: 'Datenqualität', FLOOR_HOLDS: 'Gehaltene Untergrenzen', STRATEGY_CHANGE: 'Strategiewechsel', COST_CHANGE: 'Stückkosten und Gebühren', COMPETITORS: 'Wettbewerb', OTHER: 'Geplante Prüfungen und Sonstiges' },
+      noChanges: (period: string) => `${period} wurde keine Entscheidung gespeichert.`,
+      risk: {
+        dangerous: (n: number) => `${n === 1 ? '1 gefährlicher Vorschlag wurde' : `${n} gefährliche Vorschläge wurden`} von Ihren Grenzen gestoppt (mehr als 10 % jenseits einer Grenze)`,
+        stale: (text: string) => `Wettbewerbsdaten sind veraltet — ${text}`,
+      },
+      noRisk: (period: string) => `Nichts Riskantes ${period}: kein gefährlicher Vorschlag, und die Wettbewerbsdaten sind nicht veraltet.`,
+      money: {
+        CLEARANCE: (n: number) => `${n === 1 ? '1 Angebot ist' : `${n} Angebote sind`} im Abverkauf — bewusst unter Break-even`,
+        BELOW_BREAK_EVEN: (n: number) => `${n === 1 ? '1 Angebot hat' : `${n} Angebote haben`} einen Preis unter Break-even`,
+      },
+      noAction: 'Nichts erfordert Ihre Aktion.',
+    },
     // Шаг 170 (#35): чеклист готовности к бою — «нельзя» (перевод откажет) и «не стоит» (советуем), у каждого пункта — своя выборка
     readiness: {
       title: 'Bereit, Preise zu senden?',
@@ -2069,6 +2096,8 @@ export const de: Messages = {
       noRight: 'Ihre Rolle darf Grenzen ansehen, aber nicht ändern.',
     },
     feed: {
+      // Шаг 171 (#34): причина решения — выборка группы карточки «What changed» Daily Overview
+      cause: { label: 'Ursache', all: 'Jede Ursache' },
       kind: { label: 'Art', writes: 'Vorgeschlagene Änderungen', decisions: 'Preisentscheidungen', writesCaption: 'Preisänderungen, die die Engine vorgeschlagen hat: an einen Shop gesendet, im Schattenmodus zurückgehalten oder gestoppt.', decisionsCaption: 'Jede Preisentscheidung, mit oder ohne vorgeschlagene Änderung. Den Status gibt es nur bei Änderungen.' },
       countsLead: (phrase: string) => `Änderungen ${phrase}, nach Status:`,
       outcome: { label: 'Ergebnis', all: 'alle', CHANGED: 'freigegeben (gesendet oder im Schattenmodus zurückgehalten)', NO_CHANGE: 'keine Änderung', REJECTED: 'abgelehnt oder blockiert' },
