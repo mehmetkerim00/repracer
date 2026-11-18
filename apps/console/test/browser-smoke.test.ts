@@ -354,12 +354,12 @@ test('step 76: the console page runs in a real browser — sign-in, workspace li
     if (!host || !svg) return null;
     return { svg: true, text: host.textContent.trim(), line: getComputedStyle(svg).color, end: getComputedStyle(svg.querySelector('.brand-mark-end')).fill };
   })()`);
-  assert.deepEqual(await mark('.login-brand'), { svg: true, text: en.ui.app.brand, line: 'rgb(31, 35, 40)', end: 'rgb(26, 127, 55)' }, 'sign-in: the mark on light, the lowercase name');
+  assert.deepEqual(await mark('.login-brand'), { svg: true, text: en.ui.app.brand, line: 'rgb(26, 31, 28)', end: 'rgb(21, 89, 58)' }, 'sign-in: the mark on light (step 167: Spruce text and success), the lowercase name');
   // Шаг 111 [Р-237]: витринное имя — TMPrice (домен tmprice.com), знак и шапка — строчное «tmprice», знак-гребёнка прежний
   assert.equal(en.ui.app.brand, 'tmprice');
   assert.equal(en.ui.app.title, 'tmprice · seller console');
   assert.equal(en.ui.app.documentTitle, 'TMPrice · seller console');
-  assert.deepEqual(await mark('.topbar .brand'), { svg: true, text: en.ui.app.title, line: 'rgb(255, 255, 255)', end: 'rgb(63, 185, 80)' }, 'header: the mark on dark');
+  assert.deepEqual(await mark('.topbar .brand'), { svg: true, text: en.ui.app.title, line: 'rgb(255, 255, 255)', end: 'rgb(108, 192, 139)' }, 'header: the mark on dark (step 167: Spruce logo accent #6cc08b)');
   assert.equal(await b.evaluate<number>(`[...document.querySelectorAll('.brand-mark')].filter((e) => e.textContent.trim() === 'r').length`), 0, 'the old «r» mark is gone');
   await b.click(owner);
   await b.waitText(en.ui.app.worlds);
@@ -521,8 +521,8 @@ test('step 85: the console works from a 375px phone to a wide monitor — no pag
     let fieldsSeen = 0;
     let checksSeen = 0;
     await checkPage('sign-in');
-    // Шаг 93: тема действительно та — канва страницы цветом своей темы Primer (`--bgColor-muted`: светлая #f6f8fa, тёмная #151b23)
-    assert.equal(await b.evaluate<string>('getComputedStyle(document.body).backgroundColor'), scheme === 'dark' ? 'rgb(21, 27, 35)' : 'rgb(246, 248, 250)', `${scheme} ${width}px: the canvas`);
+    // Шаг 93: тема действительно та — канва страницы цветом своей темы; шаг 167 — канва эталона «Spruce Hybrid» (светлая #f6f5f1, тёмная #0c1410)
+    assert.equal(await b.evaluate<string>('getComputedStyle(document.body).backgroundColor'), scheme === 'dark' ? 'rgb(12, 20, 16)' : 'rgb(246, 245, 241)', `${scheme} ${width}px: the canvas`);
     await b.click(owner);
     await b.waitText(en.ui.app.worlds);
     await checkPage('workspaces');
@@ -655,11 +655,22 @@ const OUT_OF_BOX = `(() => {
 
 
 /**
+ * Шаг 167 (тема «Spruce Hybrid»): подписи колонок, полей и секций меню набраны заглавными (`text-transform: uppercase`), а `innerText`
+ * отдаёт текст уже преобразованным. Правила, которые судят СЛОВА страницы (словарь, глоссарий, профиль рынка, повторы), читают текст с
+ * выключенным преобразованием — иначе «When» в шапке стал бы «WHEN», и правило, ищущее слово с учётом регистра, ослабло бы молча.
+ * Геометрию (ширина, касание, выход за рамку) правила меряют на настоящей отрисовке
+ */
+function plainText(expr: string): string {
+  return `(() => { const s = document.createElement('style'); s.textContent = '* { text-transform: none !important; }'; document.head.append(s);
+    try { return (${expr}); } finally { s.remove(); } })()`;
+}
+
+/**
  * Шаг 100 (D, находка по скринам владельца): пояс колонки времени — один раз в шапке («When · UTC−4»), строки — коротко, без года и
  * пояса («Oct 17, 15:41»). В испанском и французском разбор месяца не срабатывал, и каждая строка несла полную дату с поясом в две
  * строки. Правило — на каждом пункте меню, на четырёх языках: в колонке, у которой пояс в шапке, нет ни года, ни «UTC»
  */
-const LONG_WHEN = `(() => {
+const LONG_WHEN = plainText(`(() => {
   const out = [];
   for (const table of document.querySelectorAll('.world-content table')) {
     const heads = [...table.querySelectorAll('thead th')];
@@ -671,14 +682,14 @@ const LONG_WHEN = `(() => {
     }
   }
   return out;
-})()`;
+})()`);
 /**
  * Шаг 96.1 [Р-146]: служебное предложение не повторяется в строках таблицы. Inventory повторял в каждой строке «to publish: N; held by shadow
  * mode: N would be sent (<время>) — nothing was sent; channel has not confirmed yet» — тот же класс, что лента чинила на шаге 84.1. Правило:
  * строка ячейки (по видимым строкам текста) с десятью и больше словами, одинаковая с точностью до чисел, стоит не больше чем в трёх строках
  * одной таблицы. Числа и время различают строки, но не делают предложение своим — поэтому они маскируются
  */
-const REPEATED_IN_ROWS = `(() => {
+const REPEATED_IN_ROWS = plainText(`(() => {
   // Шаг 157: таблица в свёрнутой панели — по тексту разметки (innerText не отрисованного пуст)
   const txt = (e) => (e.closest('details:not([open])') ? e.textContent : e.innerText);
   const out = [];
@@ -695,7 +706,7 @@ const REPEATED_IN_ROWS = `(() => {
     for (const [l, n] of seen) if (n > 3) out.push('×' + n + ' «' + l.slice(0, 100) + '»');
   }
   return out.slice(0, 5);
-})()`;
+})()`);
 
 /**
  * Шаг 96.2 [Р-146]: колонка таблицы, у которой на странице все ячейки — одно и то же значение или прочерк, — кандидат на подпись секции
@@ -703,7 +714,7 @@ const REPEATED_IN_ROWS = `(() => {
  * выбор строки) не считается; числовая колонка (`th.num`) — только если она целиком из прочерков: одинаковые суммы — данные (у демо пол
  * $14.00 у всех предложений amazon.com), а не служебный текст. Таблица меньше трёх строк не судится
  */
-const CONSTANT_COLUMNS = `(() => {
+const CONSTANT_COLUMNS = plainText(`(() => {
   // Шаг 157: таблица в свёрнутой панели не отрисована — её innerText пуст; правило судит и её, по тексту разметки
   const txt = (e) => (e.closest('details:not([open])') ? e.textContent : e.innerText);
   const out = [];
@@ -721,7 +732,7 @@ const CONSTANT_COLUMNS = `(() => {
     });
   }
   return out;
-})()`;
+})()`);
 
 test('step 86, step 98 (Р-223): every menu item and the heading of its page are the same words — English, German, Spanish and French; no English dictionary string on a Spanish or French screen', async () => {
   const b = browser!;
@@ -1143,7 +1154,7 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
       reason: tr.querySelector('td.reason-cell')?.innerText.trim() ?? null }))`);
     const caption = () => b.evaluate<{ state: string | null; reason: string | null }>(`(() => { const c = document.querySelector('.also-caption'); return {
       state: c?.querySelector('.uniform-state .badge')?.textContent.trim() ?? null, reason: c?.querySelector('.uniform-reason')?.textContent.trim() ?? null }; })()`);
-    const heads = () => b.evaluate<string[]>(`[...document.querySelectorAll('table.also-stopped thead th')].map((th) => th.innerText.trim().replace(/\\s+/g, ' '))`);
+    const heads = () => b.evaluate<string[]>(plainText(`[...document.querySelectorAll('table.also-stopped thead th')].map((th) => th.innerText.trim().replace(/\\s+/g, ' '))`));
     let rows = await also();
     assert.equal(rows.length, 24, 'the 144 adjustments collapse into 24 rows (12 offers, two reasons)');
     // C: все строки «Adjusted to limit» — состояние одной пилюлей в подписи, колонки и пилюль в строках нет (шаг 137: словарь статусов)
@@ -1190,7 +1201,7 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
     assert.deepEqual([(await also()).length, (await filters()).map((f) => f.pressed)], [24, ['false', 'false']], 'a new period clears the reason filter');
     // D: удержания полом — «как удержано» и одна на всех причина — подписью секции; числа справа табличными цифрами
     const floor = await b.evaluate<{ heads: string[]; caption: string; reasonCells: number; nums: Array<{ align: string; numeric: string }> }>(`(() => { const t = document.querySelector('table.floor-holds');
-      return { heads: [...t.querySelectorAll('thead th')].map((th) => th.innerText.trim()), caption: document.querySelector('.floor-caption')?.textContent.trim() ?? '',
+      return { heads: [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim()), caption: document.querySelector('.floor-caption')?.textContent.trim() ?? '',
         reasonCells: t.querySelectorAll('td.reason-cell').length,
         nums: [...t.querySelector('tbody tr').querySelectorAll('td.num')].map((td) => ({ align: getComputedStyle(td).textAlign, numeric: getComputedStyle(td).fontVariantNumeric })) }; })()`);
     const d = en.ui.dangerous;
@@ -1264,9 +1275,10 @@ test('step 93/96.1: the theme belongs to the device — sun or moon toggles ligh
     for (let i = 0; i < 30 && JSON.stringify(got) !== JSON.stringify(want); i++) { await new Promise((r) => setTimeout(r, 100)); got = await button(); }
     assert.deepEqual(got, want, `choice «${choice}», seen «${seen}»: the button offers «${label}»`);
   };
-  const DARK = { canvas: 'rgb(21, 27, 35)', card: 'rgb(13, 17, 23)', text: 'rgb(240, 246, 252)' };
-  const LIGHT = { canvas: 'rgb(246, 248, 250)', card: 'rgb(255, 255, 255)', text: 'rgb(31, 35, 40)' };
-  assert.deepEqual(await colours(), DARK, 'a dark system gets the dark Primer pairs without a choice');
+  // Шаг 167: пары эталона «Spruce Hybrid» — канва, карточка, текст
+  const DARK = { canvas: 'rgb(12, 20, 16)', card: 'rgb(19, 32, 26)', text: 'rgb(230, 237, 231)' };
+  const LIGHT = { canvas: 'rgb(246, 245, 241)', card: 'rgb(255, 255, 255)', text: 'rgb(26, 31, 28)' };
+  assert.deepEqual(await colours(), DARK, 'a dark system gets the dark theme pairs without a choice');
   await expectButton('system', 'dark');
   // Без выбора — система на лету: смена системной темы без перезагрузки меняет и страницу, и иконку
   await b.setColorScheme('light');
@@ -1321,7 +1333,7 @@ const EUROPE = /Kaufland|kaufland\.|amazon\.de|ebay\.de|€|\bEUR\b|Deutsch|Omni
 test('step 87: the us market profile shows no German, no Omnibus, no Kaufland and no European storefront on any screen; eu still does', async () => {
   const b = browser!;
   const owner = en.ui.app.login.asAccount(en.values.OWNER);
-  const europeOnPage = async () => { const t = await b.evaluate<string>('document.body.innerText'); const found = EUROPE.exec(t); return found ? `«${found[0]}» in …${t.slice(Math.max(0, found.index - 80), found.index + 40)}…` : null; };
+  const europeOnPage = async () => { const t = await b.evaluate<string>(plainText('document.body.innerText')); const found = EUROPE.exec(t); return found ? `«${found[0]}» in …${t.slice(Math.max(0, found.index - 80), found.index + 40)}…` : null; };
   currentApi = usApi;
   try {
     await b.setViewport(1440, 900);
@@ -1349,7 +1361,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
     // Подключение предлагает витрины США — словами — и только их
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
     await settled(b, 'us connections');
-    const connectText = await b.evaluate<string>('document.body.innerText');
+    const connectText = await b.evaluate<string>(plainText('document.body.innerText'));
     assert.ok(connectText.includes('amazon.com') && connectText.includes('ebay.com'), `us: amazon.com and ebay.com are offered — ${connectText.slice(0, 300)}`);
     // Шаг 89: Walmart — канал рынка США; подключить его нельзя, пока у платформы нет ключей, и экран говорит это словами
     assert.ok(/\bWalmart\b/.test(connectText) && connectText.includes(en.ui.connections.missing.WALMART_API_KEYS!), `us: Walmart is named and waits for our keys — ${connectText.slice(0, 400)}`);
@@ -1366,7 +1378,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   const eu = await europeOnPage();
   assert.ok(eu !== null, `eu: the rule sees Europe — ${eu}`);
   // Шаг 100 (C): «Deutsch» — пункт меню языков, а не ссылка в шапке
-  assert.ok(/amazon\.de/.test(await b.evaluate<string>('document.body.innerText')), 'eu: the connections offer amazon.de');
+  assert.ok(/amazon\.de/.test(await b.evaluate<string>(plainText('document.body.innerText'))), 'eu: the connections offer amazon.de');
   assert.ok((await languagesOffered(b)).includes('Deutsch'), 'eu: the language menu offers Deutsch');
   // шаг 96.2: в профиле eu подпись файла остатков называет немецкие заголовки — и правило это видит; в us её не было (выше)
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/inventory`)}, true)`);
@@ -1374,7 +1386,7 @@ test('step 87: the us market profile shows no German, no Omnibus, no Kaufland an
   // Шаг 154: длинная подпись — первая фраза на виду, остальное по «Learn more» в разметке: подпись ищется в тексте страницы, а не в видимом
   assert.ok((await b.evaluate<string>(`document.querySelector('.world-content').textContent.replace(/\\s+/g, ' ')`)).includes(en.ui.stock.importFile.hintBilingual), 'eu: the stock file takes German or English headers');
   assert.deepEqual([EUROPE.test(en.ui.stock.importFile.hintBilingual), EUROPE.test(en.ui.stock.importFile.hint)], [true, false], 'the rule sees the German headers of the eu caption and nothing European in the us one');
-  assert.ok(!/\bWalmart\b/.test(await b.evaluate<string>('document.body.innerText')), 'eu: Walmart is a channel of the us market only');
+  assert.ok(!/\bWalmart\b/.test(await b.evaluate<string>(plainText('document.body.innerText'))), 'eu: Walmart is a channel of the us market only');
   const euMenu = await b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
   assert.ok(euMenu.includes(en.ui.app.screens.compliance), `eu: the same workspace has the Omnibus tab — ${euMenu.join(', ')}`);
 });
@@ -1407,13 +1419,13 @@ test('step 88 (Р-213), step 98 (Р-222): sign-in offers two roles at 375 and 14
     await waitFor(b, `location.hash.startsWith('#/w/')`, 'the manager goes straight into the only workspace');
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
     await settled(b, 'manager connections');
-    const connections = await b.evaluate<string>('document.body.innerText');
+    const connections = await b.evaluate<string>(plainText('document.body.innerText'));
     // Шаг 98 [Р-222]: аккаунты каналов, язык и пояс — и у менеджера (ролей для людей две, права одинаковые)
     assert.ok(!connections.includes(en.ui.connections.noRight), 'the manager is not told that channel accounts are the owner’s');
     assert.ok(await b.evaluate<number>(`[...document.querySelectorAll('button')].filter((x) => /^Connect/.test(x.textContent.trim())).length`) > 0, 'the manager connects a channel');
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/stop`)}, true)`);
     await settled(b, 'manager stop');
-    assert.ok((await b.evaluate<string>('document.body.innerText')).includes(en.ui.stop.auditTitle), 'the audit log of stops and roles');
+    assert.ok((await b.evaluate<string>(plainText('document.body.innerText'))).includes(en.ui.stop.auditTitle), 'the audit log of stops and roles');
   } finally {
     currentApi = euApi;
     await b.setViewport(1440, 900);
@@ -1644,7 +1656,7 @@ test('step 125 (П6): the log-in URI page — Amazon arrives with amazon_callbac
   await b.waitText(en.ui.app.login.roleCan.OWNER);
   await b.click(en.ui.app.login.asAccount(en.values.OWNER));
   await settled(b, 'control: a plain sign-in');
-  assert.equal(await b.evaluate<boolean>(`document.body.innerText.includes(${JSON.stringify(en.ui.connections.errors.loginWithoutConnect)})`), false, 'control: no log-in message on a plain sign-in');
+  assert.equal(await b.evaluate<boolean>(plainText(`document.body.innerText.includes(${JSON.stringify(en.ui.connections.errors.loginWithoutConnect)})`)), false, 'control: no log-in message on a plain sign-in');
   assert.equal(amazonLoginSeen.length, 1);
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
@@ -3129,6 +3141,61 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 167: the Spruce Hybrid theme — fonts from the console itself, headings in Schibsted Grotesk, no monospace, a dark sidebar with its active item, uppercase labels; both themes', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await b.waitText(en.ui.app.worlds);
+    await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+    await settled(b, 'first screen');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+    await settled(b, 'offers');
+    await waitFor(b, `!!document.querySelector('table.products tbody tr') && document.fonts.status === 'loaded'`, 'offers and fonts');
+    const seen = await b.evaluate<Record<string, unknown>>(`(() => {
+      const css = (el, p) => el ? getComputedStyle(el)[p] : null;
+      const active = document.querySelector('.nav-group a.active');
+      const fonts = performance.getEntriesByType('resource').filter((e) => /\\.woff2(\\?|$)/.test(e.name));
+      return {
+        h2: css(document.querySelector('.world-content h2'), 'fontFamily').split(',')[0].replace(/["']/g, '').trim(),
+        body: css(document.body, 'fontFamily').split(',')[0].replace(/["']/g, '').trim(),
+        heading: document.fonts.check('600 16px "Schibsted Grotesk"'), inter: document.fonts.check('400 16px Inter'),
+        fontsOwnOrigin: fonts.length > 0 && fonts.every((e) => new URL(e.name).origin === location.origin),
+        money: css(document.querySelector('td.cur'), 'fontFamily')?.split(',')[0].replace(/["']/g, '').trim() ?? 'Inter',
+        mono: [...document.querySelectorAll('body *')].some((e) => /mono/i.test(getComputedStyle(e).fontFamily)),
+        sidebar: css(document.querySelector('.sidebar'), 'backgroundColor'),
+        activeText: css(active, 'color'), activeWeight: css(active, 'fontWeight'), activeEdge: css(active, 'boxShadow'),
+        th: [css(document.querySelector('table.products th'), 'textTransform'), css(document.querySelector('table.products th'), 'fontSize')],
+        // кнопка сортировки в шапке колонки — тем же видом, что подпись (у кнопки браузер сбрасывает text-transform)
+        sortHead: [...document.querySelectorAll('table.products th > .sort-head')].map((x) => css(x, 'textTransform') + ' ' + css(x, 'fontSize')).filter((v, i, a) => a.indexOf(v) === i),
+        section: [css(document.querySelector('.nav-group .group-title'), 'textTransform'), css(document.querySelector('.nav-group .group-title'), 'letterSpacing')],
+      };
+    })()`);
+    assert.deepEqual(seen, {
+      h2: 'Schibsted Grotesk', body: 'Inter', heading: true, inter: true, fontsOwnOrigin: true, money: 'Inter', mono: false,
+      sidebar: scheme === 'dark' ? 'rgb(10, 17, 13)' : 'rgb(15, 43, 29)',
+      activeText: 'rgb(255, 255, 255)', activeWeight: '600', activeEdge: 'rgb(108, 192, 139) 3px 0px 0px 0px inset',
+      th: ['uppercase', '10.5px'], sortHead: ['uppercase 10.5px'], section: ['uppercase', '0.84px'],
+    }, `${scheme}: ${JSON.stringify(seen)}`);
+    // Контроль помощника plainText: innerText подписи колонки — заглавными, тот же текст через plainText — словами словаря
+    const head = await b.evaluate<[string, string]>(`[document.querySelector('table.products th').innerText.trim(), ${plainText(`document.querySelector('table.products th').innerText.trim()`)}]`);
+    assert.ok(head[0] === head[1].toUpperCase() && head[0] !== head[1], `${scheme}: rules read words, not the uppercase rendering — ${JSON.stringify(head)}`);
+    for (const width of [375, 1440]) {
+      await b.setViewport(width, 900);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+    }
+    await b.setViewport(1440, 900);
+  }
+  await b.setColorScheme('light');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 166 (#26): «To publish» sorts only within a chosen channel — without one the option is off and the caption says to choose; within one the screen asks for that order', async () => {
   const b = browser!;
   const before = b.errors().length;
@@ -3249,6 +3316,12 @@ test('step 163 (#27): bulk edit and imports keep a summary bar of their numbers 
     await new Promise((x) => setTimeout(x, 200));
     assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
     assert.deepEqual(await b.evaluate(OUT_OF_BOX), [], `${width}: nothing sticks out of its frame`);
+    // Шаг 167: строка «требует внимания» заметна целиком — и закреплённая первая ячейка (на телефоне) того же фона, что строка, с полосой слева
+    const marked = await b.evaluate<{ rows: number; same: boolean; edge: boolean }>(`(() => {
+      const rows = [...document.querySelectorAll('.bounds-edit section.diff tbody tr')].filter((tr) => tr.querySelector(':scope > td.offer.attention'));
+      const bg = (td) => getComputedStyle(td).backgroundColor;
+      return { rows: rows.length, same: rows.every((tr) => bg(tr.children[0]) === bg(tr.children[1])), edge: rows.every((tr) => /inset/.test(getComputedStyle(tr.children[0]).boxShadow)) }; })()`);
+    assert.ok(marked.rows > 0 && marked.same && marked.edge, `${width}: the attention row is marked whole, the sticky first cell too — ${JSON.stringify(marked)}`);
   }
   await b.setViewport(1440, 900);
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');

@@ -2,34 +2,39 @@
  * Шаг 77: дизайн-токены консоли — единственное место цветов, отступов, радиусов и шрифта. Экраны и стили берут значения отсюда,
  * своих цветов не заводят.
  *
- * Шаг 83: НИЧЕГО не изобретать — каждое значение взято из дизайн-системы GitHub Primer (пакет @primer/primitives 11.10.0, лицензия
- * MIT; светлая тема). Пометка `primer: --имя` у строки — токен Primer, из которого значение взято; правило-тест
- * (apps/console/test/design-tokens.test.ts) сверяет каждое помеченное значение с пакетом и не пускает непомеченных, кроме названных
- * исключений. Polaris (Shopify) не используется: его лицензия не разрешает самостоятельному приложению вид, похожий на продукты Shopify.
+ * Шаг 167 (решение владельца): тема «Spruce Hybrid» — эталон утверждён владельцем. Значение с пометкой `spruce: ключ` (светлая тема) или
+ * `spruce-dark: ключ` (тёмная) — значение эталона под этим ключом; правило-тест (apps/console/test/design-tokens.test.ts, палитра —
+ * apps/console/test/spruce-theme.ts) сверяет его с эталоном и считает контраст каждой пары «текст — фон» (не меньше 4,5:1). Два значения
+ * светлой темы эталона контраст не проходили — затемнены в пределах оттенка, правило называет оба. Чего эталон не называет (цвет ошибок,
+ * чипы площадок, образцы цвета товара, кружки ролей, отступы и размеры), — прежнее: GitHub Primer (@primer/primitives 11.10.0, MIT),
+ * пометка `primer: --имя` / `primer-dark: --имя`, как с шага 83.
  */
 :root {
   /* шаг 93: схема цвета системных элементов (полосы прокрутки, поля дат) — светлая; тёмная тема ниже объявляет тёмную */
   color-scheme: light;
-  /* Поверхности */
-  --bg: #f6f8fa; /* primer: --bgColor-muted */
-  --surface: #ffffff; /* primer: --bgColor-default */
-  --surface-muted: #f6f8fa; /* primer: --bgColor-muted */
-  --border: #d1d9e0; /* primer: --borderColor-default */
-  --divider: #d1d9e0b3; /* primer: --borderColor-muted */
-  --shadow: 0 1px 1px 0 #1f23280a, 0 1px 2px 0 #1f232808; /* primer: --shadow-resting-small */
+  /* Поверхности: канва, карточки, шапка и подвал таблиц, разделители строк */
+  --bg: #f6f5f1; /* spruce: canvas */
+  --surface: #ffffff; /* spruce: card */
+  --surface-muted: #fbfaf6; /* spruce: table-head */
+  --border: #e4e1d8; /* spruce: card-border */
+  --divider: #f0ede4; /* spruce: row-divider */
+  --table-border: #e9e6dc; /* spruce: table-border */
+  --shadow: 0 1px 2px rgba(15, 43, 29, 0.05); /* spruce: card-shadow */
   --shadow-lg: 0 0 0 1px #d1d9e040, 0 6px 12px -3px #25292e0a, 0 6px 18px 0 #25292e1f; /* primer: --shadow-floating-small */
   --backdrop: #c8d1da66; /* primer: --overlay-backdrop-bgColor */
-  --radius: 0.375rem; /* primer: --borderRadius-medium */
+  --radius: 0.5rem; /* spruce: control-radius */
   --radius-sm: 0.1875rem; /* primer: --borderRadius-small */
-  --radius-lg: 0.75rem; /* primer: --borderRadius-large */
+  --radius-lg: 0.75rem; /* spruce: card-radius */
   --radius-pill: 624.9375rem; /* primer: --borderRadius-full */
   --border-width: 0.0625rem; /* primer: --borderWidth-thin */
 
-  /* Текст */
-  --text: #1f2328; /* primer: --fgColor-default */
-  --text-2: #59636e; /* primer: --fgColor-muted */
-  --text-3: #818b98; /* primer: --fgColor-disabled */
-  --text-money: #1f2328; /* primer: --fgColor-default */
+  /* Текст: основной, вторичный, слабый, подписи колонок и полей; отрицательные деньги */
+  --text: #1a1f1c; /* spruce: text */
+  --text-2: #5b635c; /* spruce: text-secondary */
+  --text-3: #687169; /* spruce: text-weak */
+  --label: #6a7168; /* spruce: label */
+  --text-money: #1a1f1c; /* spruce: text */
+  --money-negative: #a03e12; /* spruce: negative */
   --on-emphasis: #ffffff; /* primer: --fgColor-onEmphasis */
   /* Шаг 112 [Р-238]: чипы площадок — тихие: подложка muted оттенка display Primer, буква — fgColor того же оттенка. eBay — auburn, а не red:
      красный совпадает с цветом ошибок (у coral в тёмной теме — тот же red); Kaufland — brown (за профилем ЕС) */
@@ -57,59 +62,70 @@
   --swatch-brown: #856d4c; /* primer: --display-brown-scale-5 */
   --swatch-teal: #127e81; /* primer: --display-teal-scale-5 */
 
-  /* Ссылки, фокус, выбранное — акцент Primer (синий) */
-  --accent: #0969da; /* primer: --fgColor-accent */
-  --accent-hover: #0969da; /* primer: --fgColor-link */
-  --accent-soft: #ddf4ff; /* primer: --bgColor-accent-muted */
-  --accent-border: #54aeff66; /* primer: --borderColor-accent-muted */
-  --accent-text: #0969da; /* primer: --fgColor-accent */
-  --accent-emphasis: #0969da; /* primer: --borderColor-accent-emphasis */
-  --focus-color: #0969da; /* primer: --focus-outline-color */
+  /* Ссылки, фокус, выбранное — акцент эталона (зелёный ели) */
+  --accent: #1f6f4a; /* spruce: accent */
+  --accent-hover: #0f2b1d; /* spruce: accent-hover */
+  --accent-soft: #e8f3ec; /* spruce: success-bg */
+  --accent-border: #9cc7ab; /* spruce: success-border */
+  --accent-text: #1f6f4a; /* spruce: accent */
+  --accent-emphasis: #1f6f4a; /* spruce: accent */
+  --focus-color: #1f6f4a; /* spruce: accent */
   --focus-width: 0.125rem; /* primer: --focus-outline-width */
   --focus-ring: 0 0 0 var(--focus-width) var(--focus-color);
 
-  /* Кнопки: основная — как у Primer (зелёная), обычная — фон и граница контрола */
-  --primary: #1f883d; /* primer: --button-primary-bgColor-rest */
-  --primary-hover: #1c8139; /* primer: --button-primary-bgColor-hover */
-  --primary-border: #1f232826; /* primer: --button-primary-borderColor-rest */
-  --control-bg: #f6f8fa; /* primer: --control-bgColor-rest */
-  --control-bg-hover: #eff2f5; /* primer: --control-bgColor-hover */
-  --control-bg-active: #e6eaef; /* primer: --control-bgColor-active */
-  --control-fg: #25292e; /* primer: --control-fgColor-rest */
+  /* Кнопки и контролы: главная — тёмная ель с белым текстом, обычная — поверхность карточки и рамка контрола эталона */
+  --primary: #0f2b1d; /* spruce: primary-bg */
+  --primary-hover: #1f6f4a; /* spruce: accent */
+  --primary-border: #0f2b1d; /* spruce: primary-bg */
+  --on-primary: #ffffff; /* spruce: primary-text */
+  --control-bg: #ffffff; /* spruce: card */
+  --control-bg-hover: #fbfaf6; /* spruce: table-head */
+  --control-bg-active: #f0ede4; /* spruce: row-divider */
+  --control-fg: #1a1f1c; /* spruce: text */
+  --control-border: #d8d4c8; /* spruce: control-border */
   --button-shadow: 0 1px 0 0 #1f23280a; /* primer: --button-default-shadow-resting */
   --track-bg: #e6eaef; /* primer: --controlTrack-bgColor-rest */
   --knob-bg: #ffffff; /* primer: --controlKnob-bgColor-rest */
 
-  /* Семантика: успех и бой — зелёный, тень и внимание — янтарный, отказы и опасное — красный */
-  --success: #1a7f37; /* primer: --fgColor-success */
-  --success-soft: #dafbe1; /* primer: --bgColor-success-muted */
-  --success-border: #4ac26b66; /* primer: --borderColor-success-muted */
-  --success-strong: #1f883d; /* primer: --bgColor-success-emphasis */
-  --warning: #9a6700; /* primer: --fgColor-attention */
-  --warning-soft: #fff8c5; /* primer: --bgColor-attention-muted */
-  --warning-border: #d4a72c66; /* primer: --borderColor-attention-muted */
-  --warning-strong: #9a6700; /* primer: --bgColor-attention-emphasis */
+  /* Семантика: успех и бой — зелёный, внимание — янтарный (и строка «needs attention»), демо — своя плашка; ошибки — красный Primer */
+  --success: #15593a; /* spruce: success-text */
+  --success-soft: #e8f3ec; /* spruce: success-bg */
+  --success-border: #9cc7ab; /* spruce: success-border */
+  --success-strong: #1f6f4a; /* spruce: accent */
+  --success-line: #9cc7ab; /* spruce: success-border */
+  --warning: #8a5a06; /* spruce: warning-text */
+  --warning-soft: #fbf2de; /* spruce: warning-bg */
+  --warning-border: #d9b36a; /* spruce: warning-border */
+  --warning-strong: #8a5a06; /* spruce: warning-text */
+  --warning-line: #d9b36a; /* spruce: warning-border */
+  --attention-row-bg: #fcf7eb; /* spruce: attention-row-bg */
+  --attention-row-edge: #d9a13b; /* spruce: attention-row-edge */
+  --demo-bg: #f3e9ce; /* spruce: demo-bg */
+  --demo-fg: #5c4a12; /* spruce: demo-text */
+  --demo-pill-border: #c9a94e; /* spruce: demo-pill-border */
   --danger: #d1242f; /* primer: --fgColor-danger */
   --danger-soft: #ffebe9; /* primer: --bgColor-danger-muted */
   --danger-border: #ff818266; /* primer: --borderColor-danger-muted */
   --danger-strong: #cf222e; /* primer: --bgColor-danger-emphasis */
   --neutral-soft: #818b981f; /* primer: --bgColor-neutral-muted */
-  /* рамка badge (Primer Label) — цвет «emphasis» границы своего тона */
-  --success-line: #1a7f37; /* primer: --borderColor-success-emphasis */
-  --warning-line: #9a6700; /* primer: --borderColor-attention-emphasis */
   --danger-line: #cf222e; /* primer: --borderColor-danger-emphasis */
 
-  /* Рама: шапка — тёмная нейтральная (Primer header), боковая навигация — светлая (Primer NavList) */
-  --header-bg: #25292e; /* primer: --header-bgColor */
-  --header-fg: #ffffffb3; /* primer: --header-fgColor-default */
-  --header-fg-logo: #ffffff; /* primer: --header-fgColor-logo */
-  /* шаг 92 [Р-216], шаг 93: конечная точка знака в тёмной шапке — зелёный успеха тёмной темы Primer; сверка — с тёмной темой */
-  --header-mark-end: #3fb950; /* primer-dark: --fgColor-success */
-  --header-divider: #818b98; /* primer: --header-borderColor-divider */
-  /* шаг 93: нижний край шапки — в светлой теме цветом самой шапки (не виден), в тёмной шапка того же цвета, что канва, и край её отделяет */
-  --header-edge: #25292e; /* primer: --header-bgColor */
-  --nav-hover: #818b981a; /* primer: --control-transparent-bgColor-hover */
-  --nav-selected: #818b9826; /* primer: --control-transparent-bgColor-selected */
+  /* Рама: шапка и боковина — тёмная ель; выбранный пункт — светлая подложка, полоса слева и белый полужирный текст */
+  --header-bg: #0f2b1d; /* spruce: chrome */
+  --header-fg: #c3d2c7; /* spruce: sidebar-text */
+  --header-fg-logo: #ffffff; /* spruce: nav-active-text */
+  --header-mark-end: #6cc08b; /* spruce: logo-accent */
+  --header-divider: #7e937f; /* spruce: sidebar-section */
+  --header-edge: #0f2b1d; /* spruce: chrome */
+  --sidebar-bg: #0f2b1d; /* spruce: chrome */
+  --sidebar-fg: #c3d2c7; /* spruce: sidebar-text */
+  --sidebar-muted: #9fb5a6; /* spruce: sidebar-muted */
+  --sidebar-section: #7e937f; /* spruce: sidebar-section */
+  --sidebar-divider: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+  --nav-hover: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+  --nav-selected: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+  --nav-active-edge: #6cc08b; /* spruce: nav-active-edge */
+  --nav-active-fg: #ffffff; /* spruce: nav-active-text */
 
   /* Шаг 84: кружки ролей на входе — шкалы Primer Label, у каждой роли свой цвет */
   --role-owner-bg: #d1f0ff; /* primer: --label-blue-bgColor-rest */
@@ -122,22 +138,22 @@
   --role-pricing-fg: #2b6e3f; /* primer: --label-green-fgColor-rest */
   --role-inventory-bg: #c7f5ef; /* primer: --label-teal-bgColor-rest */
   --role-inventory-fg: #106e75; /* primer: --label-teal-fgColor-rest */
-  /* Шаг 88 [Р-213]: менеджер — ежедневная работа, зелёный прежнего менеджера цен (их не показывают вместе) */
   --role-manager-bg: #caf7ca; /* primer: --label-green-bgColor-rest */
   --role-manager-fg: #2b6e3f; /* primer: --label-green-fgColor-rest */
   --role-neutral-bg: #e8ecf2; /* primer: --label-gray-bgColor-rest */
   --role-neutral-fg: #5c6570; /* primer: --label-gray-fgColor-rest */
 
-  /* Шрифты: интерфейс — системный стек Primer; IBM Plex Mono — только денежные колонки таблиц (решение владельца, шаг 83) */
-  --font: "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Backtick Fix", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"; /* primer: --fontStack-system */
-  --font-code: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace; /* primer: --fontStack-monospace */
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Шрифты: Inter — весь интерфейс, Schibsted Grotesk 600 — заголовки страниц, имя пространства и бренд; файлы — src/fonts (OFL). Моноширинного нет */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; /* spruce: font-text */
+  --font-heading: 'Schibsted Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; /* spruce: font-heading */
   --font-size: 0.875rem; /* primer: --base-text-size-sm */
   --font-size-sm: 0.75rem; /* primer: --base-text-size-xs */
   --font-size-xs: 0.75rem; /* primer: --base-text-size-xs */
   --font-size-md: 1rem; /* primer: --base-text-size-md */
   --font-size-lg: 1.25rem; /* primer: --base-text-size-lg */
   --font-size-xl: 2rem; /* primer: --base-text-size-xl */
+  --font-size-label: 0.65625rem; /* spruce: label-size */
+  --tracking-section: 0.08em; /* spruce: section-tracking */
   --line-height: 1.5; /* primer: --base-text-lineHeight-normal */
   --line-height-tight: 1.25; /* primer: --base-text-lineHeight-tight */
   --weight-normal: 400; /* primer: --base-text-weight-normal */
@@ -158,7 +174,7 @@
   --base-size-20: 1.25rem; /* primer: --base-size-20 */
   --base-size-96: 6rem; /* primer: --base-size-96 */
   --base-size-128: 8rem; /* primer: --base-size-128 */
-  --control-h: 2rem; /* primer: --control-medium-size */
+  --control-h: 2rem; /* spruce: control-height */
   --badge-h: 1.25rem; /* primer: --base-size-20 */
   /* Шаг 85, адаптив: ширина выдвижной навигации (Primer Overlay small) и цель касания на узком экране (Primer, грубый указатель) */
   --drawer-w: 20rem; /* primer: --overlay-width-small */
@@ -170,29 +186,85 @@
 }
 
 /*
- * Шаг 93: ТЁМНАЯ тема — те же имена токенов, значения тёмной темы Primer (@primer/primitives, `functional/themes/dark.css`), пометка
- * `primer-dark: --имя`. Пары контраста — пары Primer (фон и текст одного токена темы), не подобраны на глаз. Тема — свойство устройства:
- * по умолчанию системная (`prefers-color-scheme`), ручной выбор пишет `data-theme` на корне страницы. Оба блока ниже одинаковы — это
- * держит токен-тест: каждое значение светлой темы из темы Primer имеет пару в обоих.
+ * Шаг 93, шаг 167: ТЁМНАЯ тема — те же имена токенов. Значения эталона «Spruce Hybrid» для тёмной темы — пометка `spruce-dark: ключ`; где
+ * эталон тёмного значения не называет, взято значение светлой темы (`spruce: ключ`) или ближайший ключ тёмного эталона — правило называет
+ * каждую такую замену. Прежние значения Primer — `primer-dark: --имя`. Тема — свойство устройства: по умолчанию системная
+ * (`prefers-color-scheme`), ручной выбор пишет `data-theme` на корне страницы. Оба блока ниже одинаковы — это держит токен-тест.
  */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #151b23; /* primer-dark: --bgColor-muted */
-    --surface: #0d1117; /* primer-dark: --bgColor-default */
-    --surface-muted: #151b23; /* primer-dark: --bgColor-muted */
-    --border: #3d444d; /* primer-dark: --borderColor-default */
-    --divider: #3d444db3; /* primer-dark: --borderColor-muted */
-    --shadow: 0 1px 1px 0 #01040999, 0 1px 3px 0 #01040999; /* primer-dark: --shadow-resting-small */
+    --bg: #0c1410; /* spruce-dark: canvas */
+    --surface: #13201a; /* spruce-dark: card */
+    --surface-muted: #0f1a14; /* spruce-dark: table-head */
+    --border: #24382c; /* spruce-dark: card-border */
+    --divider: #1d2e24; /* spruce-dark: table-border */
+    --table-border: #1d2e24; /* spruce-dark: table-border */
+    --shadow: 0 1px 2px rgba(15, 43, 29, 0.05); /* spruce: card-shadow */
+    --text: #e6ede7; /* spruce-dark: text */
+    --text-2: #aebdb2; /* spruce-dark: text-secondary */
+    --text-3: #7e8e82; /* spruce-dark: text-weak */
+    --label: #90a094; /* spruce-dark: label */
+    --text-money: #e6ede7; /* spruce-dark: text */
+    --money-negative: #e58a5a; /* spruce-dark: negative */
+    --accent: #8fd3a8; /* spruce-dark: accent */
+    --accent-hover: #c4e8d0; /* spruce-dark: accent-hover */
+    --accent-soft: #16301f; /* spruce-dark: success-bg */
+    --accent-border: #3f7a58; /* spruce-dark: success-border */
+    --accent-text: #8fd3a8; /* spruce-dark: accent */
+    --accent-emphasis: #8fd3a8; /* spruce-dark: accent */
+    --focus-color: #8fd3a8; /* spruce-dark: accent */
+    --primary: #6cc08b; /* spruce-dark: primary-bg */
+    --primary-hover: #8fd3a8; /* spruce-dark: accent */
+    --primary-border: #6cc08b; /* spruce-dark: primary-bg */
+    --on-primary: #0a110d; /* spruce-dark: primary-text */
+    --control-bg: #13201a; /* spruce-dark: card */
+    --control-bg-hover: #0f1a14; /* spruce-dark: table-head */
+    --control-bg-active: #1d2e24; /* spruce-dark: table-border */
+    --control-fg: #e6ede7; /* spruce-dark: text */
+    --control-border: #24382c; /* spruce-dark: card-border */
+    --success: #8fd3a8; /* spruce-dark: success-text */
+    --success-soft: #16301f; /* spruce-dark: success-bg */
+    --success-border: #3f7a58; /* spruce-dark: success-border */
+    --success-strong: #1f6f4a; /* spruce: accent */
+    --success-line: #3f7a58; /* spruce-dark: success-border */
+    --warning: #e0b45c; /* spruce-dark: warning-text */
+    --warning-soft: #2a2413; /* spruce-dark: warning-bg */
+    --warning-border: #9a7a33; /* spruce-dark: warning-border */
+    --warning-strong: #8a5a06; /* spruce: warning-text */
+    --warning-line: #9a7a33; /* spruce-dark: warning-border */
+    --attention-row-bg: #1d1a10; /* spruce-dark: attention-row-bg */
+    --attention-row-edge: #b98a2e; /* spruce-dark: attention-row-edge */
+    --demo-bg: #2a2413; /* spruce-dark: demo-bg */
+    --demo-fg: #e3c87a; /* spruce-dark: demo-text */
+    --demo-pill-border: #8a7637; /* spruce-dark: demo-pill-border */
+    --header-bg: #112219; /* spruce-dark: header */
+    --header-fg: #aebdb2; /* spruce-dark: sidebar-text */
+    --header-fg-logo: #e6ede7; /* spruce-dark: text */
+    --header-mark-end: #6cc08b; /* spruce: logo-accent */
+    --header-divider: #90a094; /* spruce-dark: label */
+    --header-edge: #22332a; /* spruce-dark: header-border */
+    --sidebar-bg: #0a110d; /* spruce-dark: sidebar */
+    --sidebar-fg: #aebdb2; /* spruce-dark: sidebar-text */
+    --sidebar-muted: #7e8e82; /* spruce-dark: text-weak */
+    --sidebar-section: #90a094; /* spruce-dark: label */
+    --sidebar-divider: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+    --nav-hover: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+    --nav-selected: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+    --nav-active-edge: #6cc08b; /* spruce: nav-active-edge */
+    --nav-active-fg: #ffffff; /* spruce: nav-active-text */
+    --danger: #f85149; /* primer-dark: --fgColor-danger */
+    --danger-soft: #f851491a; /* primer-dark: --bgColor-danger-muted */
+    --danger-border: #f8514966; /* primer-dark: --borderColor-danger-muted */
+    --danger-strong: #da3633; /* primer-dark: --bgColor-danger-emphasis */
+    --danger-line: #da3633; /* primer-dark: --borderColor-danger-emphasis */
+    --neutral-soft: #656c7633; /* primer-dark: --bgColor-neutral-muted */
+    --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
     --shadow-lg: 0 0 0 1px #3d444d, 0 6px 12px -3px #01040966, 0 6px 18px 0 #01040966; /* primer-dark: --shadow-floating-small */
     --backdrop: #21283066; /* primer-dark: --overlay-backdrop-bgColor */
-    --text: #f0f6fc; /* primer-dark: --fgColor-default */
-    --text-2: #9198a1; /* primer-dark: --fgColor-muted */
-    --text-3: #656c76; /* primer-dark: --fgColor-disabled */
-    --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
-    --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
-    /* Шаг 112 [Р-238]: чипы площадок — тихие: подложка muted оттенка display Primer, буква — fgColor того же оттенка. eBay — auburn, а не red:
-       красный совпадает с цветом ошибок (у coral в тёмной теме — тот же red); Kaufland — brown (за профилем ЕС) */
+    --button-shadow: 0 0 0 0 #00000000; /* primer-dark: --button-default-shadow-resting */
+    --track-bg: #010409; /* primer-dark: --controlTrack-bgColor-rest */
+    --knob-bg: #262c36; /* primer-dark: --controlKnob-bgColor-rest */
     --chip-amazon-bg: #311708; /* primer-dark: --display-orange-bgColor-muted */
     --chip-amazon-fg: #ed8326; /* primer-dark: --display-orange-fgColor */
     --chip-walmart-bg: #001a47; /* primer-dark: --display-blue-bgColor-muted */
@@ -203,7 +275,6 @@
     --chip-kaufland-fg: #b69a6d; /* primer-dark: --display-brown-fgColor */
     --chip-other-bg: #1c1c1c; /* primer-dark: --display-gray-bgColor-muted */
     --chip-other-fg: #92a1b5; /* primer-dark: --display-gray-fgColor */
-    /* Шаг 112 [Р-238]: кружок-образец цвета товара — ступень 5 шкалы display (почти одна в обеих темах), чёрный и белый — неизменные */
     --swatch-black: #010409; /* primer-dark: --bgColor-black */
     --swatch-white: #ffffff; /* primer-dark: --bgColor-white */
     --swatch-grey: #6e7f96; /* primer-dark: --display-gray-scale-5 */
@@ -216,46 +287,6 @@
     --swatch-pink: #d34591; /* primer-dark: --display-pink-scale-5 */
     --swatch-brown: #94774c; /* primer-dark: --display-brown-scale-5 */
     --swatch-teal: #158a8a; /* primer-dark: --display-teal-scale-5 */
-    --accent: #4493f8; /* primer-dark: --fgColor-accent */
-    --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
-    --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */
-    --accent-border: #388bfd66; /* primer-dark: --borderColor-accent-muted */
-    --accent-text: #4493f8; /* primer-dark: --fgColor-accent */
-    --accent-emphasis: #1f6feb; /* primer-dark: --borderColor-accent-emphasis */
-    --focus-color: #1f6feb; /* primer-dark: --focus-outline-color */
-    --primary: #238636; /* primer-dark: --button-primary-bgColor-rest */
-    --primary-hover: #29903b; /* primer-dark: --button-primary-bgColor-hover */
-    --primary-border: #ffffff26; /* primer-dark: --button-primary-borderColor-rest */
-    --control-bg: #212830; /* primer-dark: --control-bgColor-rest */
-    --control-bg-hover: #262c36; /* primer-dark: --control-bgColor-hover */
-    --control-bg-active: #2a313c; /* primer-dark: --control-bgColor-active */
-    --control-fg: #f0f6fc; /* primer-dark: --control-fgColor-rest */
-    --button-shadow: 0 0 0 0 #00000000; /* primer-dark: --button-default-shadow-resting */
-    --track-bg: #010409; /* primer-dark: --controlTrack-bgColor-rest */
-    --knob-bg: #262c36; /* primer-dark: --controlKnob-bgColor-rest */
-    --success: #3fb950; /* primer-dark: --fgColor-success */
-    --success-soft: #2ea04326; /* primer-dark: --bgColor-success-muted */
-    --success-border: #2ea04366; /* primer-dark: --borderColor-success-muted */
-    --success-strong: #238636; /* primer-dark: --bgColor-success-emphasis */
-    --warning: #d29922; /* primer-dark: --fgColor-attention */
-    --warning-soft: #bb800926; /* primer-dark: --bgColor-attention-muted */
-    --warning-border: #bb800966; /* primer-dark: --borderColor-attention-muted */
-    --warning-strong: #9e6a03; /* primer-dark: --bgColor-attention-emphasis */
-    --danger: #f85149; /* primer-dark: --fgColor-danger */
-    --danger-soft: #f851491a; /* primer-dark: --bgColor-danger-muted */
-    --danger-border: #f8514966; /* primer-dark: --borderColor-danger-muted */
-    --danger-strong: #da3633; /* primer-dark: --bgColor-danger-emphasis */
-    --neutral-soft: #656c7633; /* primer-dark: --bgColor-neutral-muted */
-    --success-line: #238636; /* primer-dark: --borderColor-success-emphasis */
-    --warning-line: #9e6a03; /* primer-dark: --borderColor-attention-emphasis */
-    --danger-line: #da3633; /* primer-dark: --borderColor-danger-emphasis */
-    --header-bg: #151b23f2; /* primer-dark: --header-bgColor */
-    --header-fg: #ffffffb3; /* primer-dark: --header-fgColor-default */
-    --header-fg-logo: #f0f6fc; /* primer-dark: --header-fgColor-logo */
-    --header-divider: #656c76; /* primer-dark: --header-borderColor-divider */
-    --header-edge: #3d444db3; /* primer-dark: --borderColor-muted */
-    --nav-hover: #656c7633; /* primer-dark: --control-transparent-bgColor-hover */
-    --nav-selected: #656c7633; /* primer-dark: --control-transparent-bgColor-selected */
     --role-owner-bg: #001a47; /* primer-dark: --label-blue-bgColor-rest */
     --role-owner-fg: #4da0ff; /* primer-dark: --label-blue-fgColor-rest */
     --role-admin-bg: #211047; /* primer-dark: --label-purple-bgColor-rest */
@@ -275,21 +306,77 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #151b23; /* primer-dark: --bgColor-muted */
-  --surface: #0d1117; /* primer-dark: --bgColor-default */
-  --surface-muted: #151b23; /* primer-dark: --bgColor-muted */
-  --border: #3d444d; /* primer-dark: --borderColor-default */
-  --divider: #3d444db3; /* primer-dark: --borderColor-muted */
-  --shadow: 0 1px 1px 0 #01040999, 0 1px 3px 0 #01040999; /* primer-dark: --shadow-resting-small */
+  --bg: #0c1410; /* spruce-dark: canvas */
+  --surface: #13201a; /* spruce-dark: card */
+  --surface-muted: #0f1a14; /* spruce-dark: table-head */
+  --border: #24382c; /* spruce-dark: card-border */
+  --divider: #1d2e24; /* spruce-dark: table-border */
+  --table-border: #1d2e24; /* spruce-dark: table-border */
+  --shadow: 0 1px 2px rgba(15, 43, 29, 0.05); /* spruce: card-shadow */
+  --text: #e6ede7; /* spruce-dark: text */
+  --text-2: #aebdb2; /* spruce-dark: text-secondary */
+  --text-3: #7e8e82; /* spruce-dark: text-weak */
+  --label: #90a094; /* spruce-dark: label */
+  --text-money: #e6ede7; /* spruce-dark: text */
+  --money-negative: #e58a5a; /* spruce-dark: negative */
+  --accent: #8fd3a8; /* spruce-dark: accent */
+  --accent-hover: #c4e8d0; /* spruce-dark: accent-hover */
+  --accent-soft: #16301f; /* spruce-dark: success-bg */
+  --accent-border: #3f7a58; /* spruce-dark: success-border */
+  --accent-text: #8fd3a8; /* spruce-dark: accent */
+  --accent-emphasis: #8fd3a8; /* spruce-dark: accent */
+  --focus-color: #8fd3a8; /* spruce-dark: accent */
+  --primary: #6cc08b; /* spruce-dark: primary-bg */
+  --primary-hover: #8fd3a8; /* spruce-dark: accent */
+  --primary-border: #6cc08b; /* spruce-dark: primary-bg */
+  --on-primary: #0a110d; /* spruce-dark: primary-text */
+  --control-bg: #13201a; /* spruce-dark: card */
+  --control-bg-hover: #0f1a14; /* spruce-dark: table-head */
+  --control-bg-active: #1d2e24; /* spruce-dark: table-border */
+  --control-fg: #e6ede7; /* spruce-dark: text */
+  --control-border: #24382c; /* spruce-dark: card-border */
+  --success: #8fd3a8; /* spruce-dark: success-text */
+  --success-soft: #16301f; /* spruce-dark: success-bg */
+  --success-border: #3f7a58; /* spruce-dark: success-border */
+  --success-strong: #1f6f4a; /* spruce: accent */
+  --success-line: #3f7a58; /* spruce-dark: success-border */
+  --warning: #e0b45c; /* spruce-dark: warning-text */
+  --warning-soft: #2a2413; /* spruce-dark: warning-bg */
+  --warning-border: #9a7a33; /* spruce-dark: warning-border */
+  --warning-strong: #8a5a06; /* spruce: warning-text */
+  --warning-line: #9a7a33; /* spruce-dark: warning-border */
+  --attention-row-bg: #1d1a10; /* spruce-dark: attention-row-bg */
+  --attention-row-edge: #b98a2e; /* spruce-dark: attention-row-edge */
+  --demo-bg: #2a2413; /* spruce-dark: demo-bg */
+  --demo-fg: #e3c87a; /* spruce-dark: demo-text */
+  --demo-pill-border: #8a7637; /* spruce-dark: demo-pill-border */
+  --header-bg: #112219; /* spruce-dark: header */
+  --header-fg: #aebdb2; /* spruce-dark: sidebar-text */
+  --header-fg-logo: #e6ede7; /* spruce-dark: text */
+  --header-mark-end: #6cc08b; /* spruce: logo-accent */
+  --header-divider: #90a094; /* spruce-dark: label */
+  --header-edge: #22332a; /* spruce-dark: header-border */
+  --sidebar-bg: #0a110d; /* spruce-dark: sidebar */
+  --sidebar-fg: #aebdb2; /* spruce-dark: sidebar-text */
+  --sidebar-muted: #7e8e82; /* spruce-dark: text-weak */
+  --sidebar-section: #90a094; /* spruce-dark: label */
+  --sidebar-divider: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+  --nav-hover: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+  --nav-selected: rgba(255, 255, 255, 0.1); /* spruce: nav-active-bg */
+  --nav-active-edge: #6cc08b; /* spruce: nav-active-edge */
+  --nav-active-fg: #ffffff; /* spruce: nav-active-text */
+  --danger: #f85149; /* primer-dark: --fgColor-danger */
+  --danger-soft: #f851491a; /* primer-dark: --bgColor-danger-muted */
+  --danger-border: #f8514966; /* primer-dark: --borderColor-danger-muted */
+  --danger-strong: #da3633; /* primer-dark: --bgColor-danger-emphasis */
+  --danger-line: #da3633; /* primer-dark: --borderColor-danger-emphasis */
+  --neutral-soft: #656c7633; /* primer-dark: --bgColor-neutral-muted */
+  --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
   --shadow-lg: 0 0 0 1px #3d444d, 0 6px 12px -3px #01040966, 0 6px 18px 0 #01040966; /* primer-dark: --shadow-floating-small */
   --backdrop: #21283066; /* primer-dark: --overlay-backdrop-bgColor */
-  --text: #f0f6fc; /* primer-dark: --fgColor-default */
-  --text-2: #9198a1; /* primer-dark: --fgColor-muted */
-  --text-3: #656c76; /* primer-dark: --fgColor-disabled */
-  --text-money: #f0f6fc; /* primer-dark: --fgColor-default */
-  --on-emphasis: #ffffff; /* primer-dark: --fgColor-onEmphasis */
-  /* Шаг 112 [Р-238]: чипы площадок — тихие: подложка muted оттенка display Primer, буква — fgColor того же оттенка. eBay — auburn, а не red:
-     красный совпадает с цветом ошибок (у coral в тёмной теме — тот же red); Kaufland — brown (за профилем ЕС) */
+  --button-shadow: 0 0 0 0 #00000000; /* primer-dark: --button-default-shadow-resting */
+  --track-bg: #010409; /* primer-dark: --controlTrack-bgColor-rest */
+  --knob-bg: #262c36; /* primer-dark: --controlKnob-bgColor-rest */
   --chip-amazon-bg: #311708; /* primer-dark: --display-orange-bgColor-muted */
   --chip-amazon-fg: #ed8326; /* primer-dark: --display-orange-fgColor */
   --chip-walmart-bg: #001a47; /* primer-dark: --display-blue-bgColor-muted */
@@ -300,7 +387,6 @@
   --chip-kaufland-fg: #b69a6d; /* primer-dark: --display-brown-fgColor */
   --chip-other-bg: #1c1c1c; /* primer-dark: --display-gray-bgColor-muted */
   --chip-other-fg: #92a1b5; /* primer-dark: --display-gray-fgColor */
-  /* Шаг 112 [Р-238]: кружок-образец цвета товара — ступень 5 шкалы display (почти одна в обеих темах), чёрный и белый — неизменные */
   --swatch-black: #010409; /* primer-dark: --bgColor-black */
   --swatch-white: #ffffff; /* primer-dark: --bgColor-white */
   --swatch-grey: #6e7f96; /* primer-dark: --display-gray-scale-5 */
@@ -313,46 +399,6 @@
   --swatch-pink: #d34591; /* primer-dark: --display-pink-scale-5 */
   --swatch-brown: #94774c; /* primer-dark: --display-brown-scale-5 */
   --swatch-teal: #158a8a; /* primer-dark: --display-teal-scale-5 */
-  --accent: #4493f8; /* primer-dark: --fgColor-accent */
-  --accent-hover: #4493f8; /* primer-dark: --fgColor-link */
-  --accent-soft: #388bfd1a; /* primer-dark: --bgColor-accent-muted */
-  --accent-border: #388bfd66; /* primer-dark: --borderColor-accent-muted */
-  --accent-text: #4493f8; /* primer-dark: --fgColor-accent */
-  --accent-emphasis: #1f6feb; /* primer-dark: --borderColor-accent-emphasis */
-  --focus-color: #1f6feb; /* primer-dark: --focus-outline-color */
-  --primary: #238636; /* primer-dark: --button-primary-bgColor-rest */
-  --primary-hover: #29903b; /* primer-dark: --button-primary-bgColor-hover */
-  --primary-border: #ffffff26; /* primer-dark: --button-primary-borderColor-rest */
-  --control-bg: #212830; /* primer-dark: --control-bgColor-rest */
-  --control-bg-hover: #262c36; /* primer-dark: --control-bgColor-hover */
-  --control-bg-active: #2a313c; /* primer-dark: --control-bgColor-active */
-  --control-fg: #f0f6fc; /* primer-dark: --control-fgColor-rest */
-  --button-shadow: 0 0 0 0 #00000000; /* primer-dark: --button-default-shadow-resting */
-  --track-bg: #010409; /* primer-dark: --controlTrack-bgColor-rest */
-  --knob-bg: #262c36; /* primer-dark: --controlKnob-bgColor-rest */
-  --success: #3fb950; /* primer-dark: --fgColor-success */
-  --success-soft: #2ea04326; /* primer-dark: --bgColor-success-muted */
-  --success-border: #2ea04366; /* primer-dark: --borderColor-success-muted */
-  --success-strong: #238636; /* primer-dark: --bgColor-success-emphasis */
-  --warning: #d29922; /* primer-dark: --fgColor-attention */
-  --warning-soft: #bb800926; /* primer-dark: --bgColor-attention-muted */
-  --warning-border: #bb800966; /* primer-dark: --borderColor-attention-muted */
-  --warning-strong: #9e6a03; /* primer-dark: --bgColor-attention-emphasis */
-  --danger: #f85149; /* primer-dark: --fgColor-danger */
-  --danger-soft: #f851491a; /* primer-dark: --bgColor-danger-muted */
-  --danger-border: #f8514966; /* primer-dark: --borderColor-danger-muted */
-  --danger-strong: #da3633; /* primer-dark: --bgColor-danger-emphasis */
-  --neutral-soft: #656c7633; /* primer-dark: --bgColor-neutral-muted */
-  --success-line: #238636; /* primer-dark: --borderColor-success-emphasis */
-  --warning-line: #9e6a03; /* primer-dark: --borderColor-attention-emphasis */
-  --danger-line: #da3633; /* primer-dark: --borderColor-danger-emphasis */
-  --header-bg: #151b23f2; /* primer-dark: --header-bgColor */
-  --header-fg: #ffffffb3; /* primer-dark: --header-fgColor-default */
-  --header-fg-logo: #f0f6fc; /* primer-dark: --header-fgColor-logo */
-  --header-divider: #656c76; /* primer-dark: --header-borderColor-divider */
-  --header-edge: #3d444db3; /* primer-dark: --borderColor-muted */
-  --nav-hover: #656c7633; /* primer-dark: --control-transparent-bgColor-hover */
-  --nav-selected: #656c7633; /* primer-dark: --control-transparent-bgColor-selected */
   --role-owner-bg: #001a47; /* primer-dark: --label-blue-bgColor-rest */
   --role-owner-fg: #4da0ff; /* primer-dark: --label-blue-fgColor-rest */
   --role-admin-bg: #211047; /* primer-dark: --label-purple-bgColor-rest */

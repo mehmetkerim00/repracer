@@ -4,12 +4,17 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { CHIP_PLATFORMS, chipProblems, type ChipTheme } from './chip-quiet.ts';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { CONTRAST_ADJUSTED, CONTRAST_PAIRS, DARK_SUBSTITUTES, SPRUCE_DARK, SPRUCE_LIGHT, contrast, hue, over, parseColor } from './spruce-theme.ts';
 
 /**
- * Шаг 83: правило «ничего не изобретать» [Р-146]. Облик консоли берёт каждое значение из дизайн-системы GitHub Primer
- * (@primer/primitives, MIT): у значения в tokens.css — пометка `primer: --имя`, и значение обязано совпадать с токеном пакета;
- * непомеченное — только составное из других токенов или названное исключение. В styles.css цвета, размеры шрифта, радиусы и шрифтовые
- * стеки — только токенами: свой цвет или размер в стилях — красная сборка.
+ * Шаг 83: правило «ничего не изобретать» [Р-146]. Облик консоли берёт каждое значение из названного источника: у значения в tokens.css —
+ * пометка, и значение обязано совпадать с источником; непомеченное — только составное из других токенов или названное исключение. В
+ * styles.css цвета, размеры шрифта, радиусы и шрифтовые стеки — только токенами: свой цвет или размер в стилях — красная сборка.
+ *
+ * Шаг 167 (решение владельца): источник цвета, шрифта и размеров рамы — эталон темы «Spruce Hybrid» (`spruce: ключ`, `spruce-dark: ключ`,
+ * палитра — spruce-theme.ts); чего эталон не называет, — GitHub Primer (@primer/primitives, MIT; `primer: --имя`, `primer-dark: --имя`).
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +23,6 @@ const primerDir = join(consoleDir, '..', '..', 'node_modules', '@primer', 'primi
 
 /** Непомеченные значения tokens.css, которые не из Primer, — с причиной */
 const EXCEPTIONS: Readonly<Record<string, string>> = {
-  '--font-mono': 'IBM Plex Mono — только денежные колонки таблиц, решение владельца шага 83',
   '--topbar-h': 'высота шапки — размер раскладки консоли, не значение дизайн-системы',
   '--sidebar-w': 'ширина боковой панели — размер раскладки консоли, не значение дизайн-системы',
 };
@@ -50,15 +54,28 @@ function primerTokens(theme: 'light' | 'dark' = 'light'): Map<string, string> {
 
 const norm = (v: string) => v.replace(/\s+/g, ' ').trim().toLowerCase();
 
-/** Проблемы tokens.css: значение не равно токену Primer, непомеченное значение, ссылка на токен, которого в пакете нет */
+/** Шаг 167: значение эталона под ключом — с поправкой контраста, если она названа (CONTRAST_ADJUSTED) */
+export function spruceValue(key: string, dark: boolean): string | undefined {
+  return dark ? SPRUCE_DARK[key] : CONTRAST_ADJUSTED[key]?.value ?? SPRUCE_LIGHT[key];
+}
+
+/** Проблемы tokens.css: значение не равно токену Primer или значению эталона, непомеченное значение, ссылка на токен или ключ, которого нет */
 export function tokenProblems(tokensCss: string, primer: ReadonlyMap<string, string>, primerDark: ReadonlyMap<string, string> = primerTokens('dark')): string[] {
   const problems: string[] = [];
-  const body = tokensCss.replace(/\/\*(?!\s*primer(?:-dark)?:)[\s\S]*?\*\//g, '');
+  const body = tokensCss.replace(/\/\*(?!\s*(?:primer|spruce)(?:-dark)?:)[\s\S]*?\*\//g, '');
   for (const line of body.split('\n')) {
-    const m = /^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*(?:\/\*\s*primer(-dark)?:\s*(--[A-Za-z0-9-]+)\s*\*\/)?\s*$/.exec(line);
-    if (!m) continue;
-    const [, name, value, dark, source] = m as unknown as [string, string, string, string | undefined, string | undefined];
-    if (source !== undefined) {
+    const m = /^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*(?:\/\*\s*(primer|spruce)(-dark)?:\s*(--[A-Za-z0-9-]+|[A-Za-z][A-Za-z0-9-]*)\s*\*\/)?\s*$/.exec(line);
+    if (!m) {
+      // Шаг 167: объявление токена, которое правило не может прочитать (пометка неверной формы), — находка, а не тихий пропуск
+      if (/^\s*--[A-Za-z0-9-]+\s*:/.test(line)) problems.push(`${line.trim()}: an unreadable token line`);
+      continue;
+    }
+    const [, name, value, kind, dark, source] = m as unknown as [string, string, string, string | undefined, string | undefined, string | undefined];
+    if (kind === 'spruce' && source !== undefined) {
+      const expected = spruceValue(source, dark !== undefined);
+      if (expected === undefined) problems.push(`${name}: spruce${dark ?? ''} key ${source} is not in the approved theme`);
+      else if (norm(value) !== norm(expected)) problems.push(`${name}: ${value} is not spruce${dark ?? ''} ${source} (${expected})`);
+    } else if (source !== undefined) {
       const expected = (dark ? primerDark : primer).get(source);
       if (expected === undefined) problems.push(`${name}: primer token ${source} is not in the package`);
       else if (norm(value) !== norm(expected)) problems.push(`${name}: ${value} is not primer ${source} (${expected})`);
@@ -99,12 +116,91 @@ function themeTokenNames(): Set<string> {
 }
 
 /** Строки «токен → (значение, источник)» блока tokens.css по селектору */
-function tokenLines(block: string): Map<string, { value: string; source: string; dark: boolean }> {
-  const out = new Map<string, { value: string; source: string; dark: boolean }>();
-  for (const m of block.matchAll(/^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*\/\*\s*primer(-dark)?:\s*(--[A-Za-z0-9-]+)\s*\*\//gm)) {
-    out.set(m[1]!, { value: m[2]!, source: m[4]!, dark: m[3] !== undefined });
+function tokenLines(block: string): Map<string, { value: string; source: string; dark: boolean; spruce: boolean }> {
+  const out = new Map<string, { value: string; source: string; dark: boolean; spruce: boolean }>();
+  for (const m of block.matchAll(/^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);\s*\/\*\s*(primer|spruce)(-dark)?:\s*(--[A-Za-z0-9-]+|[A-Za-z][A-Za-z0-9-]*)\s*\*\//gm)) {
+    out.set(m[1]!, { value: m[2]!, source: m[5]!, dark: m[4] !== undefined, spruce: m[3] === 'spruce' });
   }
   return out;
+}
+
+/** Блок tokens.css по открывающей строке: светлый `:root`, системная тёмная тема, ручная тёмная */
+function blockOf(tokensCss: string, open: RegExp): string | null {
+  const m = open.exec(tokensCss);
+  if (!m) return null;
+  let depth = 0;
+  for (let i = m.index + m[0].length - 1; i < tokensCss.length; i++) {
+    if (tokensCss[i] === '{') depth++;
+    if (tokensCss[i] === '}' && --depth === 0) return tokensCss.slice(m.index, i + 1);
+  }
+  return null;
+}
+const THEME_BLOCKS = { light: /^:root \{/m, 'system dark': /@media \(prefers-color-scheme: dark\) \{/, 'manual dark': /^:root\[data-theme="dark"\] \{/m } as const;
+
+const isColour = (value: string) => { try { parseColor(value); return true; } catch { return false; } };
+
+/**
+ * Шаг 167: тёмная тема эталона — целиком. Каждый цвет светлой темы с пометкой `spruce` имеет в ОБОИХ тёмных блоках пару: `spruce-dark` того
+ * же ключа, а иная пара (другой ключ тёмного эталона или значение светлой темы) — только названная в DARK_SUBSTITUTES с причиной;
+ * названная, но неиспользуемая замена — тоже находка
+ */
+export function spruceThemeProblems(tokensCss: string, substitutes: typeof DARK_SUBSTITUTES = DARK_SUBSTITUTES): string[] {
+  const problems: string[] = [];
+  const light = blockOf(tokensCss, THEME_BLOCKS.light);
+  if (!light) return ['tokens.css: the light block is missing'];
+  const lightSpruce = [...tokenLines(light)].filter(([, t]) => t.spruce && !t.dark && isColour(t.value));
+  const used = new Set<string>();
+  for (const where of ['system dark', 'manual dark'] as const) {
+    const block = blockOf(tokensCss, THEME_BLOCKS[where]);
+    if (!block) { problems.push(`tokens.css: the ${where} block is missing`); continue; }
+    const dark = tokenLines(block);
+    for (const [name, t] of lightSpruce) {
+      const d = dark.get(name);
+      if (!d || !d.spruce) { problems.push(`${where}: ${name} has no spruce dark value`); continue; }
+      const sub = substitutes[name];
+      // пара своего ключа — без замены; названная «замена», равная ей, — не использована
+      if (d.dark && d.source === t.source) continue;
+      if (sub && d.source === sub.key && d.dark === !sub.light) { used.add(name); continue; }
+      problems.push(`${where}: ${name} takes ${d.dark ? 'spruce-dark' : 'spruce'} ${d.source} — not the dark ${t.source} and not a named substitute`);
+    }
+  }
+  for (const name of Object.keys(substitutes)) if (!used.has(name)) problems.push(`${name}: a named dark substitute that tokens.css does not use`);
+  return problems;
+}
+
+/** Значения темы: тёмные блоки наследуют светлые, как каскад страницы */
+function themeValues(tokensCss: string, which: keyof typeof THEME_BLOCKS): Map<string, string> {
+  const valuesOf = (block: string | null) => new Map([...(block ?? '').matchAll(/^\s*(--[A-Za-z0-9-]+)\s*:\s*(.+?);/gm)].map((m) => [m[1]!, m[2]!.trim()]));
+  const light = valuesOf(blockOf(tokensCss, THEME_BLOCKS.light));
+  return which === 'light' ? light : new Map([...light, ...valuesOf(blockOf(tokensCss, THEME_BLOCKS[which]))]);
+}
+
+/**
+ * Шаг 167 (правило владельца): контраст каждой пары «текст — фон» не меньше 4,5:1 — расчётом WCAG 2, а не на глаз, в каждой теме
+ * (светлая, системная тёмная, ручная тёмная), на худшем фоне пары. `A@B` — полупрозрачный фон A поверх B
+ */
+export function contrastProblems(tokensCss: string, pairs: typeof CONTRAST_PAIRS = CONTRAST_PAIRS, min = 4.5): string[] {
+  const problems: string[] = [];
+  for (const theme of Object.keys(THEME_BLOCKS) as Array<keyof typeof THEME_BLOCKS>) {
+    const v = themeValues(tokensCss, theme);
+    const colour = (name: string): [number, number, number, number] => {
+      const raw = v.get(name);
+      if (raw === undefined) throw new Error(`${theme}: ${name} is not defined`);
+      return parseColor(raw);
+    };
+    const background = (spec: string) => {
+      const [top, under] = spec.split('@');
+      const c = colour(top!);
+      return c[3] < 1 ? over(c, under ? colour(under) : colour('--surface')) : c;
+    };
+    for (const [text, backgrounds] of pairs) {
+      for (const bg of backgrounds) {
+        const ratio = contrast(colour(text), background(bg));
+        if (ratio < min) problems.push(`${theme}: ${text} on ${bg} — ${ratio.toFixed(2)}:1`);
+      }
+    }
+  }
+  return problems;
 }
 
 /**
@@ -115,12 +211,8 @@ function tokenLines(block: string): Map<string, { value: string; source: string;
  * Шаг 93: исключения правила пар — токен, у которого тёмная тема берёт ДРУГОЕ имя Primer, названное здесь с причиной. Значение по-прежнему
  * сверяется с пакетом (tokenProblems); правило проверяет, что тёмная пара — ровно названная
  */
-export const THEME_EXCEPTIONS: Readonly<Record<string, { dark: string; why: string }>> = {
-  '--header-edge': {
-    dark: '--borderColor-muted',
-    why: 'нижний край шапки: в светлой теме цветом самой шапки (не виден), в тёмной шапка (--header-bgColor) того же цвета, что канва (--bgColor-muted), и край её отделяет',
-  },
-};
+// Шаг 167: край шапки — значение эталона «Spruce Hybrid» (у темы Primer исключений больше нет); пары эталона — DARK_SUBSTITUTES
+export const THEME_EXCEPTIONS: Readonly<Record<string, { dark: string; why: string }>> = {};
 
 export function themeProblems(tokensCss: string, themed: ReadonlySet<string>, exceptions: Readonly<Record<string, { dark: string }>> = THEME_EXCEPTIONS): string[] {
   const problems: string[] = [];
@@ -193,7 +285,7 @@ export function mediaProblems(stylesCss: string, primer: ReadonlyMap<string, str
   return problems;
 }
 
-test('step 83: every value in tokens.css is the GitHub Primer token it names — nothing invented', () => {
+test('step 83, step 167: every value in tokens.css is the Spruce Hybrid value or the GitHub Primer token it names — nothing invented', () => {
   const primer = primerTokens();
   const tokensCss = readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8');
   assert.deepEqual(tokenProblems(tokensCss, primer), []);
@@ -208,6 +300,16 @@ test('step 83: every value in tokens.css is the GitHub Primer token it names —
   assert.match(tokenProblems('  --x: #123456; /* primer-dark: --contribution-default-bgColor-3 */', primer).join(), /is not primer --contribution-default-bgColor-3/);
   // Пометок не меньше, чем значений Primer в файле: правило не зеленеет на пустом файле
   assert.ok((tokensCss.match(/primer: --/g) ?? []).length >= 60, 'tokens.css names its primer sources');
+  // Шаг 167: значения эталона сверяются с эталоном — чужое значение, выдуманный ключ и значение светлой темы под тёмной пометкой краснеют
+  assert.ok((tokensCss.match(/spruce: [a-z]/g) ?? []).length >= 60, 'tokens.css names its spruce sources');
+  assert.deepEqual(tokenProblems('  --bg: #f6f5f1; /* spruce: canvas */', primer), []);
+  assert.match(tokenProblems('  --bg: #f6f8fa; /* spruce: canvas */', primer).join(), /is not spruce canvas \(#f6f5f1\)/);
+  assert.match(tokenProblems('  --bg: #f6f5f1; /* spruce: madeUp */', primer).join(), /key madeUp is not in the approved theme/);
+  assert.match(tokenProblems('  --bg: #f6f5f1; /* spruce: canvas, card */', primer).join(), /an unreadable token line/, 'a mark of a wrong form is a finding, not a skip');
+  assert.match(tokenProblems('  --bg: #f6f5f1; /* spruce-dark: canvas */', primer).join(), /is not spruce-dark canvas \(#0c1410\)/);
+  // поправка контраста — единственное отличие от эталона, и только названная
+  assert.deepEqual(tokenProblems('  --text-3: #687169; /* spruce: text-weak */', primer), []);
+  assert.match(tokenProblems('  --text-3: #8b948c; /* spruce: text-weak */', primer).join(), /is not spruce text-weak \(#687169\)/);
 });
 
 test('step 83: styles.css takes colours, font sizes, radii and font stacks only from tokens', () => {
@@ -226,15 +328,12 @@ test('step 93: the dark theme is complete — every themed light value has its G
   const tokensCss = readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8');
   const themed = themeTokenNames();
   assert.deepEqual(themeProblems(tokensCss, themed), []);
-  assert.ok((tokensCss.match(/primer-dark: --/g) ?? []).length >= 120, 'both dark blocks carry their pairs');
+  assert.ok((tokensCss.match(/primer-dark: --/g) ?? []).length >= 90, 'both dark blocks carry their pairs');
   // Положительные контроли [Р-94]: выкинутая пара, пара не того токена и разошедшиеся блоки краснеют
   const dropped = tokensCss.replace(/\n\s*--danger: #f85149; \/\* primer-dark: --fgColor-danger \*\//, '');
   assert.match(themeProblems(dropped, themed).join(), /--danger has no dark value/);
-  const swapped = tokensCss.replace('--text: #f0f6fc; /* primer-dark: --fgColor-default */', '--text: #9198a1; /* primer-dark: --fgColor-muted */');
-  assert.match(themeProblems(swapped, themed).join(), /--text takes --fgColor-muted instead of the dark --fgColor-default/);
-  // исключение пропускает ровно названную пару: без него край шапки краснеет, с чужой парой — тоже
-  assert.match(themeProblems(tokensCss, themed, {}).join(), /--header-edge takes --borderColor-muted instead of the dark --header-bgColor/);
-  assert.match(themeProblems(tokensCss, themed, { '--header-edge': { dark: '--borderColor-default' } }).join(), /--header-edge takes --borderColor-muted instead of the dark --borderColor-default/);
+  const swapped = tokensCss.replace('--danger: #f85149; /* primer-dark: --fgColor-danger */', '--danger: #9198a1; /* primer-dark: --fgColor-muted */');
+  assert.match(themeProblems(swapped, themed).join(), /--danger takes --fgColor-muted instead of the dark --fgColor-danger/);
 });
 
 test('step 93: padding, margin and gap in styles.css are on the GitHub Primer spacing scale', () => {
@@ -358,4 +457,67 @@ test('step 112 [Р-238]: platform chips are quiet in every theme — a soft tint
   // Белая буква на тихой подложке не читается; одинаковые чипы двух площадок не различить
   assert.match(chipProblems('x', { ...themes.light!, chips: { amazon: { bg: '#ffe7d1', fg: '#ffffff', sources: [] } } }).join(), /amazon: the letter is hard to read/);
   assert.match(chipProblems('x', { ...themes.light!, chips: { a: themes.light!.chips.ebay!, b: themes.light!.chips.ebay! } }).join(), /a and b: hard to tell apart/);
+});
+
+/**
+ * Шаг 167 (решение владельца — тема «Spruce Hybrid»): тёмная тема эталона целиком — каждый цвет светлой темы эталона имеет пару в обоих тёмных
+ * блоках, замены названы с причиной
+ */
+test('step 167: the dark theme is complete — every Spruce colour has its dark pair in both dark blocks, substitutes named', () => {
+  const tokensCss = readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8');
+  assert.deepEqual(spruceThemeProblems(tokensCss), []);
+  // Положительные контроли [Р-94]: выкинутая пара, пара без названной замены и неиспользуемая замена краснеют
+  const dropped = tokensCss.replace(/\n\s*--accent: #8fd3a8; \/\* spruce-dark: accent \*\//, '');
+  assert.match(spruceThemeProblems(dropped).join(), /--accent has no spruce dark value/);
+  const { ['--control-border']: _drop, ...without } = DARK_SUBSTITUTES;
+  assert.match(spruceThemeProblems(tokensCss, without).join(), /--control-border takes spruce-dark card-border — not the dark control-border and not a named substitute/);
+  assert.match(spruceThemeProblems(tokensCss, { ...DARK_SUBSTITUTES, '--text': { key: 'text', why: 'x' } }).join(), /--text: a named dark substitute that tokens\.css does not use/);
+});
+
+/** Шаг 167 (правило владельца): контраст каждой пары «текст — фон» не меньше 4,5:1 в каждой теме — расчётом, подписи 10.5px включительно */
+test('step 167: every text and background pair reads at 4.5:1 or more in the light, system dark and manual dark theme', () => {
+  const tokensCss = readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8');
+  assert.deepEqual(contrastProblems(tokensCss), []);
+  // Красное сначала [Р-94]: эталон без поправок — слабый текст и подписи светлой темы ниже 4,5:1 на канве
+  const unadjusted = tokensCss.replace('--text-3: #687169;', '--text-3: #8b948c;').replace('--label: #6a7168;', '--label: #6b7369;');
+  const found = contrastProblems(unadjusted);
+  assert.ok(found.some((x) => /^light: --text-3 on --bg — 2\.87:1$/.test(x)) && found.some((x) => /^light: --label on --bg — 4\.50:1$/.test(x)), found.join(' | '));
+});
+
+/** Шаг 167: поправка контраста — в пределах оттенка (тон не дальше 2°), нужна (эталон не проходит) и достаточна (поправка проходит) */
+test('step 167: a value darkened for contrast keeps its hue, and only values that failed are adjusted', () => {
+  const canvas = parseColor(SPRUCE_LIGHT.canvas!);
+  for (const [key, a] of Object.entries(CONTRAST_ADJUSTED)) {
+    assert.equal(SPRUCE_LIGHT[key], a.spec, `${key}: the adjustment starts from the approved value`);
+    const spec = parseColor(a.spec);
+    const value = parseColor(a.value);
+    assert.ok(Math.abs(hue(spec) - hue(value)) <= 2, `${key}: hue ${hue(spec).toFixed(1)}° → ${hue(value).toFixed(1)}°`);
+    assert.ok(contrast(spec, canvas) < 4.5 && contrast(value, canvas) >= 4.5, `${key}: ${contrast(spec, canvas).toFixed(3)} → ${contrast(value, canvas).toFixed(3)}`);
+  }
+});
+
+/**
+ * Шаг 167 (решение владельца): шрифты — файлами woff2 в репозитории под OFL с текстами лицензий, никакой загрузки из сети; моноширинного
+ * шрифта в интерфейсе не остаётся
+ */
+test('step 167: fonts are woff2 files in the repository under the OFL with their licenses — nothing from the network, no monospace font', () => {
+  const fontsDir = join(consoleDir, 'src', 'fonts');
+  const fontsCss = readFileSync(join(fontsDir, 'fonts.css'), 'utf8');
+  const source = readFileSync(join(fontsDir, 'SOURCE.md'), 'utf8');
+  const urls = [...fontsCss.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1]!.replace(/['"]/g, ''));
+  assert.deepEqual(new Set(urls), new Set(['./inter-latin-400-normal.woff2', './inter-latin-500-normal.woff2', './inter-latin-600-normal.woff2', './schibsted-grotesk-latin-600-normal.woff2']));
+  for (const url of urls) {
+    const file = join(fontsDir, url.slice(2));
+    const sha = createHash('sha256').update(readFileSync(file)).digest('hex');
+    assert.ok(source.includes(`\`${url.slice(2)}\``) && source.includes(sha), `${url}: named in SOURCE.md with its SHA-256 ${sha}`);
+  }
+  for (const license of ['OFL-Inter.txt', 'OFL-SchibstedGrotesk.txt']) {
+    assert.ok(existsSync(join(fontsDir, license)) && /SIL Open Font License, Version 1\.1/.test(readFileSync(join(fontsDir, license), 'utf8')), `${license} is the OFL 1.1`);
+  }
+  const main = readFileSync(join(consoleDir, 'src', 'main.tsx'), 'utf8');
+  assert.match(main, /import '\.\/fonts\/fonts\.css';/);
+  assert.doesNotMatch(main, /@fontsource/, 'no font package in the page');
+  const css = [fontsCss, readFileSync(join(consoleDir, 'src', 'tokens.css'), 'utf8'), readFileSync(join(consoleDir, 'src', 'styles.css'), 'utf8')].join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(css, /url\(\s*['"]?(?:https?:)?\/\//, 'no font or image from the network');
+  assert.doesNotMatch(css, /monospace|\bmono\b(?!\s*\{)|Plex Mono|SFMono|Menlo|Consolas/i, 'no monospace font stack');
 });

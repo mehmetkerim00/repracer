@@ -12,6 +12,8 @@
 html, body { margin: 0; background: var(--bg); }
 body { font-family: var(--font); font-size: var(--font-size); line-height: var(--line-height); color: var(--text); }
 h1, h2, h3, h4 { font-weight: var(--weight-heading); color: var(--text); }
+/* Шаг 167 (тема «Spruce Hybrid»): заголовки страниц, имя пространства и бренд — Schibsted Grotesk 600; остальное — Inter */
+h1, h2, .brand, .login-brand, .sidebar .workspace .name { font-family: var(--font-heading); font-weight: var(--weight-heading); }
 h2 { font-size: var(--font-size-lg); line-height: var(--line-height-tight); margin: 0 0 var(--space-2); }
 /* заголовок страницы — заголовок Primer (title large) */
 .world-content h2, main > h2 { font-size: var(--font-size-xl); line-height: var(--line-height-tight); margin-bottom: var(--space-2); }
@@ -25,16 +27,18 @@ ul, ol { margin: 0 0 var(--space-2); padding-left: var(--space-5); }
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); text-decoration: underline; }
 strong, b { font-weight: var(--weight-heading); }
-code, pre { font-family: var(--font-code); font-size: var(--font-size-sm); }
+code, pre { font-family: var(--font); font-size: var(--font-size-sm); }
 .muted, .note { color: var(--text-2); }
 .note { font-size: var(--font-size-sm); margin: var(--space-1) 0 0; }
 .small { font-size: var(--font-size-sm); }
 .nowrap { white-space: nowrap; }
-/* числа — вправо табличными цифрами системного шрифта; IBM Plex Mono — только деньги в колонках таблиц (решение владельца, шаг 83) */
+/* числа — вправо табличными цифрами; шаг 167: моноширинного шрифта в интерфейсе нет — деньги и количества набраны Inter с tabular-nums */
 .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: var(--weight-medium); color: var(--text-money); }
-/* денежная колонка таблицы — класс `cur` у ячейки суммы в валюте (не у количества): только она набрана IBM Plex Mono */
-td.cur { font-family: var(--font-mono); }
+/* денежная колонка таблицы — класс `cur` у ячейки суммы в валюте: табличные цифры, чтобы суммы стояли столбцом */
+td.cur { font-variant-numeric: tabular-nums; }
+/* шаг 167: отрицательные деньги — свой цвет темы */
+.negative { color: var(--money-negative); }
 /* подпись под суммой и ссылка в денежной колонке остаются текстом интерфейса */
 td.cur .note, td.cur .muted, td.cur .small, td.cur a, td.cur .badge, td.cur .floor-parts { font-family: var(--font); font-weight: 400; }
 .when { color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; font-size: var(--font-size-sm); }
@@ -84,36 +88,38 @@ td.cur .note, td.cur .muted, td.cur .small, td.cur a, td.cur .badge, td.cur .flo
 main.page { max-width: 1200px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-7); }
 main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: calc(100vh - var(--topbar-h)); }
 
-/* Демо: тонкая полоса внимания под шапкой, на каждом экране мира [Р-151] */
+/* Демо: тонкая полоса под шапкой, на каждом экране мира [Р-151]; шаг 167 — своя плашка темы: фон, текст и рамка пилюли */
 .demo-strip {
-  display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); background: var(--warning-soft);
-  border-bottom: var(--border-width) solid var(--warning-border); color: var(--text); font-size: var(--font-size-sm);
+  display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); background: var(--demo-bg);
+  border-bottom: var(--border-width) solid var(--demo-pill-border); color: var(--demo-fg); font-size: var(--font-size-sm);
 }
+.demo-strip .badge { background: transparent; color: var(--demo-fg); border-color: var(--demo-pill-border); }
 
 /* полоса демо стоит над раскладкой: панель тянется до низа окна, а не на высоту окна ниже полосы */
 .world-layout { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); flex: 1; }
-.sidebar { align-self: stretch; background: var(--surface); border-right: var(--border-width) solid var(--border); }
+/* шаг 167 (тема «Spruce Hybrid»): боковина — тёмная ель, как шапка; выбранный пункт — светлая подложка, полоса слева, белый полужирный текст */
+.sidebar { align-self: stretch; background: var(--sidebar-bg); border-right: var(--border-width) solid var(--sidebar-divider); color: var(--sidebar-fg); }
 .sidebar-inner { position: sticky; top: var(--topbar-h); max-height: calc(100vh - var(--topbar-h)); overflow-y: auto; padding: var(--space-4) var(--space-2); }
-.sidebar .workspace { padding: 0 var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border); margin-bottom: var(--space-2); }
-.sidebar .workspace .name { font-weight: var(--weight-heading); font-size: var(--font-size); margin-bottom: var(--space-1); }
-.sidebar .workspace a { font-size: var(--font-size-sm); color: var(--text-2); }
-.sidebar .workspace a:hover { color: var(--accent); }
+.sidebar .workspace { padding: 0 var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--sidebar-divider); margin-bottom: var(--space-2); }
+.sidebar .workspace .name { font-weight: var(--weight-heading); font-size: var(--font-size); margin-bottom: var(--space-1); color: var(--nav-active-fg); }
+.sidebar .workspace a { font-size: var(--font-size-sm); color: var(--sidebar-muted); }
+.sidebar .workspace a:hover { color: var(--nav-active-fg); }
 .nav-group { margin-bottom: var(--space-3); }
 /* Шаг 96.1: раздел из одного пункта — без заголовка; от соседнего блока его отделяет тонкая линия Primer */
-.nav-group.solo + .nav-group, .nav-group + .nav-group.solo { border-top: var(--border-width) solid var(--divider); padding-top: var(--space-2); }
-.nav-group .group-title { padding: var(--space-1) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--weight-heading); color: var(--text-2); }
+.nav-group.solo + .nav-group, .nav-group + .nav-group.solo { border-top: var(--border-width) solid var(--sidebar-divider); padding-top: var(--space-2); }
+.nav-group .group-title {
+  padding: var(--space-1) var(--space-2); font-size: var(--font-size-label); font-weight: var(--weight-heading); color: var(--sidebar-section);
+  text-transform: uppercase; letter-spacing: var(--tracking-section);
+}
 /* пункт NavList: иконка 20px тонким штрихом и подпись; выбранный — фоном выбора и полосой акцента слева */
 .nav-group a {
   display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); min-height: var(--control-h); border-radius: var(--radius);
-  color: var(--text); font-size: var(--font-size); text-decoration: none; position: relative;
+  color: var(--sidebar-fg); font-size: var(--font-size); text-decoration: none; position: relative;
 }
-.nav-group a .icon { flex: none; color: var(--text-2); }
-.nav-group a:hover { background: var(--nav-hover); text-decoration: none; color: var(--text); }
-.nav-group a.active { background: var(--nav-selected); font-weight: var(--weight-heading); }
-.nav-group a.active::after {
-  content: ''; position: absolute; left: calc(-1 * var(--space-2)); top: var(--space-1); bottom: var(--space-1); width: var(--space-1);
-  border-radius: var(--radius); background: var(--accent-emphasis);
-}
+.nav-group a .icon { flex: none; color: var(--sidebar-muted); }
+.nav-group a:hover { background: var(--nav-hover); text-decoration: none; color: var(--nav-active-fg); }
+.nav-group a.active { background: var(--nav-selected); box-shadow: inset 3px 0 0 var(--nav-active-edge); color: var(--nav-active-fg); font-weight: var(--weight-heading); }
+.nav-group a.active .icon, .nav-group a:hover .icon { color: var(--nav-active-fg); }
 /* шаг 84: единые отступы страницы и предельная ширина контента — на широком мониторе ничего не размазывается */
 .world-content { min-width: 0; width: 100%; max-width: 1344px; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
 .world-content > * + * { margin-top: var(--space-4); }
@@ -138,7 +144,7 @@ p.empty {
 
 /* ---------- карточки (Primer Box) ---------- */
 .card {
-  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
   padding: var(--space-4);
 }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
@@ -207,7 +213,7 @@ ul.explain li { padding: var(--space-1) 0; }
 /* «Включить запись» — карточка с полем и кнопкой; про второй фактор — мелко */
 .live-card { border: var(--border-width) solid var(--border); border-radius: var(--radius); background: var(--surface-muted); padding: var(--space-2) var(--space-3); max-width: 420px; }
 .live-card { display: flex; flex-direction: column; gap: var(--space-2); }
-.live-card input { width: 100%; font-family: var(--font-code); font-size: var(--font-size-sm); }
+.live-card input { width: 100%; font-family: var(--font); font-size: var(--font-size-sm); }
 .live-card button { align-self: flex-start; }
 /* карточка, где таблица — всё содержимое: шапка таблицы прилегает к верху карточки */
 /* без overflow: hidden — иначе карточка становится контейнером прокрутки, и липкая шапка таблицы съезжает на первую строку */
@@ -223,14 +229,14 @@ table.accounts-modes td:last-child { width: 40%; }
 /* ---------- кнопки (Primer Button), поля ---------- */
 button {
   font: inherit; font-weight: var(--weight-medium); font-size: var(--font-size); line-height: var(--line-height-tight); min-height: var(--control-h);
-  padding: var(--space-1) var(--space-3); border-radius: var(--radius); border: var(--border-width) solid var(--border); background: var(--control-bg);
+  padding: var(--space-1) var(--space-3); border-radius: var(--radius); border: var(--border-width) solid var(--control-border); background: var(--control-bg);
   color: var(--control-fg); cursor: pointer; box-shadow: var(--button-shadow);
 }
 button:hover { background: var(--control-bg-hover); }
 button:not(:disabled):active { background: var(--control-bg-active); }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.primary { background: var(--primary); border-color: var(--primary-border); color: var(--on-emphasis); }
+button.primary { background: var(--primary); border-color: var(--primary-border); color: var(--on-primary); }
 button.primary:hover { background: var(--primary-hover); }
 button.danger { background: var(--control-bg); border-color: var(--border); color: var(--danger); }
 button.danger:hover { background: var(--danger-strong); border-color: var(--danger-strong); color: var(--on-emphasis); }
@@ -238,7 +244,7 @@ button.danger:hover { background: var(--danger-strong); border-color: var(--dang
 .target-card.whole h3::first-letter { text-transform: uppercase; }
 .buttons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 input, select, textarea {
-  font: inherit; font-size: var(--font-size); color: var(--text); background: var(--surface); border: var(--border-width) solid var(--border);
+  font: inherit; font-size: var(--font-size); color: var(--text); background: var(--surface); border: var(--border-width) solid var(--control-border);
   border-radius: var(--radius); padding: var(--space-1) var(--space-3); line-height: var(--line-height-tight); min-height: var(--control-h);
 }
 /* шаг 94: галочка — своего размера, без высоты поля ввода: иначе она стоит ниже своей подписи */
@@ -273,7 +279,8 @@ label { color: var(--text); }
  * одним рядом в конце группы; плашка канала — заголовок, пилюля, суть и подробности по раскрытию, текст не шире ~80 знаков
  */
 .field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
-.field-label { font-weight: var(--weight-heading); font-size: var(--font-size); color: var(--text); line-height: var(--line-height-tight); }
+/* шаг 167: подписи полей — заглавными 10.5px цветом подписей */
+.field-label { font-weight: var(--weight-heading); font-size: var(--font-size-label); color: var(--label); line-height: var(--line-height-tight); text-transform: uppercase; }
 .field > input:not([type='checkbox']):not([type='radio']), .field > select, .field > textarea { width: 100%; max-width: 100%; }
 .field-caption { margin: 0; font-size: var(--font-size-sm); color: var(--text-2); max-width: 80ch; }
 .field-error { margin: 0; font-size: var(--font-size-sm); color: var(--danger); }
@@ -317,7 +324,7 @@ label { color: var(--text); }
 .toolbar > .export-note, .toolbar > .export-progress { flex-basis: 100%; }
 .export-note { margin: 0; font-size: var(--font-size-sm); color: var(--text-2); }
 /* шаг 105 [Р-230]: заголовок колонки Buy Box на Offers — кнопка сортировки по всему каталогу; выглядит заголовком, сторона — треугольником */
-th > .sort-head { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+th > .sort-head { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-transform: inherit; }
 th > .sort-head:hover { color: var(--text); }
 th.num > .sort-head { justify-content: flex-end; }
 /* Шаг 107 [Р-232]: имя продавца — внешняя ссылка; иконка «откроется в новой вкладке» рядом с именем */
@@ -339,12 +346,14 @@ th.num > .sort-head { justify-content: flex-end; }
 .filters-count { margin-left: auto; font-size: var(--font-size-sm); color: var(--text-2); align-self: flex-end; line-height: var(--control-h); }
 
 /* ---------- таблицы ---------- */
-.table-wrap { overflow-x: auto; background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.table-wrap { overflow-x: auto; background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 table { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--divider); vertical-align: top; text-align: left; }
 th {
-  position: sticky; top: var(--topbar-h); z-index: 2; background: var(--surface-muted); color: var(--text-2); font-weight: var(--weight-medium);
-  font-size: var(--font-size-sm); font-weight: var(--weight-heading); border-bottom: var(--border-width) solid var(--border); white-space: nowrap;
+  position: sticky; top: var(--topbar-h); z-index: 2; background: var(--surface-muted); color: var(--label); font-weight: var(--weight-medium);
+  font-size: var(--font-size-label); font-weight: var(--weight-heading); border-bottom: var(--border-width) solid var(--table-border); white-space: nowrap;
+  /* шаг 167: подписи колонок — заглавными 10.5px цветом подписей */
+  text-transform: uppercase;
 }
 .table-wrap th { top: 0; }
 td { line-height: var(--line-height); }
@@ -373,11 +382,11 @@ table.products tbody tr:hover td.offer, table.sticky-end tbody tr:hover td:last-
 .table-head .head-note { flex-basis: 100%; font-size: var(--font-size-sm); color: var(--text-2); }
 .th-zone { color: var(--text-2); font-weight: 400; }
 td .basis { color: var(--text); }
-.table-foot { margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); border-top: 1px solid var(--divider); position: sticky; left: 0; }
+.table-foot { margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); border-top: 1px solid var(--table-border); background: var(--surface-muted); position: sticky; left: 0; }
 /* панель над содержимым: фильтры, выбор, итоги — карточкой, а не текстом на фоне страницы */
 .toolbar {
   display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3) var(--space-4); padding: var(--space-3) var(--space-4);
-  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .toolbar > * { margin: 0; }
 /* соседние блоки экрана — карточки, панели, таблицы, уведомления — с одинаковым зазором */
@@ -431,7 +440,9 @@ td.bound { min-width: 130px; }
 /* причины отказа включения — красными маркерами (шаг 79) */
 ul.problems li::marker { color: var(--danger); }
 /* строка экрана различий, требующая внимания, — янтарной чертой слева у предложения (шаг 79) */
-td.offer.attention { box-shadow: inset 3px 0 0 var(--warning); }
+/* шаг 167: строка «требует внимания» — светлая янтарная подложка и полоса слева */
+td.offer.attention { box-shadow: inset 3px 0 0 var(--attention-row-edge); }
+tbody tr:has(> td.offer.attention) > td { background: var(--attention-row-bg); }
 td.pills { min-width: 170px; }
 td.pills .badge { margin: 0 var(--space-1) var(--space-1) 0; }
 table.dense th { white-space: normal; }
@@ -554,10 +565,10 @@ a.row-link::after { content: '→'; }
 }
 h2 .badge, h3 .badge { margin-left: var(--space-2); }
 .badge.symbol { font-weight: var(--weight-heading); }
-.tone-ok { color: var(--success); border-color: var(--success-line); }
+.tone-ok { color: var(--success); border-color: var(--success-line); background: var(--success-soft); }
 .tone-progress { color: var(--accent); border-color: var(--accent-emphasis); }
-.tone-warn { color: var(--warning); border-color: var(--warning-line); }
-.tone-stop { color: var(--danger); border-color: var(--danger-line); }
+.tone-warn { color: var(--warning); border-color: var(--warning-line); background: var(--warning-soft); }
+.tone-stop { color: var(--danger); border-color: var(--danger-line); background: var(--danger-soft); }
 .tone-off { color: var(--text-2); border-color: var(--border); }
 .tone-unknown { color: var(--text-2); border-color: var(--border); border-style: dashed; }
 /* Шаг 111 [Р-237]: чип площадки с буквой из data-letter, короткое имя витрины — приглушённо рядом. Шаг 112 [Р-238]: чип тихий — подложка
@@ -889,7 +900,7 @@ p.status-line { padding: var(--space-2) var(--space-3); border-radius: var(--rad
 /* подтверждение набранным идентификатором: подсказка над полем, поле и кнопка — отдельной строкой */
 /* шаг 94: набранное подтверждение — поле стандарта; набирают идентификатор — моноширинным */
 .typed-confirm { margin: var(--space-3) 0; }
-.typed-confirm input { font-family: var(--font-code); font-size: var(--font-size-sm); }
+.typed-confirm input { font-family: var(--font); font-size: var(--font-size-sm); }
 .account-writers { border-left: 1px solid var(--divider); padding-left: var(--space-5); min-width: 0; }
 .account-writers p { margin: 0 0 var(--space-2); }
 .account .badge { white-space: normal; }
@@ -967,22 +978,22 @@ p.notice.live-blocked { margin: 0; }
   .world-layout { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
     position: fixed; top: var(--topbar-h); left: 0; bottom: 0; z-index: 40; width: var(--drawer-w); max-width: calc(100vw - var(--space-7));
-    overflow-y: auto; border-right: var(--border-width) solid var(--border); box-shadow: var(--shadow-lg); visibility: hidden; transform: translateX(-100%);
+    overflow-y: auto; border-right: var(--border-width) solid var(--sidebar-divider); box-shadow: var(--shadow-lg); visibility: hidden; transform: translateX(-100%);
   }
   .nav-open .sidebar { visibility: visible; transform: none; }
   .sidebar-inner { position: relative; top: 0; max-height: none; overflow: visible; padding-top: var(--space-2); }
   .nav-backdrop { display: block; position: fixed; top: var(--topbar-h); left: 0; right: 0; bottom: 0; z-index: 35; background: var(--backdrop); }
   .nav-close {
-    display: flex; align-items: center; justify-content: center; width: var(--touch-target); margin: 0 0 var(--space-1) auto; padding: 0; color: var(--text-2);
+    display: flex; align-items: center; justify-content: center; width: var(--touch-target); margin: 0 0 var(--space-1) auto; padding: 0; color: var(--sidebar-muted);
     border-color: transparent; background: transparent; box-shadow: none;
   }
-  .nav-close:hover { background: var(--nav-hover); color: var(--text); }
+  .nav-close:hover { background: var(--nav-hover); color: var(--nav-active-fg); }
   .sidebar .workspace { padding-top: 0; }
   .sidebar-extras {
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-3) var(--space-2) 0;
-    border-top: var(--border-width) solid var(--border);
+    border-top: var(--border-width) solid var(--sidebar-divider);
   }
-  .sidebar-extras .user { flex-basis: 100%; color: var(--text-2); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+  .sidebar-extras .user { flex-basis: 100%; color: var(--sidebar-muted); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
   .menu-button { display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--space-2); }
   /* шапка внутри рабочего пространства: кнопка меню, знак, имя — язык, адрес и выход уехали в панель */
   .topbar.in-world .lang, .topbar.in-world .theme-button, .topbar.in-world .user, .topbar.in-world > button.ghost:not(.menu-button) { display: none; }
@@ -1091,6 +1102,8 @@ p.notice.live-blocked { margin: 0; }
   }
   .table-wrap > table:not(.cardify) th:first-child { z-index: 3; background: var(--surface-muted); }
   .table-wrap > table:not(.cardify) tbody tr:hover td:first-child, .table-wrap > table:not(.cardify) tr:is(.line-MARGIN, .line-PRICE) td:first-child { background: var(--surface-muted); }
+  /* шаг 167: строка «требует внимания» и на телефоне — закреплённая первая ячейка тоже янтарная и несёт полосу слева */
+  .table-wrap > table:not(.cardify) tr:has(> td.offer.attention) > td:first-child { background: var(--attention-row-bg); box-shadow: inset 3px 0 0 var(--attention-row-edge), 1px 0 0 var(--divider); }
   table.products td.offer { min-width: 160px; }
   td.product, table.stock-table td:last-child { min-width: 0; }
   /* остатки — карточкой: SKU и EAN переносятся под названием, каналы — списком с подписью сверху */
@@ -1100,6 +1113,8 @@ p.notice.live-blocked { margin: 0; }
 }
 
 @media (width < 34rem) {
+  /* шаг 167: Inter шире прежнего системного шрифта — длинная ссылка строки («Set minimum & maximum price for …») на телефоне переносится, а не выталкивает страницу */
+  a.row-link { white-space: normal; }
   /* плитки тени — одной колонкой */
   .stats { grid-template-columns: minmax(0, 1fr); }
   /* на телефоне имя продукта в шапке уступает место кнопке меню и языку */
@@ -1227,7 +1242,7 @@ th .legend { display: block; color: var(--text-3); font-size: var(--font-size-xs
 /* Шаг 163 (#27): полоса сводки — первым ребёнком своего раздела; липнет под шапкой страницы, пока раздел на экране, строки листаются под ней */
 .sticky-summary {
   position: sticky; top: var(--topbar-h); z-index: 10; margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3);
-  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .sticky-summary .stat-chips { margin: 0; }
 .reason-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
@@ -1293,7 +1308,7 @@ p.notice.import-applied { background: var(--success-soft); color: var(--success)
 .import-columns[open] > summary { margin-bottom: var(--space-2); }
 .import-history { margin-top: var(--space-3); }
 .import-history h4, .import-errors h4, .import-changes h4 { margin: 0 0 var(--space-2); }
-.mono { font-family: var(--font-mono); }
+.mono { font-variant-numeric: tabular-nums; }
 
 /* Шаг 102 [Р-227]: режим распродажи — строка в квитанции и в Protections, состояние и форма на странице пола; цвет — attention Primer */
 .verdict-body > p.clearance-line, .summary-card > p.clearance-line { margin: var(--space-1) 0 0; color: var(--warning); }

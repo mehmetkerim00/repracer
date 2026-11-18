@@ -21,7 +21,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Точка входа, которую исполняет браузер: страница консоли продавца (панель оператора и лендинг — без сборки модулей) */
 export const BROWSER_ENTRIES = ['apps/console/src/main.tsx'];
 /** Внешние пакеты, которые исполняются в браузере */
-export const BROWSER_PACKAGES = ['react', 'react-dom', '@fontsource/ibm-plex-mono'];
+/** Шаг 167: шрифты — файлами в apps/console/src/fonts (OFL), пакетов шрифтов в браузере нет */
+export const BROWSER_PACKAGES = ['react', 'react-dom'];
 
 const BUILTINS = new Set(builtinModules.flatMap((m) => [m, `node:${m}`]));
 

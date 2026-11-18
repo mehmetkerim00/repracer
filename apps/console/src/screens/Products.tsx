@@ -204,7 +204,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                 <td className={`num money${r.currentPriceMissing ? ' muted empty-value' : ' cur'}`}>{r.currentPrice}</td>
                 {bbOn ? bbCells(r.buybox) : null}
                 {/* Шаг 162 (#27): маржа при текущей цене — функцией Gate; пусто — словами и обычным шрифтом */}
-                {col.margin ? <td className={`num margin${r.margin.missing ? ' muted empty-value' : ''}`}>{r.margin.text}</td> : null}
+                {col.margin ? <td className={`num margin${r.margin.missing ? ' muted empty-value' : r.margin.bp !== null && r.margin.bp < 0 ? ' negative' : ''}`}>{r.margin.text}</td> : null}
                 <td className={`num floor${r.floor.missing ? '' : ' cur'}`}>
                   {r.floor.missing ? <span className="muted empty-value">{r.floor.amount}</span> : <strong>{r.floor.amount}</strong>}
                   <div className="muted small floor-parts">{r.floor.parts}</div>
