@@ -1439,6 +1439,8 @@ export const en = {
         matched: (n: number, total: number) => `${n} of ${total} offers match the filter`,
         attention: 'Needs attention', anyAttention: 'All offers',
         attentionValues: { ANY: 'Any reason', NO_UNIT_COST: 'No unit cost or fees', AUTOMATED_PRICING: 'Amazon repricer on', CHANNEL_BOUNDS: 'Amazon bounds not read', NOT_BUYABLE: 'Not buyable', TURNED_OFF: 'Turned off' },
+        // Шаг 170 (#35): чего не хватает для включения
+        setup: 'Setup', anySetup: 'Any', setupValues: { NO_STRATEGY: 'No strategy', NO_BOUNDS: 'No minimum or maximum price' },
       },
     },
     outcomes: { APPROVED: 'Approved', NO_CHANGE: 'No change', REJECTED: 'Rejected', HELD: 'Held' },
@@ -1496,6 +1498,37 @@ export const en = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 170 (#35): чеклист готовности к бою — «нельзя» (перевод откажет) и «не стоит» (советуем), у каждого пункта — своя выборка
+    readiness: {
+      title: 'Ready to send prices?',
+      headline: {
+        blocks: (n: number) => (n === 1 ? 'One thing stops sending prices on this account.' : `${n} things stop sending prices on this account.`),
+        advice: (n: number) => (n === 1 ? 'Nothing stops sending prices; one thing is worth fixing first.' : `Nothing stops sending prices; ${n} things are worth fixing first.`),
+        ready: 'Nothing stops sending prices, and nothing is worth fixing first.',
+      },
+      badge: { blocks: 'Not yet', advice: 'Ready, with advice', ready: 'Ready' },
+      switchBlocked: 'Unavailable: the switch would be refused — see «Stops the switch» below.',
+      blocksTitle: 'Stops the switch', adviceTitle: 'Worth fixing first — the switch does not wait for it',
+      fine: (list: string) => `Checked and fine: ${list}.`,
+      storefrontCount: (storefront: string, n: number) => `${storefront}: ${n}`,
+      checks: { NO_ACCESS: 'access to the channel', PROPERTY_UNKNOWN: 'what we know about the storefront', BOUNDS_UNREAD: 'Amazon bounds of offers that are on', OFFERS_OFF: 'every offer is on',
+        NO_UNIT_COST: 'unit cost and fees', NO_STRATEGY: 'strategies', NO_BOUNDS: 'minimum and maximum prices', AUTOMATED_PRICING: 'no Amazon repricer', OTHER_TOOL: 'no other tool changes prices', STALE_DATA: 'competitor data is fresh' },
+      items: {
+        liveWritesForbidden: 'This environment never sends prices to a channel; the shadow keeps working here.',
+        revoked: 'Access to the channel was revoked — connect it again.',
+        noAccess: 'We have no access to the channel yet — finish connecting it.',
+        propertyUnknown: (list: string) => `We do not know ${list} yet. Nothing is needed from you: it is confirmed on our side or by the channel.`,
+        boundsUnread: (n: number) => `${n === 1 ? '1 offer that is on has' : `${n} offers that are on have`} Amazon Min/Max bounds we cannot read — turn their automatic pricing off or remove the bounds in Seller Central.`,
+        offersOff: (n: number, total: number) => `${n} of ${total} offers are off — the trial does not price them.`,
+        noUnitCost: (n: number) => `${n === 1 ? '1 offer has' : `${n} offers have`} no unit cost or fees — they cannot be switched on.`,
+        noStrategy: (n: number) => `${n === 1 ? '1 offer has' : `${n} offers have`} no strategy.`,
+        noBounds: (n: number) => `${n === 1 ? '1 offer has' : `${n} offers have`} no minimum or maximum price.`,
+        automatedPricing: (n: number) => `${n === 1 ? '1 offer has' : `${n} offers have`} the Amazon repricer on — we do not price them.`,
+        otherTool: 'You told us another tool also changes prices in this channel — two repricers on one channel work against each other.',
+        otherToolUnanswered: 'Tell us whether another tool updates stock or prices in this channel.',
+        staleData: (text: string) => `Competitor data is stale — ${text}.`,
+      },
+    },
     // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
     unchanged: {
       title: 'Why didn\'t my price change?', link: 'Why didn\'t my price change?',

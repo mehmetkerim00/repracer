@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -491,6 +491,34 @@ test('step 166: the stock screen and its export take sort=to_publish only with a
   const without = await call(auth, 'GET', `${api(w, 'stock')}?sort=to_publish`);
   assert.equal(without.status, 400, JSON.stringify(without.body));
   assert.equal((without.body as { error: { code: string } }).error.code, 'BAD_PAGE');
+});
+
+/**
+ * Шаг 170 (#35): чеклист готовности — правило экрана без базы: «не стоит» ведёт в выборку Offers с тем же числом (в том числе новый фильтр
+ * Setup); неверное значение Setup — 400; гость и роль без права перевода читают чеклист, и он называет, почему им перевод недоступен
+ */
+test('step 170 (#35): readiness without a database — advice links are Offers selections of the same number; a bad Setup is 400; a role without the switch is told so', async () => {
+  // Мир без себестоимости у предложения — советы с выборками; мир счастливого пути — роль без права перевода
+  const id = 'kaufland/pipeline/enable-margin-without-cost';
+  const owner = await login('OWNER');
+  const view = await get<ReadinessView>(owner, api(id, 'readiness'));
+  assert.ok(view.accounts.length > 0, 'the world has a channel account');
+  let links = 0;
+  for (const item of view.accounts.flatMap((a) => [...a.blocks, ...a.advice])) {
+    for (const link of item.links.filter((l) => l.target[0] === 'products')) {
+      const page = await get<ProductListView>(owner, `${api(id, 'products')}?offset=0&limit=1&${link.target[2]}`);
+      assert.equal(page.page.total, link.count, `${item.code}: ${link.target[2]}`);
+      links += 1;
+    }
+  }
+  // Setup: правило экрана — у мира сценария все предложения со стратегией и границами; фильтр отвечает и пустой выборкой
+  for (const setup of ['NO_STRATEGY', 'NO_BOUNDS']) assert.equal((await call(owner, 'GET', `${api(id, 'products')}?setup=${setup}`)).status, 200);
+  const bad = await call(owner, 'GET', `${api(id, 'products')}?setup=EVERYTHING`);
+  assert.deepEqual([bad.status, (bad.body as { error: { code: string } }).error.code], [400, 'BAD_PAGE']);
+  const viewer = await login('OPERATOR');
+  const theirs = await get<ReadinessView>(viewer, api('kaufland/pipeline/happy-path', 'readiness'));
+  assert.ok(theirs.accounts.every((a) => a.blocks.some((x) => x.code === 'ROLE') && !a.canSwitch), `a role without the switch is told so: ${JSON.stringify(theirs.accounts.map((a) => a.blocks.map((x) => x.code)))}`);
+  assert.ok(links > 0, `the world has advice that opens an Offers selection: ${JSON.stringify(view.accounts.map((a) => a.advice.map((x) => x.code)))}`);
 });
 
 /**

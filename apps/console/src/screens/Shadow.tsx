@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { periodSearch, type ListQuery, type Period, type ShadowView } from '@repracer/console-model';
+import { useEffect, useState } from 'react';
+import { periodSearch, type AccountReadiness, type ListQuery, type Period, type ReadinessItem, type ReadinessView, type ShadowView } from '@repracer/console-model';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, ErrorBox, errorText, Gaps, href, Intro, Load, Pager, useMessages, useOpenBlocks, When, WhenHead, UnitName } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
@@ -14,7 +14,42 @@ import { ShadowHero } from './ShadowHero.tsx';
  * Включение боя требует второго фактора и НАБРАННОГО имени аккаунта [Р-170]; возврат в тень — одно нажатие. Асимметрия
  * намеренная: тень безопасна, и церемония на безопасном направлении учит продавца бояться кнопки, которая его защищает.
  */
-export function ShadowScreen({ worldId }: { worldId: string }) {
+/**
+ * Шаг 170 (#35, Р-254): чеклист готовности аккаунта к бою — «Stops the switch» (перевод откажет) и «Worth fixing first» (советуем, не
+ * блокируем) раздельно, пройденные — одной строкой; каждый пункт — ссылка в свою выборку. Тот же список стоит над формой перевода: момент
+ * перевода показывает ровно его, а не второй вариант
+ */
+function ReadinessItems({ worldId, items, cls }: { worldId: string; items: readonly ReadinessItem[]; cls: 'blocks' | 'advice' }) {
+  return (
+    <ul className={`readiness-items readiness-${cls}`}>
+      {items.map((x) => (
+        <li key={x.code} data-code={x.code}>
+          {x.links.length === 1 && x.links[0]!.label === '' ? <a href={href(worldId, ...x.links[0]!.target)}>{x.text}</a> : x.text}
+          {x.links.length > 1 || (x.links.length === 1 && x.links[0]!.label !== '')
+            ? <span className="readiness-links">{x.links.map((l) => <a key={l.label} href={href(worldId, ...l.target)}>{l.label}</a>)}</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ReadinessBlock({ worldId, r }: { worldId: string; r: AccountReadiness }) {
+  const m = useMessages();
+  const t = m.ui.readiness;
+  return (
+    <section className={`readiness readiness-${r.blocks.length > 0 ? 'blocked' : r.advice.length > 0 ? 'advised' : 'ready'}`} aria-label={t.title}>
+      <h3>{t.title}</h3>
+      <p className="readiness-headline">
+        <Badge tone={r.blocks.length > 0 ? 'stop' : r.advice.length > 0 ? 'warn' : 'ok'}>{r.blocks.length > 0 ? t.badge.blocks : r.advice.length > 0 ? t.badge.advice : t.badge.ready}</Badge> {r.headline}
+      </p>
+      {r.blocks.length > 0 ? <><h4>{t.blocksTitle}</h4><ReadinessItems worldId={worldId} items={r.blocks} cls="blocks" /></> : null}
+      {r.advice.length > 0 ? <><h4>{t.adviceTitle}</h4><ReadinessItems worldId={worldId} items={r.advice} cls="advice" /></> : null}
+      {r.fine ? <p className="readiness-fine muted small">{r.fine}</p> : null}
+    </section>
+  );
+}
+
+export function ShadowScreen({ worldId, focus = null }: { worldId: string; focus?: 'properties' | null }) {
   const m = useMessages();
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
   // Шаг 96 (II): период — пресет или свой диапазон дат в поясе пространства
@@ -28,11 +63,23 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
   const copy = (id: string) => void navigator.clipboard?.writeText(id).then(() => setCopied(id)).catch(() => setCopied(null));
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState<Record<string, string>>({});
+  // Шаг 170 (#35): чеклист готовности — своим запросом (тот же ответ у блока и у формы перевода); после перевода — заново
+  const [readiness, retryReadiness] = useResource<ReadinessView>(worldPath(worldId, 'readiness'), m.locale);
+  // Шаг 170 (#35): `shadow/properties` — раскрыть блок «Good to know» и показать проверки магазинов (свёрнутое остаётся выбором зрителя)
+  // Чеклист над блоком грузится своим запросом — прокрутка после обоих ответов, иначе карточки сдвигают блок вниз
+  useEffect(() => {
+    if (focus !== 'properties' || view.state !== 'ready' || readiness.state === 'loading') return;
+    const checks = document.querySelector('.store-checks');
+    const details = checks?.closest('details');
+    if (details && !details.open) details.open = true;
+    checks?.scrollIntoView({ block: 'start' });
+  }, [focus, view.state, readiness.state]);
+  const readinessOf = (id: string): AccountReadiness | null => readiness.state === 'ready' ? readiness.data.accounts.find((x) => x.channelAccountId === id) ?? null : null;
   const switchMode = (channelAccountId: string, toMode: 'SHADOW' | 'LIVE') =>
     void requestJson<{ mode: string }>(worldPath(worldId, 'shadow', 'mode'), {
       method: 'POST', locale: m.locale,
       body: { channelAccountId, toMode, ...(toMode === 'LIVE' ? { typedConfirmation: typed[channelAccountId] ?? '' } : {}) },
-    }).then(() => { setError(null); retry(); }).catch((e: unknown) => setError(errorText(e, m)));
+    }).then(() => { setError(null); retry(); retryReadiness(); }).catch((e: unknown) => setError(errorText(e, m)));
 
   const c = m.ui.shadow.columns;
   return (
@@ -97,9 +144,11 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                             <input value={typed[a.channelAccountId] ?? ''} placeholder={a.externalAccountId} size={a.externalAccountId.length + 2}
                               onChange={(e) => setTyped({ ...typed, [a.channelAccountId]: e.currentTarget.value })} />
                           </Field>
-                          <FormActions>
+                          {/* Шаг 170 (#35): перевод откажет — кнопка неактивна и называет почему; что именно — пункты «Stops the switch» чеклиста карточки */}
+                          <FormActions hint={readinessOf(a.channelAccountId)?.canSwitch === false ? m.ui.readiness.switchBlocked : null}>
                             {/* Яркая кнопка — только когда имя набрано верно: до этого глаз не ведут к самому опасному действию экрана */}
-                            <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId ? 'primary' : ''}
+                            <button type="button" className={(typed[a.channelAccountId] ?? '') === a.externalAccountId && readinessOf(a.channelAccountId)?.canSwitch !== false ? 'primary' : ''}
+                              disabled={readinessOf(a.channelAccountId)?.canSwitch === false} title={readinessOf(a.channelAccountId)?.canSwitch === false ? m.ui.readiness.switchBlocked : undefined}
                               onClick={() => switchMode(a.channelAccountId, 'LIVE')}>{v.liveButton}</button>
                             {/* Шаг 96 (Б13): имя копируется кнопкой; подтверждение и журнал прежние [Р-170] — имя по-прежнему вставляет человек */}
                             <button type="button" title={m.ui.shadow.copyHint} onClick={() => copy(a.externalAccountId)}>{copied === a.externalAccountId ? m.ui.shadow.copied : m.ui.shadow.copy}</button>
@@ -110,6 +159,7 @@ export function ShadowScreen({ worldId }: { worldId: string }) {
                         <button type="button" onClick={() => switchMode(a.channelAccountId, 'SHADOW')}>{v.shadowButton}</button>
                       ) : null}
                     </div>
+                    {(() => { const r = readinessOf(a.channelAccountId); return r && r.writeMode === 'SHADOW' ? <ReadinessBlock worldId={worldId} r={r} /> : null; })()}
                   </article>
                 ))}
             {v.liveBlockedText === null ? null : <p className="notice live-blocked">{v.liveBlockedText}</p>}

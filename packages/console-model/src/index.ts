@@ -5,7 +5,7 @@ export { LOCALES, messagesFor, type Messages } from './i18n/index.ts';
 export { humanDate, monthDay, nameTag, tableWhenParts, zoneName } from './i18n/shape.ts';
 export type { Fmt, Locale, Template } from './i18n/types.ts';
 /** Права по роли [OQ-125] — те же, что проверяют хранилище и БД */
-export { can, EXTENDED_ROLES, offeredRoles, VISIBLE_ROLES, type MemberRole, type PricingAction } from '@repracer/pricing-model';
+export { can, EXTENDED_ROLES, holdsOwnerActions, offeredRoles, VISIBLE_ROLES, type MemberRole, type PricingAction } from '@repracer/pricing-model';
 export { boundText, channelNotes, noteBlocksPricing, notAssignedText, productList, strategyLabel, type ChannelNote, type FloorCell, type MissingSetup, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
 export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, triggerChip, triggerPhrase, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceCompetitors, type TraceItem, type TraceStep, type TraceStepKey, type TraceSummary } from './trace.ts';
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
@@ -46,7 +46,7 @@ export { BUYBOX_SHARE_HORIZON_MS, BUYBOX_SHARE_KEEP_DAYS, buyboxDiagnosis, buybo
 export { buyboxCells, matchesHolder, OFFER_HOLDER_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, offerBuyboxCells, offerHolderKind, offerSortValue, signedMoney, sortOffers, storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferHolderKind, type OfferSort, type OfferSortKeyValue } from './offer-buybox.ts';
 export { catalogTotals, filterActive, NO_FILTER, offerMatchesSearch, type OfferFilter } from './products.ts';
 // Шаг 118: фильтр Offers по автоцене — значения из хранилища (одно правило у базы и экрана)
-export { OFFER_PRICING_FILTERS, type OfferPricingFilterValue } from '@repracer/pricing-pipeline/store';
+export { OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type OfferPricingFilterValue, type OfferSetupFilter } from '@repracer/pricing-pipeline/store';
 // Шаг 104 [Р-229]: выгрузка экранов в файл
 export {
   amountText, AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, auditExportRows, changePercent, dateInZone, decisionExportRows, EXPORT_ABOUT_SHEET, EXPORT_FORMATS, EXPORT_HEADERS, EXPORT_MAX_ROWS,
@@ -62,3 +62,4 @@ export { channelBoundsConflicts, channelBoundsFacts, channelBoundsPill, channelB
 export { AGEING_SECONDS, ATTENTION_FILTERS, ATTENTION_REASONS, attentionCounts, attentionReasons, FRESH_SECONDS, freshnessItems, freshnessLevel, matchesAttention, statusLineView, type FreshnessItem,
   type AttentionCounts, type AttentionFilter, type AttentionReason, type FreshnessLevel, type FreshnessRow, type StatusLineInput, type StatusLineView, type StatusMode } from './status-line.ts';
 export { unchangedView, type UnchangedState, type UnchangedView } from './unchanged.ts';
+export { readinessFactsOf, readinessView, setupGaps, type AccountReadiness, type ReadinessAccountInput, type ReadinessClass, type ReadinessCode, type ReadinessInput, type ReadinessItem, type ReadinessLink, type ReadinessView } from './readiness.ts';

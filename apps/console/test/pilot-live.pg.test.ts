@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 
 import { ModelOAuthProvider } from '@repracer/channel-oauth/model';
-import type { BulkJobView, ConnectionsView, ImportCheckView, BoundsDiffView, EnableResultView, OnboardingView, StrategyPreviewView } from '@repracer/console-model';
+import type { BulkJobView, ConnectionsView, ImportCheckView, BoundsDiffView, EnableResultView, OnboardingView, ReadinessView, StrategyPreviewView } from '@repracer/console-model';
 import { nextNineUtc, VirtualClock } from '@repracer/contract-tests/live';
 import { AMAZON_DE, SimulatedAmazonPort } from '@repracer/contract-tests/simulator';
 import { FakeMail } from '@repracer/alert-delivery/testing';
@@ -450,6 +450,11 @@ test('Р-179: путь пилота целиком — от оператора �
   const boundedSku = skus[1]!;
   await new PgPricingStore(db.pool('svc_app', 1), { adminPool: db.pool('svc_admin', 1) }).recordOfferChannelPricing(ids.tenantId, ids.accountId,
     [{ marketplace: AMAZON_DE, externalSku: boundedSku, automatedPricing: false, channelBounds: true, source: 'DISCOVERY', observedAt: clock.iso() as never }]);
+  // Шаг 170 (#35): чеклист готовности говорит то же ДО попытки — пункт «нельзя» с числом стража, кнопка неактивна
+  const readyBefore = await consoleCall<ReadinessView>('шаг 170: чеклист до перевода', 'GET', api('readiness'));
+  const accountBefore = readyBefore.body.accounts.find((x) => x.channelAccountId === ids.accountId)!;
+  assert.deepEqual([accountBefore.canSwitch, accountBefore.blocks.map((x) => [x.code, x.count])], [false, [['BOUNDS_UNREAD', 1]]],
+    `шаг 170: чеклист называет ровно то, на чём откажет перевод: ${JSON.stringify(accountBefore.blocks)}`);
   const refusedLive = await consoleCall<{ error: { code: string; message: string } }>('шаг 136: бой с рамками Amazon без значений', 'POST', api('shadow', 'mode'),
     { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
   assert.deepEqual([refusedLive.status, refusedLive.body.error?.code], [409, 'CHANNEL_BOUNDS_UNREAD'], `шаг 136: перевод в бой отказывает: ${JSON.stringify(refusedLive.body)}`);
@@ -461,6 +466,8 @@ test('Р-179: путь пилота целиком — от оператора �
   const { rows: [bounded] } = await observer.query('SELECT price_write_scope_id AS id FROM tenant_data.offer_mapping WHERE tenant_id = $1 AND external_sku = $2', [ids.tenantId, boundedSku]);
   const off = await consoleCall('шаг 136: продавец выключает автоцену у предложения', 'POST', api('scopes', `${bounded!.id}/disable`), { note: 'Amazon Min/Max we cannot read' });
   assert.equal(off.status, 200, JSON.stringify(off.body));
+  const readyAfter = (await consoleCall<ReadinessView>('шаг 170: чеклист после выключения', 'GET', api('readiness'))).body.accounts.find((x) => x.channelAccountId === ids.accountId)!;
+  assert.deepEqual([readyAfter.canSwitch, readyAfter.blocks], [true, []], 'шаг 170: «нельзя» пусто — и перевод ниже проходит');
   const goneLive = await consoleCall<{ mode: string }>('шаг 136: бой после выключения', 'POST', api('shadow', 'mode'), { channelAccountId: ids.accountId, toMode: 'LIVE', typedConfirmation: SELLER });
   assert.deepEqual([goneLive.status, goneLive.body.mode], [200, 'LIVE'], `шаг 136: без таких включённых предложений бой включается: ${JSON.stringify(goneLive.body)}`);
 

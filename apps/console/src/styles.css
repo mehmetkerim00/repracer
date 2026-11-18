@@ -967,6 +967,15 @@ section.account-modes { display: flex; flex-direction: column; gap: var(--space-
 .am-action .live-card { max-width: none; }
 p.notice.live-blocked { margin: 0; }
 @media (width < 63.25rem) { .account-mode { grid-template-columns: 1fr; } }
+/* Шаг 170 (#35): чеклист готовности к бою — во всю ширину карточки аккаунта; «нельзя» и «не стоит» — раздельными списками, ссылки в выборки */
+.account-mode > .readiness { grid-column: 1 / -1; border-top: var(--border-width) solid var(--border); padding-top: var(--space-3); }
+.readiness h3 { margin: 0 0 var(--space-2); }
+.readiness h4 { margin: var(--space-3) 0 var(--space-1); font-size: var(--font-size-sm); }
+.readiness .readiness-headline { margin: 0; }
+.readiness-items { margin: 0; padding-left: var(--space-4); }
+.readiness-items li + li { margin-top: var(--space-1); }
+.readiness-items .readiness-links { display: inline-flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-left: var(--space-2); }
+.readiness .readiness-fine { margin: var(--space-3) 0 0; }
 /* шаг 86: поле имени не сжимается уже самого имени (ширина — по `size`), кнопка при нехватке места уходит строкой ниже */
 
 /*

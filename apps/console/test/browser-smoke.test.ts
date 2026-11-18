@@ -167,6 +167,8 @@ let productsPatch: ((body: { rows: Array<Record<string, unknown>> }) => void) | 
 let boundsPatch: ((body: { items: Array<Record<string, unknown>> }) => void) | null = null;
 /** Шаг 168: правка ответа Inventory — строка «требует внимания» (в смоук-мире у товаров нет ни расхождения, ни порога выставления) */
 let stockPatch: ((body: { rows: Array<Record<string, unknown>> }) => void) | null = null;
+/** Шаг 170: правка ответа чеклиста готовности — аккаунт мира смоука становится теневым аккаунтом синтетической тени (их карточки — одно) */
+let readinessPatch: ((body: { accounts: Array<Record<string, unknown>> }) => void) | null = null;
 
 /** Шаг 139 (BUG-02): решение мира смоука у удержанных строк тени — только на время своего теста (ссылка «Why this price» из тени) */
 let shadowDecisionId: string | null = null;
@@ -299,6 +301,7 @@ before(async () => {
     : productsPatch && /\/products(\?|$)/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) productsPatch!(r.body as never); return r; })
     : boundsPatch && /\/bounds\?/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) boundsPatch!(r.body as never); return r; })
     : stockPatch && /\/stock\?/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) stockPatch!(r.body as never); return r; })
+    : readinessPatch && /\/readiness(\?|$)/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) readinessPatch!(r.body as never); return r; })
     : decisionChip && /\/decisions\?/.test(req.url) ? currentApi(req).then((r) => {
       const body = r.body as { items?: Array<Record<string, unknown>> };
       if (r.status === 200 && body.items?.length) body.items[0] = { ...body.items[0], trigger: decisionChip };
@@ -3143,6 +3146,91 @@ const LONG_HELP = `(() => {
   }
   return out;
 })()`;
+
+/**
+ * Шаг 170 (#35, Р-254): чеклист готовности на Shadow mode — у карточки аккаунта в тени: «Stops the switch» и «Worth fixing first» раздельно,
+ * пройденные — одной строкой; кнопка перевода неактивна и называет почему; пункт ведёт в выборку Offers, и Offers показывает её с тем же
+ * числом. У мира смоука аккаунт боевой, а тень синтетическая: ответ чеклиста привязан к карточке тени правкой, пункт «нельзя» — синтетический;
+ * число выборки — настоящее (Offers отвечает им же); равенство чисел и выборок на всех мирах держат тесты PostgreSQL и памяти
+ */
+test('step 170 (#35): Shadow mode — a checklist per shadow account: stops and advice apart, checked items in one line; the switch is off with its reason; an item opens its Offers selection', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const t = en.ui.readiness;
+  const visit = async (hash: string, ready: string, what: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(hash)}, true)`);
+    await settled(b, what);
+    await waitFor(b, ready, what);
+  };
+  // Настоящее число выборки: предложения витрины с автоценой On — так Offers отвечает на тот же адрес
+  await visit(`#/w/${world}/products`, `!!document.querySelector('table.products tbody tr')`, 'offers');
+  const storefront = await b.evaluate<string>(`[...document.querySelectorAll('.filters select')][0].querySelectorAll('option')[1].value`);
+  const selection = new URLSearchParams({ storefront, pricing: 'ON' }).toString();
+  await visit(`#/w/${world}/products/filter/${encodeURIComponent(selection)}`, `!!document.querySelector('table.products tbody tr')`, 'the selection');
+  const shown = await b.evaluate<number>(`document.querySelectorAll('table.products tbody tr').length`);
+  readinessPatch = (body) => {
+    const a = body.accounts[0]!;
+    Object.assign(a, {
+      channelAccountId: 'smoke-account', writeMode: 'SHADOW', canSwitch: false, headline: t.headline.blocks(1),
+      blocks: [{ code: 'PROPERTY_UNKNOWN', cls: 'BLOCKS', count: null, text: t.items.propertyUnknown('kaufland.de · Day boundary'), links: [{ label: '', target: ['shadow', 'properties'], count: null }] }],
+      advice: [{ code: 'OFFERS_OFF', cls: 'ADVISE', count: shown, text: t.items.noStrategy(shown), links: [{ label: '', target: ['products', 'filter', selection], count: shown }] }],
+    });
+  };
+  try {
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        await visit(`#/w/${world}/shadow`, `!!document.querySelector('.account-mode .readiness')`, `${scheme} ${width}: shadow`);
+        const seen = await b.evaluate<{ title: string; heads: string[]; blocks: number; advice: number; fine: string; button: { disabled: boolean; hint: string } }>(`(() => {
+          const r = document.querySelector('.account-mode .readiness');
+          const button = [...document.querySelectorAll('.account-mode .live-card button')].find((x) => x.textContent.trim() === ${JSON.stringify(en.ui.shadow.liveButton)});
+          return { title: r.querySelector('h3').textContent.trim(), heads: [...r.querySelectorAll('h4')].map((h) => h.textContent.trim()),
+            blocks: r.querySelectorAll('.readiness-blocks li').length, advice: r.querySelectorAll('.readiness-advice li').length,
+            fine: r.querySelector('.readiness-fine')?.textContent.trim() ?? '',
+            button: { disabled: button?.disabled ?? false, hint: document.querySelector('.account-mode .live-card .form-hint')?.textContent.trim() ?? '' } }; })()`);
+        assert.equal(seen.title, t.title, `${scheme} ${width}: the checklist heads the account`);
+        assert.deepEqual(seen.heads, [t.blocksTitle, t.adviceTitle], `${scheme} ${width}: stops and advice are apart`);
+        assert.deepEqual([seen.blocks, seen.advice], [1, 1], `${scheme} ${width}: ${JSON.stringify(seen)}`);
+        assert.ok(seen.fine.startsWith(t.fine('').replace(/\.$/, '').trim()), `${scheme} ${width}: checked items in one line — ${seen.fine}`);
+        assert.deepEqual(seen.button, { disabled: true, hint: t.switchBlocked }, `${scheme} ${width}: the switch is off and says why`);
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out`);
+        if (width === 375) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${scheme} 375: touch targets`);
+      }
+    }
+    await b.setColorScheme('light');
+    await b.setViewport(1440, 900);
+    // Пункт о свойстве витрины — к проверкам магазинов этого же экрана: блок «Good to know» раскрывается, проверки — в окне
+    await visit(`#/w/${world}/shadow`, `!!document.querySelector('.account-mode .readiness')`, 'shadow again');
+    await b.evaluate(`(() => { const d = document.querySelector('.store-checks')?.closest('details'); if (d) d.open = false; return true; })()`);
+    await b.evaluate(`(document.querySelector('.readiness-blocks li a').click(), true)`);
+    await waitFor(b, `location.hash.endsWith('/shadow/properties') && document.querySelector('.store-checks')?.closest('details')?.open === true`, 'the property item opens the store checks');
+    const top = await b.evaluate<number>(`document.querySelector('.store-checks').getBoundingClientRect().top`);
+    assert.ok(top >= 0 && top < 900, `the store checks are in view: ${top}`);
+    // Пункт ведёт в свою выборку: Offers с витриной и автоценой из адреса, столько же строк, сколько число пункта
+    await b.evaluate(`(document.querySelector('.readiness-advice li a').click(), true)`);
+    await waitFor(b, `location.hash.includes('/products/filter/') && !!document.querySelector('table.products tbody tr')`, 'the item opens Offers');
+    await settled(b, 'offers selection');
+    const offers = await b.evaluate<{ selects: string[]; rows: number }>(`({ selects: [...document.querySelectorAll('.filters select')].map((s) => s.value), rows: document.querySelectorAll('table.products tbody tr').length })`);
+    assert.ok(offers.selects.includes(storefront) && offers.selects.includes('ON'), `the filters show the selection: ${JSON.stringify(offers.selects)}`);
+    assert.equal(offers.rows, shown, 'the same number of offers as the item says');
+  } finally {
+    readinessPatch = null;
+    await b.setColorScheme(null);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
 
 /**
  * Шаг 169 (#36, Р-254): «Why didn't my price change?» — вход из строки Offers и со страницы предложения; ответ — строка сути, фраза с пилюлей

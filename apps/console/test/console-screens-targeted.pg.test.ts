@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { ATTENTION_FILTERS, ATTENTION_REASONS, type DecisionListView, type ProductListView, type StatusLineView, type StopView, type StrategyListView } from '@repracer/console-model';
+import { ATTENTION_FILTERS, ATTENTION_REASONS, OFFER_SETUP_FILTERS, type DecisionListView, type ReadinessView, type ProductListView, type StatusLineView, type StopView, type StrategyListView } from '@repracer/console-model';
 import { buildStandWorlds, pgStandJoinMember, pgStandUsers, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { pgStoreFactory } from '@repracer/contract-tests/pg-store';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
@@ -218,6 +218,69 @@ test('step 146 (#34): the status line — the database equals the screen rule on
   }
   assert.ok(seen.worlds > 0 && seen.attention > 0 && seen.stops > 0, `every part met data: ${JSON.stringify({ ...seen, reasons: [...seen.reasons] })}`);
   assert.ok(seen.reasons.size >= 2, `at least two reasons met data: ${[...seen.reasons].join(', ')}`);
+});
+
+/**
+ * Шаг 170 (#35): чеклист готовности на PostgreSQL — факты считает база теми же фрагментами, что фильтры Offers (себестоимость, Automate
+ * Pricing, рамки Amazon, автоцена, новый Setup), без базы — правило экрана; ответы двух серверов равны на каждом мире стенда. Число каждой
+ * ссылки пункта — ровно `page.total` Offers по ней; число пункта рамок — функция стража перевода, и оно равно сумме его выборок. Фильтр Setup
+ * сам по себе — база = правило экрана
+ */
+test('step 170 (#35): readiness — the database equals the screen rule on every stand world; every item number is the Offers selection it links to; Setup filters alike', { timeout: 20 * 60_000 }, async () => {
+  const r = await targeted({ method: 'POST', url: '/api/stand-issuer/token', body: { role: 'OWNER' } });
+  const auth = { authorization: `Bearer ${(r.body as StandToken).accessToken}`, cookie: 'repracer_locale=en' };
+  const both = async (url: string) => {
+    const [a, b] = await Promise.all([targeted({ method: 'GET', url, body: null, ...auth }), full({ method: 'GET', url, body: null, ...auth })]);
+    assert.equal(a.status, 200, `${url}: ${JSON.stringify(a.body).slice(0, 300)}`);
+    assert.deepEqual(a.body, b.body, `${url}: database = screen rule`);
+    return a.body;
+  };
+  const seen = { worlds: 0, items: 0, links: 0, setup: 0, codes: new Set<string>() };
+  let created = 0;
+  for (const live of worlds) {
+    if (!live.store.consoleCatalogFacts) continue;
+    const api = (path: string) => `/api/worlds/${encodeURIComponent(live.id)}/${path}`;
+    const all = (await both(api('products?offset=0&limit=1'))) as ProductListView;
+    if (all.page.total === 0) continue;
+    seen.worlds += 1;
+    /**
+     * В мирах стенда у каждого предложения есть стратегия и границы: фильтру Setup не на чем различаться. Новое предложение из обнаружения
+     * (штатный путь каталога, Р-179) рождается выключенным, без стратегии, границ и себестоимости — у первого мира с аккаунтом оно одно
+     */
+    if (created === 0) {
+      const account = (await live.store.channelAccounts(live.tenantId)).find((x) => x.marketplaces.length > 0);
+      if (account) {
+        created = await live.store.recordDiscoveredOffers(live.tenantId, account.channelAccountId, [{ marketplace: account.marketplaces[0]!, externalSku: 'SYN-170-NEW',
+          externalUnitId: 'SYN-170-NEW', externalOfferId: 'syn-170-offer', channelProductRef: 'SYN170REF', gtin: null, condition: 'NEW', fulfillment: 'MERCHANT' }]);
+      }
+    }
+    // Каталог — после нового предложения: выборка Setup различает, только когда она не пуста и не весь каталог
+    const catalog = ((await both(api('products?offset=0&limit=1'))) as ProductListView).page.total;
+    for (const setup of OFFER_SETUP_FILTERS) {
+      const page = (await both(api(`products?offset=0&limit=200&setup=${setup}`))) as ProductListView;
+      if (page.page.total > 0 && page.page.total < catalog) seen.setup += 1;
+    }
+    const view = (await both(api('readiness'))) as ReadinessView;
+    for (const account of view.accounts) {
+      for (const item of [...account.blocks, ...account.advice]) {
+        seen.codes.add(item.code);
+        const offers = item.links.filter((l) => l.target[0] === 'products');
+        if (offers.length === 0) continue;
+        seen.items += 1;
+        let sum = 0;
+        for (const link of offers) {
+          const page = (await both(api(`products?offset=0&limit=1&${link.target[2]}`))) as ProductListView;
+          assert.equal(page.page.total, link.count, `${live.id} ${item.code}: the number is the Offers selection it links to — ${link.target[2]}`);
+          sum += page.page.total;
+          seen.links += 1;
+        }
+        assert.equal(item.count, sum, `${live.id} ${item.code}: the item number is the sum of its selections`);
+      }
+    }
+  }
+  assert.equal(created, 1, 'the new offer of discovery is in the catalog');
+  assert.ok(seen.worlds > 0 && seen.items > 0 && seen.links > 0 && seen.setup >= 2, `every part met data: ${JSON.stringify({ ...seen, codes: [...seen.codes] })}`);
+  for (const code of ['NO_STRATEGY', 'NO_BOUNDS', 'NO_UNIT_COST', 'OFFERS_OFF']) assert.ok(seen.codes.has(code), `${code} met data: ${[...seen.codes].join(', ')}`);
 });
 
 /**

@@ -31,7 +31,7 @@ import { StockScreen } from './screens/Stock.tsx';
 import { FeedScreen } from './screens/Feed.tsx';
 import { StrategiesScreen } from './screens/Strategies.tsx';
 import { TraceScreen } from './screens/Decisions.tsx';
-import { ProductsScreen } from './screens/Products.tsx';
+import { offerQueryOfPath, ProductsScreen } from './screens/Products.tsx';
 import { StopScreen } from './screens/Stop.tsx';
 
 export interface Route {
@@ -297,7 +297,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       {/* Шаг 146 (#34, ярус 1): строка состояния — первой на каждом экране пространства; повторный запрос — при смене экрана */}
       {redirectTo ? null : <StatusLine worldId={world.id} screen={[route.screen, route.param, route.param2, route.param3].filter(Boolean).join('/')} />}
       {redirectTo ? null
-        : route.screen === 'shadow' ? <ShadowScreen worldId={world.id} />
+        // Шаг 170 (#35): `shadow/properties` — пункт чеклиста о свойстве витрины раскрывает блок проверок магазинов
+        : route.screen === 'shadow' ? <ShadowScreen key={route.param ?? ''} worldId={world.id} focus={route.param === 'properties' ? 'properties' : null} />
         // Шаг 145: `feed/held/<период>` — клик по плитке «Held back» тени: журнал с группой «Held by shadow mode» и тем же периодом
         : route.screen === 'feed' ? <FeedScreen key={`${route.param}|${route.param2}`} worldId={world.id} kind={route.param === 'decisions' ? 'decisions' : 'writes'}
             initialStatus={route.param === 'held' ? 'SHADOW_HELD' : undefined} initialPeriod={periodOfPath(route.param2)} />
@@ -329,7 +330,9 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
             <JobHistory worldId={world.id} /></>
         // Шаг 146 (#34): `products/attention/<причина>` — клик по «требует внимания» строки состояния
         : route.screen === 'products' ? <ProductsScreen key={`${route.param}|${route.param2}`} worldId={world.id}
-            initialAttention={route.param === 'attention' && (ATTENTION_FILTERS as readonly string[]).includes(route.param2 ?? '') ? route.param2 as AttentionFilter : undefined} />
+            initialAttention={route.param === 'attention' && (ATTENTION_FILTERS as readonly string[]).includes(route.param2 ?? '') ? route.param2 as AttentionFilter : undefined}
+            // Шаг 170 (#35): `products/filter/<параметры>` — пункт чеклиста готовности открывает свою выборку
+            initialQuery={route.param === 'filter' ? offerQueryOfPath(route.param2) : undefined} />
         : route.screen === 'inventory' ? <StockScreen worldId={world.id} />
         : route.screen === 'channels' ? <ChannelsScreen worldId={world.id} section={route.param} />
         : route.screen === 'compliance' ? (world.euStorefronts && market.omnibus ? <ComplianceScreen worldId={world.id} /> : <><h2>{m.ui.app.screens.compliance}</h2><p className="subtitle">{m.ui.app.subtitles.compliance}</p><p className="notice">{m.ui.compliance.notApplicable}</p></>)

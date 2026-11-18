@@ -1378,6 +1378,8 @@ export const de: Messages = {
         matched: (n: number, total: number) => `${n} von ${total} Angeboten passen zum Filter`,
         attention: 'Erfordert Aufmerksamkeit', anyAttention: 'Alle Angebote',
         attentionValues: { ANY: 'Beliebiger Grund', NO_UNIT_COST: 'Ohne Stückkosten oder Gebühren', AUTOMATED_PRICING: 'Amazon-Repricer an', CHANNEL_BOUNDS: 'Amazon-Grenzen nicht gelesen', NOT_BUYABLE: 'Nicht kaufbar', TURNED_OFF: 'Ausgeschaltet' },
+        // Шаг 170 (#35): чего не хватает для включения
+        setup: 'Einrichtung', anySetup: 'Alle', setupValues: { NO_STRATEGY: 'Ohne Strategie', NO_BOUNDS: 'Ohne Mindest- oder Höchstpreis' },
       },
     },
     outcomes: { APPROVED: 'Freigegeben', NO_CHANGE: 'Keine Änderung', REJECTED: 'Abgelehnt', HELD: 'Zurückgehalten' },
@@ -1433,6 +1435,37 @@ export const de: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 170 (#35): чеклист готовности к бою — «нельзя» (перевод откажет) и «не стоит» (советуем), у каждого пункта — своя выборка
+    readiness: {
+      title: 'Bereit, Preise zu senden?',
+      headline: {
+        blocks: (n: number) => (n === 1 ? 'Eine Sache verhindert das Senden der Preise für dieses Konto.' : `${n} Dinge verhindern das Senden der Preise für dieses Konto.`),
+        advice: (n: number) => (n === 1 ? 'Nichts verhindert das Senden der Preise; eine Sache lohnt sich vorher zu beheben.' : `Nichts verhindert das Senden der Preise; ${n} Dinge lohnen sich vorher zu beheben.`),
+        ready: 'Nichts verhindert das Senden der Preise, und nichts muss vorher behoben werden.',
+      },
+      badge: { blocks: 'Noch nicht', advice: 'Bereit, mit Hinweisen', ready: 'Bereit' },
+      switchBlocked: 'Nicht verfügbar: Die Umstellung würde abgelehnt — siehe „Verhindert die Umstellung“ unten.',
+      blocksTitle: 'Verhindert die Umstellung', adviceTitle: 'Vorher beheben lohnt sich — die Umstellung wartet nicht darauf',
+      fine: (list: string) => `Geprüft und in Ordnung: ${list}.`,
+      storefrontCount: (storefront: string, n: number) => `${storefront}: ${n}`,
+      checks: { NO_ACCESS: 'Zugriff auf den Kanal', PROPERTY_UNKNOWN: 'was wir über den Shop wissen', BOUNDS_UNREAD: 'Amazon-Grenzen eingeschalteter Angebote', OFFERS_OFF: 'jedes Angebot ist eingeschaltet',
+        NO_UNIT_COST: 'Stückkosten und Gebühren', NO_STRATEGY: 'Strategien', NO_BOUNDS: 'Mindest- und Höchstpreise', AUTOMATED_PRICING: 'kein Amazon-Repricer', OTHER_TOOL: 'kein anderes Tool ändert Preise', STALE_DATA: 'Wettbewerbsdaten sind aktuell' },
+      items: {
+        liveWritesForbidden: 'Diese Umgebung sendet nie Preise an einen Kanal; der Schattenmodus läuft hier weiter.',
+        revoked: 'Der Zugriff auf den Kanal wurde widerrufen — verbinden Sie ihn erneut.',
+        noAccess: 'Wir haben noch keinen Zugriff auf den Kanal — schließen Sie die Verbindung ab.',
+        propertyUnknown: (list: string) => `Wir kennen ${list} noch nicht. Von Ihnen ist nichts nötig: Das bestätigen wir oder der Kanal.`,
+        boundsUnread: (n: number) => `${n === 1 ? '1 eingeschaltetes Angebot hat' : `${n} eingeschaltete Angebote haben`} Amazon-Min/Max-Grenzen, die wir nicht lesen können — schalten Sie die automatische Preisgestaltung dort aus oder entfernen Sie die Grenzen in Seller Central.`,
+        offersOff: (n: number, total: number) => `${n} von ${total} Angeboten sind ausgeschaltet — die Testphase berechnet keine Preise für sie.`,
+        noUnitCost: (n: number) => `${n === 1 ? '1 Angebot hat' : `${n} Angebote haben`} keine Stückkosten oder Gebühren — sie lassen sich nicht einschalten.`,
+        noStrategy: (n: number) => `${n === 1 ? '1 Angebot hat' : `${n} Angebote haben`} keine Strategie.`,
+        noBounds: (n: number) => `${n === 1 ? '1 Angebot hat' : `${n} Angebote haben`} keinen Mindest- oder Höchstpreis.`,
+        automatedPricing: (n: number) => `${n === 1 ? 'Bei 1 Angebot ist' : `Bei ${n} Angeboten ist`} der Amazon-Repricer an — für diese berechnen wir keine Preise.`,
+        otherTool: 'Laut Ihrer Angabe ändert ein anderes Tool ebenfalls Preise in diesem Kanal — zwei Repricer auf einem Kanal arbeiten gegeneinander.',
+        otherToolUnanswered: 'Sagen Sie uns, ob ein anderes Tool Bestände oder Preise in diesem Kanal aktualisiert.',
+        staleData: (text: string) => `Die Wettbewerbsdaten sind veraltet — ${text}.`,
+      },
+    },
     // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
     unchanged: {
       title: 'Warum hat sich mein Preis nicht geändert?', link: 'Warum hat sich mein Preis nicht geändert?',

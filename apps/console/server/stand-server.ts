@@ -6,12 +6,12 @@ import { createServer, type ServerResponse } from 'node:http';
 import { buildInfoFromEnv, ConfigError, createHeartbeat, secretFromEnv, type BuildInfo } from '@repracer/service-runtime';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, noteBlocksPricing, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, holdsOwnerActions, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, noteBlocksPricing, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView, storefrontName,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
-  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, unchangedView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, unchangedView, readinessFactsOf, readinessView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue, type OfferSetupFilter,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
   ATTENTION_FILTERS, attentionCounts, freshnessItems, statusLineView, statusStops, type AttentionFilter,
 } from '@repracer/console-model';
@@ -853,17 +853,20 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       const pricing = params.get('pricing');
       // Шаг 146 (#34): «требует внимания» — любая причина или одна
       const attention = params.get('attention');
+      // Шаг 170 (#35): чего не хватает для включения — стратегии или границ
+      const setup = params.get('setup');
       const q = (params.get('q') ?? '').trim();
       const sort = params.get('sort');
       const dir = params.get('dir');
       const bb = params.get('bb');
       if (q.length > 100 || (holder !== null && !(OFFER_HOLDER_FILTERS as readonly string[]).includes(holder)) || (pricing !== null && !(OFFER_PRICING_FILTERS as readonly string[]).includes(pricing)) || (sort !== null && !(OFFER_SORT_KEYS as readonly string[]).includes(sort))
         || (attention !== null && !(ATTENTION_FILTERS as readonly string[]).includes(attention))
+        || (setup !== null && !(OFFER_SETUP_FILTERS as readonly string[]).includes(setup))
         || (dir !== null && dir !== 'asc' && dir !== 'desc') || (bb !== null && bb !== '1')) return null;
       const [acc, mk] = storefront.split('|');
       const sf = storefront === '' ? null : acc && mk && live.accounts.some((a) => a.channelAccountId === acc && a.marketplaces.includes(mk)) ? { channelAccountId: acc, marketplace: mk } : undefined;
       if (sf === undefined) return null;
-      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, attention: attention as AttentionFilter | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
+      return { storefront: sf, storefrontValue: sf ? storefront : null, pricing: pricing as OfferPricingFilterValue | null, attention: attention as AttentionFilter | null, setup: setup as OfferSetupFilter | null, holder: holder as OfferQuery['holder'], q: q.toLowerCase(),
         sort: sort ? { key: sort as NonNullable<OfferQuery['sort']>['key'], dir: (dir ?? 'asc') as 'asc' | 'desc' } : null, bb: bb === '1' };
     };
     const offerDeps = () => ({ store: live.store, tenantId: live.tenantId, now: live.clock.iso(), useDatabase: targeted !== null, world: () => load(null), m,
@@ -1045,12 +1048,38 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             attention: f?.attention ?? attentionCounts(targeted ? await load(null) : world, m),
           }, m));
         }
+        /**
+         * Шаг 170 (#35): чеклист готовности к бою — один ответ у блока Shadow mode и у формы перевода. «Нельзя» — правила стража журнала режимов
+         * (закрытая база и свойства витрин — из страницы тени, рамки Amazon — функция стража), доступ, роль и второй фактор зрителя; «не стоит» —
+         * числа выборок Offers: на PostgreSQL — фактами базы теми же фрагментами, без неё — правилом экрана по каталогу
+         */
+        case 'readiness': {
+          if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
+          const now = live.clock.iso();
+          const offered = services.connect?.(live.id) ?? null;
+          const [accounts, freshness, f, shadowPage, connections] = await Promise.all([
+            live.store.channelAccounts(live.tenantId),
+            live.store.competitorFreshness ? live.store.competitorFreshness(live.tenantId) : Promise.resolve(null),
+            facts({ readiness: { now: now as never } }),
+            live.shadow ? live.shadow.shadowPage(live.tenantId, now, { offset: 0, limit: 1 }) : Promise.resolve(null),
+            offered ? offered.connections(live.tenantId) : Promise.resolve(null),
+          ]);
+          const answers = connections ? new Map(connections.accounts.map((c) => [c.channelAccountId, c.otherTools] as const)) : null;
+          return ok(readinessView({
+            worldId: live.id, now,
+            accounts: accounts.map((a) => ({ channelAccountId: a.channelAccountId, channel: a.channel, marketplaces: a.marketplaces, authStatus: a.authStatus, writeMode: a.writeMode,
+              ...(answers ? { otherTools: answers.get(a.channelAccountId) ?? null } : {}) })),
+            facts: f?.readiness ?? readinessFactsOf(await load(null), m),
+            properties: shadowPage?.properties ?? [], liveWritesRefused: shadowPage?.liveWritesRefused === true, freshness,
+            viewer: { canSwitch: holdsOwnerActions(viewer.role), secondFactor: hasSecondFactor(principal.amr) },
+          }, m));
+        }
         case 'products': {
           const query = parseListQuery(url.searchParams);
           const oq = parseOfferQuery(url.searchParams);
           if (!query || !oq) return fail(400, 'BAD_PAGE', s.badRequest);
           // Шаг 105 [Р-230]: фильтр строки и сортировка по колонке Buy Box — выборкой по всему каталогу (база или правило экрана)
-          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, attention: oq.attention ?? null, holder: oq.holder, q: oq.q };
+          const filter = { storefront: oq.storefrontValue, pricing: oq.pricing ?? null, attention: oq.attention ?? null, setup: oq.setup ?? null, holder: oq.holder, q: oq.q };
           const deps = offerDeps();
           const catalog = filterActive(filter) || oq.sort ? await selectOffers(deps, oq, query) : await catalogPageFor(query);
           const world = await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog });
@@ -1361,7 +1390,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const { storefrontValue: _sv, bb, ...query } = oq;
           return {
             query: { offers: { query, accounts: accountCompetitors(), shareRange: { since: range.since, until: range.until }, buybox: exportScreen === 'offers' && bb } },
-            filters: { storefront: sf, repricing: oq.pricing ?? '', needs_attention: oq.attention ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
+            filters: { storefront: sf, repricing: oq.pricing ?? '', needs_attention: oq.attention ?? '', setup: oq.setup ?? '', buy_box_holder: oq.holder ?? '', search: oq.q, sort: oq.sort ? `${oq.sort.key} ${oq.sort.dir}` : '',
               ...(exportScreen === 'offers' ? { buy_box_columns: bb ? 'on' : '' } : {}) },
             period: null, periodPart: day(now),
           };
@@ -2231,7 +2260,7 @@ export function createRateLimiter(config: RateLimitConfig) {
  * страница, порядок, фильтры-перечисления); у остальных (поиск, записка, идентификаторы) — только имя: строка журнала не несёт ни текста
  * поиска, ни данных продавца
  */
-const SLOW_QUERY_VALUES = new Set(['period', 'kind', 'outcome', 'limit', 'offset', 'sort', 'dir', 'group', 'status', 'channel', 'attention', 'tab', 'format', 'since', 'until']);
+const SLOW_QUERY_VALUES = new Set(['period', 'kind', 'outcome', 'limit', 'offset', 'sort', 'dir', 'group', 'status', 'channel', 'attention', 'setup', 'tab', 'format', 'since', 'until']);
 export function slowQuery(params: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of params) out[key] = SLOW_QUERY_VALUES.has(key) ? value.slice(0, 40) : '…';

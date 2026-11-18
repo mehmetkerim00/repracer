@@ -1583,6 +1583,8 @@ export interface OfferPageFilter {
   /** Шаг 146 (#34): «требует внимания» — любая причина или одна (момент — для себестоимости и оценки комиссии) */
   attention?: { filter: AttentionFilter; now: Instant };
   holder?: OfferHolderFilter;
+  /** Шаг 170 (#35): чего не хватает для включения — стратегии или минимальной и максимальной цены */
+  setup?: OfferSetupFilter;
   /** Поиск — по подписи экрана, SKU, ключу канала и EAN, как у поиска предложения (`consoleCatalogFacts.search`) */
   search?: { q: string; labelTemplate: string; marketplaceWords: Readonly<Record<string, string>>; channelNames: Readonly<Record<string, string>>; unknownChannel: string };
   sort?: { key: OfferSortKey; dir: 'asc' | 'desc' };
@@ -1592,6 +1594,14 @@ export interface OfferPageFilter {
   /** Посчитать строки выгрузки конкурентов (потолок 50 000 — до создания задания) */
   countCompetitorRows?: boolean;
 }
+
+/**
+ * Шаг 170 (#35): фильтр Offers «Setup» — чего не хватает предложению для включения: стратегии (`NO_STRATEGY`) или действующей минимальной или
+ * максимальной цены (`NO_BOUNDS`). Одно правило у базы и экрана (равенство на мирах стенда держит тест); чеклист готовности тени считает
+ * им же
+ */
+export const OFFER_SETUP_FILTERS = ['NO_STRATEGY', 'NO_BOUNDS'] as const;
+export type OfferSetupFilter = (typeof OFFER_SETUP_FILTERS)[number];
 
 /** Шаг 118: фильтр Offers по автоцене — включена или выключена */
 export const OFFER_PRICING_FILTERS = ['ON', 'OFF'] as const;
@@ -1655,6 +1665,30 @@ export interface ConsoleCatalogFactsQuery {
   keys?: ReadonlyArray<{ marketplace: string; channelProductRef: string; condition: string }>;
   /** Шаг 146 (#34): итоги «требует внимания» по каталогу — теми же фрагментами, что фильтр Offers */
   attention?: { now: Instant };
+  /** Шаг 170 (#35): факты готовности к бою по витринам — теми же фрагментами, что фильтры Offers; рамки — функцией стража перевода */
+  readiness?: { now: Instant };
+}
+
+/**
+ * Шаг 170 (#35): готовность витрины аккаунта к бою — числа тех же выборок Offers: автоцена Off, причины «требует внимания» (себестоимость,
+ * Automate Pricing), фильтр Setup (стратегия, границы); `boundsUnreadOn` — включённые с рамками Amazon без значений (причина и автоцена On)
+ */
+export interface ReadinessStorefrontFacts {
+  channelAccountId: string;
+  marketplace: string;
+  offers: number;
+  off: number;
+  noUnitCost: number;
+  noStrategy: number;
+  noBounds: number;
+  automatedPricing: number;
+  boundsUnreadOn: number;
+}
+
+export interface ReadinessFacts {
+  storefronts: ReadinessStorefrontFacts[];
+  /** Число стража перевода в бой (шаг 136, `tenant_data.live_switch_blocking_offers`) по аккаунту; аккаунта без таких предложений нет в списке */
+  blockingBounds: Array<{ channelAccountId: string; total: number }>;
 }
 
 export interface ConsoleCatalogFacts {
@@ -1668,6 +1702,7 @@ export interface ConsoleCatalogFacts {
   channelPricing: Array<{ channelAccountId: string; total: number; rows: ConsoleOfferChannelPricingRow[] }> | null;
   keyed: Array<{ marketplace: string; channelProductRef: string; condition: string; writeScopeId: string }> | null;
   attention?: AttentionCounts | null;
+  readiness?: ReadinessFacts | null;
 }
 
 export interface ScopeDecisionStats {

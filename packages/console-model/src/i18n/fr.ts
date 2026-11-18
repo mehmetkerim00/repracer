@@ -1432,6 +1432,8 @@ export const fr: Messages = {
         matched: (n: number, total: number) => `${n} offres sur ${total} correspondent au filtre`,
         attention: 'Demande de l’attention', anyAttention: 'Toutes les offres',
         attentionValues: { ANY: 'N’importe quel motif', NO_UNIT_COST: 'Sans coût unitaire ni frais', AUTOMATED_PRICING: 'Tarification automatique Amazon active', CHANNEL_BOUNDS: 'Limites Amazon non lues', NOT_BUYABLE: 'Non achetable', TURNED_OFF: 'Désactivée' },
+        // Шаг 170 (#35): чего не хватает для включения
+        setup: 'Configuration', anySetup: 'Toutes', setupValues: { NO_STRATEGY: 'Sans stratégie', NO_BOUNDS: 'Sans prix minimum ou maximum' },
       },
     },
     outcomes: { APPROVED: 'Approuvé', NO_CHANGE: 'Aucun changement', REJECTED: 'Rejeté', HELD: 'Retenu' },
@@ -1487,6 +1489,37 @@ export const fr: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 170 (#35): чеклист готовности к бою — «нельзя» (перевод откажет) и «не стоит» (советуем), у каждого пункта — своя выборка
+    readiness: {
+      title: 'Prêt à envoyer les prix ?',
+      headline: {
+        blocks: (n: number) => (n === 1 ? 'Un point empêche d’envoyer les prix sur ce compte.' : `${n} points empêchent d’envoyer les prix sur ce compte.`),
+        advice: (n: number) => (n === 1 ? 'Rien n’empêche d’envoyer les prix ; un point mérite d’être réglé avant.' : `Rien n’empêche d’envoyer les prix ; ${n} points méritent d’être réglés avant.`),
+        ready: 'Rien n’empêche d’envoyer les prix, et rien n’est à régler avant.',
+      },
+      badge: { blocks: 'Pas encore', advice: 'Prêt, avec conseils', ready: 'Prêt' },
+      switchBlocked: 'Indisponible : le passage serait refusé — voir « Empêche le passage » ci-dessous.',
+      blocksTitle: 'Empêche le passage', adviceTitle: 'À régler avant — le passage ne l’attend pas',
+      fine: (list: string) => `Vérifié et correct : ${list}.`,
+      storefrontCount: (storefront: string, n: number) => `${storefront} : ${n}`,
+      checks: { NO_ACCESS: 'accès au canal', PROPERTY_UNKNOWN: 'ce que nous savons de la boutique', BOUNDS_UNREAD: 'limites Amazon des offres activées', OFFERS_OFF: 'toutes les offres sont activées',
+        NO_UNIT_COST: 'coût unitaire et frais', NO_STRATEGY: 'stratégies', NO_BOUNDS: 'prix minimum et maximum', AUTOMATED_PRICING: 'pas de tarification automatique Amazon', OTHER_TOOL: 'aucun autre outil ne change les prix', STALE_DATA: 'données de la concurrence à jour' },
+      items: {
+        liveWritesForbidden: 'Cet environnement n’envoie jamais de prix à un canal ; le mode fantôme continue ici.',
+        revoked: 'L’accès au canal a été révoqué — reconnectez-le.',
+        noAccess: 'Nous n’avons pas encore accès au canal — terminez la connexion.',
+        propertyUnknown: (list: string) => `Nous ne connaissons pas encore ${list}. Rien n’est nécessaire de votre part : nous ou le canal le confirmons.`,
+        boundsUnread: (n: number) => `${n === 1 ? '1 offre activée a' : `${n} offres activées ont`} des limites min/max Amazon que nous ne pouvons pas lire — désactivez leur prix automatique ou retirez les limites dans Seller Central.`,
+        offersOff: (n: number, total: number) => `${n} offres sur ${total} sont désactivées — l’essai ne calcule pas leur prix.`,
+        noUnitCost: (n: number) => `${n === 1 ? '1 offre n’a' : `${n} offres n’ont`} pas de coût unitaire ni de frais — elles ne peuvent pas être activées.`,
+        noStrategy: (n: number) => `${n === 1 ? '1 offre n’a' : `${n} offres n’ont`} pas de stratégie.`,
+        noBounds: (n: number) => `${n === 1 ? '1 offre n’a' : `${n} offres n’ont`} pas de prix minimum ou maximum.`,
+        automatedPricing: (n: number) => `${n === 1 ? '1 offre a' : `${n} offres ont`} la tarification automatique Amazon active — nous ne calculons pas leur prix.`,
+        otherTool: 'Vous nous avez indiqué qu’un autre outil change aussi les prix dans ce canal — deux outils de prix sur un canal se contrarient.',
+        otherToolUnanswered: 'Dites-nous si un autre outil met à jour les stocks ou les prix dans ce canal.',
+        staleData: (text: string) => `Les données de la concurrence sont anciennes — ${text}.`,
+      },
+    },
     // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
     unchanged: {
       title: 'Pourquoi mon prix n’a-t-il pas changé ?', link: 'Pourquoi mon prix n’a-t-il pas changé ?',

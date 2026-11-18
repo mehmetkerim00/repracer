@@ -54,7 +54,7 @@ import type {
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded, FeeExpiryNotice,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason, PricingSwitchRef } from '@repracer/pricing-pipeline';
 import { ATTENTION_REASONS, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DECISION_OUTCOME_GROUPS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
-import type { AttentionCounts, AttentionFilter, AttentionReason, FreshnessRow } from '@repracer/pricing-pipeline';
+import type { AttentionCounts, AttentionFilter, AttentionReason, FreshnessRow, OfferSetupFilter, ReadinessFacts } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
 import { IMPORT_RUN_COLUMNS, importRunRow, insertImportRun } from './import-runs.ts';
@@ -280,6 +280,16 @@ const ATTENTION_SQL: Readonly<Record<AttentionReason, (now: () => string) => str
     TURNED_OFF: () => `(s.pricing_mode = 'OFF' AND (SELECT j.action FROM tenant_data.offer_pricing_switch j
                                                WHERE j.tenant_id = s.tenant_id AND j.write_scope_id = s.write_scope_id ORDER BY j.seq DESC LIMIT 1) = 'OFF')`,
 };
+/**
+ * Шаг 170 (#35): фильтр Setup Offers — чего не хватает для включения. Правило экрана: стратегии нет (`strategy` строки каталога — по
+ * `pricing_strategy_id`) или минимальная либо максимальная цена не разрешается (`bounds.*.status` — последние версии уровней единицы и товара
+ * той же валюты и базы, как `BOUNDS_ROWS`; то же — функции `effective_min_price` / `effective_max_price`)
+ */
+const SETUP_SQL: Readonly<Record<OfferSetupFilter, string>> = {
+  NO_STRATEGY: `s.pricing_strategy_id IS NULL`,
+  NO_BOUNDS: `(tenant_data.effective_min_price(s.tenant_id, s.write_scope_id) IS NULL OR tenant_data.effective_max_price(s.tenant_id, s.write_scope_id) IS NULL)`,
+};
+
 function attentionWhere(filter: AttentionFilter, now: () => string): string {
   return filter === 'ANY' ? `(${ATTENTION_REASONS.map((r) => ATTENTION_SQL[r](now)).join(' OR ')})` : ATTENTION_SQL[filter](now);
 }
@@ -3051,6 +3061,8 @@ export class PgPricingStore implements PricingStore {
     if (f.pricing) where.push(`s.pricing_mode = ${p(PRICING_MODE_OF_FILTER[f.pricing])}`);
     // Шаг 146 (#34): «требует внимания» — те же фрагменты, что итоги строки состояния
     if (f.attention) { const at = f.attention.now; let ref: string | null = null; where.push(attentionWhere(f.attention.filter, () => (ref ??= p(at)))); }
+    // Шаг 170 (#35): чего не хватает для включения — те же фрагменты, что факты чеклиста готовности
+    if (f.setup) where.push(SETUP_SQL[f.setup]);
     const search = f.search && f.search.q !== '' ? f.search : null;
     const label = search
       ? `, coalesce(m.external_unit_id, m.external_sku, '') AS unit, coalesce(m.channel_product_ref, '') AS ref, coalesce(p.gtin, '') AS gtin, coalesce(p.title, p.sku) AS product,
@@ -3313,7 +3325,36 @@ export class PgPricingStore implements PricingStore {
              FROM sc`, [tenantId, query.attention.now]);
         attention = { any: Number(r!.any), byReason: Object.fromEntries(ATTENTION_REASONS.map((x) => [x, Number(r![x.toLowerCase()])])) as Record<AttentionReason, number> };
       }
-      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed, attention };
+      let readiness: ReadinessFacts | null = null;
+      if (query.readiness) {
+        /**
+         * Шаг 170 (#35): готовность витрин к бою — числа тех же выборок Offers (автоцена Off, причины «требует внимания», Setup) по витрине
+         * аккаунта; рамки Amazon у включённых — причина и автоцена On (выборка ссылки), а число отказа — функция стража перевода по аккаунту
+         */
+        const { rows } = await tx.query(
+          `WITH sc AS (SELECT m.channel_account_id, m.marketplace, s.pricing_mode,
+                              ${ATTENTION_SQL.NO_UNIT_COST(() => '$2')} AS no_unit_cost, ${ATTENTION_SQL.AUTOMATED_PRICING(() => '$2')} AS automated_pricing,
+                              ${ATTENTION_SQL.CHANNEL_BOUNDS(() => '$2')} AS channel_bounds, ${SETUP_SQL.NO_STRATEGY} AS no_strategy, ${SETUP_SQL.NO_BOUNDS} AS no_bounds
+                         ${SCOPE_FROM})
+           SELECT channel_account_id, marketplace, count(*)::int AS offers, count(*) FILTER (WHERE pricing_mode = 'OFF')::int AS off,
+                  count(*) FILTER (WHERE no_unit_cost)::int AS no_unit_cost, count(*) FILTER (WHERE no_strategy)::int AS no_strategy,
+                  count(*) FILTER (WHERE no_bounds)::int AS no_bounds, count(*) FILTER (WHERE automated_pricing)::int AS automated_pricing,
+                  count(*) FILTER (WHERE channel_bounds AND pricing_mode = 'ENGINE')::int AS bounds_unread_on
+             FROM sc GROUP BY channel_account_id, marketplace ORDER BY channel_account_id, marketplace`, [tenantId, query.readiness.now]);
+        const { rows: blocking } = await tx.query(
+          `SELECT a.channel_account_id, b.total FROM tenant_data.channel_account a
+             CROSS JOIN LATERAL (SELECT max(x.total)::int AS total FROM tenant_data.live_switch_blocking_offers(a.tenant_id, a.channel_account_id) x) b
+            WHERE a.tenant_id = $1 AND b.total IS NOT NULL ORDER BY a.channel_account_id`, [tenantId]);
+        readiness = {
+          storefronts: rows.map((r) => ({
+            channelAccountId: String(r.channel_account_id), marketplace: String(r.marketplace), offers: Number(r.offers), off: Number(r.off),
+            noUnitCost: Number(r.no_unit_cost), noStrategy: Number(r.no_strategy), noBounds: Number(r.no_bounds), automatedPricing: Number(r.automated_pricing),
+            boundsUnreadOn: Number(r.bounds_unread_on),
+          })),
+          blockingBounds: blocking.map((r) => ({ channelAccountId: String(r.channel_account_id), total: Number(r.total) })),
+        };
+      }
+      return { total: Number(t!.total), firstIds, search, strategyUsage, stopImpact, channelPricing, keyed, attention, readiness };
     });
   }
 
