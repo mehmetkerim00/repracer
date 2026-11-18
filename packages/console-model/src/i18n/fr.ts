@@ -775,7 +775,7 @@ export const fr: Messages = {
       filter: {
         searchLabel: 'Trouver un produit', search: 'Rechercher par nom ou SKU', withReservations: 'Seulement les produits avec réservations', apply: 'Rechercher', reset: 'Tout afficher',
         // Шаг 159 (#26): канал предложения, «требует внимания», порядок
-        channelLabel: 'Canal', allChannels: 'Tous les canaux', attention: 'Demande de l’attention', attentionCaption: 'Écart, stock sous le minimum de publication ou stock géré par le canal.', sortLabel: 'Trier par', sorts: { AVAILABLE: 'Disponible', RESERVED: 'Réservé' },
+        channelLabel: 'Canal', allChannels: 'Tous les canaux', attention: 'Demande de l’attention', attentionCaption: 'Écart, stock sous le minimum de publication ou stock géré par le canal.', sortLabel: 'Trier par', sorts: { AVAILABLE: 'Disponible', RESERVED: 'Réservé', TO_PUBLISH: 'À publier' }, sortHint: { noChannel: 'Choisissez un canal pour trier par « À publier ».', withChannel: 'Les produits sans un seul nombre à publier sur ce canal viennent à la fin.' },
         matched: (n: number, total: number) => `${n} produits sur ${total} correspondent.`,
         none: 'Aucun produit ne correspond à la recherche ou au filtre.',
       },

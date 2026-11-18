@@ -246,7 +246,7 @@ export interface StockPageQuery {
   limit: number;
   search?: string | null;
   withReservations?: boolean;
-  /** Шаг 159 (#26): порядок — по доступному (по умолчанию, шаг 84.1) или по резервам */
+  /** Шаг 159 (#26): порядок — по доступному (по умолчанию, шаг 84.1) или по резервам; шаг 166 — по публикуемому, только с каналом */
   sort?: StockSort;
   /** Шаг 159 (#26): только товары с предложением этого канала (KAUFLAND, AMAZON, EBAY, WALMART) */
   channel?: string | null;
@@ -254,7 +254,37 @@ export interface StockPageQuery {
   attention?: boolean;
 }
 
-export type StockSort = 'AVAILABLE' | 'RESERVED';
+export type StockSort = 'AVAILABLE' | 'RESERVED' | 'TO_PUBLISH';
+
+/**
+ * Шаг 166 (решение владельца по #26): публикуемое — число единицы записи количества, то есть канала, а не товара. Ключ порядка «по
+ * публикуемому» — число ЕДИНСТВЕННОЙ включённой единицы выбранного канала; нет такой единицы или их несколько (два аккаунта, два региона)
+ * — числа нет: максимум или сумма были бы выдуманным числом
+ */
+export function toPublishKey(row: Pick<StockRow, 'channels'>, channel: string): number | null {
+  const lines = row.channels.filter((c) => c.channel === channel && c.syncEnabled);
+  return lines.length === 1 ? lines[0]!.published : null;
+}
+
+/** Без канала порядка «по публикуемому» нет — отказ, а не тихая подмена другим порядком */
+export const TO_PUBLISH_NEEDS_CHANNEL = 'TO_PUBLISH_NEEDS_CHANNEL';
+
+/**
+ * Порядок страницы остатков — одно правило у хранилища в памяти и у теста равенства с PostgreSQL. По доступному (шаг 84.1), по резервам
+ * (шаг 159) или по публикуемому в канале (шаг 166: товары с числом — первыми, по убыванию; без числа — после); затем SKU байтово, как база
+ */
+export function compareStockRows(a: StockRow, b: StockRow, sort: StockSort | undefined, channel: string | null | undefined): number {
+  const byAvailable = b.available - a.available || b.reserved - a.reserved;
+  let first = 0;
+  if (sort === 'RESERVED') first = b.reserved - a.reserved || b.available - a.available;
+  else if (sort === 'TO_PUBLISH') {
+    if (!channel) throw new Error(TO_PUBLISH_NEEDS_CHANNEL);
+    const ka = toPublishKey(a, channel);
+    const kb = toPublishKey(b, channel);
+    first = (ka === null ? 1 : 0) - (kb === null ? 1 : 0) || (kb ?? 0) - (ka ?? 0) || byAvailable;
+  } else first = byAvailable;
+  return first || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0);
+}
 
 /**
  * Шаг 159 (#26): товар требует внимания, если хотя бы одно из трёх:

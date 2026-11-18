@@ -3129,6 +3129,54 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 166 (#26): «To publish» sorts only within a chosen channel — without one the option is off and the caption says to choose; within one the screen asks for that order', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const f = en.ui.stock.filter;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/inventory`)}, true)`);
+  await settled(b, 'inventory');
+  await waitFor(b, `!!document.querySelector('table.stock-table tbody tr')`, 'the stock table');
+  const field = (label: string) => `[...document.querySelectorAll('.stock .filters .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
+  const sort = () => b.evaluate<{ value: string; off: boolean; caption: string }>(`(() => { const x = ${field(f.sortLabel)};
+    const o = [...x.querySelectorAll('option')].find((o) => o.value === 'TO_PUBLISH');
+    return { value: x.querySelector('select').value, off: !o || o.disabled, caption: x.querySelector('.field-caption')?.textContent.trim() ?? '' }; })()`);
+  const select = async (label: string, value: string, what: string) => {
+    await b.evaluate(`(() => { const s = ${field(label)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ${JSON.stringify(value)}); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await settled(b, what);
+  };
+  // Без канала: вариант есть, но недоступен, и подпись зовёт выбрать канал
+  assert.deepEqual(await sort(), { value: 'AVAILABLE', off: true, caption: f.sortHint.noChannel });
+  // Канал выбран: вариант доступен, подпись говорит, где товары без числа, и запрос несёт порядок вместе с каналом. Сам порядок — правило
+  // `compareStockRows`: равенство базы ему держит тест PostgreSQL шага 166 (в смоук-мире у канала один товар — порядка не видно)
+  const channels = await b.evaluate<string[]>(`[...${field(f.channelLabel)}.querySelectorAll('option')].map((o) => o.value).filter(Boolean)`);
+  assert.ok(channels.length >= 1, 'the workspace has a channel to choose');
+  await select(f.channelLabel, channels[0]!, `channel ${channels[0]}`);
+  assert.equal((await sort()).off, false, '«To publish» is available within a channel');
+  await select(f.sortLabel, 'TO_PUBLISH', 'to publish');
+  assert.deepEqual(await sort(), { value: 'TO_PUBLISH', off: false, caption: f.sortHint.withChannel });
+  assert.ok(await b.evaluate<boolean>(`performance.getEntriesByType('resource').some((e) => e.name.includes('/stock?') && e.name.includes('sort=to_publish') && e.name.includes(${JSON.stringify(`channel=${channels[0]}`)}))`),
+    'the screen asks the server for the order within the channel');
+  // Снятый канал возвращает порядок по доступному
+  await select(f.channelLabel, channels[0]!, 'one channel');
+  await select(f.sortLabel, 'TO_PUBLISH', 'to publish');
+  await select(f.channelLabel, '', 'all channels');
+  assert.deepEqual(await sort(), { value: 'AVAILABLE', off: true, caption: f.sortHint.noChannel }, 'clearing the channel drops «To publish»');
+  for (const width of [375, 1440]) {
+    await b.setViewport(width, 900);
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${width}: no sideways scroll`);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 163 (#27): bulk edit and imports keep a summary bar of their numbers under the page header while the rows scroll; 375 keeps the page', async () => {
   const b = browser!;
   const before = b.errors().length;

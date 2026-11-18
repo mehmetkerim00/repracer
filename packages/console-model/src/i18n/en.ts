@@ -777,7 +777,7 @@ export const en = {
       filter: {
         searchLabel: 'Find a product', search: 'Search by name or SKU', withReservations: 'Only products with reservations', apply: 'Search', reset: 'Show all',
         // Шаг 159 (#26): канал предложения, «требует внимания», порядок
-        channelLabel: 'Channel', allChannels: 'All channels', attention: 'Needs attention', attentionCaption: 'Divergence, stock below the minimum to list, or stock managed by the channel.', sortLabel: 'Sort by', sorts: { AVAILABLE: 'Available', RESERVED: 'Reserved' },
+        channelLabel: 'Channel', allChannels: 'All channels', attention: 'Needs attention', attentionCaption: 'Divergence, stock below the minimum to list, or stock managed by the channel.', sortLabel: 'Sort by', sorts: { AVAILABLE: 'Available', RESERVED: 'Reserved', TO_PUBLISH: 'To publish' }, sortHint: { noChannel: 'Choose a channel to sort by “To publish”.', withChannel: 'Products with no single number to publish on this channel come last.' },
         matched: (n: number, total: number) => `${n} of ${total} products match.`,
         none: 'No product matches the search or the filter.',
       },

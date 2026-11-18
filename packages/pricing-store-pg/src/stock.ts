@@ -3,7 +3,7 @@ import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import {
   type AnswerOtherToolsResult, type ConfirmOrdersOutcome, type ConfirmQuantityWritesResult, type RevokeQuantityWritesResult, type DecideReturnOutcome, type QuantityWritesState, type OrderReturnRow, type OtherTools,
-  availableOf, publishedQuantity, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
+  availableOf, publishedQuantity, TO_PUBLISH_NEEDS_CHANNEL, type CreateStockSourceResult, type EnableStockSyncInput, type EnableStockSyncResult, type InboundStockOutcome, type InboundStockRow,
   type OrderLinesOutcome, type RecalculationOutcome, type StockActor, type StockChannelRow, type StockDivergenceRow, type StockImportOutcome, type StockImportRow,
   type StockPage, type StockPageQuery, type StockRow, type StockSourceMode, type StockSourceRow, type StockStore,
   type StockApplyOutcome, type StockApplyRow, type StockImportTarget,
@@ -963,17 +963,36 @@ export class PgStockStore implements StockStore {
              AND (NOT $5::boolean OR p.product_id IN (${PgStockStore.ATTENTION_SQL}))`;
       const filter = [tenantId, search, query.withReservations === true, query.channel ?? null, query.attention === true];
       /**
+       * Шаг 166 (решение владельца по #26): «по публикуемому» — только внутри выбранного канала, правилом `compareStockRows`: число
+       * единственной включённой единицы количества этого канала (`publishedQuantity`: буфер, потолок, порог аккаунта; без строки настроек —
+       * нули, как `channelRow`), нет её или их несколько — NULL, такие товары после. Без канала — отказ: число принадлежит каналу
+       */
+      if (query.sort === 'TO_PUBLISH' && !query.channel) throw new Error(TO_PUBLISH_NEEDS_CHANNEL);
+      const toPublish = query.sort !== 'TO_PUBLISH' ? 'NULL::int' : `(
+        SELECT CASE WHEN count(*) = 1 THEN min(CASE
+                 WHEN least(greatest(0, greatest(0, q.on_hand - q.reserved) - coalesce(al.buffer_units, 0)), coalesce(al.max_quantity, 2147483647)) < coalesce(al.min_quantity_to_list, 0) THEN 0
+                 ELSE least(greatest(0, greatest(0, q.on_hand - q.reserved) - coalesce(al.buffer_units, 0)), coalesce(al.max_quantity, 2147483647)) END) END
+          FROM tenant_data.write_scope s
+          JOIN tenant_data.channel_account ca ON ca.tenant_id = s.tenant_id AND ca.channel_account_id = s.channel_account_id
+          LEFT JOIN LATERAL (SELECT a.buffer_units, a.max_quantity, a.min_quantity_to_list FROM tenant_data.stock_allocation a
+                              WHERE a.tenant_id = s.tenant_id AND a.scope_type = 'CHANNEL_ACCOUNT' AND a.channel_account_id = s.channel_account_id
+                              ORDER BY a.version DESC LIMIT 1) al ON true
+         WHERE s.tenant_id = $1 AND s.product_id = q.product_id AND s.field = 'QUANTITY' AND s.status <> 'RETIRED' AND s.quantity_sync_enabled AND ca.channel = $4)`;
+      const order = query.sort === 'RESERVED' ? 'z.reserved DESC, greatest(z.on_hand - z.reserved, 0) DESC'
+        : query.sort === 'TO_PUBLISH' ? '(z.to_publish IS NULL), z.to_publish DESC, greatest(z.on_hand - z.reserved, 0) DESC, z.reserved DESC'
+        : 'greatest(z.on_hand - z.reserved, 0) DESC, z.reserved DESC';
+      /**
        * Шаг 84.1: сначала товары, которые есть чем продавать, — по убыванию доступного, при равенстве — по резервам, затем по SKU; нули —
        * вниз (у демо прежний порядок по SKU ставил наверх товары США без остатка, и экран открывался строками нулей). Остаток и резервы —
        * коррелированными подзапросами по индексам товара, как прежде: план не зависит от свежести статистики (шаг 67)
        */
       const { rows: products } = await tx.query(
-        `SELECT q.* FROM (
+        `SELECT z.* FROM (SELECT q.*, ${toPublish} AS to_publish FROM (
            SELECT p.product_id, p.sku, p.title, p.color, p.gtin,
                   coalesce((SELECT sum(sp.on_hand) FROM tenant_data.stock_pool sp WHERE sp.tenant_id = p.tenant_id AND sp.product_id = p.product_id), 0)::int AS on_hand,
                   coalesce((SELECT sum(r.quantity) FROM channel_data.reservation r WHERE r.tenant_id = p.tenant_id AND r.product_id = p.product_id AND ${PgStockStore.RESERVED_SQL}), 0)::int AS reserved
-             FROM tenant_data.product p WHERE ${matches}) q
-          ORDER BY ${query.sort === 'RESERVED' ? 'q.reserved DESC, greatest(q.on_hand - q.reserved, 0) DESC' : 'greatest(q.on_hand - q.reserved, 0) DESC, q.reserved DESC'}, q.sku, q.product_id
+             FROM tenant_data.product p WHERE ${matches}) q) z
+          ORDER BY ${order}, z.sku, z.product_id
           LIMIT $6 OFFSET $7`, [...filter, query.limit, query.offset]);
       const filtered = search !== null || query.withReservations === true || (query.channel ?? null) !== null || query.attention === true;
       const { rows: [matched] } = filtered

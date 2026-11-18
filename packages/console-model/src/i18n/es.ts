@@ -775,7 +775,7 @@ export const es: Messages = {
       filter: {
         searchLabel: 'Buscar un producto', search: 'Buscar por nombre o SKU', withReservations: 'Solo productos con reservas', apply: 'Buscar', reset: 'Mostrar todo',
         // Шаг 159 (#26): канал предложения, «требует внимания», порядок
-        channelLabel: 'Canal', allChannels: 'Todos los canales', attention: 'Requiere atención', attentionCaption: 'Discrepancia, inventario por debajo del mínimo para publicar o inventario gestionado por el canal.', sortLabel: 'Ordenar por', sorts: { AVAILABLE: 'Disponible', RESERVED: 'Reservado' },
+        channelLabel: 'Canal', allChannels: 'Todos los canales', attention: 'Requiere atención', attentionCaption: 'Discrepancia, inventario por debajo del mínimo para publicar o inventario gestionado por el canal.', sortLabel: 'Ordenar por', sorts: { AVAILABLE: 'Disponible', RESERVED: 'Reservado', TO_PUBLISH: 'Para publicar' }, sortHint: { noChannel: 'Elija un canal para ordenar por «Para publicar».', withChannel: 'Los productos sin un único número para publicar en este canal van al final.' },
         matched: (n: number, total: number) => `${n} de ${total} productos coinciden.`,
         none: 'Ningún producto coincide con la búsqueda o el filtro.',
       },

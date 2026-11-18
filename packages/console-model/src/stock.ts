@@ -89,6 +89,8 @@ export interface StockView {
     search: string; withReservations: boolean; matchedText: string | null; noneText: string | null;
     /** Шаг 159 (#26): канал предложения, «требует внимания», порядок; варианты канала — каналы аккаунтов мира словами */
     channel: string | null; attention: boolean; sort: StockSort; channelOptions: Array<{ value: string; label: string }>;
+    /** Шаг 166 (решение владельца по #26): «по публикуемому» — только внутри канала; без канала подпись зовёт выбрать канал, с ним — где товары без числа */
+    sortHint: string | null;
   };
   sources: Array<StockSourceRow & { modeText: string; productsText: string }>;
   /** Ловушки каналов аккаунтов мира — до включения синхронизации */
@@ -219,6 +221,7 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
     filter: {
       search, withReservations: filter.withReservations === true,
       channel: filter.channel ?? null, attention: filter.attention === true, sort: filter.sort ?? 'AVAILABLE',
+      sortHint: !filter.channel ? t.filter.sortHint.noChannel : filter.sort === 'TO_PUBLISH' ? t.filter.sortHint.withChannel : null,
       channelOptions: [...new Set(world.accounts.map((a) => a.channel))].sort().map((c) => ({ value: c, label: channelName(c) })),
       matchedText: filtered ? t.filter.matched(page.total, page.summary.products) : null,
       noneText: filtered && page.total === 0 ? t.filter.none : null,

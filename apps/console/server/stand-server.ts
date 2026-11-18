@@ -306,12 +306,15 @@ function roleShown(role: Viewer['role'], m: Messages): string | null {
  * Шаг 159 (#26): фильтр экрана остатков сверх поиска — канал предложения (только каналы аккаунтов мира), «требует внимания» (`attention=1`),
  * порядок (`sort=reserved`). Один разбор у экрана и у выгрузки [Р-229]; неверный параметр — null, и маршрут отвечает 400
  */
-function stockFilterOf(params: URLSearchParams, channels: readonly string[]): { channel?: string; attention?: boolean; sort?: 'AVAILABLE' | 'RESERVED' } | null {
+function stockFilterOf(params: URLSearchParams, channels: readonly string[]): { channel?: string; attention?: boolean; sort?: 'AVAILABLE' | 'RESERVED' | 'TO_PUBLISH' } | null {
   const channel = params.get('channel');
   const attention = params.get('attention');
   const sort = params.get('sort');
-  if ((channel !== null && !channels.includes(channel)) || (attention !== null && attention !== '1') || (sort !== null && sort !== 'reserved' && sort !== 'available')) return null;
-  return { ...(channel !== null ? { channel } : {}), ...(attention === '1' ? { attention: true } : {}), ...(sort === 'reserved' ? { sort: 'RESERVED' as const } : {}) };
+  if ((channel !== null && !channels.includes(channel)) || (attention !== null && attention !== '1') || (sort !== null && sort !== 'reserved' && sort !== 'available' && sort !== 'to_publish')) return null;
+  // Шаг 166 (решение владельца по #26): «по публикуемому» — только с каналом: число принадлежит каналу, без него порядок был бы выдуманным
+  if (sort === 'to_publish' && channel === null) return null;
+  return { ...(channel !== null ? { channel } : {}), ...(attention === '1' ? { attention: true } : {}),
+    ...(sort === 'reserved' ? { sort: 'RESERVED' as const } : sort === 'to_publish' ? { sort: 'TO_PUBLISH' as const } : {}) };
 }
 
 export function createStandApi(worlds: readonly LiveWorld[], identity: StandIdentity, services: StandServices = {}) {

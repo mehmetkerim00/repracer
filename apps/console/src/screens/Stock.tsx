@@ -132,11 +132,11 @@ export function StockScreen({ worldId }: { worldId: string }) {
 
 /** Экран без запросов — то, что отрисовывает тест из ответа сервера */
 /** Шаг 159 (#26): фильтр экрана остатков — поиск, «с резервами», канал предложения, «требует внимания», порядок; параметры — одни у экрана и выгрузки */
-export interface StockFilter { search: string; withReservations: boolean; channel: string | null; attention: boolean; sort: 'AVAILABLE' | 'RESERVED' }
+export interface StockFilter { search: string; withReservations: boolean; channel: string | null; attention: boolean; sort: 'AVAILABLE' | 'RESERVED' | 'TO_PUBLISH' }
 const NO_FILTER: StockFilter = { search: '', withReservations: false, channel: null, attention: false, sort: 'AVAILABLE' };
 function stockFilterParams(f: StockFilter): string {
   return `${f.search ? `&q=${encodeURIComponent(f.search)}` : ''}${f.withReservations ? '&reserved=1' : ''}${f.channel ? `&channel=${encodeURIComponent(f.channel)}` : ''}`
-    + `${f.attention ? '&attention=1' : ''}${f.sort === 'RESERVED' ? '&sort=reserved' : ''}`;
+    + `${f.attention ? '&attention=1' : ''}${f.sort === 'RESERVED' ? '&sort=reserved' : f.sort === 'TO_PUBLISH' ? '&sort=to_publish' : ''}`;
 }
 
 export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: {
@@ -173,15 +173,20 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
           <Field label={t.filter.searchLabel}><input type="search" value={search} placeholder={t.filter.search} onChange={(e) => setSearch(e.currentTarget.value)} /></Field>
           {/* Шаг 159 (#26): канал предложения и порядок — по всему каталогу запросом базы */}
           <Field label={t.filter.channelLabel}>
-            <select value={v.filter.channel ?? ''} onChange={(e) => onFilter(current({ channel: e.currentTarget.value === '' ? null : e.currentTarget.value }))}>
+            {/* Шаг 166: без канала порядка «по публикуемому» нет — снятый канал возвращает порядок по доступному */}
+            <select value={v.filter.channel ?? ''} onChange={(e) => { const channel = e.currentTarget.value === '' ? null : e.currentTarget.value;
+              onFilter(current({ channel, ...(channel === null && v.filter.sort === 'TO_PUBLISH' ? { sort: 'AVAILABLE' as const } : {}) })); }}>
               <option value="">{t.filter.allChannels}</option>
               {v.filter.channelOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
-          <Field label={t.filter.sortLabel}>
+          {/* Шаг 166 (решение владельца по #26): «по публикуемому» — только внутри выбранного канала; без канала вариант недоступен и подпись
+              зовёт выбрать канал */}
+          <Field label={t.filter.sortLabel} caption={v.filter.sortHint}>
             <select value={v.filter.sort} onChange={(e) => onFilter(current({ sort: e.currentTarget.value as StockFilter['sort'] }))}>
               <option value="AVAILABLE">{t.filter.sorts.AVAILABLE}</option>
               <option value="RESERVED">{t.filter.sorts.RESERVED}</option>
+              <option value="TO_PUBLISH" disabled={v.filter.channel === null}>{t.filter.sorts.TO_PUBLISH}</option>
             </select>
           </Field>
           <CheckField label={t.filter.withReservations} checked={withReservations} onChange={(on) => { setWithReservations(on); onFilter(current({ withReservations: on })); }} />
@@ -192,7 +197,7 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
           </div>
           {/* Шаг 104 [Р-229]: выгрузка — по ПРИМЕНЁННОМУ фильтру: тем товарам, что в таблице; шаг 159 — и по каналу, вниманию, порядку */}
           <ExportControl worldId={worldId} screen="inventory" query={exportQuery(null, { q: v.filter.search, reserved: v.filter.withReservations ? '1' : undefined,
-            channel: v.filter.channel ?? undefined, attention: v.filter.attention ? '1' : undefined, sort: v.filter.sort === 'RESERVED' ? 'reserved' : undefined })} empty={v.rows.length === 0} />
+            channel: v.filter.channel ?? undefined, attention: v.filter.attention ? '1' : undefined, sort: v.filter.sort === 'RESERVED' ? 'reserved' : v.filter.sort === 'TO_PUBLISH' ? 'to_publish' : undefined })} empty={v.rows.length === 0} />
         </form>
       ) : null}
       {v.filter.matchedText ? <Help className="section-sub" text={v.filter.matchedText} /> : null}

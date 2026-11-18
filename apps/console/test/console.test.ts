@@ -479,6 +479,21 @@ test('no endless spinner: a request that gets no answer ends with an error the s
 });
 
 /**
+ * Шаг 166 (решение владельца по #26): порядок «по публикуемому» — только внутри выбранного канала. С каналом экран и выгрузка его принимают;
+ * без канала — отказ 400, а не тихая подмена другим порядком: число принадлежит каналу
+ */
+test('step 166: the stock screen and its export take sort=to_publish only with a channel', async () => {
+  const auth = await login('OWNER');
+  const w = (await get<WorldSummary[]>(auth, '/api/worlds'))[0]!.id;
+  const channel = (await get<StockView>(auth, api(w, 'stock'))).filter.channelOptions[0]!.value;
+  const within = await get<StockView>(auth, `${api(w, 'stock')}?channel=${channel}&sort=to_publish`);
+  assert.deepEqual([within.filter.channel, within.filter.sort, within.filter.sortHint], [channel, 'TO_PUBLISH', messagesFor('en').ui.stock.filter.sortHint.withChannel]);
+  const without = await call(auth, 'GET', `${api(w, 'stock')}?sort=to_publish`);
+  assert.equal(without.status, 400, JSON.stringify(without.body));
+  assert.equal((without.body as { error: { code: string } }).error.code, 'BAD_PAGE');
+});
+
+/**
  * Шаг 164 (решение владельца по таймауту Price changes на QA-A): медленный запрос оставляет строку журнала — метод, путь, значения только
  * безопасных параметров выборки, код, время и ушёл ли клиент, не дождавшись. Тела, токена и текста поиска в строке нет; быстрый — без строки
  */

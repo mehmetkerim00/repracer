@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { systemClock } from '@repracer/channel-port';
 import type { Instant, OrderLine } from '@repracer/channel-port';
 import { availableOf, publishedQuantity, type StockAllocation } from './published.ts';
+import { compareStockRows, TO_PUBLISH_NEEDS_CHANNEL } from './store.ts';
 
 /** Шаг 98 [Р-222]: запись количества подтверждают и отзывают владелец или менеджер — как страж базы (0191) и `OWNER_LEVEL_ROLES` модели */
 const OWNER_LEVEL: readonly string[] = ['OWNER', 'MANAGER'];
@@ -367,6 +368,7 @@ export class InMemoryStockStore implements StockStore {
   }
 
   async stockPage(_tenantId: string, query: StockPageQuery): Promise<StockPage> {
+    if (query.sort === 'TO_PUBLISH' && !query.channel) throw new Error(TO_PUBLISH_NEEDS_CHANNEL);
     const products = [...new Map(this.offers.map((o) => [o.productId, o])).values()];
     // Шаг 84.1: порядок — как у PostgreSQL: по убыванию доступного, затем резервов, затем по SKU (байтово, как сортировка базы)
     const rows: StockRow[] = products.map((o) => ({
@@ -374,8 +376,8 @@ export class InMemoryStockStore implements StockStore {
       channels: [...this.scopes.values()].filter((s) => s.offer.productId === o.productId).map((s) => this.channelRow(s)),
       // Шаг 159 (#26): каналы предложений товара — фильтр «канал», как у PostgreSQL
       offerChannels: [...new Set(this.offers.filter((x) => x.productId === o.productId).map((x) => x.channel))].sort(),
-    })).sort((a, b) => (query.sort === 'RESERVED' ? b.reserved - a.reserved || b.available - a.available : b.available - a.available || b.reserved - a.reserved)
-      || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : 1));
+    // Шаг 166: порядок — одно правило с PostgreSQL (`compareStockRows`); «по публикуемому» без канала — отказ
+    })).sort((a, b) => compareStockRows(a, b, query.sort, query.channel));
     const channelRows = rows.flatMap((r) => r.channels);
     // Шаг 69 (K8): поиск по названию или SKU и фильтр «с резервациями» — тем же правилом, что у PostgreSQL
     const needle = query.search?.trim().toLowerCase() ?? '';

@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { MemorySeedScope } from '@repracer/pricing-pipeline';
 import { DEFAULT_RETRY_POLICY } from '@repracer/write-dispatcher';
-import { stockNeedsAttention } from '@repracer/stock-sync';
+import { compareStockRows, stockNeedsAttention, toPublishKey } from '@repracer/stock-sync';
 import { createPool, PgPricingStore, PgStockStore, PgWriteQueueStore, inTenant, seedPricingWorld, type PgPool, type SeededPricingWorld } from '../src/index.ts';
 import { createIsolatedDatabase, type IsolatedDatabase } from './isolated-db.ts';
 
@@ -459,6 +459,26 @@ test('step 159 (#26): the stock page filters by offer channel and «needs attent
   const byReserved = (await store.stockPage(world.tenantId, { offset: 0, limit: 500, sort: 'RESERVED' })).items;
   const ruleOrder = [...all].sort((a, b) => b.reserved - a.reserved || b.available - a.available || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0));
   assert.deepEqual(byReserved.map((r) => r.sku), ruleOrder.map((r) => r.sku), 'sorted by reserved, then available, then SKU');
+});
+
+/**
+ * Шаг 166 (решение владельца по #26): порядок «по публикуемому» — только внутри выбранного канала, правилом `compareStockRows` (stock-sync):
+ * число единственной включённой единицы количества этого канала, товары без числа — после. Без канала — отказ: число принадлежит каналу
+ */
+test('step 166 (#26): «to publish» sorts within the chosen channel — the database equals the rule; without a channel it is refused', async () => {
+  let numbered = 0;
+  let without = 0;
+  for (const channel of ['KAUFLAND', 'AMAZON']) {
+    const all = (await store.stockPage(world.tenantId, { offset: 0, limit: 500, channel })).items;
+    const keys = all.map((r) => toPublishKey(r, channel));
+    numbered = Math.max(numbered, new Set(keys.filter((k) => k !== null)).size);
+    without += keys.filter((k) => k === null).length;
+    const page = (await store.stockPage(world.tenantId, { offset: 0, limit: 500, channel, sort: 'TO_PUBLISH' })).items;
+    const rule = [...all].sort((a, b) => compareStockRows(a, b, 'TO_PUBLISH', channel));
+    assert.deepEqual(page.map((r) => `${r.sku}:${toPublishKey(r, channel)}`), rule.map((r) => `${r.sku}:${toPublishKey(r, channel)}`), `${channel}: the database equals the rule`);
+  }
+  assert.ok(numbered >= 2 && without >= 1, `the world has different numbers to publish and products without one: ${numbered} distinct, ${without} without`);
+  await assert.rejects(store.stockPage(world.tenantId, { offset: 0, limit: 500, sort: 'TO_PUBLISH' }), /TO_PUBLISH_NEEDS_CHANNEL/);
 });
 
 test('step 53: after a refused version the value the channel already holds is not sent again', async () => {
