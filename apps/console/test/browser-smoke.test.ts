@@ -2290,8 +2290,8 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
     if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
     await go('products');
     const p = m.ui.products;
-    // Шаг 146 (#34): поле «Needs attention» — после «Repricing»
-    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.attention, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
+    // Шаг 146 (#34): поле «Needs attention» — после «Repricing»; шаг 170 (#35): «Setup» — после него
+    assert.deepEqual(await b.evaluate<string[]>(fieldLabels), [p.filters.storefront, p.filters.pricing, p.filters.attention, p.filters.setup, p.filters.holder, p.filters.search, m.ui.export.button, m.ui.export.competitors], `${m.locale}: the filter row`);
     // Колонки Buy Box выключены по умолчанию и есть в выборе Columns
     const shown = await b.evaluate<string[]>(headers);
     // Шаг 148 (#27): один сигнал конкуренции по умолчанию — держатель Buy Box; остальные колонки Buy Box и Maximum price — за «Columns»
