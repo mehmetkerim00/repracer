@@ -165,6 +165,8 @@ let receiptCompetitors: unknown = null;
 let productsPatch: ((body: { rows: Array<Record<string, unknown>> }) => void) | null = null;
 /** Шаг 152: правка ответа индекса Costs & floors — строка без границ (в смоук-мире у всех предложений границы заданы) */
 let boundsPatch: ((body: { items: Array<Record<string, unknown>> }) => void) | null = null;
+/** Шаг 168: правка ответа Inventory — строка «требует внимания» (в смоук-мире у товаров нет ни расхождения, ни порога выставления) */
+let stockPatch: ((body: { rows: Array<Record<string, unknown>> }) => void) | null = null;
 
 /** Шаг 139 (BUG-02): решение мира смоука у удержанных строк тени — только на время своего теста (ссылка «Why this price» из тени) */
 let shadowDecisionId: string | null = null;
@@ -296,6 +298,7 @@ before(async () => {
     })
     : productsPatch && /\/products(\?|$)/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) productsPatch!(r.body as never); return r; })
     : boundsPatch && /\/bounds\?/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) boundsPatch!(r.body as never); return r; })
+    : stockPatch && /\/stock\?/.test(req.url) ? currentApi(req).then((r) => { if (r.status === 200) stockPatch!(r.body as never); return r; })
     : decisionChip && /\/decisions\?/.test(req.url) ? currentApi(req).then((r) => {
       const body = r.body as { items?: Array<Record<string, unknown>> };
       if (r.status === 200 && body.items?.length) body.items[0] = { ...body.items[0], trigger: decisionChip };
@@ -3141,6 +3144,82 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+test('step 168: a row is yellow only for a real reason — on Offers exactly the rows of «Needs attention», on Inventory exactly the rows of its filter; both themes, 375', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const visit = async (route: string, ready: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+    await waitFor(b, ready, route);
+  };
+  const offerKey = `(tr) => tr.querySelector('a[href*="/decisions/"], a[href*="/bounds/"]')?.getAttribute('href').split('/').pop() ?? tr.querySelector('td.offer').textContent.trim()`;
+  const offers = (only: 'marked' | 'all') => b.evaluate<string[]>(`[...document.querySelectorAll('table.products tbody tr${only === 'marked' ? '.attention' : ''}')].map(${offerKey}).sort()`);
+  // Offers: подсвеченные строки — ровно строки фильтра «Needs attention» (причины строки состояния, правило базы = правило экрана)
+  await visit('products', `!!document.querySelector('table.products tbody tr')`);
+  const marked = await offers('marked');
+  const all = await offers('all');
+  await visit('products/attention/ANY', `!!document.querySelector('table.products tbody tr') || !!document.querySelector('.world-content p.notice, .world-content p.empty')`);
+  const listed = await offers('all');
+  assert.ok(marked.length > 0, `offers: the smoke world has an offer that needs attention (Walmart unpublished) — ${marked.length} of ${all.length}`);
+  assert.deepEqual(marked, listed, 'offers: the yellow rows are exactly the rows of «Needs attention»');
+  // Inventory: подсвеченные строки — ровно строки фильтра «Needs attention» (`stockNeedsAttention`)
+  const products = (only: 'marked' | 'all') => b.evaluate<string[]>(`[...document.querySelectorAll('table.stock-table tbody tr${only === 'marked' ? '.attention' : ''}')].map((tr) => tr.querySelector('td.product').textContent.trim()).sort()`);
+  await visit('inventory', `!!document.querySelector('table.stock-table tbody tr')`);
+  const stockMarked = await products('marked');
+  const stockAll = await products('all');
+  await b.evaluate(`(() => { const c = [...document.querySelectorAll('.stock .filters .check-field')].find((x) => x.textContent.includes(${JSON.stringify(en.ui.stock.filter.attention)})); c.querySelector('input').click(); return true; })()`);
+  await settled(b, 'needs attention');
+  await waitFor(b, `!!document.querySelector('.stock .section-sub')`, 'the filter names its count');
+  const stockListed = await products('all');
+  assert.deepEqual(stockMarked, stockListed, `inventory: the yellow rows are exactly the rows of «Needs attention» — ${stockMarked.length} of ${stockAll.length}`);
+  // Подсветка — фоном строки и полосой слева; строка без причины — без неё. У смоук-мира одно предложение: рядом — его копия без причин
+  // внимания (ответ экрана подменён только здесь; правило причин держат тест модели и равенство базы шага 146)
+  productsPatch = (body) => {
+    const first = body.rows[0]!;
+    body.rows.push({ ...first, attention: [], unit: { ...(first.unit as Record<string, unknown>), writeScopeId: 'smoke-168-plain' } });
+  };
+  for (const scheme of ['light', 'dark'] as const) {
+    await b.setColorScheme(scheme);
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await visit('products', `!!document.querySelector('table.products tbody tr.attention')`);
+      const look = await b.evaluate<{ same: boolean; edge: boolean; plain: boolean }>(`(() => {
+        const tr = document.querySelector('table.products tbody tr.attention'); const other = document.querySelector('table.products tbody tr:not(.attention)');
+        const bg = (td) => getComputedStyle(td).backgroundColor;
+        return { same: [...tr.children].every((td) => bg(td) === bg(tr.children[1])), edge: /inset/.test(getComputedStyle(tr.children[0]).boxShadow),
+          plain: bg(other.children[1]) !== bg(tr.children[1]) }; })()`);
+      assert.deepEqual(look, { same: true, edge: true, plain: true }, `${scheme} ${width}: the attention row is tinted whole with its bar, other rows are not — ${await b.evaluate<string>(`JSON.stringify([...document.querySelector('table.products tbody tr.attention').children].map((td) => td.className + ' ' + getComputedStyle(td).backgroundColor))`)}`);
+      assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+      // Inventory на телефоне — карточками: подложка и полоса у карточки целиком, а не у каждой ячейки. В смоук-мире у товаров причин нет — одна
+      // строка помечена правкой ответа (правило причин держит тест модели), смотрится её карточка
+      if (width === 375) {
+        stockPatch = (body) => { body.rows[0]!.attention = true; };
+        await visit('inventory', `!!document.querySelector('table.stock-table tbody tr')`);
+        stockPatch = null;
+        const card = await b.evaluate<{ marked: number; whole: boolean }>(`(() => {
+          const tr = document.querySelector('table.stock-table tbody tr.attention');
+          if (!tr) return { marked: 0, whole: false };
+          const cs = getComputedStyle(tr);
+          return { marked: 1, whole: /inset/.test(cs.boxShadow) && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && [...tr.children].every((td) => getComputedStyle(td).backgroundColor === 'rgba(0, 0, 0, 0)') }; })()`);
+        assert.ok(card.whole, `${scheme} 375: an Inventory card that needs attention is tinted as a card — ${JSON.stringify(card)}`);
+      }
+    }
+  }
+  productsPatch = null;
+  await b.setColorScheme('light');
+  await b.setViewport(1440, 900);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 167: the Spruce Hybrid theme — fonts from the console itself, headings in Schibsted Grotesk, no monospace, a dark sidebar with its active item, uppercase labels; both themes', async () => {
   const b = browser!;
   const before = b.errors().length;
@@ -3318,7 +3397,7 @@ test('step 163 (#27): bulk edit and imports keep a summary bar of their numbers 
     assert.deepEqual(await b.evaluate(OUT_OF_BOX), [], `${width}: nothing sticks out of its frame`);
     // Шаг 167: строка «требует внимания» заметна целиком — и закреплённая первая ячейка (на телефоне) того же фона, что строка, с полосой слева
     const marked = await b.evaluate<{ rows: number; same: boolean; edge: boolean }>(`(() => {
-      const rows = [...document.querySelectorAll('.bounds-edit section.diff tbody tr')].filter((tr) => tr.querySelector(':scope > td.offer.attention'));
+      const rows = [...document.querySelectorAll('.bounds-edit section.diff tbody tr.attention')];
       const bg = (td) => getComputedStyle(td).backgroundColor;
       return { rows: rows.length, same: rows.every((tr) => bg(tr.children[0]) === bg(tr.children[1])), edge: rows.every((tr) => /inset/.test(getComputedStyle(tr.children[0]).boxShadow)) }; })()`);
     assert.ok(marked.rows > 0 && marked.same && marked.edge, `${width}: the attention row is marked whole, the sticky first cell too — ${JSON.stringify(marked)}`);

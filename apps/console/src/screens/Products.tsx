@@ -184,7 +184,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
           </thead>
           <tbody>
             {view.rows.map((r) => (
-              <tr key={r.unit.writeScopeId}>
+              // Шаг 168: строка с причиной «требует внимания» (та же, что считает строка состояния) — подсвечена
+              <tr key={r.unit.writeScopeId} className={r.attention.length > 0 ? 'attention' : undefined}>
                 <td className="offer">
                   <strong><UnitName unit={r.unit} variant={false} /></strong>
                   {/*

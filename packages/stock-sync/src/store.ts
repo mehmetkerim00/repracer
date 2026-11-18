@@ -286,17 +286,7 @@ export function compareStockRows(a: StockRow, b: StockRow, sort: StockSort | und
   return first || (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0) || (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0);
 }
 
-/**
- * Шаг 159 (#26): товар требует внимания, если хотя бы одно из трёх:
- *  - количество в канале расходится с нашим (последняя запись не применена, `divergence`);
- *  - остатком у канала управляет сам канал (FBA, FBK — `channelManaged`);
- *  - у включённой синхронизации есть что опубликовать, но это меньше порога выставления — канал покажет ноль.
- * Одно правило у хранилища в памяти, у экрана и у теста равенства с запросом PostgreSQL
- */
-export function stockNeedsAttention(row: Pick<StockRow, 'available' | 'channels' | 'channelManaged'>): boolean {
-  if ((row.channelManaged ?? []).length > 0) return true;
-  return row.channels.some((c) => c.divergence !== null || (c.syncEnabled && c.allocation != null && belowMinimumToList(row.available, c.allocation)));
-}
+// Шаг 159, шаг 168: правило «товар требует внимания» (`stockNeedsAttention`) — в published.ts: его берёт и экран (подпуть без модулей Node)
 
 
 

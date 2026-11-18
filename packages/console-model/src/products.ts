@@ -4,7 +4,9 @@ import { channelBoundsPill, channelBoundsUnread } from './channel-bounds.ts';
 import type { Messages } from './i18n/index.ts';
 import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './page.ts';
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
-import type { AttentionFilter, ConsoleCatalogPage, OfferPricingFilterValue, ScopeDecisionStats } from '@repracer/pricing-pipeline';
+import type { AttentionFilter, AttentionReason, ConsoleCatalogPage, OfferPricingFilterValue, ScopeDecisionStats } from '@repracer/pricing-pipeline';
+// Шаг 168: одно правило «требует внимания» со строкой состояния (status-line берёт channelNotes отсюда — вызов во время работы, не при загрузке)
+import { attentionReasons } from './status-line.ts';
 import { storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferSort } from './offer-buybox.ts';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
@@ -73,6 +75,11 @@ export interface ProductRow {
    * комиссия, распродажа). Важнейшая (stop) первой, остальные — «+N» с тем же содержимым; сказать нечего — null
    */
   health: (HealthItem & { more: HealthItem[] }) | null;
+  /**
+   * Шаг 168 (решение владельца): причины «требует внимания» — те, что считает строка состояния (`attentionReasons`); есть хоть одна — строка
+   * Offers подсвечена. Пометки Health без такой причины (распродажа, истёкшая комиссия) строку не подсвечивают
+   */
+  attention: AttentionReason[];
   /** Шаг 103 [Р-228]: правило умолчания аккаунта не назначило стратегию новому предложению — причина словами, иначе null */
   notAssigned: string | null;
   /** Шаг 105 [Р-230]: колонки Buy Box — только когда зритель их включил (их считают по снимку и отрезкам; выключенные — не нужны) */
@@ -403,6 +410,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     return {
       margin,
       health: marks.length === 0 ? null : { ...marks[0]!, more: marks.slice(1) },
+      attention: attentionReasons(world, scope, m),
       unit: unitOf(world, scope, m),
       // Шаг 148 (#27, UX-04): пустое — словами («No price yet», «Not set»), а не «no value» и «not set: not set»
       currentPrice: scope.currentPriceMinor === null ? p.noPriceYet : money(scope.currentPriceMinor),

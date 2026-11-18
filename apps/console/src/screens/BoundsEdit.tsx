@@ -43,9 +43,10 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
           <thead><tr><th>{c.offer}</th><th>{c.minBefore}</th><th>{c.minAfter}</th><th>{c.maxBefore}</th><th>{c.maxAfter}</th><th>{c.price}</th><th>{c.notes}</th></tr></thead>
           <tbody>
             {view.rows.map((r) => (
-              <tr key={r.unit.writeScopeId}>
-                {/* Шаг 79 (ревью): предложение — текстом; внимание к строке — в колонке пометок, а не цветом названия */}
-                <td className={`offer${r.tone === 'warn' ? ' attention' : ''}`}><UnitName unit={r.unit} /></td>
+              // Шаг 167, шаг 168: строка с пометкой внимания — подсвечена целиком (класс строки, как на Offers и Inventory)
+              <tr key={r.unit.writeScopeId} className={r.tone === 'warn' ? 'attention' : undefined}>
+                {/* Шаг 79 (ревью): предложение — текстом; что именно требует внимания — в колонке пометок */}
+                <td className="offer"><UnitName unit={r.unit} /></td>
                 <td className="num cur">{r.minBefore}</td>
                 <td className="num cur">{r.minAfter}{r.minChange ? <div className="small muted">{r.minChange}</div> : null}</td>
                 <td className="num cur">{r.maxBefore}</td>

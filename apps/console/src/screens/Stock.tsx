@@ -208,7 +208,8 @@ export function StockScreenView({ view: v, worldId, query, onQuery, onFilter }: 
           <thead><tr><th>{t.columns.product}</th><th className="num">{t.columns.onHand}</th><th className="num">{t.columns.reserved}</th><th className="num">{t.columns.available}</th><th>{t.columns.channels}</th></tr></thead>
           <tbody>
             {v.rows.map((r) => (
-              <tr key={r.productId}>
+              // Шаг 168: строка, которую берёт фильтр «Needs attention», — подсвечена
+              <tr key={r.productId} className={r.attention ? 'attention' : undefined}>
                 <td className="product card-title">{r.label}{r.label !== r.sku ? <span className="small muted nowrap"> · {r.sku}</span> : null}{r.gtin ? <span className="small muted nowrap"> · {r.gtin}</span> : null}</td>
                 <td className="num" data-label={t.columns.onHand}>{r.onHand}</td><td className="num" data-label={t.columns.reserved}>{r.reserved}</td><td className="num money" data-label={t.columns.available}>{r.available}</td>
                 <td className="text-cell" data-label={t.columns.channels}>

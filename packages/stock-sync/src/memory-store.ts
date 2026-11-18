@@ -12,7 +12,7 @@ import type {
   StockApplyOutcome, StockApplyRow, StockImportTarget,
 } from './store.ts';
 import type { ImportRunInput } from '@repracer/pricing-pipeline';
-import { stockNeedsAttention } from './store.ts';
+import { stockNeedsAttention } from './published.ts';
 
 /** Запись «в полёте»: ещё не завершена. Тот же список, что у `PgStockStore`: PENDING, DISPATCHED, ACCEPTED */
 const IN_FLIGHT = ['PENDING', 'DISPATCHED', 'ACCEPTED'];

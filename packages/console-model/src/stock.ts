@@ -1,7 +1,7 @@
 import { can } from '@repracer/pricing-model';
 import type { OrderReturnRow, StockChannelRow, StockDivergenceRow, StockPage, StockRow, StockSort, StockSourceRow } from '@repracer/stock-sync';
 // Шаг 160: правило публикуемого количества — подпутём без модулей Node (страница консоли, правило импортов шага 76)
-import { belowMinimumToList, publishedQuantity } from '@repracer/stock-sync/published';
+import { belowMinimumToList, publishedQuantity, stockNeedsAttention } from '@repracer/stock-sync/published';
 import type { Messages } from './i18n/index.ts';
 import { pageInfo, type ListQuery, type PageInfo } from './page.ts';
 import { gap, storefrontChip, storefrontName, type Gap, type StandWorld, type StorefrontChip } from './world.ts';
@@ -58,6 +58,8 @@ export interface StockRowView {
    * amazon.com — 12, managed by Amazon»), «only shown, we never change it» и время — один раз над таблицей и подсказкой строки
    */
   channelManaged: Array<{ text: string; detail: string }>;
+  /** Шаг 168 (решение владельца): строка «требует внимания» — правилом фильтра Inventory (`stockNeedsAttention`): подсвечена только по причине */
+  attention: boolean;
 }
 
 export interface StockTrap {
@@ -210,7 +212,7 @@ export function stockView(world: StandWorld, page: StockPage, query: ListQuery, 
   const search = filter.search?.trim() ?? '';
   const filtered = search !== '' || filter.withReservations === true || (filter.channel ?? null) !== null || filter.attention === true;
   const channelName = (channel: string) => (m.values as Record<string, string | undefined>)[channel] ?? channel;
-  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, channels: r.channels.map((c) => channelCell(c, m, world, r.available)),
+  const rows = page.items.map((r: StockRow): StockRowView => ({ productId: r.productId, label: r.title ?? r.sku, sku: r.sku, gtin: r.gtin, onHand: r.onHand, reserved: r.reserved, available: r.available, attention: stockNeedsAttention(r), channels: r.channels.map((c) => channelCell(c, m, world, r.available)),
     channelManaged: (r.channelManaged ?? []).map((c) => ({
       text: t.channel.managedShort(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity),
       detail: t.channel.managedByChannel(channelName(c.channel), storefrontName(c.channel, c.marketplace, m), c.quantity, m.when(c.observedAt)),

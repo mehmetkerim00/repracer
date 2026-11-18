@@ -440,9 +440,13 @@ td.bound { min-width: 130px; }
 /* причины отказа включения — красными маркерами (шаг 79) */
 ul.problems li::marker { color: var(--danger); }
 /* строка экрана различий, требующая внимания, — янтарной чертой слева у предложения (шаг 79) */
-/* шаг 167: строка «требует внимания» — светлая янтарная подложка и полоса слева */
-td.offer.attention { box-shadow: inset 3px 0 0 var(--attention-row-edge); }
-tbody tr:has(> td.offer.attention) > td { background: var(--attention-row-bg); }
+/* шаг 167, шаг 168: строка «требует внимания» (класс строки — только по настоящей причине) — светлая янтарная подложка и полоса слева */
+tbody tr.attention > td { background: var(--attention-row-bg); }
+tbody tr.attention > td:first-child { box-shadow: inset 3px 0 0 var(--attention-row-edge); }
+/* закреплённая колонка предложения Offers держит свою тень-границу — полоса внимания добавляется к ней */
+table.products tbody tr.attention > td.offer { background: var(--attention-row-bg); box-shadow: inset 3px 0 0 var(--attention-row-edge), 1px 0 0 var(--divider); }
+/* закреплённая колонка действий справа — той же подложки, что строка */
+table.sticky-end tbody tr.attention > td:last-child { background: var(--attention-row-bg); }
 td.pills { min-width: 170px; }
 td.pills .badge { margin: 0 var(--space-1) var(--space-1) 0; }
 table.dense th { white-space: normal; }
@@ -1072,6 +1076,11 @@ p.notice.live-blocked { margin: 0; }
   /* закреплённая колонка ленты в карточке не нужна — без своей тени и фона */
   table.cardify.sticky-end td:last-child, table.cardify.sticky-end tbody tr:hover td:last-child { position: static; box-shadow: none; background: transparent; }
   table.cardify tbody tr:hover td { background: transparent; }
+  /* шаг 168: строка «требует внимания» карточкой — подложка и полоса у самой карточки, ячейки прозрачны (иначе полосы между ячейками и метка в строку) */
+  table.cardify tbody tr.attention { background: var(--attention-row-bg); box-shadow: inset 3px 0 0 var(--attention-row-edge); }
+  table.cardify tbody tr.attention > td, table.cardify tbody tr.attention > td:first-child { background: transparent; box-shadow: none; }
+  /* расчёт к публикации со всеми частями («…, below the minimum to list N») на телефоне переносится, а не обрезается краем карточки */
+  .stock-channels .nowrap { white-space: normal; }
   table.cardify td[data-label]::before {
     content: attr(data-label); float: left; margin-right: var(--space-3); color: var(--text-2); font-family: var(--font); font-size: var(--font-size-sm);
     font-weight: 400; text-align: left;
@@ -1103,7 +1112,7 @@ p.notice.live-blocked { margin: 0; }
   .table-wrap > table:not(.cardify) th:first-child { z-index: 3; background: var(--surface-muted); }
   .table-wrap > table:not(.cardify) tbody tr:hover td:first-child, .table-wrap > table:not(.cardify) tr:is(.line-MARGIN, .line-PRICE) td:first-child { background: var(--surface-muted); }
   /* шаг 167: строка «требует внимания» и на телефоне — закреплённая первая ячейка тоже янтарная и несёт полосу слева */
-  .table-wrap > table:not(.cardify) tr:has(> td.offer.attention) > td:first-child { background: var(--attention-row-bg); box-shadow: inset 3px 0 0 var(--attention-row-edge), 1px 0 0 var(--divider); }
+  .table-wrap > table:not(.cardify) tr.attention > td:first-child { background: var(--attention-row-bg); box-shadow: inset 3px 0 0 var(--attention-row-edge), 1px 0 0 var(--divider); }
   table.products td.offer { min-width: 160px; }
   td.product, table.stock-table td:last-child { min-width: 0; }
   /* остатки — карточкой: SKU и EAN переносятся под названием, каналы — списком с подписью сверху */

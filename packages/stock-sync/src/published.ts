@@ -1,3 +1,4 @@
+import type { StockRow } from './store.ts';
 /** Буфер канала над общим пулом [Р-6]: последняя версия для аккаунта, переопределение — для единицы записи */
 export interface StockAllocation {
   bufferUnits: number;
@@ -33,4 +34,16 @@ export function publishedQuantity(available: number, allocation: StockAllocation
 export function belowMinimumToList(available: number, a: StockAllocation): boolean {
   const q = Math.min(a.maxQuantity ?? Number.MAX_SAFE_INTEGER, Math.max(0, available - a.bufferUnits));
   return a.minQuantityToList > 0 && q > 0 && q < a.minQuantityToList;
+}
+
+/**
+ * Шаг 159 (#26): товар требует внимания, если хотя бы одно из трёх:
+ *  - количество в канале расходится с нашим (последняя запись не применена, `divergence`);
+ *  - остатком у канала управляет сам канал (FBA, FBK — `channelManaged`);
+ *  - у включённой синхронизации есть что опубликовать, но это меньше порога выставления — канал покажет ноль.
+ * Одно правило у хранилища в памяти, у экрана (фильтр и подсветка строки, шаг 168) и у теста равенства с запросом PostgreSQL
+ */
+export function stockNeedsAttention(row: Pick<StockRow, 'available' | 'channels' | 'channelManaged'>): boolean {
+  if ((row.channelManaged ?? []).length > 0) return true;
+  return row.channels.some((c) => c.divergence !== null || (c.syncEnabled && c.allocation != null && belowMinimumToList(row.available, c.allocation)));
 }

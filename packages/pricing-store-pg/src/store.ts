@@ -272,7 +272,8 @@ const ATTENTION_SQL: Readonly<Record<AttentionReason, (now: () => string) => str
                                            ORDER BY l.observed_at DESC, l.recorded_at DESC LIMIT 1) ls WHERE NOT ls.buyable)
                    OR EXISTS (SELECT 1 FROM (SELECT h.issue_type FROM channel_data.offer_pricing_health h
                                               WHERE h.tenant_id = m.tenant_id AND h.channel_account_id = s.channel_account_id AND h.marketplace = m.marketplace
-                                                AND h.channel_product_ref = m.channel_product_ref AND h.condition = m.condition
+                                                -- Шаг 168: состояние предложения — без учёта регистра, как у экрана и прочих чтений наблюдений (у Walmart «new», у предложения «NEW»)
+                                                AND h.channel_product_ref = m.channel_product_ref AND lower(h.condition) = lower(m.condition)
                                               ORDER BY h.event_time DESC, h.recorded_at DESC LIMIT 1) ph
                                WHERE ph.issue_type = 'WALMART_UNPUBLISHED_UNCOMPETITIVE_PRICE'))`,
     // Выключил человек (Р-242): режим OFF и последняя строка журнала выключения — OFF
