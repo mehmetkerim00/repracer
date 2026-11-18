@@ -1,8 +1,8 @@
 # TMPrice — Functional Design Document
 
-Nov 16, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 141.
-The QA-A stand runs build `5f361d6` (steps 140–141), deployed on Nov 16, 2026 (America/New_York). It carries the fixes of GitHub issues #30–#33 and
-the clearance rule of #27: clearance turns on only when break-even is computed.
+Nov 18, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 169.
+The QA-A stand runs `main`; the footer of every page names the exact build (`Build <sha> · <time>`). Since step 146 the console is being
+redesigned issue by issue (#34, #24, #27, #29, #25, #26, #28, then the proposals #36, #35, #34 tier 2); the theme is "Spruce Hybrid" (step 167).
 
 ## How to read the labels
 
@@ -84,21 +84,26 @@ Every data screen shares the same conventions:
 - an Export button (CSV/XLSX);
 - a "Why this price" link wherever a price appears;
 - the build (`Build <sha> · <time>`) in the footer of every page.
+- a status line on top of every workspace screen: pricing mode, active stops, freshness of competitor data, and the offers that need
+  attention — each number opens its own selection;
+- a row that needs attention is tinted yellow — only for a real reason: on Offers the reasons the status line counts, on Inventory the
+  rule of its "needs attention" filter.
 
 | Screen | What it shows | What the seller does there | Label |
 |---|---|---|---|
 | Sign-in / Workspaces | The businesses this login belongs to, with role and live counters | One workspace — signs straight in; several — picks one | **[QA-A]** |
 | Shadow mode | Everything the engine would have sent, held back; decisions per day; "N price reductions your floor prevented; $X in aggregate proposed price differences — not realized profit" (events, unique SKUs and sum by the same definition as Protections); the weekly e-mail as a preview | Reviews decisions during the trial week. On a QA database the switch to live is refused, and the screen names the reason before any attempt | **[QA-A]** |
 | Price changes | One journal of every price sent or held, and of every decision behind it: from → to, status, reason, trigger chip ("Seller ↓ $12.50"). A repeated "no change" is one row with a counter | Audits activity; opens any row's receipt | **[QA-A]** |
-| Why this price | The full decision record of one change (§ 5) | Reads the receipt; follows links to bounds and floors | **[QA-A]** |
+| Why this price | The full decision record of one change (§ 5): a summary card first (trigger, proposed price, decision, sending to your store), the seven stations folded behind "Show full evidence" — open by themselves for a rejection or a pause | Reads the receipt; follows links to bounds and floors | **[QA-A]** |
+| Why didn't my price change? | For one offer and a period (up to 30 days): the receipt sentence of its latest stored decision with its status pill, since when the same stored reason runs, how many checks followed, the last price change of the period; the receipt and the period's decisions folded below. With no decision in the period it says so and explains when decisions are recorded — no reason is guessed after the fact | Opens it from the Offers row, the offer page, or an empty Price changes selection with an offer chosen | **[QA-A]** |
 | Strategies | Strategies in plain words, their versions, which offers each prices, a preview before saving | Creates new versions, assigns offers, previews | **[QA-A]** |
 | Default strategy for new offers | Per channel account (on Channels): "None" or an active strategy available on that channel | Sets it. It assigns the latest active version to newly discovered offers, but never enables sending; every auto-assignment traces back to the person who set the default | **[QA-A]** |
 | Costs & floors | Unit costs, min/max prices, margin floor, break-even, clearance; the marketplace's own Min/Max next to ours with conflict warnings (where the values are known) | Edits costs and bounds (second factor for many offers); sees which floor is effective and why | **[QA-A]** |
 | Protections | What stopped or prevented changes: floor holds ("120 price reductions prevented by your floor; $589.70 in aggregate proposed price differences", with Events / Unique SKUs / Sum; one event is one hold, however many times the price was re-checked while it lasted), stops by people, rules. Each row has one status from the shared vocabulary: Adjusted to limit, Rejected (dangerous when over 10% beyond a bound), Blocked | Reviews what the fence earned; opens each hold's receipt | **[QA-A]** |
-| Offers | Every offer: status, current price, strategy, effective floor, color; optional Buy Box columns (holder, price, gap, share 7d); "Repricing: On / Off" filter | Filters, sorts, bulk edits, exports offers and competitors | **[QA-A]** |
+| Offers | Every offer: status ("On · shadow mode" in the trial), current price, margin at that price, health (errors and blocks, the most important first with what to do), strategy, effective floor, color; optional Buy Box columns (holder, price, gap, share 7d); "Repricing: On / Off" and "Needs attention" filters | Filters, sorts, bulk edits, exports offers and competitors | **[QA-A]** |
 | Turn off one offer | "Turn off" / "Enable" per offer (Owner or Manager, no second factor, optional note); "Turned off by …" on the row. A turned-off offer is not evaluated, and its queued writes are not sent | Pauses one SKU without stopping anything else | **[QA-A]** |
 | Competition | Per offer: Buy Box holder, place and gap, Buy Box share 24h / 7d / 30d by snapshots, "Why not in the Buy Box", the Amazon competitive summary with coupons and buyer-segment groups | Understands the market around one offer | **[QA-A]** |
-| Inventory | One shared stock pool per product, minus a safety buffer, fed to every channel; each channel line names its calculation with the saved buffer, cap and minimum to list (e.g. "58 to publish = 60 available − buffer 2"); reservations; what was published and confirmed; divergence; returns to decide on | Sets buffers, imports stock, accepts or rejects returns | **[QA-A]** |
+| Inventory | One shared stock pool per product, minus a safety buffer, fed to every channel; each channel line names its calculation with the saved buffer, cap and minimum to list (e.g. "58 to publish = 60 available − buffer 2"); reservations; what was published and confirmed; divergence; returns to decide on; filters by channel and "needs attention"; sort by reserved, and by "To publish" within a chosen channel; a preview of what a channel would get before enabling | Sets buffers, imports stock, accepts or rejects returns | **[QA-A]** |
 | Channels | Channel accounts, shadow/live state, "other tools" question, external edits counter, default strategy | Watches sync health | **[QA-A]** |
 | Stop pricing | The emergency brake and the audit log (stops, roles, channel events, exports) | Stops a channel account, a storefront or the whole workspace with a note; resumes | **[QA-A]** |
 | Omnibus | Lowest prior price per EU storefront (30 days) as evidence for discounts | — (EU profile only) | **[DEFERRED 135 (EU)]** |

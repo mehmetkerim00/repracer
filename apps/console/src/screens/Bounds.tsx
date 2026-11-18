@@ -210,6 +210,8 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
           </dl>
           {/* Шаг 149 (шаг 142): распродажа без действующей оценки комиссии — подписанный убыток может быть устаревшим */}
           {view.feeExpired ? <p className="notice warn fee-expired" role="status">{view.feeExpired}</p> : null}
+          {/* Шаг 169 (#36): почему цена не менялась — ответ из сохранённых решений предложения */}
+          <p className="small"><a href={href(view.worldId, 'unchanged', view.unit.writeScopeId)}>{m.ui.unchanged.link}</a></p>
         </section>
         <ChannelBoundsSection view={view} />
       </div>

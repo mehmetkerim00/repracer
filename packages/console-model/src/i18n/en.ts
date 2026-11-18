@@ -513,7 +513,9 @@ export const en = {
         // Шаг 95 [Р-217]: слитые экраны меню — 9 пунктов вместо 14; прежние имена остаются заголовками разделов и ссылок
         costs: 'Costs & floors', protections: 'Protections', channels: 'Channels',
         // Шаг 96 (В19): страница и пункт остатков — Inventory; Offers — в разделе Pricing
-        inventory: 'Inventory' },
+        inventory: 'Inventory',
+        // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
+        unchanged: 'Why didn\'t my price change?' },
       loading: (seconds: number) => `Loading… If there is no answer within ${seconds} s, an error is shown.`,
       timeout: (seconds: number) => `The service did not answer within ${seconds} s. Try again in a minute.`,
       unavailable: (detail: string) => `The server is unavailable: ${detail}`,
@@ -1494,6 +1496,22 @@ export const en = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
+    unchanged: {
+      title: 'Why didn\'t my price change?', link: 'Why didn\'t my price change?',
+      subtitle: 'From the decisions we stored for this offer — nothing is guessed after the fact.',
+      lead: {
+        UNCHANGED: (period: string) => `The price stayed as it was — the latest decision ${period}:`,
+        CHANGED: (period: string) => `The latest decision ${period} set a new price:`,
+      },
+      none: (period: string) => `No decision was computed for this offer ${period}.`,
+      noneWhen: 'A decision is recorded when the engine checks the offer: when new competitor data arrives, on the scheduled recompute (at least once a day), or when its unit cost, fees or bounds change. Nothing is recorded while automatic pricing is off for the offer, while pricing is stopped, or while its bounds cannot be computed.',
+      since: (when: string) => `Since ${when}`,
+      sinceAtLeast: (when: string) => `At least since ${when} — no earlier decision is shown here`,
+      lastChange: (price: string, when: string) => `Last price change in this period: ${price}, ${when}`,
+      evidence: 'Show the receipt of this decision', history: 'Decisions for this offer in this period', openReceipt: 'Open the full receipt',
+      pickOffer: 'To ask why the price of one offer did not change, choose the offer in the filter above.',
+    },
     competition: {
       pageTitle: 'Competition', back: '← Offers', link: 'Competition →', subtitle: 'Who holds the Buy Box, where your offer stands, and why.',
       missingTitle: 'Offer not found', missingText: 'This link does not lead to an offer of this workspace.',

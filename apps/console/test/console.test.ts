@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -491,6 +491,33 @@ test('step 166: the stock screen and its export take sort=to_publish only with a
   const without = await call(auth, 'GET', `${api(w, 'stock')}?sort=to_publish`);
   assert.equal(without.status, 400, JSON.stringify(without.body));
   assert.equal((without.body as { error: { code: string } }).error.code, 'BAD_PAGE');
+});
+
+/**
+ * Шаг 169 (#36): «Why didn't my price change?» — ответ из сохранённых решений предложения за период: последнее решение журнала (тот же
+ * фильтр предложения и период) и его квитанция; чужое предложение — 404, неверный период — 400, предложение без решений — «no decision»
+ */
+test('step 169 (#36): the answer is the latest stored decision of the offer — the receipt headline; unknown offer 404, bad period 400, no decisions — said so', async () => {
+  const id = 'kaufland/pipeline/happy-path';
+  const owner = await login('OWNER');
+  const decisions = await get<DecisionListView>(owner, `${api(id, 'decisions')}?period=30d`);
+  const latest = decisions.items[0]!;
+  assert.ok(latest?.unit, 'the world has a decision');
+  const scopeId = latest.unit!.writeScopeId;
+  const view = await get<UnchangedView>(owner, `${api(id, 'unchanged', scopeId)}?period=30d`);
+  const ofOffer = await get<DecisionListView>(owner, `${api(id, 'decisions')}?period=30d&writeScopeId=${encodeURIComponent(scopeId)}`);
+  const trace = await get<DecisionTrace>(owner, api(id, 'decisions', ofOffer.items[0]!.decisionId));
+  assert.deepEqual([view.decisionId, view.headline, view.status?.label, view.history.length], [trace.decisionId, trace.headline, trace.status.label, ofOffer.items.length]);
+  assert.equal(view.evidence?.decisionId, trace.decisionId, 'the receipt of the latest decision is the evidence');
+  assert.equal((await call(owner, 'GET', `${api(id, 'unchanged', 'no-such-offer')}?period=30d`)).status, 404);
+  const bad = await call(owner, 'GET', `${api(id, 'unchanged', scopeId)}?period=1y`);
+  assert.deepEqual([bad.status, (bad.body as { error: { code: string } }).error.code], [400, 'BAD_PERIOD']);
+  // Окно до хранения решений (30 суток) — пусто: решений нет, и ответ это говорит, не угадывая причину; глубина отрезана и названа
+  const none = await get<UnchangedView>(owner, `${api(id, 'unchanged', scopeId)}?from=2020-01-01&to=2020-01-02`);
+  assert.deepEqual([none.state, none.decisionId, none.evidence, none.history.length, none.noneText, none.clipped],
+    ['NONE', null, null, 0, messagesFor('en').ui.unchanged.noneWhen, true]);
+  const markup = await html('/src/screens/Unchanged.tsx', 'UnchangedView', { view, period: { preset: '30d' }, onPeriod: () => {} }, 'en');
+  for (const text of [view.headline, 'Show the receipt of this decision', 'Decisions for this offer in this period']) assert.ok(markup.includes(text.replace(/&/g, '&amp;')), `${text}: ${markup.slice(0, 400)}`);
 });
 
 /**

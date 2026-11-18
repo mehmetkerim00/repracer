@@ -41,7 +41,11 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
   );
 }
 
-export function TraceView({ trace }: { trace: DecisionTrace }) {
+/**
+ * Шаг 169 (#36): `embedded` — квитанция внутри ответа «Why didn't my price change?»: без «назад», заголовка страницы и строки предложения
+ * (их показывает ответ); итог и станции — те же
+ */
+export function TraceView({ trace, embedded = false }: { trace: DecisionTrace; embedded?: boolean }) {
   const m = useMessages();
   const t = m.ui.trace;
   const s = trace.summary;
@@ -52,12 +56,14 @@ export function TraceView({ trace }: { trace: DecisionTrace }) {
   const originName = origin ? (m.ui.app.screens as Readonly<Record<string, string | undefined>>)[origin.screen] : undefined;
   return (
     <article className="trace">
+      {embedded ? null : <>
       <p className="back">{origin && originName ? <a href={origin.hash}>{t.backTo(originName)}</a> : <a href={href(trace.worldId, 'feed', 'decisions')}>{t.back}</a>}</p>
       <h2>{t.pageTitle}</h2>
       <p className="subtitle">{t.meta(trace.unit?.label ?? m.ui.common.noValue, trace.decisionId, trace.decidedAt)}
         {/* Шаг 76 (предполётный прогон демо): от решения — к границам и разбивке пола этого же предложения. Без ссылки вопрос «что
             помешает продать ниже себестоимости» вёл на экран товаров без поиска, где нужное предложение — на пятой странице */}
         {trace.unit ? <> · <a href={href(trace.worldId, 'bounds', trace.unit.writeScopeId)}>{m.ui.products.bounds}</a></> : null}</p>
+      </>}
       {/*
         Шаг 147 (#24, Р-254): итог — краткий вид. Карточка своего тона: знак исхода, итоговая цена крупно (только у одобренного), пилюля статуса
         словарём шага 137 и пометки; у отказа и паузы рядом — их причина (это и есть решение). Ниже — повод, предложение, решение и судьба

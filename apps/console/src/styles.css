@@ -1296,6 +1296,15 @@ details.competitors-at > .table-wrap { margin-top: var(--space-2); }
 .competition-share .big { margin: var(--space-2) 0 0; }
 .competition-why .reasons-list { margin: 0 0 var(--space-2); padding-left: var(--space-4); }
 .competition-why .reasons-list li + li { margin-top: var(--space-1); }
+/* Шаг 169 (#36): ответ «Why didn't my price change?» — строка сути, фраза с пилюлей, факты; доказательства — свёрнутыми карточками */
+.unchanged .card { margin-bottom: var(--space-4); }
+.unchanged > .filters { margin-bottom: var(--space-3); }
+.unchanged-answer .unchanged-lead { margin: 0; }
+.unchanged-answer p.headline { margin: var(--space-1) 0 var(--space-2); }
+.unchanged-answer .facts { margin: 0 0 var(--space-2); }
+.unchanged-answer .facts li + li { margin-top: var(--space-1); }
+.unchanged .more-block > .trace { margin-top: var(--space-3); }
+p.unchanged-hint { margin: var(--space-2) 0 0; }
 @media (width < 48rem) {
   /* закреплённая первая ячейка нашей строки на телефоне — та же подсветка, непрозрачная */
   .table-wrap > table.competitors:not(.cardify) tr.self-row td:first-child { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface); }

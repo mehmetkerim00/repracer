@@ -61,3 +61,4 @@ export { channelBoundsConflicts, channelBoundsFacts, channelBoundsPill, channelB
 // Шаг 146 (#34, ярус 1): строка состояния продавца и причины «требует внимания» — одно правило у экрана и фильтра Offers
 export { AGEING_SECONDS, ATTENTION_FILTERS, ATTENTION_REASONS, attentionCounts, attentionReasons, FRESH_SECONDS, freshnessItems, freshnessLevel, matchesAttention, statusLineView, type FreshnessItem,
   type AttentionCounts, type AttentionFilter, type AttentionReason, type FreshnessLevel, type FreshnessRow, type StatusLineInput, type StatusLineView, type StatusMode } from './status-line.ts';
+export { unchangedView, type UnchangedState, type UnchangedView } from './unchanged.ts';

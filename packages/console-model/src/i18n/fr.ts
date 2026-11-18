@@ -512,7 +512,9 @@ export const fr: Messages = {
         // Шаг 95 [Р-217]: слитые экраны меню — 9 пунктов вместо 14; прежние имена остаются заголовками разделов и ссылок
         costs: 'Coûts et planchers', protections: 'Protections', channels: 'Canaux',
         // Шаг 96 (В19): страница и пункт остатков — Inventory; Offers — в разделе Pricing
-        inventory: 'Stocks' },
+        inventory: 'Stocks',
+        // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
+        unchanged: 'Pourquoi mon prix n’a-t-il pas changé ?' },
       loading: (seconds: number) => `Chargement… Sans réponse dans les ${seconds} s, une erreur s’affiche.`,
       timeout: (seconds: number) => `Le service n’a pas répondu dans les ${seconds} s. Réessayez dans une minute.`,
       unavailable: (detail: string) => `Le serveur est indisponible : ${detail}`,
@@ -1485,6 +1487,22 @@ export const fr: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
+    unchanged: {
+      title: 'Pourquoi mon prix n’a-t-il pas changé ?', link: 'Pourquoi mon prix n’a-t-il pas changé ?',
+      subtitle: 'À partir des décisions enregistrées pour cette offre : rien n’est deviné après coup.',
+      lead: {
+        UNCHANGED: (period: string) => `Le prix est resté le même — la dernière décision ${period} :`,
+        CHANGED: (period: string) => `La dernière décision ${period} a fixé un nouveau prix :`,
+      },
+      none: (period: string) => `Aucune décision n’a été calculée pour cette offre ${period}.`,
+      noneWhen: 'Une décision est enregistrée quand le moteur vérifie l’offre : à l’arrivée de nouvelles données de la concurrence, au recalcul planifié (au moins une fois par jour) ou quand le coût unitaire, les frais ou les limites changent. Rien n’est enregistré tant que le prix automatique de l’offre est désactivé, tant que les prix sont arrêtés ou tant que ses limites ne peuvent pas être calculées.',
+      since: (when: string) => `Depuis ${when}`,
+      sinceAtLeast: (when: string) => `Au moins depuis ${when} — aucune décision antérieure n’est affichée ici`,
+      lastChange: (price: string, when: string) => `Dernier changement de prix sur cette période : ${price}, ${when}`,
+      evidence: 'Afficher les preuves de cette décision', history: 'Décisions de cette offre sur cette période', openReceipt: 'Ouvrir toutes les preuves',
+      pickOffer: 'Pour demander pourquoi le prix d’une offre n’a pas changé, choisissez l’offre dans le filtre ci-dessus.',
+    },
     competition: {
       pageTitle: 'Concurrence', back: '← Offres', link: 'Concurrence →', subtitle: 'Qui détient la Buy Box, où se situe votre offre, et pourquoi.',
       missingTitle: 'Offre introuvable', missingText: 'Ce lien ne mène à aucune offre de cet espace de travail.',

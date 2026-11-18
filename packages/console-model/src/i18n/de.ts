@@ -487,7 +487,9 @@ export const de: Messages = {
       brand: 'tmprice',
       screens: { connections: 'Kanalkonten', onboarding: 'Einrichtung', shadow: 'Schattenmodus', stock: 'Bestand', products: 'Angebote', decisions: 'Warum dieser Preis', rejected: 'Gestoppte Änderungen', bounds: 'Grenzen', 'cost-import': 'Stückkosten-Import', stop: 'Preise stoppen', strategies: 'Strategien', feed: 'Preisänderungen', dangerous: 'Gefährliche Änderungen', compliance: 'Omnibus', jobs: 'Massenvorgänge',
         costs: 'Kosten & Untergrenzen', protections: 'Schutz', channels: 'Kanäle',
-        inventory: 'Lagerbestand' },
+        inventory: 'Lagerbestand',
+        // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
+        unchanged: 'Warum hat sich mein Preis nicht geändert?' },
       loading: (seconds: number) => `Daten werden geladen. Ohne Antwort innerhalb von ${seconds} s wird ein Fehler angezeigt.`,
       timeout: (seconds: number) => `Der Dienst hat nicht innerhalb von ${seconds} s geantwortet. Versuchen Sie es in einer Minute erneut.`,
       unavailable: (detail: string) => `Der Server ist nicht erreichbar: ${detail}`,
@@ -1431,6 +1433,22 @@ export const de: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
+    unchanged: {
+      title: 'Warum hat sich mein Preis nicht geändert?', link: 'Warum hat sich mein Preis nicht geändert?',
+      subtitle: 'Aus den gespeicherten Entscheidungen zu diesem Angebot — nachträglich wird nichts erraten.',
+      lead: {
+        UNCHANGED: (period: string) => `Der Preis blieb unverändert — die letzte Entscheidung ${period}:`,
+        CHANGED: (period: string) => `Die letzte Entscheidung ${period} hat einen neuen Preis festgelegt:`,
+      },
+      none: (period: string) => `Für dieses Angebot wurde ${period} keine Entscheidung berechnet.`,
+      noneWhen: 'Eine Entscheidung wird gespeichert, wenn die Preisautomatik das Angebot prüft: wenn neue Wettbewerbsdaten eintreffen, bei der geplanten Neuberechnung (mindestens einmal täglich) oder wenn sich Stückkosten, Gebühren oder Grenzen ändern. Nichts wird gespeichert, solange die automatische Preisgestaltung für das Angebot aus ist, solange die Preise gestoppt sind oder solange seine Grenzen nicht berechnet werden können.',
+      since: (when: string) => `Seit ${when}`,
+      sinceAtLeast: (when: string) => `Mindestens seit ${when} — eine frühere Entscheidung wird hier nicht gezeigt`,
+      lastChange: (price: string, when: string) => `Letzte Preisänderung in diesem Zeitraum: ${price}, ${when}`,
+      evidence: 'Belege dieser Entscheidung zeigen', history: 'Entscheidungen zu diesem Angebot in diesem Zeitraum', openReceipt: 'Alle Belege öffnen',
+      pickOffer: 'Um zu fragen, warum sich der Preis eines Angebots nicht geändert hat, wählen Sie das Angebot oben im Filter.',
+    },
     competition: {
       pageTitle: 'Wettbewerb', back: '← Angebote', link: 'Wettbewerb →', subtitle: 'Wer die Buy Box hält, wo Ihr Angebot steht und warum.',
       missingTitle: 'Angebot nicht gefunden', missingText: 'Dieser Link führt zu keinem Angebot dieses Arbeitsbereichs.',

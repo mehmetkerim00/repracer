@@ -512,7 +512,9 @@ export const es: Messages = {
         // Шаг 95 [Р-217]: слитые экраны меню — 9 пунктов вместо 14; прежние имена остаются заголовками разделов и ссылок
         costs: 'Costos y pisos', protections: 'Protecciones', channels: 'Canales',
         // Шаг 96 (В19): страница и пункт остатков — Inventory; Offers — в разделе Pricing
-        inventory: 'Inventario' },
+        inventory: 'Inventario',
+        // Шаг 169 (#36): имя страницы ответа — для «назад» квитанции, открытой с неё
+        unchanged: '¿Por qué no cambió mi precio?' },
       loading: (seconds: number) => `Cargando… Si no hay respuesta en ${seconds} s, se mostrará un error.`,
       timeout: (seconds: number) => `El servicio no respondió en ${seconds} s. Inténtelo de nuevo en un minuto.`,
       unavailable: (detail: string) => `El servidor no está disponible: ${detail}`,
@@ -1485,6 +1487,22 @@ export const es: Messages = {
       line: (what: string, how: string) => `${what} · ${how}`,
     },
     /** Шаг 97 [Р-218…Р-221]: страница Competition предложения — не пункт меню, ссылка из Offers */
+    // Шаг 169 (#36): «Why didn't my price change?» — только из сохранённых причин решений
+    unchanged: {
+      title: '¿Por qué no cambió mi precio?', link: '¿Por qué no cambió mi precio?',
+      subtitle: 'A partir de las decisiones guardadas para esta oferta: no se adivina nada a posteriori.',
+      lead: {
+        UNCHANGED: (period: string) => `El precio no cambió; la última decisión ${period}:`,
+        CHANGED: (period: string) => `La última decisión ${period} fijó un precio nuevo:`,
+      },
+      none: (period: string) => `No se calculó ninguna decisión para esta oferta ${period}.`,
+      noneWhen: 'Una decisión se guarda cuando el motor revisa la oferta: cuando llegan nuevos datos de la competencia, en el recálculo programado (al menos una vez al día) o cuando cambian el costo unitario, las comisiones o los límites. No se guarda nada mientras el precio automático de la oferta está desactivado, mientras los precios están detenidos o mientras no se pueden calcular sus límites.',
+      since: (when: string) => `Desde ${when}`,
+      sinceAtLeast: (when: string) => `Al menos desde ${when}: aquí no se muestra ninguna decisión anterior`,
+      lastChange: (price: string, when: string) => `Último cambio de precio en este periodo: ${price}, ${when}`,
+      evidence: 'Ver las pruebas de esta decisión', history: 'Decisiones de esta oferta en este periodo', openReceipt: 'Abrir todas las pruebas',
+      pickOffer: 'Para preguntar por qué no cambió el precio de una oferta, elija la oferta en el filtro de arriba.',
+    },
     competition: {
       pageTitle: 'Competencia', back: '← Ofertas', link: 'Competencia →', subtitle: 'Quién tiene la Buy Box, dónde está su oferta y por qué.',
       missingTitle: 'Oferta no encontrada', missingText: 'Este enlace no lleva a una oferta de este espacio de trabajo.',

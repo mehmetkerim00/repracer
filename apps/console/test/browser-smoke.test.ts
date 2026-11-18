@@ -3144,6 +3144,92 @@ const LONG_HELP = `(() => {
   return out;
 })()`;
 
+/**
+ * Шаг 169 (#36, Р-254): «Why didn't my price change?» — вход из строки Offers и со страницы предложения; ответ — строка сути, фраза с пилюлей
+ * статуса и факты, доказательства (квитанция и решения периода) свёрнуты, но на странице; пустая выборка журнала цен с выбранным предложением
+ * ведёт на ответ того же периода, и там без решений — честное «no decision was computed» и когда решения появляются; обе темы, 1440 и 375
+ */
+test('step 169 (#36): «Why didn\'t my price change?» — from the Offers row and the offer page; the answer with its pill, the evidence folded; an empty journal with an offer leads to «no decision»', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const t = en.ui.unchanged;
+  const visit = async (hash: string, ready: string, what: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(hash)}, true)`);
+    await settled(b, what);
+    await waitFor(b, ready, what);
+  };
+  try {
+    // Вход из строки Offers — ссылка ответа предложения рядом с «Bounds» и «Competition →»
+    await visit(`#/w/${world}/products`, `!!document.querySelector('table.products tbody tr')`, 'offers');
+    const fromRow = await b.evaluate<string | null>(`[...document.querySelectorAll('table.products tbody tr td.actions a')].find((a) => a.textContent.trim() === ${JSON.stringify(t.link)})?.getAttribute('href') ?? null`);
+    assert.ok(fromRow && /\/unchanged\/[^/]+$/.test(fromRow), `the Offers row links to the answer — ${fromRow}`);
+    const offer = fromRow.split('/').pop()!;
+    // Вход со страницы предложения — карточка «At a glance»
+    await visit(`#/w/${world}/bounds/${offer}`, `!!document.querySelector('.floor-glance')`, 'offer page');
+    assert.equal(await b.evaluate<string | null>(`[...document.querySelectorAll('.floor-glance a')].find((a) => a.textContent.trim() === ${JSON.stringify(t.link)})?.getAttribute('href') ?? null`), fromRow, 'the offer page links to the same answer');
+    for (const scheme of ['light', 'dark'] as const) {
+      await b.setColorScheme(scheme);
+      for (const width of [1440, 375]) {
+        await b.setViewport(width, 900);
+        await visit(`#/w/${world}/products`, `!!document.querySelector('table.products tbody tr')`, `${scheme} ${width}: offers`);
+        await visit(fromRow, `!!document.querySelector('.unchanged-answer')`, `${scheme} ${width}: answer`);
+        const seen = await b.evaluate<{ title: string; lead: string; pill: string; headline: string; receipt: string; blocks: Array<{ summary: string; open: boolean }>; verdict: boolean; rows: number; menu: string }>(`(() => {
+          const answer = document.querySelector('.unchanged-answer');
+          const blocks = [...document.querySelectorAll('section.unchanged > details.more-block')];
+          return { title: document.querySelector('.world-content h2').textContent.trim(), lead: answer.querySelector('.unchanged-lead')?.textContent.trim() ?? '',
+            pill: answer.querySelector('p.headline .badge')?.textContent.trim() ?? '', headline: answer.querySelector('p.headline').textContent.trim(),
+            receipt: [...answer.querySelectorAll('a')].find((a) => a.textContent.trim() === ${JSON.stringify(t.openReceipt)})?.getAttribute('href') ?? '',
+            blocks: blocks.map((d) => ({ summary: d.querySelector(':scope > summary').textContent.trim(), open: d.open })),
+            verdict: !!blocks[0]?.querySelector('.trace .verdict'), rows: blocks[1]?.querySelectorAll('tbody tr').length ?? 0,
+            menu: document.querySelector('.nav-group a[aria-current="page"]')?.textContent.trim() ?? '' }; })()`);
+        assert.equal(seen.title, t.title, `${scheme} ${width}: the page title`);
+        assert.ok(seen.lead.endsWith(':') && seen.pill !== '' && seen.headline.length > seen.pill.length, `${scheme} ${width}: one sentence of the point with the status pill — ${JSON.stringify(seen)}`);
+        assert.match(seen.receipt, /\/decisions\/[^/]+$/, `${scheme} ${width}: the full receipt is one click away`);
+        assert.deepEqual(seen.blocks.map((x) => x.open), [false, false], `${scheme} ${width}: the evidence is folded`);
+        assert.ok(seen.blocks[0]!.summary === t.evidence && seen.blocks[1]!.summary.startsWith(t.history), `${scheme} ${width}: ${JSON.stringify(seen.blocks)}`);
+        assert.ok(seen.verdict && seen.rows >= 1, `${scheme} ${width}: the folded receipt and decisions stay in the page`);
+        assert.equal(seen.menu, en.ui.app.screens.products, `${scheme} ${width}: the answer belongs to Offers in the menu`);
+        assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), `${scheme} ${width}: no sideways scroll`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out`);
+        if (width === 375) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${scheme} 375: touch targets`);
+        await b.evaluate(`(document.querySelector('section.unchanged > details.more-block > summary').click(), true)`);
+        await waitFor(b, `document.querySelector('section.unchanged > details.more-block').open`, `${scheme} ${width}: a click opens the receipt`);
+        assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: open — nothing sticks out`);
+      }
+    }
+    // Пустая выборка журнала решений (окно до хранения) с выбранным предложением — ссылка на ответ того же периода; без предложения — подсказка
+    await b.setColorScheme('light');
+    await b.setViewport(1440, 900);
+    const past = 'from=2020-01-01&to=2020-01-02';
+    await visit(`#/w/${world}/feed/decisions/${encodeURIComponent(past)}`, `!!document.querySelector('.world-content p.empty') && !!document.querySelector('.filters .offer-picker select option[value=${JSON.stringify(offer)}]')`, 'empty decisions');
+    assert.equal(await b.evaluate<string>(`document.querySelector('p.unchanged-hint')?.textContent.trim() ?? ''`), t.pickOffer, 'without an offer — the hint to choose one');
+    await b.evaluate(`(() => { const sel = document.querySelector('.filters .offer-picker select');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(offer)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(b, `!!document.querySelector('p.unchanged-hint a')`, 'the hint becomes a link with the offer chosen');
+    const hint = await b.evaluate<string>(`document.querySelector('p.unchanged-hint a').getAttribute('href')`);
+    assert.equal(decodeURIComponent(hint), `#/w/${decodeURIComponent(world)}/unchanged/${decodeURIComponent(offer)}/${past}`, 'the same offer and the same period');
+    await visit(hint, `!!document.querySelector('.unchanged-answer')`, 'answer without decisions');
+    const none = await b.evaluate<{ headline: string; text: string; blocks: number; clipped: boolean }>(`(() => { const a = document.querySelector('.unchanged-answer');
+      return { headline: a.querySelector('p.headline').textContent.trim(), text: [...a.querySelectorAll('p.muted')].map((p) => p.textContent.trim()).join(' '),
+        blocks: document.querySelectorAll('section.unchanged > details.more-block').length, clipped: !!document.querySelector('.unchanged p.notice') }; })()`);
+    assert.equal(none.headline.startsWith(t.none('').split(' ').slice(0, 4).join(' ')), true, `no decision — said so: ${none.headline}`);
+    assert.ok(none.text.includes(t.noneWhen) && none.blocks === 0 && none.clipped, `when decisions appear; no evidence to fold; the clipped period named — ${JSON.stringify(none)}`);
+  } finally {
+    await b.setColorScheme(null);
+    await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 168: a row is yellow only for a real reason — on Offers exactly the rows of «Needs attention», on Inventory exactly the rows of its filter; both themes, 375', async () => {
   const b = browser!;
   const before = b.errors().length;

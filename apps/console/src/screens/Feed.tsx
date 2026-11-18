@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, periodPhrase, periodSearch, type DecisionListView, type FeedQuery, type FeedStatusGroup, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
+import { UnchangedHint } from './Unchanged.tsx';
 import { Badge, commonZone, Gaps, Help, href, Load, OfferPicker, Pager, ReasonLine, UnitName, useMessages, When, WhenHead } from '../components.tsx';
 import { Field } from '../forms.tsx';
 import { PeriodPicker } from '../date-range.tsx';
@@ -70,7 +71,8 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
       {view.clipped ? <p className="notice">{m.ui.period.clipped(90)}</p> : null}
       {view.search && view.search.total > view.search.shown ? <p className="notice">{f.searchLimited(view.search.shown, view.search.total)}</p> : null}
       {trialWeek ? <p className="notice trial-week">{f.trialWeek}</p> : null}
-      {view.items.length === 0 ? <p className="muted empty">{f.empty}</p> : (
+      {/* Шаг 169 (#36): пустая выборка журнала — к ответу «Why didn't my price change?» выбранного предложения за тот же период */}
+      {view.items.length === 0 ? <><p className="muted empty">{f.empty}</p>{onQuery ? <UnchangedHint worldId={view.worldId} writeScopeId={q.writeScopeId ?? undefined} period={query.period ?? { preset: '7d' }} /> : null}</> : (
         <div className="table-wrap">
           {/* Шаг 104 [Р-229]: выгрузка — кнопкой «Export» в ряду фильтров (прежняя «All N entries as a file» заменена) */}
           {/* Шаг 145 (аудит UX, 1.2): у чисел — период и что они считают; число группы — фильтр ровно этой группы */}
@@ -216,6 +218,7 @@ function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch }
             {view.clipped ? <p className="notice">{m.ui.period.clipped(30)}</p> : null}
             {view.search && view.search.total > view.search.shown ? <p className="notice">{f.searchLimited(view.search.shown, view.search.total)}</p> : null}
             <DecisionsView worldId={worldId} items={view.items} />
+            {view.items.length === 0 ? <UnchangedHint worldId={worldId} writeScopeId={query.writeScopeId} period={period} /> : null}
             <Pager page={view.page} query={query} onQuery={(q) => setQuery({ ...query, ...q })} />
           </>
         )}

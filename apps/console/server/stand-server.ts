@@ -11,7 +11,7 @@ import {
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
   FEED_MAX_DAYS, HOT_DECISIONS_DAYS, parsePeriod, periodPhrase, periodRange, SEARCH_FILTER_LIMIT, type Period,
-  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue,
+  BUYBOX_SHARE_KEEP_DAYS, channelOf, competitionView, unchangedView, effectiveFloor, shareNamedBy, filterActive, OFFER_HOLDER_FILTERS, OFFER_PRICING_FILTERS, OFFER_SHARE_PERIOD, OFFER_SORT_KEYS, type OfferPricingFilterValue,
   AUDIT_KEEP_DAYS, IMPORTS_KEEP_DAYS, EXPORT_FORMATS, EXPORT_MAX_ROWS, EXPORT_SCREENS, dateInZone, pageInfo, type ExportFormat, type ExportScreen,
   ATTENTION_FILTERS, attentionCounts, freshnessItems, statusLineView, statusStops, type AttentionFilter,
 } from '@repracer/console-model';
@@ -39,6 +39,9 @@ import {
  * Права действий проверяет хранилище пути решения (на PostgreSQL — БД), сервер дублирует проверку, чтобы ответить 403 до вызова.
  * Автор действия — пользователь токена: его членство сверяет хранилище (находка 4). Тексты — на языке запроса [Р-72].
  */
+
+/** Шаг 169 (#36): сколько решений предложения показывает ответ «Why didn't my price change?» — свежие первыми */
+const UNCHANGED_HISTORY = 50;
 
 /**
  * Шаг 96: период экрана из адреса — `period=24h|7d|30d` или `from`/`to` (даты в поясе пространства). Прежний `days` понимается
@@ -1146,6 +1149,23 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             snapshot, spans, range, sources, floorMinor: effectiveFloor(scope, world).minor, period, summary,
           }, m);
           return view ? ok(view) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+        }
+        /**
+         * Шаг 169 (#36): «Why didn't my price change?» одного предложения — решения предложения за период (не глубже 30 суток — столько
+         * живут решения [Р-28]) и квитанция последнего из них. Только сохранённое: решений нет — ответ это и говорит
+         */
+        case 'unchanged': {
+          if (param === null) return fail(404, 'NOT_FOUND', s.notFound);
+          const period = periodOf(url.searchParams, {});
+          if (period === null) return fail(400, 'BAD_PERIOD', s.badRequest);
+          const world = await load([param]);
+          const scope = scopeById(world, param);
+          if (!scope) return fail(404, 'SCOPE_NOT_FOUND', s.notFound);
+          const range = periodRange(period, live.clock.iso(), display?.timeZone ?? null, HOT_DECISIONS_DAYS);
+          const page = await live.store.decisionPage(live.tenantId, { offset: 0, limit: UNCHANGED_HISTORY, writeScopeId: param, since: range.since as never, ...upperOf(period, range) });
+          const first = page.items[0];
+          const detail = first ? await live.store.decisionDetail(live.tenantId, first.decisionId) : null;
+          return ok(unchangedView(world, scope, page, detail ? decisionTrace(world, detail, m) : null, m, period, range.clipped));
         }
         /**
          * Р-136 (ревью шага 29, находка 4): поиск предложения. Выпадающий список показывает первые OFFER_CHOICES, и без поиска

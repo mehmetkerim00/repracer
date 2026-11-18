@@ -10,6 +10,7 @@ import { StatusLine } from './status-line.tsx';
 import { ExportContext } from './export.tsx';
 import { BoundsScreen } from './screens/Bounds.tsx';
 import { CompetitionScreen } from './screens/Competition.tsx';
+import { UnchangedScreen } from './screens/Unchanged.tsx';
 import { ChannelsScreen } from './screens/Channels.tsx';
 import { ComplianceScreen } from './screens/Compliance.tsx';
 import { CostsScreen } from './screens/Costs.tsx';
@@ -80,7 +81,8 @@ export function redirectOf(route: Pick<Route, 'screen' | 'param'>): string[] | n
 
 /** Пункт меню экрана, у которого своего пункта нет: квитанция решения — журнал цен, страница предложения — Costs & floors */
 // Шаг 97: страница Competition предложения — из строки Offers, своего пункта меню у неё нет (меню остаётся из 9 пунктов)
-const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: 'costs', competition: 'products' };
+// Шаг 169 (#36): ответ «Why didn't my price change?» — тоже со строки Offers
+const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: 'costs', competition: 'products', unchanged: 'products' };
 
 /**
  * Р-142 (шаг 31): у массовых операций есть СВОЙ экран. Без него готовый файл и кнопка отмены жили только в состоянии того
@@ -304,6 +306,8 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
         : route.screen === 'costs' ? <CostsScreen worldId={world.id} section={route.param} target={route.param2 ?? null} />
         : route.screen === 'bounds' && route.param ? <BoundsScreen worldId={world.id} writeScopeId={route.param} />
         : route.screen === 'competition' && route.param ? <CompetitionScreen worldId={world.id} writeScopeId={route.param} />
+        // Шаг 169 (#36): «Why didn't my price change?» предложения; `unchanged/<предложение>/<период>` — вход из пустой выборки журнала цен
+        : route.screen === 'unchanged' && route.param ? <UnchangedScreen key={`${route.param}|${route.param2}`} worldId={world.id} writeScopeId={route.param} initialPeriod={periodOfPath(route.param2)} />
         // Шаг 145: `protections/rules/<период>/shadow` — клик по денежной плитке тени: тот же период, удержания пола аккаунтов в тени
         : route.screen === 'protections' ? <ProtectionsScreen key={`${route.param}|${route.param2}|${route.param3}`} worldId={world.id} tab={route.param === 'people' ? 'people' : 'rules'}
             days={[1, 7, 30].includes(Number(route.param2)) ? Number(route.param2) : 7} initialPeriod={periodOfPath(route.param2)} floorShadowOnly={route.param3 === 'shadow'} />
