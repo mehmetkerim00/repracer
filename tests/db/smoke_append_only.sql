@@ -512,6 +512,9 @@ SELECT pg_temp.expect_fail('truncate tenant_data.default_strategy_change', $q$ T
   'TRUNCATE of tenant_data.default_strategy_change is forbidden');
 SELECT pg_temp.expect_fail('truncate tenant_data.offer_pricing_switch', $q$ TRUNCATE tenant_data.offer_pricing_switch $q$,
   'TRUNCATE of tenant_data.offer_pricing_switch is forbidden');
+-- Шаг 172 (#34): журнал визитов Daily Overview — начало окна «Since your last visit»; TRUNCATE его не берёт
+SELECT pg_temp.expect_fail('truncate tenant_data.overview_visit', $q$ TRUNCATE tenant_data.overview_visit $q$,
+  'TRUNCATE of tenant_data.overview_visit is forbidden');
 -- Шаг 120 (P1-04): журнал уведомлений об истечении оценки комиссии — однократность писем, TRUNCATE его не берёт
 SELECT pg_temp.expect_fail('truncate channel_data.fee_expiry_notice', $q$ TRUNCATE channel_data.fee_expiry_notice $q$,
   'TRUNCATE of channel_data.fee_expiry_notice is forbidden');
@@ -805,6 +808,9 @@ SELECT s.tenant_id, s.write_scope_id, CASE s.pricing_mode WHEN 'ENGINE' THEN 'OF
   FROM tenant_data.write_scope s
  WHERE s.tenant_id = 'a0000000-0000-0000-0000-00000000000a' AND s.field = 'PRICE' AND s.pricing_mode IN ('ENGINE', 'OFF')
  ORDER BY s.write_scope_id LIMIT 1;
+
+-- Шаг 172 (#34): визит Daily Overview — владелец от своего имени открыл Overview
+INSERT INTO tenant_data.overview_visit (tenant_id, membership_id) VALUES ('a0000000-0000-0000-0000-00000000000a', 'a2000000-0000-0000-0000-00000000000a');
 
 -- Находка 4 ревью шага 16, Р-93, Р-103: у каждой append-only таблицы есть строка, и изменение строки отклоняет именно триггер неизменяемости
 DO $$

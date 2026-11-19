@@ -90,7 +90,7 @@ export {
 export { EXPLANATION_RULESETS } from './dictionary.ts';
 export { listingNotBuyableAlerts, listingStatusStep, type LatestListingState, type LatestPart } from './listing-status.ts';
 export type { ChannelObservation, ConsoleAuditRow, DiscoveredCatalogOffer, MemberRoleChangeResult, DiscoveryStop, FloorRaiseAfter, FloorRaiseCandidate, BuyboxSpanRow, BuyboxHolderObservation, CompetitionData, CompetitionDataRow, OfferHolderFilter, OfferPageFilter, OfferSortKey, OfferPricingFilterValue } from './store.ts';
-export { DATA_QUALITY_CODES, DECISION_CAUSES, decisionCause, FLOOR_REJECTIONS, OFFER_MONEY_FILTERS, type DecisionCause, type DecisionCauseCount, type OfferMoneyFilter } from './store.ts';
+export { DATA_QUALITY_CODES, DECISION_CAUSES, decisionCause, FLOOR_REJECTIONS, OFFER_MONEY_FILTERS, OVERVIEW_VISIT_GAP_MINUTES, type DecisionCause, type DecisionCauseCount, type OfferMoneyFilter } from './store.ts';
 export { OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, PRICING_MODE_OF_FILTER, type OfferSetupFilter, type ReadinessFacts, type ReadinessStorefrontFacts } from './store.ts';
 // Шаг 146 (#34): причины «требует внимания» и свежесть данных конкурентов строки состояния
 export { ATTENTION_FILTERS, ATTENTION_REASONS, type AttentionCounts, type AttentionFilter, type AttentionReason, type FreshnessRow } from './store.ts';

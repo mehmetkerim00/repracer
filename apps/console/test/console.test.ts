@@ -516,6 +516,31 @@ test('step 171 (#34): Overview without a database — every cause group is the j
 });
 
 /**
+ * Шаг 172 (#34): «Since your last visit» без базы — первое открытие Overview: прежнего визита нет, честные 24 часа; через два часа виртуальных
+ * часов — новый визит, окно от прежнего, и ссылки групп несут тот же момент; журнал по ссылке — то же число
+ */
+test('step 172 (#34): Overview since the last visit — the first open is the last 24 hours, two hours later the window starts at the visit before', async () => {
+  const id = 'kaufland/pipeline/above-max-price';
+  const owner = await login('OWNER');
+  const live = liveOf(id);
+  const t = messagesFor('en').ui.overview;
+  const first = await get<OverviewView>(owner, api(id, 'overview'));
+  assert.equal(first.windowNote, t.windowNote, 'no earlier visit — the honest 24 hours');
+  const visitedAt = live.clock.iso();
+  assert.equal((await get<OverviewView>(owner, api(id, 'overview'))).windowNote, t.windowNote, 'opened again within 30 minutes — the same visit');
+  live.clock.advance(2 * 3_600_000);
+  const later = await get<OverviewView>(owner, api(id, 'overview'));
+  assert.equal(later.windowNote, t.windowSinceNote);
+  for (const g of later.changed.groups) {
+    assert.equal(g.target[2], `since=${visitedAt}`, `${g.cause}: the link carries the moment of the visit before`);
+    const page = await get<DecisionListView>(owner, `${api(id, 'decisions')}?offset=0&limit=1&since=${encodeURIComponent(visitedAt)}&cause=${g.cause}`);
+    assert.equal(page.page.total, g.decisions, `${g.cause}: the group is the journal of that window`);
+  }
+  const bad = await call(owner, 'GET', `${api(id, 'decisions')}?since=2026-13-01T00:00:00.000Z`);
+  assert.equal(bad.status, 400, 'an impossible moment is a bad request, not an error');
+});
+
+/**
  * Шаг 170 (#35): чеклист готовности — правило экрана без базы: «не стоит» ведёт в выборку Offers с тем же числом (в том числе новый фильтр
  * Setup); неверное значение Setup — 400; гость и роль без права перевода читают чеклист, и он называет, почему им перевод недоступен
  */

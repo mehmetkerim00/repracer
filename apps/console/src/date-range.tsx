@@ -81,8 +81,11 @@ export function DateRangePicker({ id, value, onChange, maxDays = 30, 'aria-descr
   const now = Date.now(); // real-clock: календарь продавца: «сегодня» — по часам браузера в поясе пространства
   const today = dayIn(now, zone);
   const min = addDays(today, -(maxDays - 1));
-  const current = 'preset' in value ? { preset: value.preset, ...presetDays(value.preset, now, zone) } : { preset: null, from: value.from, to: value.to };
-  const label = rangeText(current.from, current.to, m.locale);
+  // Шаг 172 (#34): «с момента» (окно Daily Overview) календарь показывает днями — от дня момента до сегодня; выбор в календаре — обычный период
+  const current = 'preset' in value ? { preset: value.preset, ...presetDays(value.preset, now, zone) }
+    : 'since' in value ? { preset: null, from: dayIn(Date.parse(value.since), zone), to: today } : { preset: null, from: value.from, to: value.to };
+  // Шаг 172: окно «с момента» подписано моментом, а не днями — иначе «с 00:12» читалось бы как «весь день»
+  const label = 'since' in value ? m.ui.period.since(m.when(value.since)) : rangeText(current.from, current.to, m.locale);
 
   const close = (restore = true) => {
     setOpen(false);

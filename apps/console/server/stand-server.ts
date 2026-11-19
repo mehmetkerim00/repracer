@@ -63,7 +63,7 @@ function periodOf(params: URLSearchParams, legacyDays: Readonly<Record<string, '
  * отрезала их (kill-test: 0 удержанных из 683). Одно правило у тени, решений, журнала и выгрузки
  */
 function upperOf(period: Period, range: { until: string }): { until?: never } {
-  return 'preset' in period ? {} : { until: range.until as never };
+  return 'from' in period ? { until: range.until as never } : {};
 }
 
 export interface ApiRequest {
@@ -1062,8 +1062,18 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
          */
         case 'overview': {
           if (param !== null) return fail(404, 'NOT_FOUND', s.notFound);
-          const period = { preset: '24h' } as const;
-          const range = periodRange(period, live.clock.iso(), display?.timeZone ?? null, HOT_DECISIONS_DAYS);
+          /**
+           * Шаг 172 (#34): окно — от визита до нынешнего (журнал визитов, 0237), не глубже хранения решений; прежнего визита нет или визит не
+           * записался (роль без права видеть цены) — честные последние 24 часа
+           */
+          const now = live.clock.iso();
+          const visit = live.store.overviewVisit
+            ? await live.store.overviewVisit(live.tenantId, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) }, now as never)
+              .catch(() => ({ previous: null }))
+            : { previous: null };
+          const earliest = new Date(Date.parse(now) - HOT_DECISIONS_DAYS * 86_400_000).toISOString();
+          const period: Period = visit.previous ? { since: visit.previous < earliest ? earliest : visit.previous } : { preset: '24h' };
+          const range = periodRange(period, now, display?.timeZone ?? null, HOT_DECISIONS_DAYS);
           const [status, causes, slice, f] = await Promise.all([
             statusLine(), live.store.decisionCauses(live.tenantId, range.since as never),
             live.store.interventions(live.tenantId, range.since as never, range.until as never), facts({ money: { now: live.clock.iso() as never } }),
@@ -1376,7 +1386,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             const range = periodRange(query.period, now, tz, FEED_MAX_DAYS);
             query.since = range.since;
             Object.assign(query, upperOf(query.period, range));
-            until = 'preset' in query.period ? null : range.until;
+            until = 'from' in query.period ? range.until : null;
           }
           if (query.q) query.scopes = (await searchOffers(query.q.toLowerCase(), SEARCH_FILTER_LIMIT)).ids;
           const { offset: _offset, limit: _limit, ...feed } = feedPageQuery(query);
@@ -1395,7 +1405,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           const decisions = { ...(ws ? { writeScopeId: ws } : {}), ...(found ? { writeScopeIds: found.ids } : {}),
             ...(period && range ? { since: range.since as never, ...upperOf(period, range) } : {}), ...(outcome ? { outcome: outcome as DecisionOutcomeGroup } : {}) };
           return { query: { decisions }, filters: { outcome: outcome ?? '', offer: offer ?? '', search: searchText },
-            ...windowed(range?.since ?? null, period && range && !('preset' in period) ? range.until : null) };
+            ...windowed(range?.since ?? null, period && range && 'from' in period ? range.until : null) };
         }
         case 'stopped-by-people':
         case 'prevented-by-rules': {
@@ -1437,7 +1447,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (period === null) return null;
           const chosen = period ?? { preset: '30d' as const };
           const range = periodRange(chosen, now, tz, exportScreen === 'imports' ? IMPORTS_KEEP_DAYS : AUDIT_KEEP_DAYS);
-          const until = 'preset' in chosen ? null : range.until;
+          const until = 'from' in chosen ? range.until : null;
           const window = { since: range.since, ...(until ? { until } : {}) };
           if (exportScreen === 'audit-log') return { query: { audit: window }, filters: {}, ...windowed(range.since, until) };
           const kind = IMPORT_KIND_LIST.find((k) => k === params.get('kind'));

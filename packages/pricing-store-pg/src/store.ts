@@ -53,7 +53,7 @@ import type {
   BoundsImportResult, BoundsImportRowInput, ImportKind, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult,
   ClearanceRef, ClearanceChangeRow, ClearanceEnableInput, ClearanceEnableResult, ClearanceDisableResult, ClearanceState, ClearanceEnded, FeeExpiryNotice,
   DefaultStrategyResult, DefaultStrategyRow, StrategyAssignmentRef, DefaultRuleReason, PricingSwitchRef } from '@repracer/pricing-pipeline';
-import { ATTENTION_REASONS, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DATA_QUALITY_CODES, DECISION_CAUSES, DECISION_OUTCOME_GROUPS, FLOOR_REJECTIONS, OFFER_MONEY_FILTERS, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
+import { ATTENTION_REASONS, CREEP_PAUSE_PERIODS, CREEP_STALE_PERIODS, DATA_QUALITY_CODES, DECISION_CAUSES, DECISION_OUTCOME_GROUPS, FLOOR_REJECTIONS, OFFER_MONEY_FILTERS, OVERVIEW_VISIT_GAP_MINUTES, FEED_IN_FLIGHT_STATUSES, FEED_NOT_SENT_STATUSES, INTERVENTION_SLICE_LIMIT, PRICING_MODE_OF_FILTER, prioritizedWindow } from '@repracer/pricing-pipeline';
 import type { AttentionCounts, AttentionFilter, AttentionReason, DecisionCauseCount, FreshnessRow, OfferMoneyFilter, OfferSetupFilter, ReadinessFacts } from '@repracer/pricing-pipeline';
 import { inTenant, RollbackWith, type PgPool, type Tx } from './db.ts';
 import { PgWriteQueueStore } from './write-queue.ts';
@@ -3434,6 +3434,22 @@ export class PgPricingStore implements PricingStore {
       ]);
       return { items: rows.map(decisionRow), total: Number(count!.n) };
     });
+  }
+
+  /**
+   * Шаг 172 (#34): визит Daily Overview (0237) — административной ролью именем человека: прошлый визит старше паузы — новый визит, момент ставит
+   * база; ответ — визит до нынешнего. Пауза — по часам базы, как момент визита
+   */
+  async overviewVisit(tenantId: string, actor: { membershipId: string; userId: string; mfa: boolean }): Promise<{ previous: Instant | null }> {
+    return inTenant(this.admin('overviewVisit'), tenantId, async (tx) => {
+      const recent = async () => (await tx.query(
+        `SELECT visited_at, visited_at > now() - make_interval(mins => $3) AS current FROM tenant_data.overview_visit
+          WHERE tenant_id = $1 AND membership_id = $2 ORDER BY visited_at DESC LIMIT 2`, [tenantId, actor.membershipId, OVERVIEW_VISIT_GAP_MINUTES])).rows;
+      const rows = await recent();
+      if (rows[0]?.current === true) return { previous: rows[1] ? iso(rows[1].visited_at) : null };
+      await tx.query('INSERT INTO tenant_data.overview_visit (tenant_id, membership_id) VALUES ($1, $2)', [tenantId, actor.membershipId]);
+      return { previous: rows[0] ? iso(rows[0].visited_at) : null };
+    }, actor.userId, { mfa: actor.mfa });
   }
 
   /** Шаг 171 (#34): решения окна по причине — строки журнала и уникальные предложения, тем же выражением, что фильтр причины */

@@ -108,7 +108,8 @@ export function overviewView(input: OverviewInput, m: Messages): OverviewView {
     })),
   ];
   return {
-    worldId: input.worldId, windowText: t.window(phrase), windowNote: t.windowNote, layout,
+    // Шаг 172: окно от прошлого визита — своей заметкой; без визита — честные 24 часа
+    worldId: input.worldId, windowText: t.window(phrase), windowNote: 'since' in input.period ? t.windowSinceNote : t.windowNote, layout,
     liveNote: layout === 'LIVE' ? t.liveNote : null,
     working,
     changed: { lead: layout === 'SHADOW' ? t.changedShadow(phrase) : t.changedLive(phrase), groups, total, empty: groups.length === 0 ? t.noChanges(phrase) : null },

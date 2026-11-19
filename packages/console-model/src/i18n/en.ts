@@ -1507,7 +1507,8 @@ export const en = {
     overview: {
       questions: { working: 'Is everything working?', changed: 'What changed and why?', risk: 'Where is the risk?', action: 'What needs action?' },
       window: (period: string) => `Counted ${period}.`,
-      windowNote: 'We do not keep your visits yet, so this is the last 24 hours rather than since your last visit.',
+      windowNote: 'We have no earlier visit of yours here yet, so this is the last 24 hours.',
+      windowSinceNote: 'Since your last visit — a visit is opening Overview at least 30 minutes after the one before.',
       liveNote: 'The live view of Overview comes with your first live account; until then these are the same four questions.',
       changedShadow: (period: string) => `Decisions ${period}, by cause — calculated in shadow mode; nothing was sent to your store.`,
       changedLive: (period: string) => `Decisions ${period}, by cause.`,
@@ -2024,6 +2025,8 @@ export const en = {
       phrase: { '24h': 'in the last 24 hours', '7d': 'in the last 7 days', '30d': 'in the last 30 days' },
       between: (from: string, to: string) => `from ${from} to ${to}`,
       clipped: (days: number) => `Only the last ${days} days are kept here: earlier days are not shown.`,
+      // Шаг 172 (#34): «с момента» — окно Daily Overview от прошлого визита
+      since: (when: string) => `since ${when}`,
     },
     /**
      * Шаг 99 [Р-224, Р-225]: импорты продавца — шаблон с текущими значениями, примерка, применение ровно примерки, журнал. Заголовки

@@ -1444,7 +1444,8 @@ export const de: Messages = {
     overview: {
       questions: { working: 'Läuft alles?', changed: 'Was hat sich geändert und warum?', risk: 'Wo liegt das Risiko?', action: 'Was erfordert eine Aktion?' },
       window: (period: string) => `Gezählt ${period}.`,
-      windowNote: 'Wir speichern Ihre Besuche noch nicht, daher sind das die letzten 24 Stunden statt seit Ihrem letzten Besuch.',
+      windowNote: 'Wir kennen hier noch keinen früheren Besuch von Ihnen, daher sind es die letzten 24 Stunden.',
+      windowSinceNote: 'Seit Ihrem letzten Besuch — ein Besuch ist das Öffnen der Übersicht mindestens 30 Minuten nach dem vorigen.',
       liveNote: 'Die Live-Ansicht der Übersicht kommt mit Ihrem ersten Live-Konto; bis dahin sind es dieselben vier Fragen.',
       changedShadow: (period: string) => `Entscheidungen ${period}, nach Ursache — im Schattenmodus berechnet; an Ihren Shop wurde nichts gesendet.`,
       changedLive: (period: string) => `Entscheidungen ${period}, nach Ursache.`,
@@ -1952,6 +1953,8 @@ export const de: Messages = {
       phrase: { '24h': 'in den letzten 24 Stunden', '7d': 'in den letzten 7 Tagen', '30d': 'in den letzten 30 Tagen' },
       between: (from: string, to: string) => `vom ${from} bis ${to}`,
       clipped: (days: number) => `Hier werden nur die letzten ${days} Tage aufbewahrt: frühere Tage werden nicht gezeigt.`,
+      // Шаг 172 (#34): «с момента» — окно Daily Overview от прошлого визита
+      since: (when: string) => `seit ${when}`,
     },
     /** Шаг 99 [Р-224, Р-225]: импорты продавца — заголовки колонок файла английские во всех языках; пояснение — на языке пространства */
     imports: {

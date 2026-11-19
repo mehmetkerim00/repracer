@@ -73,3 +73,17 @@ test('step 171 (#34): the texts in every language', () => {
     }
   }
 });
+
+test('step 172 (#34): the window since the last visit — the phrase, the note and every link carry the same moment', async () => {
+  const { parsePeriod, periodRange, periodSearch } = await import('./period.ts');
+  const since = '2026-11-18T08:52:00.000Z';
+  assert.deepEqual(parsePeriod(new URLSearchParams(`since=${since}`)), { since });
+  for (const bad of ['since=2026-11-18', `since=${since}&period=24h`, 'since=2026-13-01T00:00:00.000Z']) assert.equal(parsePeriod(new URLSearchParams(bad)), null, bad);
+  assert.equal(periodSearch({ since }), `since=${since}`);
+  assert.deepEqual(periodRange({ since }, '2026-11-18T12:00:00.000Z', 'UTC', 30), { since, until: '2026-11-18T12:00:00.000Z', clipped: false, maxDays: 30 });
+  const v = overviewView(input({ period: { since } }), en);
+  assert.equal(v.windowNote, en.ui.overview.windowSinceNote);
+  assert.equal(v.windowText, en.ui.overview.window(en.ui.period.since(en.when(since))));
+  assert.deepEqual(v.changed.groups.map((g) => g.target[2]), [`since=${since}`, `since=${since}`], 'the journal of the same window');
+  assert.equal(overviewView(input(), en).windowNote, en.ui.overview.windowNote, 'no earlier visit — the honest 24 hours');
+});

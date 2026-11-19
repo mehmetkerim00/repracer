@@ -3151,6 +3151,43 @@ const LONG_HELP = `(() => {
 })()`;
 
 /**
+ * Шаг 172 (#34): «Since your last visit» — первое открытие Overview говорит, что прежнего визита нет (последние 24 часа); через два часа часов мира —
+ * окно «since …» от прежнего визита, заметка о визите, и ссылка группы несёт тот же момент
+ */
+test('step 172 (#34): Overview — the first open is the last 24 hours and says why; two hours later the window starts at the visit before', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const t = en.ui.overview;
+  const open = async (what: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/inventory`)}, true)`);
+    await settled(b, `${what}: away`);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/overview`)}, true)`);
+    await settled(b, what);
+    await waitFor(b, `document.querySelectorAll('.overview-card').length === 4`, what);
+    return b.evaluate<{ badge: string; note: string; link: string }>(`({ badge: document.querySelector('.overview-window .badge')?.textContent.trim() ?? '',
+      note: document.querySelector('.overview-window .muted')?.textContent.trim() ?? '', link: document.querySelector('.overview-causes li a')?.getAttribute('href') ?? '' })`);
+  };
+  const first = await open('first open');
+  // Смоук-мир — общий у тестов файла: прежний визит мог остаться от другого теста; тогда заметка уже о визите
+  if (first.note === t.windowNote) assert.equal(first.badge, t.window(en.ui.period.phrase['24h']), 'no earlier visit — the last 24 hours');
+  smokeLive.clock.advance(2 * 3_600_000);
+  const later = await open('two hours later');
+  assert.equal(later.note, t.windowSinceNote, 'the window is since the last visit');
+  assert.match(later.badge, /^Counted since /, later.badge);
+  if (later.link) assert.ok(decodeURIComponent(later.link).includes('/since='), `the cause link carries the moment: ${later.link}`);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
  * Шаг 171 (#34, ярус 2; Р-254): Daily Overview — первый пункт меню, заголовок = пункт меню; четыре карточки-вопроса (две колонки на 1440, одна
  * на 375); группа причины открывает журнал решений с фильтром этой причины и тем же окном, и в журнале ровно столько решений, сколько в
  * карточке; обе темы, без бокового прокрута
@@ -3198,7 +3235,8 @@ test('step 171 (#34): Overview — the first menu item; four question cards; a c
     await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/overview`)}, true)`);
     await settled(b, 'overview');
     await waitFor(b, `document.querySelectorAll('.overview-card').length === 4`, 'four cards');
-    const group = await b.evaluate<{ cause: string; text: string } | null>(`(() => { const li = document.querySelector('.overview-causes li'); return li ? { cause: li.dataset.cause, text: li.textContent.trim() } : null; })()`);
+    const group = await b.evaluate<{ cause: string; text: string; href: string } | null>(`(() => { const li = document.querySelector('.overview-causes li');
+      return li ? { cause: li.dataset.cause, text: li.textContent.trim(), href: li.querySelector('a').getAttribute('href') } : null; })()`);
     assert.ok(group, 'the smoke world has decisions in the last 24 hours');
     const decisions = Number(/· (\d+) decision/.exec(group.text)?.[1]);
     await b.evaluate(`(document.querySelector('.overview-causes li a').click(), true)`);
@@ -3207,7 +3245,8 @@ test('step 171 (#34): Overview — the first menu item; four question cards; a c
     const journal = await b.evaluate<{ hash: string; cause: string; pager: string }>(`({ hash: location.hash, cause: [...document.querySelectorAll('.world-content select')].map((s) => s.value).find((v) => v === ${JSON.stringify(group.cause)}) ?? '',
       pager: document.querySelector('.world-content .buttons .small')?.textContent.trim() ?? '' })`);
     assert.equal(journal.cause, group.cause, `the journal is filtered by the cause: ${journal.hash}`);
-    assert.match(journal.hash, /period%3D24h|period=24h/, 'the same window');
+    // Окно — то же, что у карточки: 24 часа или «с прошлого визита» (шаг 172), если смоук-мир уже видел Overview
+    assert.equal(decodeURIComponent(journal.hash), decodeURIComponent(group.href), 'the same window');
     assert.ok(journal.pager.endsWith(` ${decisions}`), `the journal holds ${decisions} decisions: «${journal.pager}»`);
   } finally {
     await b.setColorScheme(null);

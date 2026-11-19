@@ -3218,3 +3218,29 @@ export const STEP123_ROWS = [
     ],
   },
 ];
+
+
+// Шаг 172 (0237): визиты Daily Overview — журнал держит база, у каждой защиты — своя проверка с причиной [Р-94, Р-99]
+const R172 = T('overview-visit-step172.pg.test.ts');
+const G172 = 'step 172: the database keeps the journal honest — the visit of the session person only, the time of the database, append-only';
+export const STEP172_ROWS = [
+  {
+    row: 'шаг 172 (визиты Daily Overview)', critical: false,
+    invariant: 'визит пишет человек от своего имени; момент визита — часы базы; журнал только на добавление, в аудите, уходит с тенантом',
+    mutations: [
+      // Без проверки «членство — того человека» несуществующее членство держит внешний ключ — другой причиной
+      m(replaceInFunction('tenant_data.overview_visit_guard()', 'IF person IS NULL OR person IS DISTINCT FROM security.current_user_id() THEN', 'IF false THEN'),
+        node(R172, G172, 'a visit in the name of another membership is refused', 'foreign key')),
+      m(replaceInFunction('tenant_data.overview_visit_guard()', 'NEW.visited_at := now();', ''),
+        node(R172, G172, { re: 'the time of a visit is the database time, not the one asked: (.*)' }, '^2020')),
+      m(dropTrigger('a0_admin_write_person_insert', 'tenant_data.overview_visit'),
+        verify('tenant_data\\.overview_visit: administrative INSERT without the person guard')),
+      m(dropTrigger('zz_admin_write_audit_insert', 'tenant_data.overview_visit'),
+        verify('tenant_data\\.overview_visit: administrative INSERT is not written to the audit log')),
+      m(dropTrigger('zz_append_only', 'tenant_data.overview_visit'), smoke('append-only tenant_data.overview_visit')),
+      m(dropTrigger('zz_no_truncate', 'tenant_data.overview_visit'), smoke('truncate tenant_data.overview_visit')),
+      m(replaceInFunction('maintenance.purge_tenant_data(uuid)', "'tenant_data.overview_visit', ", ''),
+        verify('tenant_data\\.overview_visit: tenant closure does not delete the table')),
+    ],
+  },
+];

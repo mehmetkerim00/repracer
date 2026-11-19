@@ -11,7 +11,12 @@ import type { Messages } from './i18n/index.ts';
  */
 export const PERIOD_PRESETS = ['24h', '7d', '30d'] as const;
 export type PeriodPreset = (typeof PERIOD_PRESETS)[number];
-export type Period = { preset: PeriodPreset } | { from: string; to: string };
+/**
+ * Шаг 172 (#34): `since` — «с момента до сейчас» (окно Daily Overview «Since your last visit»): момент ISO UTC; сверху окно открыто, как у пресета
+ */
+export type Period = { preset: PeriodPreset } | { from: string; to: string } | { since: string };
+/** Момент ISO UTC строгого вида — как его пишет `toISOString` */
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const PRESET_HOURS: Readonly<Record<PeriodPreset, number>> = { '24h': 24, '7d': 168, '30d': 720 };
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -32,6 +37,12 @@ export function parsePeriod(params: URLSearchParams): Period | null | undefined 
   const preset = params.get('period');
   const from = params.get('from');
   const to = params.get('to');
+  const since = params.get('since');
+  // Шаг 172: момент — один, без пресета и дат; строгий вид, настоящий момент
+  if (since !== null) {
+    if (preset !== null || from !== null || to !== null || !INSTANT.test(since) || Number.isNaN(Date.parse(since)) || new Date(since).toISOString() !== since) return null;
+    return { since };
+  }
   if (preset !== null) {
     if (from !== null || to !== null) return null;
     return (PERIOD_PRESETS as readonly string[]).includes(preset) ? { preset: preset as PeriodPreset } : null;
@@ -43,7 +54,7 @@ export function parsePeriod(params: URLSearchParams): Period | null | undefined 
 
 /** Параметры адреса для периода — та же форма, что разбирает `parsePeriod` */
 export function periodSearch(p: Period): string {
-  return 'preset' in p ? `period=${p.preset}` : `from=${p.from}&to=${p.to}`;
+  return 'preset' in p ? `period=${p.preset}` : 'since' in p ? `since=${p.since}` : `from=${p.from}&to=${p.to}`;
 }
 
 /** Смещение пояса от UTC в момент `ms`, миллисекунды; пояс, которого Intl не знает, — UTC */
@@ -96,6 +107,9 @@ export function periodRange(p: Period, now: string, timeZone: string | null | un
   if ('preset' in p) {
     since = nowMs - PRESET_HOURS[p.preset] * 3_600_000;
     until = nowMs;
+  } else if ('since' in p) {
+    since = Math.min(Date.parse(p.since), nowMs);
+    until = nowMs;
   } else {
     since = zonedDayStart(p.from, tz);
     until = Math.min(zonedDayStart(nextDate(p.to), tz), nowMs);
@@ -118,6 +132,7 @@ export function periodDays(range: PeriodRange, timeZone: string | null | undefin
 /** Фраза периода для заголовков: «in the last 7 days», «from Oct 1, 2026 to Oct 5, 2026» */
 export function periodPhrase(p: Period, m: Messages): string {
   if ('preset' in p) return m.ui.period.phrase[p.preset];
+  if ('since' in p) return m.ui.period.since(m.when(p.since));
   const human = (date: string) => m.date(date);
   return m.ui.period.between(human(p.from), human(p.to));
 }

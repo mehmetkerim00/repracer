@@ -6,7 +6,7 @@ import { rangeText } from '../date-range.tsx';
 
 /** Шаг 96.2: короткая подпись периода — в чипе повторов «×11 · 7d» */
 export function periodShort(period: Period, m: Messages): string {
-  return 'preset' in period ? m.ui.period.short[period.preset] : rangeText(period.from, period.to, m.locale);
+  return 'preset' in period ? m.ui.period.short[period.preset] : 'since' in period ? m.ui.period.since(m.when(period.since)) : rangeText(period.from, period.to, m.locale);
 }
 
 /**

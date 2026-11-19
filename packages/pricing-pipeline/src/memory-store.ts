@@ -5,7 +5,7 @@ import { listingStatusStep, type LatestListingState } from './listing-status.ts'
 import { prioritizedWindow } from './reconciliation.ts';
 import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, FeeExpiryNotice, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow, FreshnessRow } from './store.ts';
-import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_CAUSES, decisionCause, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
+import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_CAUSES, decisionCause, OVERVIEW_VISIT_GAP_MINUTES, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionCause, type DecisionCauseCount, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FloorHoldEpisodeRow, type FloorHoldTotals, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
 /** Записи в полёте: одна на единицу, показываются в состоянии консоли; завершённые — только в ленте [Р-154] */
 const IN_FLIGHT_WRITE = new Set(['PENDING', 'DISPATCHED', 'ACCEPTED', 'FAILED', 'BLOCKED']);
@@ -2757,6 +2757,19 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       });
     }
     return out;
+  }
+
+  /** Шаг 172 (#34): визиты Daily Overview по членству — тем же правилом, что база (`tenant_data.overview_visit`) */
+  private readonly overviewVisits = new Map<string, Instant[]>();
+  async overviewVisit(_tenantId: string, actor: { membershipId: string }, now: Instant): Promise<{ previous: Instant | null }> {
+    const visits = this.overviewVisits.get(actor.membershipId) ?? [];
+    const last = visits.at(-1);
+    if (last === undefined || Date.parse(now) - Date.parse(last) >= OVERVIEW_VISIT_GAP_MINUTES * 60_000) {
+      visits.push(now);
+      this.overviewVisits.set(actor.membershipId, visits);
+      return { previous: last ?? null };
+    }
+    return { previous: visits.at(-2) ?? null };
   }
 
   async decisionCauses(_tenantId: string, since: Instant, until?: Instant): Promise<DecisionCauseCount[]> {

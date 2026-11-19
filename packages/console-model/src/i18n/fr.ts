@@ -1498,7 +1498,8 @@ export const fr: Messages = {
     overview: {
       questions: { working: 'Tout fonctionne-t-il ?', changed: 'Qu’est-ce qui a changé et pourquoi ?', risk: 'Où est le risque ?', action: 'Qu’est-ce qui demande une action ?' },
       window: (period: string) => `Compté ${period}.`,
-      windowNote: 'Nous ne conservons pas encore vos visites : ce sont donc les dernières 24 heures, et non depuis votre dernière visite.',
+      windowNote: 'Nous n’avons pas encore ici de visite précédente de votre part : ce sont donc les dernières 24 heures.',
+      windowSinceNote: 'Depuis votre dernière visite : une visite, c’est ouvrir l’aperçu au moins 30 minutes après la précédente.',
       liveNote: 'La vue en direct arrive avec votre premier compte en direct ; d’ici là, ce sont les mêmes quatre questions.',
       changedShadow: (period: string) => `Décisions ${period}, par cause — calculées en mode fantôme ; rien n’a été envoyé à votre boutique.`,
       changedLive: (period: string) => `Décisions ${period}, par cause.`,
@@ -2011,6 +2012,8 @@ export const fr: Messages = {
       phrase: { '24h': 'au cours des dernières 24 heures', '7d': 'au cours des 7 derniers jours', '30d': 'au cours des 30 derniers jours' },
       between: (from: string, to: string) => `du ${from} au ${to}`,
       clipped: (days: number) => `Seuls les ${days} derniers jours sont conservés ici : les jours antérieurs ne sont pas affichés.`,
+      // Шаг 172 (#34): «с момента» — окно Daily Overview от прошлого визита
+      since: (when: string) => `depuis ${when}`,
     },
     /** Шаг 99 [Р-224, Р-225]: импорты продавца — заголовки колонок файла английские во всех языках; пояснение — на языке пространства */
     imports: {

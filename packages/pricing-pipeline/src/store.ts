@@ -1125,6 +1125,11 @@ export interface PricingStore {
   decisionPage(tenantId: string, query: DecisionPageQuery): Promise<DecisionPage>;
   /** Шаг 171 (#34): решения окна [since, until) по причине — тем же правилом, что фильтр причины журнала */
   decisionCauses(tenantId: string, since: Instant, until?: Instant): Promise<DecisionCauseCount[]>;
+  /**
+   * Шаг 172 (#34): визит Daily Overview человека. Открытие Overview — новый визит, если прошлый старше `OVERVIEW_VISIT_GAP_MINUTES`; ответ — момент
+   * визита ДО нынешнего (начало окна «Since your last visit»), прежних визитов нет — null. Членство — того человека, что в сессии (держит база)
+   */
+  overviewVisit?(tenantId: string, actor: { membershipId: string; userId: string; mfa: boolean }, now: Instant): Promise<{ previous: Instant | null }>;
   decisionDetail(tenantId: string, decisionId: string): Promise<DecisionDetail | null>;
   /**
    * Шаг 97 [Р-220]: отрезки держателя Buy Box предложения единицы, задевающие период [from, to) (и последний до него — его состояние
@@ -1540,6 +1545,9 @@ export function decisionCause(
   if (d.trigger === 'COMPETITOR_CHANGE') return 'COMPETITORS';
   return 'OTHER';
 }
+
+/** Шаг 172 (#34): визит — открытие Overview не раньше чем через столько минут после прошлого; повторные открытия внутри — тот же визит */
+export const OVERVIEW_VISIT_GAP_MINUTES = 30;
 
 /** Шаг 171: решения окна по причине — строк журнала и уникальных предложений */
 export interface DecisionCauseCount { cause: DecisionCause; decisions: number; offers: number }
