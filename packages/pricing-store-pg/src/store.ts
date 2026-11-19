@@ -3373,10 +3373,17 @@ export class PgPricingStore implements PricingStore {
                   count(*) FILTER (WHERE no_bounds)::int AS no_bounds, count(*) FILTER (WHERE automated_pricing)::int AS automated_pricing,
                   count(*) FILTER (WHERE channel_bounds AND pricing_mode = 'ENGINE')::int AS bounds_unread_on
              FROM sc GROUP BY channel_account_id, marketplace ORDER BY channel_account_id, marketplace`, [tenantId, query.readiness.now]);
+        /**
+         * Шаг 173.1: LATERAL по функции стража — вложенный цикл неизбежен. При отключённых вложенных циклах (`wholeCatalogPlan`) PostgreSQL
+         * прибавляет к оценке штраф 10^10, оценка проходит пороги JIT, и PostgreSQL с LLVM компилирует оператор с оптимизацией: на QA-A —
+         * 2 133 мс на ноль строк, весь чеклист готовности ~2 с. Оператор — по аккаунтам тенанта, не по каталогу: вложенные циклы — на нём одном
+         */
+        await tx.query('SET LOCAL enable_nestloop = on');
         const { rows: blocking } = await tx.query(
           `SELECT a.channel_account_id, b.total FROM tenant_data.channel_account a
              CROSS JOIN LATERAL (SELECT max(x.total)::int AS total FROM tenant_data.live_switch_blocking_offers(a.tenant_id, a.channel_account_id) x) b
             WHERE a.tenant_id = $1 AND b.total IS NOT NULL ORDER BY a.channel_account_id`, [tenantId]);
+        await tx.query('SET LOCAL enable_nestloop = off');
         readiness = {
           storefronts: rows.map((r) => ({
             channelAccountId: String(r.channel_account_id), marketplace: String(r.marketplace), offers: Number(r.offers), off: Number(r.off),
