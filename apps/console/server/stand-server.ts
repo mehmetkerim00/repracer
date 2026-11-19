@@ -1094,7 +1094,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
             live.store.channelAccounts(live.tenantId),
             live.store.competitorFreshness ? live.store.competitorFreshness(live.tenantId) : Promise.resolve(null),
             facts({ readiness: { now: now as never } }),
-            live.shadow ? live.shadow.shadowPage(live.tenantId, now, { offset: 0, limit: 1 }) : Promise.resolve(null),
+            // Шаг 173: только свойства витрин и закрытая база — без сводки недели; у тени без лёгкого чтения — страница тени, как раньше
+            live.shadow ? (live.shadow.readinessInputs ? live.shadow.readinessInputs(live.tenantId) : live.shadow.shadowPage(live.tenantId, now, { offset: 0, limit: 1 })) : Promise.resolve(null),
             offered ? offered.connections(live.tenantId) : Promise.resolve(null),
           ]);
           const answers = connections ? new Map(connections.accounts.map((c) => [c.channelAccountId, c.otherTools] as const)) : null;

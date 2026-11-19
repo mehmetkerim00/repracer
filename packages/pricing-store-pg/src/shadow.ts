@@ -159,6 +159,15 @@ export type ShadowModeResult =
 
 const num = (v: unknown): number => Number(v ?? 0);
 
+/** Свойство витрины из `platform.marketplace_readiness()` — у страницы тени и у входов чеклиста готовности (шаг 173) */
+function propertyRow(r: Record<string, unknown>): MarketplaceProperty {
+  return {
+    channel: r.channel as string, marketplace: r.marketplace as string, country: r.country as string,
+    property: r.property as string, value: (r.value as string | null) ?? null, status: r.status as string,
+    question: (r.question as string | null) ?? null, closesBy: r.closes_by as string, source: r.source as string,
+  };
+}
+
 /** Список сумм из базы: массив пар «валюта, сумма» [Р-71]; всё, что не пара, отбрасывается — цифра без валюты не деньги */
 const moneyList = (v: unknown): Array<{ currency: string; minor: number }> =>
   (Array.isArray(v) ? v : []).flatMap((e) => {
@@ -177,6 +186,25 @@ export class PgShadowStore {
   /**
    * Сводка и страница удержанных записей. `sinceDays` — окно отчёта; по умолчанию неделя, как у дайджеста [Р-171].
    */
+  /**
+   * Шаг 173 (#35): то, что чеклисту готовности нужно от тени, — свойства витрин аккаунтов тенанта и закрытая для боевых записей база; те же два
+   * запроса, что у страницы тени, без сводки недели, графика и дайджестов
+   */
+  async readinessInputs(tenantId: string): Promise<Pick<ShadowPage, 'properties' | 'liveWritesRefused'>> {
+    return inTenant(this.pools.adminPool, tenantId, async (tx) => {
+      const [properties, guard] = await Promise.all([
+        tx.query(
+          `SELECT r.* FROM platform.marketplace_readiness() r
+            WHERE EXISTS (SELECT 1 FROM tenant_data.channel_account ca
+                           WHERE ca.tenant_id = $1 AND ca.disconnected_at IS NULL
+                             AND ca.channel = r.channel AND r.marketplace = ANY (ca.marketplaces))
+            ORDER BY r.channel, r.marketplace, r.property`, [tenantId]),
+        tx.query(`SELECT security.live_writes_refused($1) AS refused`, [tenantId]),
+      ]);
+      return { properties: properties.rows.map(propertyRow), liveWritesRefused: guard.rows[0]?.refused === true };
+    });
+  }
+
   async shadowPage(tenantId: string, now: Instant, query: { offset: number; limit: number; sinceDays?: number; since?: Instant; until?: Instant }): Promise<ShadowPage> {
     const sinceDays = query.sinceDays ?? 7;
     // Окно отчёта ограничено и здесь, а не только маршрутом: хранилище зовут и прогоны, и исполнитель дайджеста
@@ -333,11 +361,7 @@ export class PgShadowStore {
           changedFrom: (r.from_mode as 'SHADOW' | 'LIVE' | null) ?? null,
           offers: num(r.offers), engineScopes: num(r.engine_scopes),
         })),
-        properties: properties.rows.map((r) => ({
-          channel: r.channel as string, marketplace: r.marketplace as string, country: r.country as string,
-          property: r.property as string, value: (r.value as string | null) ?? null, status: r.status as string,
-          question: (r.question as string | null) ?? null, closesBy: r.closes_by as string, source: r.source as string,
-        })),
+        properties: properties.rows.map(propertyRow),
         digests: digests.rows.map((r) => ({
           periodStart: r.period_start as Instant, periodEnd: r.period_end as Instant,
           decisions: num(r.decisions), heldWrites: num(r.held_writes), floorSavings: moneyList(r.floor_savings),

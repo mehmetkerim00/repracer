@@ -149,6 +149,11 @@ function accountsOf(scenario: Scenario): StandAccount[] {
 export interface ShadowReader {
   shadowPage(tenantId: string, now: string, query: { offset: number; limit: number; sinceDays?: number }): Promise<ShadowPage>;
   switchWriteMode(tenantId: string, change: ShadowModeChange): Promise<ShadowModeResult>;
+  /**
+   * Шаг 173: то, что чеклисту готовности нужно от тени, — свойства витрин аккаунтов и закрытая база, без сводки недели (на QA-A маршрут
+   * чеклиста через страницу тени шёл 2,2 с). Нет метода — маршрут читает страницу тени, как раньше
+   */
+  readinessInputs?(tenantId: string): Promise<Pick<ShadowPage, 'properties' | 'liveWritesRefused'>>;
 }
 
 export interface StandOptions {
