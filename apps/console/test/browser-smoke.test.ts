@@ -2324,10 +2324,10 @@ test('step 105 (D) [Р-230]: Offers — filter row with two exports, Buy Box col
   await waitFor(b, `${sortState}[1] === 'ascending'`, 'price sorted ascending');
   await b.evaluate(`(document.querySelectorAll('table.products thead th[aria-sort] button')[1].click(), true)`);
   await waitFor(b, `${sortState}[1] === 'descending'`, 'price sorted descending');
-  // Фильтр держателя «нет данных конкурентов» — строка «N of M offers match the filter»
+  // Фильтр держателя «нет данных конкурентов» — строка «Showing N of M offers» (шаг 175; было «N of M offers match the filter»)
   await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')].find((x) => [...x.options].some((o) => o.value === 'NO_DATA'));
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'NO_DATA'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-  await waitFor(b, `/ offers match the filter$/.test(document.querySelector('.section-sub')?.textContent ?? '')`, 'the page says how many offers match');
+  await waitFor(b, `/^Showing \\d+ of \\d+ offers$/.test(document.querySelector('.section-sub')?.textContent ?? '')`, 'the page says how many offers it shows');
   await b.evaluate(`(() => { const s = [...document.querySelectorAll('form.export-bar select')].find((x) => [...x.options].some((o) => o.value === 'NO_DATA'));
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ''); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await settled(b, 'filter cleared');
@@ -2681,15 +2681,17 @@ test('step 112 [Р-238]: quiet chips 6 px from the name on the middle of the lin
       assert.equal(of('Travel mug', 'grey')?.ref, 'grey', `${theme}: eBay without an ID — the color only`);
       assert.equal(of('Bike light', null)?.ref, null, `${theme}: eBay without an ID and a color — no second line`);
       assert.equal(of('Desk lamp, large', null)?.ref, 'Walmart ID 70012', `${theme}: Walmart — its ID by the channel name`);
-      // Компактные строки — только цвет: идентификатор прячется, цвет остаётся (без него две «Travel mug» одной площадки не различить)
-      // Вид Offers читается из хранилища при открытии экрана: уход на другой экран и возврат открывают его заново
+      // Шаг 175 (QA-A Testing 2.0, этап 4): компактные строки — стандарт, и в них видны и цвет, и идентификатор в канале (прежде компактный вид
+      // прятал идентификатор — варианты одного товара в выборе было не различить). Прежнее сохранённое «compact» ничего не меняет
       await b.evaluate(`(localStorage.setItem('repracer.products.view', JSON.stringify({ compact: true })), true)`);
       await go('costs');
       await go('products');
-      const compact = await b.evaluate<Array<{ variant: boolean; ids: boolean }>>(`[...document.querySelectorAll('table.products tbody tr .product-ref')].map((p) => ({
+      const compact = await b.evaluate<Array<{ variant: boolean; hasIds: boolean; ids: boolean }>>(`[...document.querySelectorAll('table.products tbody tr .product-ref')].map((p) => ({
         variant: !!p.querySelector('.unit-variant') && p.querySelector('.unit-variant').getBoundingClientRect().height > 0,
+        hasIds: !!p.querySelector('.channel-ids'),
         ids: !!p.querySelector('.channel-ids') && p.querySelector('.channel-ids').getBoundingClientRect().height > 0 }))`);
-      assert.ok(compact.filter((x) => x.variant).length === 10 && compact.every((x) => !x.ids), `${theme}: compact rows keep the color and hide the channel ID — ${JSON.stringify(compact)}`);
+      assert.ok(compact.filter((x) => x.variant).length === 10 && compact.some((x) => x.hasIds) && compact.every((x) => x.ids === x.hasIds),
+        `${theme}: compact rows show the color and the channel ID — ${JSON.stringify(compact)}`);
       await b.evaluate(`(localStorage.removeItem('repracer.products.view'), true)`);
       // Costs & floors — список границ: цвет второй строкой под названием, кружок у известного слова
       await go('costs');
@@ -2789,7 +2791,7 @@ test('step 139 (BUG-01, BUG-02): Shadow mode blocks stay open over «Older» and
 
 /**
  * Шаг 146 (#34, ярус 1): строка состояния — первая на каждом экране пространства, на четырёх языках, в обеих темах; ссылка «требует внимания»
- * ведёт в Offers с фильтром, и Offers называет то же число («N of M offers match the filter»), ссылка причины — с её числом; остановки — на
+ * ведёт в Offers с фильтром, и Offers называет то же число («Showing N of M offers», шаг 175), ссылка причины — с её числом; остановки — на
  * Stop pricing. На 375 — части столбцом, страница не уезжает вбок, ссылки — цели касания 44 px (правило шага 85 знает `.status-line a`)
  */
 const STATUS = `(() => { const n = document.querySelector('.world-content > nav.status-line:first-child');
@@ -3155,6 +3157,63 @@ const LONG_HELP = `(() => {
  * окно «since …» от прежнего визита, заметка о визите, и ссылка группы несёт тот же момент
  */
 /**
+ * Шаг 175 (QA-A Testing 2.0, этап 4): быстрые правки UX. Offers — компактные строки без выбора плотности, идентификатор в канале виден.
+ * Costs & floors — заданный минимум и действующий пол разными колонками; в списке выбора — цвет и идентификатор. Массовая правка: Preview
+ * неактивна, пока не выбрано, что менять; Apply неактивна, когда правка ничего не меняет, — обе говорят почему
+ */
+test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+  await settled(b, 'offers');
+  const offers = await b.evaluate<{ compact: boolean; toggles: number; ids: number; visible: number }>(`(() => {
+    const ids = [...document.querySelectorAll('table.products .product-ref .channel-ids')];
+    return { compact: document.querySelector('table.products').classList.contains('compact'), toggles: document.querySelectorAll('.view-options > .check-field').length,
+      ids: ids.length, visible: ids.filter((x) => getComputedStyle(x).display !== 'none').length }; })()`);
+  assert.deepEqual([offers.compact, offers.toggles], [true, 0], 'compact rows are the standard — no density checkbox');
+  assert.ok(offers.ids > 0 && offers.visible === offers.ids, `the channel IDs are shown in compact rows: ${JSON.stringify(offers)}`);
+
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+  await settled(b, 'costs');
+  const costs = await b.evaluate<{ heads: string[]; picks: number; withRef: number }>(`({ heads: [...document.querySelectorAll('.costs table thead th')].map((x) => x.textContent.trim()),
+    picks: document.querySelectorAll('.bounds-edit .pick-list li').length, withRef: document.querySelectorAll('.bounds-edit .pick-list li .product-ref').length })`);
+  assert.ok(costs.heads.includes(en.ui.bounds.indexColumns.min) && costs.heads.includes(en.ui.products.columns.floor), `the minimum and the effective floor apart: ${costs.heads.join(' | ')}`);
+  assert.ok(costs.withRef > 0, `the pick list names offers with their color or channel ID: ${costs.withRef} of ${costs.picks}`);
+
+  const e = en.ui.boundsEdit;
+  const button = (text: string) => `[...document.querySelectorAll('.bounds-edit button')].find((x) => x.textContent.trim() === ${JSON.stringify(text)})`;
+  await b.evaluate(`(document.querySelectorAll('.bounds-edit .pick-list li input')[0].click(), true)`);
+  await new Promise((x) => setTimeout(x, 200));
+  const keep = await b.evaluate<{ disabled: boolean; hint: string }>(`({ disabled: ${button(e.plan)}.disabled, hint: document.querySelector('.bounds-edit .form-hint')?.textContent.trim() ?? '' })`);
+  assert.deepEqual(keep, { disabled: true, hint: e.problems.NOTHING_TO_CHANGE }, 'nothing chosen to change — Preview is off and says why');
+  // Минимум — тот же, что у предложения: правка ничего не меняет
+  const min = await b.evaluate<string>(`document.querySelectorAll('.costs table tbody tr')[0].children[1].textContent.trim()`);
+  const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
+  await b.evaluate(`(() => { const s = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'SET'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.evaluate(`(() => { const i = ${field(e.amountLabel)}.querySelector('input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(min.replace(/[^\d.]/g, ''))}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.click(e.plan, '.bounds-edit button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.bounds-edit section.diff tbody tr') !== null`, 'the differences are shown');
+  const same = await b.evaluate<{ disabled: boolean; hint: string }>(`({ disabled: ${button(e.apply)}.disabled, hint: document.querySelector('.bounds-edit .form-hint')?.textContent.trim() ?? '' })`);
+  assert.deepEqual(same, { disabled: true, hint: e.nothingWouldChange }, `the same minimum ${min} — Apply is off and says why`);
+  await b.click(e.back, '.bounds-edit button');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
  * Шаг 174 (QA-A Testing 2.0, BUG-01, BUG-02, BUG-05): массовая правка границ на Costs & floors. Минимум выше максимума — один отказ словами до
  * задания (было — три плашки «unexpected error (code MIN_ABOVE_MAX)»). После «Done» таблица границ и список выбора показывают
  * новые значения сами, без перезагрузки страницы; то же — у импорта границ на том же экране. Фраза «идёт в фоне» живёт, пока идёт задание:
@@ -3181,9 +3240,9 @@ test('step 174 (BUG-01, BUG-02, BUG-05): Costs & floors — min above max is one
   // Строка таблицы границ и пункт списка выбора — одного предложения: оба — из одной страницы списка, в одном порядке
   const at = await b.evaluate<number>(`[...document.querySelectorAll('.costs table tbody tr')].findIndex((tr) => tr.querySelector('a')?.getAttribute('href')?.endsWith(${JSON.stringify(`/bounds/${target.writeScopeId}`)}))`);
   assert.ok(at >= 0, 'the offer is on the first page of the bounds table');
-  const read = () => b.evaluate<{ min: string; max: string; pick: string }>(`(() => {
+  const read = () => b.evaluate<{ name: string; min: string; max: string; pick: string }>(`(() => {
     const tr = document.querySelectorAll('.costs table tbody tr')[${at}];
-    return { min: tr.children[1].textContent.trim(), max: tr.children[2].textContent.trim(),
+    return { name: tr.querySelector('.unit-title').textContent.trim(), min: tr.children[1].textContent.trim(), max: tr.children[2].textContent.trim(),
       pick: document.querySelectorAll('.bounds-edit .pick-list li')[${at}].textContent.replace(/\\s+/g, ' ').trim() }; })()`);
   const was = await read();
   // Смоук-мир общий у тестов файла: границы сдвигаются на цент — соседи (шаг 163 и др.) видят почти прежние числа
@@ -3205,9 +3264,8 @@ test('step 174 (BUG-01, BUG-02, BUG-05): Costs & floors — min above max is one
   await new Promise((x) => setTimeout(x, 300));
   const refusal = await b.evaluate<{ boxes: number; text: string; jobs: number }>(`(() => { const boxes = [...document.querySelectorAll('.costs .error')];
     return { boxes: boxes.length, text: boxes.map((x) => x.innerText).join(' | '), jobs: document.querySelectorAll('.bounds-edit section.job').length }; })()`);
-  const label = was.pick.replace(/[€$][\d.,]+ – [€$][\d.,]+$/, '').trim();
   assert.equal(refusal.boxes, 1, `one refusal, not three: ${refusal.text}`);
-  assert.ok(refusal.text.includes(label) && refusal.text.includes(was.max) && refusal.text.includes(en.ui.boundsEdit.problems.nothingChanged), `the offer, the maximum and «nothing changed»: ${refusal.text}`);
+  assert.ok(refusal.text.includes(was.name) && refusal.text.includes(was.max) && refusal.text.includes(en.ui.boundsEdit.problems.nothingChanged), `the offer, the maximum and «nothing changed»: ${refusal.text}`);
   assert.ok(!/MIN_ABOVE_MAX|code |ws-price|_price/.test(refusal.text), `no code, no internal ID: ${refusal.text}`);
   assert.equal(refusal.jobs, 0, 'no job was started for a refusal that is known before');
 

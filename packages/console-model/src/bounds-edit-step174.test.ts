@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { boundsProblemsText, expandBoundsEdit, PROBLEM_OFFERS_SHOWN } from './bounds-edit.ts';
-import { messagesFor, type Locale } from './i18n/index.ts';
+import { messagesFor } from './i18n/index.ts';
+import type { Locale } from './i18n/types.ts';
 import { bulkJobView } from './jobs.ts';
 
 /**

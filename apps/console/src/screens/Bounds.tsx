@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, DateTimeField, errorText, Gaps, Help, href, Load, NotFound, Pager, SectionAnchor, UnitName, useMessages } from '../components.tsx';
+import { Badge, Cell, DateTimeField, errorText, Gaps, Help, href, Load, NotFound, Pager, ProductRef, SectionAnchor, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 
@@ -288,14 +288,18 @@ export function BoundsIndexView({ worldId, items, embedded = false }: { worldId:
       {items.length === 0 ? null : (
         <div className="table-wrap">
           <table className="cardify">
-            <thead><tr><th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th /></tr></thead>
+            {/* Шаг 175 (QA-A Testing 2.0, этап 4): заданный минимум и действующий пол — разные колонки: пол бывает выше минимума (маржа, безубыточность) */}
+            <thead><tr><th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th className="num">{m.ui.products.columns.floor}</th><th /></tr></thead>
             <tbody>
               {items.map((i) => (
                 <tr key={i.writeScopeId}>
-                  <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}><UnitName unit={i} /></a></td>
+                  <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}><UnitName unit={i} variant={false} /></a><ProductRef unit={i} /></td>
                   {/* Шаг 152 (#27, UX-04): пустая граница — «Not set» словами, приглушённо и без моноширинного шрифта сумм */}
                   <td className={i.minPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.min}>{i.minPrice}</td>
                   <td className={i.maxPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.max}>{i.maxPrice}</td>
+                  <td className={i.floor.missing ? 'num muted empty-value' : 'num money cur'} data-label={m.ui.products.columns.floor}>
+                    {i.floor.missing ? i.floor.amount : <strong>{i.floor.amount}</strong>}<div className="muted small floor-parts">{i.floor.parts}</div>
+                  </td>
                   <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
                 </tr>
               ))}

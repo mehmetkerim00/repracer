@@ -6,7 +6,7 @@ export { humanDate, monthDay, nameTag, tableWhenParts, zoneName } from './i18n/s
 export type { Fmt, Locale, Template } from './i18n/types.ts';
 /** Права по роли [OQ-125] — те же, что проверяют хранилище и БД */
 export { can, EXTENDED_ROLES, holdsOwnerActions, offeredRoles, VISIBLE_ROLES, type MemberRole, type PricingAction } from '@repracer/pricing-model';
-export { boundText, channelNotes, noteBlocksPricing, notAssignedText, productList, strategyLabel, type ChannelNote, type FloorCell, type MissingSetup, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
+export { boundText, channelNotes, noteBlocksPricing, notAssignedText, offerChoiceText, productList, strategyLabel, type ChannelNote, type FloorCell, type MissingSetup, type ProductListView, type ProductRow, type StrategyLabel } from './products.ts';
 export { decisionItems, decisionListView, type DecisionListView, decisionTrace, explanationOf, isDangerous, noChangeTitle, triggerChip, triggerPhrase, type DecisionListItem, type DecisionTrace, type ItemOutcome, type StepStatus, type TraceCompetitors, type TraceItem, type TraceStep, type TraceStepKey, type TraceSummary } from './trace.ts';
 export { rejectedView, type RejectedItem, type RejectedKind, type RejectedView } from './rejected.ts';
 export { decisionStatus, PRICE_STATUS_TONE, type PriceStatus } from './statuses.ts';

@@ -364,7 +364,10 @@ test('Р-131, G: without the declared cost the screen shows a requirement, not a
     [false, ['COST_REQUIRED'], [['MARGIN_WITHOUT_COST', []]]]);
   assert.equal(first.warnings[0]!.text, 'Hinweis: die Strategie Zielmarge und die Mindestmarge 15 % brauchen die Stückkosten, aber die Stückkosten sind nicht gesetzt. Bis dahin würde jeder Preis abgelehnt.');
   const dialog = await html('/src/screens/Products.tsx', 'EnableResultView', { unit: scope.unit.label, result: first, busy: false, error: null, onAcknowledge: () => {}, onClose: () => {} }, 'de');
-  assert.ok(dialog.includes(first.problems[0]!.text), first.problems[0]!.text);
+  // Шаг 175: в окне причина — без повтора заголовка «Repricing nicht aktiviert»; суть — та же
+  const prefix = messagesFor('de').ui.app.dialog.refusedTitle('');
+  const essence = first.problems[0]!.text.slice(prefix.length);
+  assert.ok(first.problems[0]!.text.startsWith(prefix) && dialog.includes(essence.charAt(0).toUpperCase() + essence.slice(1)), first.problems[0]!.text);
   // Р-131: подтверждения нет — кнопки «всё равно включить» на экране с препятствием не существует
   assert.equal(dialog.includes('Trotzdem aktivieren'), false, dialog);
   const acknowledged = (await call(operator, 'POST', api(id, 'scopes', scope.unit.writeScopeId, 'enable'), { acknowledgeWarnings: true })).body as EnableResult;
@@ -1460,6 +1463,23 @@ test('step 174 (BUG-03, BUG-04): without break-even the clearance section is the
 });
 
 /**
+ * Шаг 175 (QA-A Testing 2.0, этап 4): окно отказа включения говорило «Repricing not enabled» в заголовке и ещё раз в начале КАЖДОЙ причины.
+ * Теперь фраза — один раз, заголовком; причины начинаются с сути («Your minimum price is not set.»). Четыре языка
+ */
+test('step 175: the enable refusal says «Repricing not enabled» once — in the title, not again in every reason', async () => {
+  for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(locale);
+    const problems = ['MIN_PRICE_MISSING', 'MAX_PRICE_MISSING', 'STRATEGY_MISSING'].map((code) => describe({ code, params: {} } as never, m));
+    const prefix = m.ui.app.dialog.refusedTitle('');
+    assert.ok(problems.every((r) => r.text.startsWith(prefix)), `${locale}: the reasons start with the title phrase — «${prefix}»`);
+    const markup = await html('/src/screens/Products.tsx', 'EnableResultView', { unit: 'Desk lamp · amazon.com', result: { enabled: false, problems, warnings: [] },
+      busy: false, error: null, onAcknowledge: () => {}, onClose: () => {} }, locale);
+    const text = markup.replace(/<[^>]+>/g, ' ');
+    assert.equal(text.split(prefix.trim()).length - 1, 1, `${locale}: «${prefix.trim()}» once — ${text}`);
+  }
+});
+
+/**
  * Шаг 103 [Р-228]: стратегия по умолчанию для новых предложений аккаунта — маршрутом экрана Channels. Задаёт тот, кто назначает стратегии
  * (владелец, менеджер); недоступная на канале стратегия — отказ с причиной словами [Р-39]; неверный запрос — 400, чужой аккаунт — 404
  */
@@ -2135,5 +2155,8 @@ test('step 148 (#27, UX-05): the enable refusal lists every missing item with a 
     ['MIN_PRICE', '#/w/demo%2Fus/costs/edit/ws-148', en.ui.products.missingItems.MIN_PRICE],
     ['MAX_PRICE', '#/w/demo%2Fus/costs/edit/ws-148', en.ui.products.missingItems.MAX_PRICE],
   ], 'every missing item links to where it is set');
-  assert.ok(dialog.includes(refusal.problems[0]!.text), 'the refusal itself is unchanged');
+  // Шаг 175: причина — без «Repricing not enabled», которое уже сказал заголовок окна; суть причины прежняя
+  const prefix = en.ui.app.dialog.refusedTitle('');
+  const essence = refusal.problems[0]!.text.slice(prefix.length);
+  assert.ok(refusal.problems[0]!.text.startsWith(prefix) && dialog.includes(essence.charAt(0).toUpperCase() + essence.slice(1)), 'the refusal itself, without the title phrase again');
 });

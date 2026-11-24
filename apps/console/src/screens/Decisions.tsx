@@ -79,7 +79,8 @@ export function TraceView({ trace, embedded = false }: { trace: DecisionTrace; e
             {s.trigger ? <div><dt>{t.trigger}</dt><dd>{s.trigger}</dd></div> : null}
             {s.proposed ? <div><dt>{t.summaryLabels.proposed}</dt><dd>{s.proposed}</dd></div> : null}
             {trace.headlinePrice ? <div><dt>{t.summaryLabels.decision}</dt><dd>{s.decision}</dd></div> : null}
-            <div><dt>{t.titles.WRITE}</dt><dd>{s.sending}</dd></div>
+            {/* Шаг 175: подпись — та же, что у станции отправки: в тени «Not sent — shadow mode», а не «Sending to your store» */}
+            <div><dt>{trace.steps.find((x) => x.key === 'WRITE')?.title ?? t.titles.WRITE}</dt><dd>{s.sending}</dd></div>
           </dl>
           {/* Шаг 102 [Р-227]: пол ниже безубыточности намеренно — пол, убыток на штуку, кто включил, когда и зачем */}
           {trace.clearance ? <p className="clearance-line">{trace.clearance.line}</p> : null}

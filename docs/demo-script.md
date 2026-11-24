@@ -208,7 +208,7 @@ are always in English.» Нажатие — фоновое задание, по�
 любом языке — на них держатся формулы и интеграции; больше 50 000 строк — честный отказ «narrow the period», а не обрезанный файл; каждая
 выгрузка — в журнале аудита. **В публичном демо** (вход гостем) кнопка видна, но отключена: «Export is not available in the public demo».
 
-**Сводка Buy Box** (шаг 105, Р-230). На **Offers** в **Columns** включите «Buy Box holder», «Buy Box price», «Gap» и «BB share 7d»: у walmart.com
+**Сводка Buy Box** (шаг 105, Р-230). На **Offers** в **Columns** включите «Buy Box holder», «Buy Box price», «Gap» и «Buy Box share (7 days)»: у walmart.com
 держатель назван (You или продавец), разрыв со знаком и доля за 7 дней; у amazon.com — «Unknown»: Amazon называет цену Buy Box, но не держателя
 (это не «другой продавец»); у ebay.com — прочерки: конкурентов eBay не даёт. Нажмите заголовок «Gap» — весь каталог упорядочен по разрыву; фильтр
 **Buy Box → Another seller** — где Buy Box не наш. Наведите на ячейку — момент и возраст снимка. «Export competitors» — первые 10 конкурентов
@@ -227,7 +227,7 @@ are always in English.» Нажатие — фоновое задание, по�
 - **Price Gate:** «Price $14.00 approved within $14.00–$50.00.», «Floor: $14.00», «Minimum margin: 12%».
 - **Input check:** «Snapshot accepted: 9 rules checked»; «Anchor 2: consistency of the snapshot» — «skipped», «fewer competitor offers
   than the 3 needed» — правило и порог, без чисел канала.
-- **Sending to your store:** «$14.00: held by shadow mode (not sent)», «Not sent: this channel account is in shadow mode, so nothing is
+- **Not sent — shadow mode** (в тени станция так и называется, шаг 175): «$14.00: held by shadow mode (not sent)», «Not sent: this channel account is in shadow mode, so nothing is
   sent to your store…».
 
 Что сказать:

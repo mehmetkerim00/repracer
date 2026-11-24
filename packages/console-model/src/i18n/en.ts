@@ -494,7 +494,7 @@ export const en = {
         compliance: 'Evidence of your prior prices for discounts on EU storefronts (Omnibus).',
         products: 'Every offer with its price, bounds and strategy — one row per offer.',
         decisions: 'Every price decision, newest first; open one to see why the price is what it is.',
-        trace: 'One decision, step by step: the competitor snapshot, the checks, the strategy, the Price Gate and the update sent to your store.',
+        trace: 'One decision, step by step: the competitor snapshot, the checks, the strategy, the Price Gate and whether the price went to your store.',
         strategies: 'How prices are computed: your strategies, where they apply and a preview before anything is saved.',
         feed: 'Every price sent to a channel or held, and every decision behind it — open one to see why the price is what it is.',
         rejected: 'Changes your bounds rejected, blocked or adjusted to a limit — dangerous ones are shown separately.',
@@ -1398,14 +1398,14 @@ export const en = {
       bulkEdit: 'Bulk operations',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,
       clock: (now: string) => `Simulated time: ${now}.`,
-      columns: { margin: 'Margin', health: 'Health', unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'BB share 7d' },
+      columns: { margin: 'Margin', health: 'Health', unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'Buy Box share (7 days)' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'What to do',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
       healthNoUnitCost: 'Import the unit cost and fees of this offer on Costs & floors.',
       healthTurnedOff: 'A person turned off automatic pricing for this offer. To let TMPrice price it again, choose «Enable» in the Status column.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart hides this offer because the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''}. To show it again, bring the walmart.com price close to that price — only if your floor allows. TMPrice never changes the price for this on its own.`,
-      conditions: { used: 'used', refurbished: 'refurbished', collectible: 'collectible' }, viewOptions: { columns: 'Columns', compact: 'Compact rows' },
+      conditions: { used: 'used', refurbished: 'refurbished', collectible: 'collectible' }, viewOptions: { columns: 'Columns' },
       productRef: (ref: string, condition: string, gtin: string | null) => `product ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
       // Шаг 112 [Р-238]: идентификатор товара в канале — именем канала (у Amazon — ASIN), а не словом «product»; пустой — не показывается.
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
@@ -1441,7 +1441,7 @@ export const en = {
         pricing: 'Repricing', anyPricing: 'Any', pricingValues: { ON: 'On', OFF: 'Off' },
         holders: { SELF: 'You', OTHER: 'Another seller', NONE: 'No one', UNKNOWN: 'Holder unknown', NO_DATA: 'No competitor data' },
         search: 'Search', searchPlaceholder: 'SKU, EAN or name',
-        matched: (n: number, total: number) => `${n} of ${total} offers match the filter`,
+        matched: (n: number, total: number) => `Showing ${n} of ${total} offers`,
         attention: 'Needs attention', anyAttention: 'All offers',
         attentionValues: { ANY: 'Any reason', NO_UNIT_COST: 'No unit cost or fees', AUTOMATED_PRICING: 'Amazon repricer on', CHANNEL_BOUNDS: 'Amazon bounds not read', NOT_BUYABLE: 'Not buyable', TURNED_OFF: 'Turned off' },
         // Шаг 171 (#34): финансовые исключения
@@ -1659,7 +1659,7 @@ export const en = {
       dangerousBadge: 'dangerous change', limitNote: (text: string) => `Cannot be explained further: ${text}`,
       status: { OK: 'passed', STOP: 'stopped', WARN: 'with remarks', SKIPPED: 'not needed', UNKNOWN: 'no data' },
       marks: { PASS: '✓ passed', FAIL: '✗ failed', SKIPPED: '– skipped', NOT_RUN: '· not checked', INFO: '•' },
-      titles: { SNAPSHOT: 'Competitor snapshot', SANITY: 'Input check', ANCHORS: 'Plausibility anchors', STRATEGY: 'Strategy', GATE: 'Price Gate', WRITE: 'Sending to your store', CHANNEL: 'Channel confirmation' },
+      titles: { SNAPSHOT: 'Competitor snapshot', SANITY: 'Input check', ANCHORS: 'Plausibility anchors', STRATEGY: 'Strategy', GATE: 'Price Gate', WRITE_SHADOW: 'Not sent — shadow mode', WRITE: 'Sending to your store', CHANNEL: 'Channel confirmation' },
       // Шаг 116 [Р-241]: повторы не пишутся строками журнала: строка называет их число
       checkedSince: (n: number, when: string) => `Same state on ${n} more ${n === 1 ? 'check' : 'checks'}, last ${when}`,
       checkedBefore: (n: number) => `After ${n} ${n === 1 ? 'check' : 'checks'} with no change of state`,
@@ -2166,13 +2166,17 @@ export const en = {
       selectionReset: 'Paging or changing the filter clears the selection of individual rows.',
       selectNone: 'Select none', badInput: (text: string) => `“${text}” is not an amount or a percentage`,
       plan: 'Preview changes', apply: 'Apply', back: 'Change the request',
+      /** Шаг 175: применять нечего — кнопка неактивна и говорит почему */
+      nothingWouldChange: 'Nothing would change: every selected offer already has these bounds.',
       columns: { offer: 'Offer', minBefore: 'min before', minAfter: 'min after', maxBefore: 'max before', maxAfter: 'max after', price: 'Current price', notes: 'Attention' },
       stats: { offers: 'Offers', changed: 'Will change', unchanged: 'Unchanged', flagged: 'Need attention', pricesOutside: 'Price outside the new bounds' },
       statsLabel: 'Summary of the changes',
       mfa: 'More than one offer: applying requires a sign-in with a second factor.',
       flags: {
-        PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `the current price ${price} is below the new minimum price ${floor}: the next decision will raise it`,
-        PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `the current price ${price} is above the new maximum price ${ceiling}: the next decision will lower it`,
+        PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `the current price ${price} is below the new minimum price ${floor}`,
+        PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `the current price ${price} is above the new maximum price ${ceiling}`,
+        /** Шаг 175: в тени новые цены только считаются — пометка не обещает, что цену поправит следующее решение */
+        shadowNote: 'shadow mode: new prices are only calculated, nothing is sent to your store',
         BIG_CHANGE: (pct: string) => `a bound moves by more than ${pct}`,
         MARGIN_FLOOR_ABOVE_MIN: (floor: string) => `the minimum-margin floor ${floor} stays above your minimum price — prices still never go below ${floor}`,
         NO_EFFECT: 'no effect: the product-level bound stays decisive',

@@ -462,8 +462,18 @@ function traceSummary(steps: readonly TraceStep[], status: PriceStatus, headline
   };
 }
 
+/**
+ * Шаг 175 (QA-A Testing 2.0, этап 4): в тени станция отправки не называется «Sending to your store» — цена не уходит в магазин: «Not sent —
+ * shadow mode». Решение тени — последняя запись удержана тенью или записи нет, а решение помечено тенью (`price_decision.shadow`)
+ */
+export function writeTitleOf(d: Pick<ConsoleDecision, 'shadow'>, writes: readonly Pick<ConsoleWrite, 'status'>[], m: Messages): string {
+  const last = writes[writes.length - 1];
+  const shadow = last ? last.status === 'SHADOW_HELD' : d.shadow === true;
+  return shadow ? m.ui.trace.titles.WRITE_SHADOW : m.ui.trace.titles.WRITE;
+}
+
 function writeStep(d: ConsoleDecision, writes: readonly ConsoleWrite[], m: Messages, boundsHeld: TraceItem | null = null): TraceStep {
-  const t = m.ui.trace;
+  const t = { ...m.ui.trace, titles: { ...m.ui.trace.titles, WRITE: writeTitleOf(d, writes, m) } };
   const money = (v: number) => m.money(v, d.currency);
   const status = (s: string) => (m.ui.writeStatus as Record<string, string | undefined>)[s] ?? s;
   if (writes.length === 0) {

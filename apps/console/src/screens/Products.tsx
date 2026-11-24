@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_MONEY_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, Cell, ColorVariant, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ReasonLine, SellerName, UnitName, useMessages } from '../components.tsx';
+import { Badge, Cell, ColorVariant, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ProductRef, ReasonLine, SellerName, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FormActions } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
@@ -58,13 +58,14 @@ function defaultColumns(view: ProductListView): Record<OptionalColumn, boolean> 
   return { margin: true, ceiling: false, strategy: true, health: view.rows.some((r) => r.health !== null), lastChange: false, nextCheck: false, ...BUYBOX_DEFAULTS };
 }
 /** Выбор колонок и плотность — удобство одного зрителя: браузерное хранилище, без него — умолчания (шаг 79) */
-function readView(view: ProductListView): { columns: Record<OptionalColumn, boolean>; compact: boolean } {
-  const fallback = { columns: defaultColumns(view), compact: false };
+/** Шаг 175 (QA-A Testing 2.0, этап 4): компактные строки — постоянный стандарт; выбора плотности больше нет */
+function readView(view: ProductListView): { columns: Record<OptionalColumn, boolean> } {
+  const fallback = { columns: defaultColumns(view) };
   try {
     const raw = globalThis.localStorage?.getItem(VIEW_KEY);
     if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as { columns?: Partial<Record<OptionalColumn, boolean>>; compact?: boolean };
-    return { columns: { ...fallback.columns, ...(parsed.columns ?? {}) }, compact: parsed.compact === true };
+    const parsed = JSON.parse(raw) as { columns?: Partial<Record<OptionalColumn, boolean>> };
+    return { columns: { ...fallback.columns, ...(parsed.columns ?? {}) } };
   } catch { return fallback; }
 }
 
@@ -191,10 +192,9 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                 ))}
               </div>
             </details>
-            <CheckField label={p.viewOptions.compact} checked={shown.compact} onChange={(on) => update({ ...shown, compact: on })} />
           </span>
         </div>
-        <table className={`products sticky-end${shown.compact ? ' compact' : ''}${col.health ? ' with-health' : ''}`}>
+        <table className={`products sticky-end compact${col.health ? ' with-health' : ''}`}>
           <thead>
             <tr>
               {/* Шаг 79 (ревью): статус — сразу после предложения: широкая таблица листается под закреплённой колонкой действий, и статус не прячется */}
@@ -285,6 +285,13 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
 }
 
 /** Итог попытки включения: отказы, предупреждения и явное «всё равно включить» (шаг 12, G) */
+/** Шаг 175: у причины отказа снимается приставка, которую уже сказал заголовок окна; первая буква остатка — заглавная */
+function withoutPrefix<T extends { text: string }>(reason: T, prefix: string): T {
+  if (prefix === '' || !reason.text.startsWith(prefix)) return reason;
+  const rest = reason.text.slice(prefix.length);
+  return { ...reason, text: rest.charAt(0).toLocaleUpperCase() + rest.slice(1) };
+}
+
 export function EnableResultView(props: { unit: string; worldId?: string; result: EnableResult | null; busy: boolean; error: string | null; onAcknowledge: () => void; onClose: () => void;
   /** Шаг 148 (#27, UX-05): что добавить для включения — каждое со ссылкой туда, где это задают */
   missing?: { writeScopeId: string; items: readonly MissingSetup[] } }) {
@@ -303,7 +310,8 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
       {result && result.problems.length > 0 ? (
         <>
           <p><strong>{d.enableProblems}</strong></p>
-          <ul className="problems">{result.problems.map((r) => <li key={r.code}><ReasonLine reason={r} /></li>)}</ul>
+          {/* Шаг 175 (QA-A Testing 2.0, этап 4): заголовок уже сказал «Repricing not enabled» — причины его не повторяют */}
+          <ul className="problems">{result.problems.map((r) => <li key={r.code}><ReasonLine reason={withoutPrefix(r, d.refusedTitle(''))} /></li>)}</ul>
           {props.worldId && props.missing && props.missing.items.length > 0 ? (
             <>
               <p><strong>{m.ui.products.missingTitle}</strong></p>
@@ -363,20 +371,6 @@ export function DisableView(props: { unit: string; done: boolean; busy: boolean;
 }
 
 /** Шаг 112 [Р-238]: вторая строка предложения на Offers — цвет товара, идентификатор товара в канале и состояние, если оно не «новое» */
-function ProductRef({ unit }: { unit: ProductRow['unit'] }) {
-  const p = useMessages().ui.products;
-  const ids = p.productId(unit.channel, unit.channelProductRef, unit.gtin);
-  const condition = unit.condition && unit.condition.toLowerCase() !== 'new'
-    ? (p.conditions as Record<string, string | undefined>)[unit.condition.toLowerCase()] ?? unit.condition : null;
-  if (!unit.color && !ids && !condition) return null;
-  return (
-    <div className="product-ref">
-      {unit.color ? <ColorVariant color={unit.color} swatch={unit.swatch} /> : null}
-      {ids ? <span className="channel-ids">{unit.color ? ' · ' : ''}{ids}</span> : null}
-      {condition ? <Badge tone="off">{condition}</Badge> : null}
-    </div>
-  );
-}
 
 export function ProductsScreen({ worldId, initialAttention, initialQuery }: { worldId: string; initialAttention?: AttentionFilter; initialQuery?: OfferUiQuery }) {
   const m = useMessages();

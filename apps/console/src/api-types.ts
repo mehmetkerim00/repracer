@@ -67,8 +67,15 @@ export interface BoundsIndexItem {
   /** Шаг 112 [Р-238]: цвет товара — второй строкой под названием */
   color: string | null;
   swatch: Swatch | null;
+  /** Шаг 175 (QA-A Testing 2.0, этап 4): вторая строка — цвет, идентификатор в канале, состояние: варианты одного товара различимы */
+  channel: string;
+  channelProductRef: string;
+  gtin: string | null;
+  condition: string;
   minPrice: string;
   maxPrice: string;
+  /** Шаг 175: действующий пол рядом с заданным минимумом — с источником («from your minimum price», «from your margin floor») */
+  floor: { amount: string; parts: string; missing: boolean };
   /** Шаг 152 (#27, UX-04): границы нет — «Not set» обычным шрифтом, без моноширинного */
   minPriceMissing: boolean;
   maxPriceMissing: boolean;

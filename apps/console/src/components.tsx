@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
-import { LOCALES, messagesFor, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type StorefrontChip, type Swatch, type UnitRef } from '@repracer/console-model';
+import { LOCALES, messagesFor, offerChoiceText, PERIOD_PRESETS, tableWhenParts, type Gap, type HumanReason, type ListQuery, type Locale, type Messages, type PageInfo, type Period, type StatusCell, type StorefrontChip, type Swatch, type UnitRef } from '@repracer/console-model';
 import { ApiError, REQUEST_TIMEOUT_MS, requestJson, worldPath, type Resource } from './api.ts';
 import { Field, FormActions } from './forms.tsx';
 import { Octicon } from './icons.tsx';
@@ -64,6 +64,26 @@ export function UnitName({ unit, variant = true }: { unit: Pick<UnitRef, 'name' 
       <span className="unit-name"><span className="unit-title">{unit.name}</span> <StorefrontTag chip={unit.storefront} /></span>
       {variant && unit.color ? <span className="unit-variant-line"><ColorVariant color={unit.color} swatch={unit.swatch ?? null} /></span> : null}
     </>
+  );
+}
+
+/**
+ * Шаг 112 [Р-238]: вторая строка предложения — цвет товара (кружок и слово), идентификатор в канале его именем (ASIN, Walmart ID) и состояние,
+ * если не «new». Шаг 175 (QA-A Testing 2.0, этап 4): одна и та же строка в таблицах и в списках выбора — варианты одного товара (green / red)
+ * различимы везде, где предложение выбирают
+ */
+export function ProductRef({ unit }: { unit: Pick<UnitRef, 'channel' | 'channelProductRef' | 'gtin' | 'condition' | 'color' | 'swatch'> }) {
+  const p = useMessages().ui.products;
+  const ids = p.productId(unit.channel, unit.channelProductRef, unit.gtin);
+  const condition = unit.condition && unit.condition.toLowerCase() !== 'new'
+    ? (p.conditions as Record<string, string | undefined>)[unit.condition.toLowerCase()] ?? unit.condition : null;
+  if (!unit.color && !ids && !condition) return null;
+  return (
+    <div className="product-ref">
+      {unit.color ? <ColorVariant color={unit.color} swatch={unit.swatch} /> : null}
+      {ids ? <span className="channel-ids">{unit.color ? ' · ' : ''}{ids}</span> : null}
+      {condition ? <Badge tone="off">{condition}</Badge> : null}
+    </div>
   );
 }
 
@@ -488,7 +508,8 @@ export function OfferPicker({ worldId, value, onChange, allowEmpty = false, empt
       <input type="search" value={query} placeholder={o.search} onChange={(e) => setQuery(e.target.value)} {...(id ? { id } : {})} {...(describedBy ? { 'aria-describedby': describedBy } : {})} />
       <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={o.choose}>
         {allowEmpty ? <option value="">{emptyLabel}</option> : null}
-        {(found?.items ?? []).map((u) => <option key={u.writeScopeId} value={u.writeScopeId}>{u.label}</option>)}
+        {/* Шаг 175: в выборе — цвет и идентификатор в канале: у вариантов одного товара одинаковые названия */}
+        {(found?.items ?? []).map((u) => <option key={u.writeScopeId} value={u.writeScopeId}>{offerChoiceText(u, m)}</option>)}
       </select>
       {error ? <span className="small warn">{error}</span> : onCounter || counter === null ? null : <span className="small muted">{counter}</span>}
     </span>

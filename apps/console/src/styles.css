@@ -500,7 +500,7 @@ table.products td.health .cell { min-width: 100px; max-width: 140px; }
 table.products td.health .badge { white-space: normal; max-width: 100%; border-radius: var(--radius); }
 table.products.with-health td.strategy { white-space: normal; min-width: 120px; }
 table.products.compact td { padding-top: var(--base-size-6); padding-bottom: var(--base-size-6); }
-table.products.compact .product-ref .channel-ids, table.products.compact .product-ref .badge, table.products.compact .floor-parts, table.products.compact .cell-detail, table.products.compact a.secondary-link { display: none; }
+/* Шаг 175 (QA-A Testing 2.0, этап 4): компактные строки — стандарт; идентификатор, цвет, состав пола и ссылки строки видны всегда */
 .product-ref .badge { margin-left: var(--space-1); }
 td.strategy .strategy-name { font-weight: var(--weight-medium); }
 /* версии стратегии — строкой на версию, статус пилюлей (шаг 79) */

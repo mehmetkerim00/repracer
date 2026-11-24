@@ -471,7 +471,7 @@ export const de: Messages = {
         compliance: 'Nachweise Ihrer früheren Preise für Rabatte auf EU-Storefronts (Omnibus).',
         products: 'Jedes Angebot mit Preis, Grenzen und Strategie — eine Zeile pro Angebot.',
         decisions: 'Jede Preisentscheidung, die neueste zuerst; öffnen Sie eine, um zu sehen, warum der Preis so ist.',
-        trace: 'Eine Entscheidung Schritt für Schritt: Wettbewerbsdaten, Prüfungen, Strategie, Price Gate und die Übertragung an Ihren Shop.',
+        trace: 'Eine Entscheidung Schritt für Schritt: Wettbewerbsdaten, Prüfungen, Strategie, Price Gate und ob der Preis an Ihren Shop ging.',
         strategies: 'Wie Preise berechnet werden: Ihre Strategien, wo sie gelten, und eine Vorschau, bevor etwas gespeichert wird.',
         feed: 'Jeder Preis, der an einen Kanal ging oder zurückgehalten wurde, und jede Entscheidung dahinter — öffnen Sie eine, um zu sehen, warum der Preis so ist.',
         rejected: 'Änderungen, die Ihre Grenzen abgelehnt, blockiert oder an eine Grenze angepasst haben — gefährliche getrennt.',
@@ -546,7 +546,7 @@ export const de: Messages = {
         confirmReleaseDistrust: 'Ja, dem Kanal wieder vertrauen',
         releaseDistrustTitle: (label: string) => `Dem Kanal wieder vertrauen: ${label}?`,
         releaseDistrustText: 'Erst aufheben, nachdem geprüft wurde, wie der Kanal unsere Preise behandelt (zum Beispiel die Preisbasis im Kanalkonto). Alle Preise ändern sich wieder; die Aufhebung wird mit Ihrem Namen, zweitem Faktor und Ihrer Notiz protokolliert.',
-        close: 'Schließen', enabledTitle: (unit: string) => `Repricing eingeschaltet: ${unit}`, refusedTitle: (unit: string) => `Repricing nicht eingeschaltet: ${unit}`, refused: 'Abgelehnt', enabledBadge: 'Eingeschaltet', addCost: 'Stückkosten erfassen',
+        close: 'Schließen', enabledTitle: (unit: string) => `Repricing eingeschaltet: ${unit}`, refusedTitle: (unit: string) => `Repricing nicht aktiviert: ${unit}`, refused: 'Abgelehnt', enabledBadge: 'Eingeschaltet', addCost: 'Stückkosten erfassen',
         enableTitle: (unit: string) => `Repricing aktivieren: ${unit}?`,
         enableWarnings: 'Vor dem Aktivieren:',
         enableAnyway: 'Trotzdem aktivieren',
@@ -1338,13 +1338,13 @@ export const de: Messages = {
       bulkEdit: 'Massenvorgänge',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Gesamt ${t.total}: an ${t.enabled}, in Arbeit ${t.applying}, gestoppt ${t.stopped}, aus ${t.off}.`,
       clock: (now: string) => `Simulierte Zeit: ${now}.`,
-      columns: { margin: 'Marge', health: 'Zustand', unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil 7 T' },
+      columns: { margin: 'Marge', health: 'Zustand', unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil (7 Tage)' },
       whatToDo: 'Was tun',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
       healthNoUnitCost: 'Importieren Sie die Stückkosten und Gebühren dieses Angebots unter Kosten & Untergrenzen.',
       healthTurnedOff: 'Jemand hat die automatische Preisgestaltung für dieses Angebot ausgeschaltet. Damit TMPrice den Preis wieder setzt, wählen Sie «Aktivieren» in der Spalte Status.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. TMPrice ändert den Preis dafür nie von sich aus.`,
-      conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten', compact: 'Kompakte Zeilen' },
+      conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten' },
       productRef: (ref: string, condition: string, gtin: string | null) => `Produkt ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
       // Шаг 112 [Р-238]: идентификатор товара в канале — именем канала (у Amazon — ASIN), а не словом «product»; пустой — не показывается.
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
@@ -1380,7 +1380,7 @@ export const de: Messages = {
         pricing: 'Repricing', anyPricing: 'Alle', pricingValues: { ON: 'An', OFF: 'Aus' },
         holders: { SELF: 'Sie', OTHER: 'Anderer Verkäufer', NONE: 'Niemand', UNKNOWN: 'Inhaber unbekannt', NO_DATA: 'Keine Wettbewerbsdaten' },
         search: 'Suche', searchPlaceholder: 'SKU, EAN oder Name',
-        matched: (n: number, total: number) => `${n} von ${total} Angeboten passen zum Filter`,
+        matched: (n: number, total: number) => `${n} von ${total} Angeboten werden angezeigt`,
         attention: 'Erfordert Aufmerksamkeit', anyAttention: 'Alle Angebote',
         attentionValues: { ANY: 'Beliebiger Grund', NO_UNIT_COST: 'Ohne Stückkosten oder Gebühren', AUTOMATED_PRICING: 'Amazon-Repricer an', CHANNEL_BOUNDS: 'Amazon-Grenzen nicht gelesen', NOT_BUYABLE: 'Nicht kaufbar', TURNED_OFF: 'Ausgeschaltet' },
         // Шаг 171 (#34): финансовые исключения
@@ -1594,7 +1594,7 @@ export const de: Messages = {
       dangerousBadge: 'gefährliche Änderung', limitNote: (text: string) => `Nicht weiter erklärbar: ${text}`,
       status: { OK: 'bestanden', STOP: 'gestoppt', WARN: 'mit Hinweisen', SKIPPED: 'nicht nötig', UNKNOWN: 'keine Daten' },
       marks: { PASS: '✓ bestanden', FAIL: '✗ nicht bestanden', SKIPPED: '– übersprungen', NOT_RUN: '· nicht geprüft', INFO: '•' },
-      titles: { SNAPSHOT: 'Wettbewerbsdaten', SANITY: 'Eingangsprüfung', ANCHORS: 'Plausibilitätsanker', STRATEGY: 'Strategie', GATE: 'Price Gate', WRITE: 'Übertragung an Ihren Shop', CHANNEL: 'Bestätigung des Kanals' },
+      titles: { SNAPSHOT: 'Wettbewerbsdaten', SANITY: 'Eingangsprüfung', ANCHORS: 'Plausibilitätsanker', STRATEGY: 'Strategie', GATE: 'Price Gate', WRITE_SHADOW: 'Nicht gesendet — Schattenmodus', WRITE: 'Übertragung an Ihren Shop', CHANNEL: 'Bestätigung des Kanals' },
       // Шаг 116 [Р-241]: повторы не пишутся строками журнала: строка называет их число
       checkedSince: (n: number, when: string) => `Gleicher Zustand bei ${n} weiteren ${n === 1 ? 'Prüfung' : 'Prüfungen'}, zuletzt ${when}`,
       checkedBefore: (n: number) => `Nach ${n} ${n === 1 ? 'Prüfung' : 'Prüfungen'} ohne Zustandsänderung`,
@@ -2091,13 +2091,17 @@ export const de: Messages = {
       selectionReset: 'Beim Blättern und beim Ändern des Filters wird die Auswahl einzelner Zeilen zurückgesetzt.',
       selectNone: 'Keine auswählen', badInput: (text: string) => `„${text}“ ist weder ein Betrag noch ein Prozentsatz`,
       plan: 'Änderungen ansehen', apply: 'Anwenden', back: 'Anfrage ändern',
+      /** Шаг 175: применять нечего — кнопка неактивна и говорит почему */
+      nothingWouldChange: 'Nichts würde sich ändern: Alle gewählten Angebote haben diese Grenzen schon.',
       columns: { offer: 'Angebot', minBefore: 'min vorher', minAfter: 'min nachher', maxBefore: 'max vorher', maxAfter: 'max nachher', price: 'Aktueller Preis', notes: 'Achtung' },
       stats: { offers: 'Angebote', changed: 'Werden geändert', unchanged: 'Unverändert', flagged: 'Mit Hinweisen', pricesOutside: 'Preis außerhalb der neuen Grenzen' },
       statsLabel: 'Übersicht der Änderungen',
       mfa: 'Mehr als ein Angebot: Anwenden erfordert eine Anmeldung mit zweitem Faktor.',
       flags: {
-        PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `der aktuelle Preis ${price} liegt unter dem neuen Mindestpreis ${floor}: die nächste Entscheidung hebt ihn an`,
-        PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `der aktuelle Preis ${price} liegt über dem neuen Höchstpreis ${ceiling}: die nächste Entscheidung senkt ihn`,
+        PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `der aktuelle Preis ${price} liegt unter dem neuen Mindestpreis ${floor}`,
+        PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `der aktuelle Preis ${price} liegt über dem neuen Höchstpreis ${ceiling}`,
+        /** Шаг 175: в тени новые цены только считаются — пометка не обещает, что цену поправит следующее решение */
+        shadowNote: 'Schattenmodus: neue Preise werden nur berechnet, an Ihren Shop wird nichts gesendet',
         BIG_CHANGE: (pct: string) => `eine Grenze verschiebt sich um mehr als ${pct}`,
         MARGIN_FLOOR_ABOVE_MIN: (floor: string) => `die Mindestmargen-Untergrenze ${floor} bleibt über Ihrem Mindestpreis — Preise fallen weiterhin nie unter ${floor}`,
         NO_EFFECT: 'ohne Wirkung: die Grenze auf Produktebene bleibt maßgeblich',

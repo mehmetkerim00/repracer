@@ -359,6 +359,15 @@ export function catalogRows(scopes: readonly ConsoleScope[], catalog: ConsoleCat
  * Р-154: статистика решений — только для ПОКАЗАННЫХ строк, запросом по индексу единицы; каталог целиком её не несёт.
  * Экрану без неё (границы) передавать нечего — тогда столбец решений честно пуст, а не «0».
  */
+/**
+ * Шаг 175 (QA-A Testing 2.0, этап 4): предложение в выпадающем выборе — подпись, цвет товара и идентификатор в канале (ASIN, Walmart ID): у
+ * вариантов одного товара (green / red) одинаковые названия, и без цвета и идентификатора их не различить. В `<option>` — только текст
+ */
+export function offerChoiceText(unit: Pick<UnitRef, 'label' | 'color' | 'channel' | 'channelProductRef' | 'gtin'>, m: Messages): string {
+  const ids = m.ui.products.productId(unit.channel, unit.channelProductRef, unit.gtin);
+  return [unit.label, unit.color, ids].filter((x): x is string => typeof x === 'string' && x !== '').join(' · ');
+}
+
 export function productList(world: StandWorld, m: Messages, query?: ListQuery, stats?: readonly ScopeDecisionStats[], catalog?: ConsoleCatalogPage,
   options: { filter?: OfferFilter; sort?: OfferSort | null; buybox?: ReadonlyMap<string, BuyboxCells> | null; writeModes?: ReadonlyMap<string, 'SHADOW' | 'LIVE'> | null } = {}): ProductListView {
   const { state } = world;

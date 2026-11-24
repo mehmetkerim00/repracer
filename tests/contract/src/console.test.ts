@@ -372,3 +372,24 @@ test('Р-69: the kill-switch world holds a fixed price with PRICING_STOPPED; a s
   assert.ok(view.halts.active.length + view.halts.history.length > 0);
   assert.equal(view.stops.active.length, 0, 'a system halt is not a human stop');
 });
+
+/**
+ * Шаг 175 (QA-A Testing 2.0, этап 4): в тени квитанция не намекает, что цена уходит в магазин — станция отправки и строка итога называются
+ * «Not sent — shadow mode», а не «Sending to your store»; у отправленной в бою — прежнее имя. Четыре языка
+ */
+test('step 175: in shadow mode the receipt never says «Sending to your store» — the write station is «Not sent — shadow mode»', async () => {
+  const w = live('kaufland/pipeline/happy-path');
+  const world = await w.view(user('OWNER'));
+  const approved = (await w.store.decisionPage(world.tenantId, { offset: 0, limit: 200 })).items.find((d) => d.outcome === 'APPROVED')!;
+  const detail = (await w.store.decisionDetail(world.tenantId, approved.decisionId))!;
+  assert.ok(detail.writes.length > 0, 'the approved decision has its write');
+  const shadowWrites = detail.writes.map((x) => ({ ...x, status: 'SHADOW_HELD' as const }));
+  for (const l of LOCALES) {
+    const m = messagesFor(l);
+    const title = (d: typeof detail) => decisionTrace(world, d, m).steps.find((s) => s.key === 'WRITE')!.title;
+    assert.equal(title({ ...detail, writes: shadowWrites }), m.ui.trace.titles.WRITE_SHADOW, `${l}: held by shadow mode — not sent`);
+    assert.equal(title({ ...detail, decision: { ...detail.decision, shadow: true }, writes: [] }), m.ui.trace.titles.WRITE_SHADOW, `${l}: a shadow decision without its write`);
+    assert.equal(title(detail), m.ui.trace.titles.WRITE, `${l}: sent live — the station keeps its name`);
+    assert.notEqual(m.ui.trace.titles.WRITE_SHADOW, m.ui.trace.titles.WRITE);
+  }
+});

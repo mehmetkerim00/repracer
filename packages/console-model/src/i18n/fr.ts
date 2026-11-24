@@ -494,7 +494,7 @@ export const fr: Messages = {
         compliance: 'Preuves de vos prix antérieurs pour les remises sur les sites de l’UE (Omnibus).',
         products: 'Chaque offre avec son prix, ses limites et sa stratégie — une ligne par offre.',
         decisions: 'Chaque décision de prix, la plus récente en premier ; ouvrez-en une pour voir pourquoi le prix est celui-là.',
-        trace: 'Une décision, étape par étape : les données de la concurrence, les contrôles, la stratégie, le Price Gate et la mise à jour envoyée à votre boutique.',
+        trace: 'Une décision, étape par étape : les données de la concurrence, les contrôles, la stratégie, le Price Gate et si le prix est parti vers votre boutique.',
         strategies: 'Comment les prix sont calculés : vos stratégies, où elles s’appliquent et un aperçu avant tout enregistrement.',
         feed: 'Chaque prix envoyé à un canal ou retenu, et chaque décision qui le sous-tend — ouvrez-en une pour voir pourquoi le prix est celui-là.',
         rejected: 'Les changements que vos limites ont rejetés, bloqués ou ajustés à une limite — les dangereux sont présentés à part.',
@@ -1391,14 +1391,14 @@ export const fr: Messages = {
       bulkEdit: 'Opérations groupées',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total} : activées ${t.enabled}, en cours ${t.applying}, arrêtées ${t.stopped}, désactivées ${t.off}.`,
       clock: (now: string) => `Heure simulée : ${now}.`,
-      columns: { margin: 'Marge', health: 'État', unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box 7 j' },
+      columns: { margin: 'Marge', health: 'État', unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box (7 jours)' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Que faire',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
       healthNoUnitCost: 'Importez le coût unitaire et les commissions de cette offre dans Coûts et planchers.',
       healthTurnedOff: 'Une personne a désactivé la tarification automatique de cette offre. Pour que TMPrice fixe de nouveau son prix, choisissez « Activer » dans la colonne Statut.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart masque cette offre parce que le même produit est moins cher ailleurs${elsewhere ? ` (${elsewhere})` : ''}. Pour qu’elle réapparaisse, rapprochez le prix walmart.com de ce prix — seulement si votre plancher le permet. TMPrice ne modifie jamais le prix de lui-même pour cette raison.`,
-      conditions: { used: 'occasion', refurbished: 'reconditionné', collectible: 'de collection' }, viewOptions: { columns: 'Colonnes', compact: 'Lignes compactes' },
+      conditions: { used: 'occasion', refurbished: 'reconditionné', collectible: 'de collection' }, viewOptions: { columns: 'Colonnes' },
       productRef: (ref: string, condition: string, gtin: string | null) => `produit ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
       // Шаг 112 [Р-238]: идентификатор товара в канале — именем канала (у Amazon — ASIN), а не словом «product»; пустой — не показывается.
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
@@ -1434,7 +1434,7 @@ export const fr: Messages = {
         pricing: 'Tarification automatique', anyPricing: 'Toutes', pricingValues: { ON: 'Activée', OFF: 'Désactivée' },
         holders: { SELF: 'Vous', OTHER: 'Un autre vendeur', NONE: 'Personne', UNKNOWN: 'Détenteur inconnu', NO_DATA: 'Pas de données de la concurrence' },
         search: 'Rechercher', searchPlaceholder: 'SKU, EAN ou nom',
-        matched: (n: number, total: number) => `${n} offres sur ${total} correspondent au filtre`,
+        matched: (n: number, total: number) => `${n} offres affichées sur ${total}`,
         attention: 'Demande de l’attention', anyAttention: 'Toutes les offres',
         attentionValues: { ANY: 'N’importe quel motif', NO_UNIT_COST: 'Sans coût unitaire ni frais', AUTOMATED_PRICING: 'Tarification automatique Amazon active', CHANNEL_BOUNDS: 'Limites Amazon non lues', NOT_BUYABLE: 'Non achetable', TURNED_OFF: 'Désactivée' },
         // Шаг 171 (#34): финансовые исключения
@@ -1649,7 +1649,7 @@ export const fr: Messages = {
       dangerousBadge: 'changement dangereux', limitNote: (text: string) => `Impossible d’expliquer davantage : ${text}`,
       status: { OK: 'réussi', STOP: 'arrêté', WARN: 'avec remarques', SKIPPED: 'non nécessaire', UNKNOWN: 'aucune donnée' },
       marks: { PASS: '✓ réussi', FAIL: '✗ échoué', SKIPPED: '– ignoré', NOT_RUN: '· non vérifié', INFO: '•' },
-      titles: { SNAPSHOT: 'Données de la concurrence', SANITY: 'Contrôle des entrées', ANCHORS: 'Repères de plausibilité', STRATEGY: 'Stratégie', GATE: 'Price Gate', WRITE: 'Envoi à votre boutique', CHANNEL: 'Confirmation du canal' },
+      titles: { SNAPSHOT: 'Données de la concurrence', SANITY: 'Contrôle des entrées', ANCHORS: 'Repères de plausibilité', STRATEGY: 'Stratégie', GATE: 'Price Gate', WRITE_SHADOW: 'Non envoyé — mode fantôme', WRITE: 'Envoi à votre boutique', CHANNEL: 'Confirmation du canal' },
       // Шаг 116 [Р-241]: повторы не пишутся строками журнала: строка называет их число
       checkedSince: (n: number, when: string) => `Même état sur ${n} ${n === 1 ? 'vérification de plus' : 'vérifications de plus'}, la dernière le ${when}`,
       checkedBefore: (n: number) => `Après ${n} ${n === 1 ? 'vérification' : 'vérifications'} sans changement d’état`,
@@ -2150,13 +2150,17 @@ export const fr: Messages = {
       selectionReset: 'Changer de page ou de filtre efface la sélection de lignes individuelles.',
       selectNone: 'Tout désélectionner', badInput: (text: string) => `« ${text} » n’est ni un montant ni un pourcentage`,
       plan: 'Aperçu des changements', apply: 'Appliquer', back: 'Modifier la demande',
+      /** Шаг 175: применять нечего — кнопка неактивна и говорит почему */
+      nothingWouldChange: 'Rien ne changerait : toutes les offres choisies ont déjà ces limites.',
       columns: { offer: 'Offre', minBefore: 'min avant', minAfter: 'min après', maxBefore: 'max avant', maxAfter: 'max après', price: 'Prix actuel', notes: 'Attention' },
       stats: { offers: 'Offres', changed: 'Seront modifiées', unchanged: 'Inchangées', flagged: 'À vérifier', pricesOutside: 'Prix hors des nouvelles limites' },
       statsLabel: 'Résumé des modifications',
       mfa: 'Plusieurs offres : l’application exige une connexion avec un second facteur.',
       flags: {
-        PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `le prix actuel ${price} est sous le nouveau prix minimum ${floor} : la prochaine décision le relèvera`,
-        PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `le prix actuel ${price} dépasse le nouveau prix maximum ${ceiling} : la prochaine décision le baissera`,
+        PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `le prix actuel ${price} est sous le nouveau prix minimum ${floor}`,
+        PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `le prix actuel ${price} dépasse le nouveau prix maximum ${ceiling}`,
+        /** Шаг 175: в тени новые цены только считаются — пометка не обещает, что цену поправит следующее решение */
+        shadowNote: 'mode fantôme : les nouveaux prix sont seulement calculés, rien n’est envoyé à votre boutique',
         BIG_CHANGE: (pct: string) => `une limite bouge de plus de ${pct}`,
         MARGIN_FLOOR_ABOVE_MIN: (floor: string) => `le plancher de marge ${floor} reste au-dessus de votre prix minimum — les prix ne descendent toujours jamais sous ${floor}`,
         NO_EFFECT: 'aucun effet : la limite au niveau du produit reste déterminante',

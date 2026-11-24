@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
 import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
-import { ErrorBox, errorText, Gaps, Help, StickySummary, UnitName, useMessages } from '../components.tsx';
+import { ErrorBox, errorText, Gaps, Help, ProductRef, StickySummary, UnitName, useMessages } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
@@ -46,7 +46,7 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
               // Шаг 167, шаг 168: строка с пометкой внимания — подсвечена целиком (класс строки, как на Offers и Inventory)
               <tr key={r.unit.writeScopeId} className={r.tone === 'warn' ? 'attention' : undefined}>
                 {/* Шаг 79 (ревью): предложение — текстом; что именно требует внимания — в колонке пометок */}
-                <td className="offer"><UnitName unit={r.unit} /></td>
+                <td className="offer"><UnitName unit={r.unit} variant={false} /><ProductRef unit={r.unit} /></td>
                 <td className="num cur">{r.minBefore}</td>
                 <td className="num cur">{r.minAfter}{r.minChange ? <div className="small muted">{r.minChange}</div> : null}</td>
                 <td className="num cur">{r.maxBefore}</td>
@@ -167,19 +167,26 @@ function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { world
       <ul className="index pick-list">
         {items.map((i) => (
           <li key={i.writeScopeId}>
-            <CheckField label={i.label} caption={`${i.minPrice} – ${i.maxPrice}`} checked={selected.includes(i.writeScopeId)}
+            {/* Шаг 175 (QA-A Testing 2.0, этап 4): в выборе — цвет и идентификатор (варианты одного товара различимы), границы и действующий пол */}
+            <CheckField label={<><UnitName unit={i} variant={false} /><ProductRef unit={i} /></>} caption={`${i.minPrice} – ${i.maxPrice} · ${m.ui.products.columns.floor}${m.colon}${i.floor.amount}`} checked={selected.includes(i.writeScopeId)}
               onChange={(on) => { setSelected(on ? [...selected, i.writeScopeId] : selected.filter((x) => x !== i.writeScopeId)); reset(); }} />
           </li>
         ))}
       </ul>
       <FieldGrid cols={4}>{adjust(t.minPrice, min, setMin)}{adjust(t.maxPrice, max, setMax)}</FieldGrid>
       {(() => {
-        const nothing = selected.length === 0 && !wholeCatalog;
+        /**
+         * Шаг 175 (QA-A Testing 2.0, этап 4): Preview и Apply неактивны, когда менять нечего, и говорят почему: не выбрано предложение, не выбрано,
+         * что менять, или все выбранные уже с этими границами
+         */
+        const why = selected.length === 0 && !wholeCatalog ? m.ui.forms.why.selectOffers
+          : min.mode === 'KEEP' && max.mode === 'KEEP' ? t.problems.NOTHING_TO_CHANGE : null;
+        const applyWhy = diff !== null && diff.view.summary.changed === 0 ? t.nothingWouldChange : null;
         return (
-          <FormActions inline hint={diff === null && nothing ? m.ui.forms.why.selectOffers : null}>
+          <FormActions inline hint={diff === null ? why : applyWhy}>
             {diff === null
-              ? <button type="button" className="primary" disabled={busy || nothing} title={nothing ? m.ui.forms.why.selectOffers : undefined} onClick={() => void plan()}>{t.plan}</button>
-              : <><button type="button" className="primary" disabled={busy} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
+              ? <button type="button" className="primary" disabled={busy || why !== null} title={why ?? undefined} onClick={() => void plan()}>{t.plan}</button>
+              : <><button type="button" className="primary" disabled={busy || applyWhy !== null} title={applyWhy ?? undefined} onClick={() => void apply()}>{t.apply}</button><button type="button" disabled={busy} onClick={reset}>{t.back}</button></>}
           </FormActions>
         );
       })()}

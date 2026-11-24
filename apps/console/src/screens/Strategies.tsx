@@ -5,7 +5,7 @@ import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
-import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ReasonLine, shortWhen, UnitName, useMessages, When, WhenHead } from '../components.tsx';
+import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ProductRef, ReasonLine, shortWhen, UnitName, useMessages, When, WhenHead } from '../components.tsx';
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 
 /**
@@ -377,7 +377,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
       <ul className="index pick-list">
         {view.scopes.map((s) => (
           <li key={s.unit.writeScopeId}>
-            <CheckField label={s.unit.label} caption={`${s.strategy} · ${s.mode}${s.byDefaultRule ? ` · ${s.byDefaultRule}` : ''}`} disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
+            {/* Шаг 175 (QA-A Testing 2.0, этап 4): в выборе — цвет и идентификатор: варианты одного товара различимы */}
+            <CheckField label={<><UnitName unit={s.unit} variant={false} /><ProductRef unit={s.unit} /></>} caption={`${s.strategy} · ${s.mode}${s.byDefaultRule ? ` · ${s.byDefaultRule}` : ''}`} disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
               {...(s.assignable ? {} : { title: t.notAssignable })}
               onChange={(v) => pick(v ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} />
             {s.channelPricing ? <div className="small pick-note"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}

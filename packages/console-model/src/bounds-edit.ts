@@ -211,8 +211,14 @@ export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInpu
     const price = scope.currentPriceMinor;
     // Пол Gate — наибольший из min_price и цены минимальной маржи: правка min_price ниже пола по марже цену не отпустит
     const marginFloor = effectiveFloor(scope, world).marginFloorMinor;
-    if (price !== null && r.after.minMinor !== null && price < r.after.minMinor) flags.push({ code: 'PRICE_BELOW_NEW_FLOOR', text: t.flags.PRICE_BELOW_NEW_FLOOR(money(price), money(r.after.minMinor)) });
-    if (price !== null && r.after.maxMinor !== null && price > r.after.maxMinor) flags.push({ code: 'PRICE_ABOVE_NEW_CEILING', text: t.flags.PRICE_ABOVE_NEW_CEILING(money(price), money(r.after.maxMinor)) });
+    /**
+     * Шаг 175 (QA-A Testing 2.0, этап 4): цена вне новых границ — как есть, без обещания «следующее решение поднимет/снизит»: с выключенной
+     * автоценой решения нет, подъём к полу идёт лестницей, а в тени новые цены только считаются — это сказано
+     */
+    const shadow = world.accounts.find((a) => a.channelAccountId === scope.channelAccountId)?.writeMode === 'SHADOW';
+    const outside = (text: string) => (shadow ? `${text} — ${t.flags.shadowNote}` : text);
+    if (price !== null && r.after.minMinor !== null && price < r.after.minMinor) flags.push({ code: 'PRICE_BELOW_NEW_FLOOR', text: outside(t.flags.PRICE_BELOW_NEW_FLOOR(money(price), money(r.after.minMinor))) });
+    if (price !== null && r.after.maxMinor !== null && price > r.after.maxMinor) flags.push({ code: 'PRICE_ABOVE_NEW_CEILING', text: outside(t.flags.PRICE_ABOVE_NEW_CEILING(money(price), money(r.after.maxMinor))) });
     if (bigChange(r.before.minMinor, r.after.minMinor) || bigChange(r.before.maxMinor, r.after.maxMinor)) flags.push({ code: 'BIG_CHANGE', text: t.flags.BIG_CHANGE(m.percentBp(DANGEROUS_DEVIATION_BP)) });
     if (marginFloor !== null && r.after.minMinor !== null && marginFloor > r.after.minMinor) flags.push({ code: 'MARGIN_FLOOR_ABOVE_MIN', text: t.flags.MARGIN_FLOOR_ABOVE_MIN(money(marginFloor)) });
     const edit = edits.find((e) => e.writeScopeId === r.writeScopeId);
