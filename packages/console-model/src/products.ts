@@ -6,7 +6,7 @@ import { listQuery, pageInfo, pageOf, type ListQuery, type PageInfo } from './pa
 import { gap, unitOf, type ConsoleScope, type ConsoleWrite, type Gap, type StandWorld, type StatusCell, type UnitRef } from './world.ts';
 import type { AttentionFilter, AttentionReason, ConsoleCatalogPage, OfferMoneyFilter, OfferPricingFilterValue, OfferSetupFilter, ScopeDecisionStats } from '@repracer/pricing-pipeline';
 // Шаг 168: одно правило «требует внимания» со строкой состояния (status-line берёт channelNotes отсюда — вызов во время работы, не при загрузке)
-import { attentionReasons } from './status-line.ts';
+import { attentionReasonOfNote, attentionReasons } from './status-line.ts';
 import { storefrontChoices, type BuyboxCells, type OfferHolderFilterValue, type OfferSort } from './offer-buybox.ts';
 
 /** Экран A: товары с явными статусами; действующий пол — главный, min_price — его составляющая (шаг 12, F) */
@@ -28,7 +28,11 @@ export interface FloorCell {
 }
 
 /** Шаг 162 (#27): пункт Health — тон, слова, пояснение и «что делать» (у заметок канала, шаг 96) */
-export interface HealthItem { tone: StatusCell['tone']; text: string; detail?: string; short?: string; whatToDo?: { label: string; text: string } }
+export interface HealthItem {
+  tone: StatusCell['tone']; text: string; detail?: string; short?: string; whatToDo?: { label: string; text: string };
+  /** Шаг 174: пункт называет причину «требует внимания» строки — у жёлтой строки Health не пуст */
+  reason?: AttentionReason;
+}
 
 /** Шаг 148 (#27, UX-05): чего не хватает для включения автоцены — окно отказа называет каждое со ссылкой */
 export type MissingSetup = 'UNIT_COST' | 'MIN_PRICE' | 'MAX_PRICE';
@@ -400,7 +404,14 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     const feePill = scope.clearance && scope.cost === null ? p.feeExpired : null;
     const notes = channelNotes(world, scope, m);
     // Короткая строка тесной ячейки — та же, что была у колонки заметок канала (шаг 89); полное пояснение — подсказкой
-    const noteItem = (n: ChannelNote): HealthItem => ({ tone: n.tone, text: n.label, ...(n.detail ? { detail: n.detail } : {}), ...(n.short ? { short: n.short } : {}), ...(n.whatToDo ? { whatToDo: n.whatToDo } : {}) });
+    const noteItem = (n: ChannelNote): HealthItem => {
+      const reason = attentionReasonOfNote(n.code);
+      return { tone: n.tone, text: n.label, ...(n.detail ? { detail: n.detail } : {}), ...(n.short ? { short: n.short } : {}), ...(n.whatToDo ? { whatToDo: n.whatToDo } : {}), ...(reason ? { reason } : {}) };
+    };
+    // Шаг 174: причины внимания, у которых нет заметки канала, — своими пунктами Health; слова — те же, что у фильтра «Needs attention»
+    const reasons = attentionReasons(world, scope, m);
+    const reasonItem = (reason: 'NO_UNIT_COST' | 'TURNED_OFF', whatToDo: string): HealthItem =>
+      ({ tone: 'warn', text: p.filters.attentionValues[reason], whatToDo: { label: p.whatToDo, text: whatToDo }, reason });
     // Порядок важности: блокировки (stop) — пол выше потолка, затем блокирующие заметки канала; затем внимание — конфликт рамок, прочие заметки,
     // истёкшая комиссия, распродажа
     const marks: HealthItem[] = [
@@ -408,13 +419,16 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       ...notes.filter((n) => n.tone === 'stop').map(noteItem),
       ...(boundsPill ? [{ tone: 'warn' as const, text: boundsPill }] : []),
       ...notes.filter((n) => n.tone !== 'stop').map(noteItem),
-      ...(feePill ? [{ tone: 'warn' as const, text: feePill }] : []),
+      // Истёкшая оценка комиссии в распродаже — та же причина «нет себестоимости или комиссии», названная точнее: второго пункта нет
+      ...(reasons.includes('NO_UNIT_COST') && !feePill ? [reasonItem('NO_UNIT_COST', p.healthNoUnitCost)] : []),
+      ...(reasons.includes('TURNED_OFF') ? [reasonItem('TURNED_OFF', p.healthTurnedOff)] : []),
+      ...(feePill ? [{ tone: 'warn' as const, text: feePill, ...(reasons.includes('NO_UNIT_COST') ? { reason: 'NO_UNIT_COST' as const } : {}) }] : []),
       ...(clearancePill ? [{ tone: 'warn' as const, text: clearancePill }] : []),
     ];
     return {
       margin,
       health: marks.length === 0 ? null : { ...marks[0]!, more: marks.slice(1) },
-      attention: attentionReasons(world, scope, m),
+      attention: reasons,
       unit: unitOf(world, scope, m),
       // Шаг 148 (#27, UX-04): пустое — словами («No price yet», «Not set»), а не «no value» и «not set: not set»
       currentPrice: scope.currentPriceMinor === null ? p.noPriceYet : money(scope.currentPriceMinor),

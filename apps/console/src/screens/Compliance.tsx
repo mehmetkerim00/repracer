@@ -40,6 +40,8 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
   const [evidence, setEvidence] = useState({ from: '', to: '', writeScopeId: '' });
   /** OQ-202: файл готовит фоновое задание — экран показывает его ход и ссылку на готовое [Р-139] */
   const [evidenceJobId, setEvidenceJobId] = useState<string | null>(null);
+  /** Шаг 174 (BUG-05): фраза запуска выгрузки — в карточке задания, пока оно идёт */
+  const [evidenceStarted, setEvidenceStarted] = useState<string | null>(null);
 
   const edit = (patch: Partial<typeof form>) => { setForm({ ...form, ...patch }); setCheck(null); setConfirming(false); setMessage(null); };
   const body = () => ({
@@ -70,7 +72,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
         body: { from: evidence.from, to: evidence.to, ...(evidence.writeScopeId ? { writeScopeId: evidence.writeScopeId } : {}) },
         locale: m.locale,
       });
-      setMessage(r.message); setEvidenceJobId(r.jobId);
+      setEvidenceStarted(r.message); setEvidenceJobId(r.jobId);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
@@ -169,7 +171,7 @@ export function ComplianceScreenView({ worldId, initial }: { worldId: string; in
           return <FormActions hint={why}><button type="button" className="primary" disabled={busy || why !== null} title={why ?? undefined} onClick={loadEvidence}>{c.download}</button></FormActions>;
         })()}
       </FieldGroup>
-      {evidenceJobId ? <JobProgress worldId={worldId} jobId={evidenceJobId} /> : null}
+      {evidenceJobId ? <JobProgress worldId={worldId} jobId={evidenceJobId} started={evidenceStarted} /> : null}
 
       <section className="card">
         <h3>{c.cannotCheckTitle}</h3>

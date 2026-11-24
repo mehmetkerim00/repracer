@@ -133,7 +133,7 @@ export function SaveConfirm({ offers, busy, onConfirm, onCancel, assign = false 
   );
 }
 
-export function StrategiesScreenView({ view, worldId, initialPreview = null }: { view: StrategyListView; worldId: string; initialPreview?: StrategyPreviewView | null }) {
+export function StrategiesScreenView({ view, worldId, initialPreview = null, onChanged }: { view: StrategyListView; worldId: string; initialPreview?: StrategyPreviewView | null; onChanged?: () => void }) {
   const m = useMessages();
   const t = m.ui.strategies;
   const assignable = view.scopes.filter((s) => s.assignable).map((s) => s.unit.writeScopeId);
@@ -147,6 +147,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  /** Шаг 174 (BUG-05): фраза запуска назначения — в карточке задания, пока оно идёт */
+  const [started, setStarted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Шаг 78: список предложений стратегии раскрывается по ссылке «Show offers» — по умолчанию только сводка по витринам
@@ -183,8 +185,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
   };
   const previewReady = (job: BulkJobView) => {
     const result = job.result as { view?: StrategyPreviewView } | null;
+    // Шаг 174 (BUG-02): отказ задания называет карточка задания — второй раз формой он не повторяется
     if (job.status === 'SUCCEEDED' && result?.view) setPreview(result.view);
-    else if (job.status === 'FAILED') setError(job.error);
   };
   const save = async () => {
     if (!preview) return;
@@ -198,7 +200,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
         : await requestJson<JobCreatedResponse>(worldPath(worldId, 'strategies'), {
           method: 'POST', body: { draft: draftOf(form), ...scopeSelection(), strategyId: form.strategyId, previewJobId, previewToken: preview.previewToken, confirmed: true }, locale: m.locale,
         });
-      setMessage(r.message); setJobId(r.jobId); setPreview(null); setPreviewJobId(null); setConfirming(false); setBusy(false); setAssigning(null);
+      setMessage(null); setStarted(r.message); setJobId(r.jobId); setPreview(null); setPreviewJobId(null); setConfirming(false); setBusy(false); setAssigning(null);
     } catch (e) {
       setConfirming(false); setBusy(false);
       // Офферы изменились после превью: показать новое превью, а не ошибку без выхода
@@ -214,7 +216,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       const r = await requestJson<StrategySaveResponse>(worldPath(worldId, 'strategies', 'unassign'), {
         method: 'POST', body: { writeScopeIds: [removing.unit.writeScopeId], confirmed: true }, locale: m.locale,
       });
-      setMessage(r.message); setRemoving(null);
+      setMessage(r.message); setRemoving(null); onChanged?.();
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
 
@@ -414,7 +416,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
       {error ? <ErrorBox message={error} /> : null}
       {message ? <p className="notice" role="status">{message}</p> : null}
       {previewJobId ? <JobProgress worldId={worldId} jobId={previewJobId} onFinished={previewReady} /> : null}
-      {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
+      {/* Шаг 174 (BUG-01): назначение завершилось — список стратегий (число предложений, последнее изменение) перечитывается сам */}
+      {jobId ? <JobProgress worldId={worldId} jobId={jobId} started={started} onFinished={(job) => { if (job.status === 'SUCCEEDED') onChanged?.(); }} /> : null}
       {preview ? <PreviewTable view={preview} /> : null}
       <Gaps gaps={view.gaps} />
       <span id="strategy-import" />
@@ -426,10 +429,11 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null }: {
 export function StrategiesScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
-  const [resource, retry] = useResource<StrategyListView>(`${worldPath(worldId, 'strategies')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  // Шаг 174: перечитывание после назначения держит прежний список на экране — редактор с итогом задания не размонтируется
+  const [resource, retry] = useResource<StrategyListView>(`${worldPath(worldId, 'strategies')}?offset=${query.offset}&limit=${query.limit}`, m.locale, { keepPrevious: true });
   return (
     <Load shape="cards" resource={resource} retry={retry}>
-      {(view) => <><StrategiesScreenView view={view} worldId={worldId} /><Pager page={view.page} query={query} onQuery={setQuery} /></>}
+      {(view) => <><StrategiesScreenView view={view} worldId={worldId} onChanged={retry} /><Pager page={view.page} query={query} onQuery={setQuery} /></>}
     </Load>
   );
 }

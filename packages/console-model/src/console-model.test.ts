@@ -336,6 +336,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice (the wordmark tmprice is lowercase)' },
     // Шаг 139 (Р-252): «corrected» — не статус цены: цель на границе — Adjusted to limit, отказ Gate — Rejected (BUG-03)
     { pattern: /\bcorrected\b/i, use: 'Adjusted to limit (the price became the bound) or Rejected (the price did not change)' },
+    // Шаг 174 (QA-A Testing 2.0, BUG-02): «Gate» — внутреннее имя; продавцу — «final price check» словами. «Price Gate» — только имя станции квитанции
+    { pattern: /(?<!Price )\bGate\b/, use: 'the final price check (Price Gate — only as the name of the receipt step)' },
   ],
   de: [
     { pattern: /\bMandant(en|in)?\b|Mandanten-?[Ss]topp/, use: 'Arbeitsbereich' },
@@ -355,6 +357,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice (PriceTrail ist der frühere Name)' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice (das Wortzeichen tmprice ist klein geschrieben)' },
     { pattern: /\bkorrigiert\b/, use: 'An die Grenze angepasst oder Abgelehnt (Р-252)' },
+    // Шаг 174 (QA-A Testing 2.0, BUG-02): «Gate» — внутреннее имя; продавцу — «final price check» словами. «Price Gate» — только имя станции квитанции
+    { pattern: /(?<!Price )\bGate\b/, use: 'abschließende Preisprüfung (Price Gate — nur als Name des Schritts der Quittung)' },
   ],
   // Шаг 98 [Р-223]: испанский и французский — тот же глоссарий (docs/console-glossary.md, раздел «Испанский и французский»)
   es: [
@@ -365,6 +369,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /snapshots?|instant[áa]neas?/i, use: 'datos de la competencia' },
     { pattern: /\bcostes?\b/i, use: 'costo (español de los vendedores de EE. UU.)' },
     { pattern: /\bcorregid[oa]s?\b|\bcorrigi(?:ó|eron)/i, use: 'Ajustado al límite o Rechazado (Р-252)' },
+    // Шаг 174 (QA-A Testing 2.0, BUG-02): «Gate» — внутреннее имя; продавцу — «final price check» словами. «Price Gate» — только имя станции квитанции
+    { pattern: /(?<!Price )\bGate\b/, use: 'revisión final del precio (Price Gate — solo como nombre del paso del recibo)' },
     { pattern: /\brepracer\b/i, use: 'TMPrice' },
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice' },
@@ -376,6 +382,8 @@ export const GLOSSARY_FORBIDDEN: Readonly<Record<'en' | 'de' | 'es' | 'fr', Read
     { pattern: /\blistings?\b|\bfiches? produits?\b/i, use: 'offre ; annonce eBay' },
     { pattern: /snapshots?|instantan[ée]s?/i, use: 'données de la concurrence' },
     { pattern: /\bcorrig(?:ée?s?)(?![a-zà-ÿ])/i, use: 'Ajusté à la limite ou Rejeté (Р-252)' },
+    // Шаг 174 (QA-A Testing 2.0, BUG-02): «Gate» — внутреннее имя; продавцу — «final price check» словами. «Price Gate» — только имя станции квитанции
+    { pattern: /(?<!Price )\bGate\b/, use: 'contrôle final du prix (Price Gate — seulement comme nom de l’étape du reçu)' },
     { pattern: /\brepracer\b/i, use: 'TMPrice' },
     { pattern: /\bprice ?trail\b/i, use: 'TMPrice' },
     { pattern: /\b(?!TMPrice\b|tmprice\b)[Tt]\.?[Mm]\.? ?[Pp][Rr][Ii][Cc][Ee]\b/, use: 'TMPrice' },
@@ -483,6 +491,13 @@ test('шаг 69 (K9), шаг 98 (Р-223): словари EN, DE, ES и FR гов
   assert.equal(es('corrija el stock en la fuente'), 0);
   for (const bad of ['Les plus petits sont « corrigés »', 'arrêtés ou corrigés', 'un prix corrigé']) assert.equal(fr(bad), 1, bad);
   assert.equal(fr('corrigez le stock dans la source'), 0);
+  // Шаг 174 (BUG-02): голое «Gate» — нет ни на одном языке; «Price Gate» как имя станции квитанции — да
+  assert.equal(en('rejected by Gate 3'), 1);
+  assert.equal(de('vom Gate abgelehnt'), 1);
+  assert.equal(de('die exakte Gate-Berechnung'), 1);
+  assert.equal(es('rechazados por el Gate'), 1);
+  assert.equal(fr('Après Gate'), 1);
+  for (const lang of ['en', 'de', 'es', 'fr'] as const) assert.equal(glossaryViolations(lang, ['Price Gate', 'the Price Gate rejected it']).length, 0, `${lang}: «Price Gate» is the step name`);
   for (const lang of ['en', 'de', 'es', 'fr'] as const) {
     const texts = dictionaryTexts(readFileSync(new URL(`./i18n/${lang}.ts`, import.meta.url), 'utf8'));
     assert.ok(texts.length > 1000, `${lang}: тексты словаря прочитаны — ${texts.length}`);

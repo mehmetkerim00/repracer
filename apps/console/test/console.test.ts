@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type OverviewView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { boundsView, describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type OverviewView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -692,7 +692,7 @@ test('step 21: a strategy is saved only with the token of the preview shown; bou
     'устаревший токен экрана различий ловит запрос: сверка с посчитанным заданием дёшева');
   assert.equal((await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody({ planJobId: null }))).status, 409, 'без экрана различий применения нет');
   const applied = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody()), 'en');
-  assert.deepEqual([applied.status, applied.headline], ['SUCCEEDED', 'Done: bounds checked for 1 offer, 1 changed.']);
+  assert.deepEqual([applied.status, applied.headline], ['SUCCEEDED', 'Successfully updated 1 offer.']);
   // Тот же экран различий после применения устарел: границы предложения уже другие, и хранилище отвечает CONFLICT
   const afterApply = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'apply'), applyBody()));
   assert.equal(afterApply.status, 'FAILED', 'the difference screen is stale after applying');
@@ -1407,6 +1407,55 @@ test('step 140 [Р-227]: the console refuses clearance while break-even is not c
       assert.ok(markup.includes(t.causes.BREAK_EVEN_UNKNOWN), `${locale}: the floor page says why clearance cannot be enabled`);
       assert.ok(markup.includes(`href="#/w/${encodeURIComponent(id)}/cost-import"`) && markup.includes(t.addCosts), `${locale}: the floor page links to the unit cost import`);
     }
+  }
+});
+
+/** Шаг 174: предложение без границ, себестоимости и цены — мир модели без стенда (как у теста шага 152) */
+function bareWorld(): never {
+  const missing = { status: 'UNRESOLVABLE', cause: 'MISSING' };
+  const scope = {
+    writeScopeId: 'ws', productId: 'p', channelAccountId: 'acc-1', marketplace: 'ATVPDKIKX0DER', externalUnitId: 'SKU-1', channelProductRef: 'REF-1',
+    condition: 'new', gtin: null, currency: 'USD', basis: 'NET', taxRegime: 'SALES_TAX_EXCLUDED', title: 'Bamboo board', sku: 'SKU-1',
+    pricingMode: 'OFF', status: 'ACTIVE', currentPriceMinor: null, minMarginBp: null, cost: null, declaredCost: null,
+    clearance: null, strategy: null, priceStop: null, channelHalt: null, channelDistrust: null, pricingSwitch: null,
+    bounds: { currency: 'USD', basis: 'NET', min: missing, max: missing }, feeEstimates: [], fees: [],
+  };
+  return {
+    id: 'w', title: 'w', description: '', tenantId: 't', now: '2026-11-25T12:00:00.000Z', viewer: { role: 'OWNER', membershipId: 'mb' }, people: {},
+    accounts: [{ channelAccountId: 'acc-1', channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'] }],
+    state: { scopes: [scope], writes: [], strategies: [], strategyVersions: [], explanationRulesets: [], fxRates: [], divergenceCases: [], halts: [], stops: [], distrusts: [],
+      members: [{ membershipId: 'mb', role: 'OWNER' }], offerChannelPricing: [], pricingHealth: [], listingStatus: [] },
+  } as never;
+}
+
+/**
+ * Шаг 174 (QA-A Testing 2.0, BUG-03, BUG-04). Тест шага 140 утверждал только то, что есть (причина и ссылка), и не утверждал, чего нет: форма
+ * распродажи без безубыточности осталась целиком, с галочкой «I understand: every sale below no value loses money» — подтверждением суммы,
+ * которой нет. Теперь у предложения без безубыточности в разделе распродажи — только причина и путь к себестоимости: ни поля, ни галочки,
+ * ни «no value». Незаданный действующий пол — «Not set», как пустые значения везде после шага 148. Четыре языка
+ */
+test('step 174 (BUG-03, BUG-04): without break-even the clearance section is the cause and the link only — no checkbox, no «no value»; a missing floor is «Not set»', async () => {
+  const id = 'kaufland/pipeline/enable-margin-without-cost';
+  const ws = 'ws-price-de-4702';
+  const clearanceOf = (markup: string) => {
+    const from = markup.indexOf('class="card clearance"');
+    assert.ok(from >= 0, 'the clearance section is on the floor page');
+    return markup.slice(from, markup.indexOf('</section>', from));
+  };
+  for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(locale);
+    const view = await get<BoundsView>(await login('OWNER', locale), api(id, 'bounds', ws));
+    assert.equal(view.clearance.breakEvenMinor, null, `${locale}: break-even is not computed`);
+    const section = clearanceOf(await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view }, locale));
+    assert.ok(section.includes(m.ui.bounds.clearance.causes.BREAK_EVEN_UNKNOWN), `${locale}: the cause is there`);
+    assert.deepEqual([section.includes('type="checkbox"'), section.includes('<input'), section.includes(m.ui.common.noValue)], [false, false, false],
+      `${locale}: no confirmation, no field and no «${m.ui.common.noValue}» without break-even`);
+
+    // Действующего пола нет (ни минимальной цены, ни себестоимости): «Not set», без «no value» на всей странице пола
+    const empty = boundsView(bareWorld(), 'ws', m, {})!;
+    assert.equal(empty.effectiveFloor.amount, m.ui.products.notSet, `${locale}: a missing effective floor is «Not set»`);
+    const page = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: empty }, locale);
+    assert.ok(!page.replace(/<[^>]+>/g, ' ').includes(m.ui.common.noValue), `${locale}: no «${m.ui.common.noValue}» on the floor page of an offer without a floor`);
   }
 });
 

@@ -3154,6 +3154,101 @@ const LONG_HELP = `(() => {
  * Шаг 172 (#34): «Since your last visit» — первое открытие Overview говорит, что прежнего визита нет (последние 24 часа); через два часа часов мира —
  * окно «since …» от прежнего визита, заметка о визите, и ссылка группы несёт тот же момент
  */
+/**
+ * Шаг 174 (QA-A Testing 2.0, BUG-01, BUG-02, BUG-05): массовая правка границ на Costs & floors. Минимум выше максимума — один отказ словами до
+ * задания (было — три плашки «unexpected error (code MIN_ABOVE_MAX)»). После «Done» таблица границ и список выбора показывают
+ * новые значения сами, без перезагрузки страницы; то же — у импорта границ на том же экране. Фраза «идёт в фоне» живёт, пока идёт задание:
+ * после «Done» на экране одно честное «Successfully updated N offers», а не «в фоне» рядом с «Done»
+ */
+test('step 174 (BUG-01, BUG-02, BUG-05): Costs & floors — min above max is one refusal in words before any job; after Done the table and the pick list show the new values by themselves; one success line, no «in the background»', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+  await settled(b, 'costs');
+  const e = en.ui.boundsEdit;
+  const state = await smokeLive.view(STAND_USERS[0] as never) as { state: { scopes: Array<{ writeScopeId: string; externalUnitId: string }> } };
+  const target = state.state.scopes[0]!;
+  // Строка таблицы границ и пункт списка выбора — одного предложения: оба — из одной страницы списка, в одном порядке
+  const at = await b.evaluate<number>(`[...document.querySelectorAll('.costs table tbody tr')].findIndex((tr) => tr.querySelector('a')?.getAttribute('href')?.endsWith(${JSON.stringify(`/bounds/${target.writeScopeId}`)}))`);
+  assert.ok(at >= 0, 'the offer is on the first page of the bounds table');
+  const read = () => b.evaluate<{ min: string; max: string; pick: string }>(`(() => {
+    const tr = document.querySelectorAll('.costs table tbody tr')[${at}];
+    return { min: tr.children[1].textContent.trim(), max: tr.children[2].textContent.trim(),
+      pick: document.querySelectorAll('.bounds-edit .pick-list li')[${at}].textContent.replace(/\\s+/g, ' ').trim() }; })()`);
+  const was = await read();
+  // Смоук-мир общий у тестов файла: границы сдвигаются на цент — соседи (шаг 163 и др.) видят почти прежние числа
+  const plusCent = (text: string, otherwise: number) => { const v = Number(/(\d+\.\d{2})/.exec(text)?.[1] ?? NaN); return (Number.isFinite(v) ? v + 0.01 : otherwise).toFixed(2); };
+  const amount = plusCent(was.min, 1.11);
+  await b.evaluate(`(document.querySelectorAll('.bounds-edit .pick-list li input')[${at}].click(), true)`);
+  const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
+  await b.evaluate(`(() => { const s = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'SET'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  const typeMin = async (value: string) => {
+    await b.evaluate(`(() => { const i = ${field(e.amountLabel)}.querySelector('input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await new Promise((x) => setTimeout(x, 200));
+  };
+
+  // BUG-02: минимум выше максимума — отказ до задания, ОДНОЙ плашкой: предложение подписью, обе суммы, «ничего не изменено»; ни кода, ни идентификатора
+  await typeMin((Number(/(\d+\.\d{2})/.exec(was.max)?.[1] ?? 25) + 50).toFixed(2));
+  await b.click(e.plan, '.bounds-edit button');
+  await waitFor(b, `document.querySelector('.bounds-edit .error, .costs .error') !== null`, 'the refusal is shown');
+  await new Promise((x) => setTimeout(x, 300));
+  const refusal = await b.evaluate<{ boxes: number; text: string; jobs: number }>(`(() => { const boxes = [...document.querySelectorAll('.costs .error')];
+    return { boxes: boxes.length, text: boxes.map((x) => x.innerText).join(' | '), jobs: document.querySelectorAll('.bounds-edit section.job').length }; })()`);
+  const label = was.pick.replace(/[€$][\d.,]+ – [€$][\d.,]+$/, '').trim();
+  assert.equal(refusal.boxes, 1, `one refusal, not three: ${refusal.text}`);
+  assert.ok(refusal.text.includes(label) && refusal.text.includes(was.max) && refusal.text.includes(en.ui.boundsEdit.problems.nothingChanged), `the offer, the maximum and «nothing changed»: ${refusal.text}`);
+  assert.ok(!/MIN_ABOVE_MAX|code |ws-price|_price/.test(refusal.text), `no code, no internal ID: ${refusal.text}`);
+  assert.equal(refusal.jobs, 0, 'no job was started for a refusal that is known before');
+
+  await typeMin(amount);
+  await b.click(e.plan, '.bounds-edit button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.bounds-edit section.diff tbody tr') !== null`, 'the differences are shown');
+  const after = await b.evaluate<string>(`document.querySelector('.bounds-edit section.diff tbody tr').children[2].childNodes[0].textContent.trim()`);
+  assert.ok(after.includes(amount), `the differences show the new minimum ${amount}: ${after}`);
+  await b.click(e.apply, '.bounds-edit button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `[...document.querySelectorAll('.bounds-edit section.job .badge')].some((x) => x.textContent.trim() === ${JSON.stringify(en.ui.jobs.statusLabels.SUCCEEDED)})`, 'the bulk edit is done');
+  // Без перезагрузки: таблица и список выбора перечитаны сами
+  await waitFor(b, `document.querySelectorAll('.costs table tbody tr')[${at}].children[1].textContent.includes(${JSON.stringify(amount)})`, 'the bounds table shows the new minimum', 5_000);
+  assert.ok((await read()).pick.includes(amount), `the pick list shows the new minimum: ${(await read()).pick}`);
+  const text = await b.evaluate<string>(`document.querySelector('.bounds-edit').innerText`);
+  assert.ok(!text.includes(en.ui.jobs.createdBounds), 'no «in the background» after Done');
+  const success = en.ui.jobs.doneBounds(1, 1);
+  assert.equal(text.split(success).length - 1, 1, `one success line «${success}»: ${text}`);
+
+  // Импорт границ на том же экране: после применения таблица тоже перечитана
+  const t = en.ui.imports;
+  const max = plusCent(was.max, 88.88);
+  const file = `sku,max_price\n${target.externalUnitId},${max}\n`;
+  await b.evaluate(`(() => { const input = document.querySelector('.import-bounds input[type=file]'); const dt = new DataTransfer();
+    dt.items.add(new File([${JSON.stringify(file)}], 'bounds-174.csv', { type: 'text/csv' })); input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor(b, `[...document.querySelectorAll('.import-bounds .file-drop')].some((x) => x.textContent.includes('bounds-174.csv'))`, 'the file is chosen');
+  await b.click(t.check, '.import-bounds button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelector('.import-bounds .import-check') !== null`, 'the check is shown');
+  await b.click(t.apply, '.import-bounds button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(smokeLive);
+  await waitFor(b, `document.querySelectorAll('.costs table tbody tr')[${at}].children[2].textContent.includes(${JSON.stringify(max)})`, 'the bounds table shows the imported maximum', 8_000);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 172 (#34): Overview — the first open is the last 24 hours and says why; two hours later the window starts at the visit before', async () => {
   const b = browser!;
   const before = b.errors().length;

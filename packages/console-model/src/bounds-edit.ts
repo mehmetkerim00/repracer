@@ -21,7 +21,12 @@ export interface BoundsEditRequest {
   max?: BoundAdjust;
 }
 
-export type BoundsRequestProblem = { code: 'NO_SCOPES' | 'NOTHING_TO_CHANGE' | 'UNKNOWN_SCOPE' | 'BAD_AMOUNT' | 'BOUND_NOT_SET'; writeScopeId?: string; bound?: 'min' | 'max' };
+export type BoundsRequestProblem =
+  | { code: 'NO_SCOPES' | 'NOTHING_TO_CHANGE'; writeScopeId?: undefined; bound?: undefined }
+  | { code: 'UNKNOWN_SCOPE'; writeScopeId: string; bound?: undefined }
+  | { code: 'BAD_AMOUNT' | 'BOUND_NOT_SET'; writeScopeId: string; bound: 'min' | 'max' }
+  /** Шаг 174 (BUG-02): новый минимум выше максимума — видно до задания по действующим границам; суммы — те, что получились бы */
+  | { code: 'MIN_ABOVE_MAX'; writeScopeId: string; bound?: undefined; minMinor: number; maxMinor: number; currency: string };
 
 /**
  * Р-136 (шаг 29): за один раз правятся границы всего каталога целевого клиента. Было 500 — живой прогон через консоль показал, что
@@ -102,9 +107,52 @@ export function expandBoundsEdit(world: StandWorld, request: BoundsEditRequest):
       if (!Number.isSafeInteger(value) || value <= 0) { problems.push({ code: 'BAD_AMOUNT', writeScopeId: id, bound }); continue; }
       if (bound === 'min') edit.minMinor = value; else edit.maxMinor = value;
     }
+    /**
+     * Шаг 174 (BUG-02): минимум выше максимума — до задания, по действующим границам. Ложной тревоги нет: действующий пол не ниже пола уровня
+     * предложения, действующий потолок не выше его потолка, а неправленная граница остаётся прежней — значит, отказ здесь будет и у базы.
+     * Обратное неверно (граница товара может решить иначе), поэтому последнее слово — по-прежнему за базой
+     */
+    const afterMin = edit.minMinor ?? current.minMinor;
+    const afterMax = edit.maxMinor ?? current.maxMinor;
+    if ((edit.minMinor !== undefined || edit.maxMinor !== undefined) && afterMin !== null && afterMax !== null && afterMin > afterMax) {
+      problems.push({ code: 'MIN_ABOVE_MAX', writeScopeId: id, minMinor: afterMin, maxMinor: afterMax, currency: scope.currency });
+    }
     edits.push(edit);
   }
   return { edits, problems };
+}
+
+/** Сколько предложений называть по имени в тексте отказа: остальные — числом */
+export const PROBLEM_OFFERS_SHOWN = 10;
+
+/**
+ * Шаг 174 (BUG-02): отказ правки — ОДИН текст словами: что не так, у каких предложений (подпись предложения, а не внутренний идентификатор)
+ * и с какими суммами; «ничего не изменено» — потому что правка применяется целиком или никак [Р-134]
+ */
+export function boundsProblemsText(world: StandWorld, problems: readonly BoundsRequestProblem[], m: Messages): string {
+  const t = m.ui.boundsEdit.problems;
+  const byId = new Map(world.state.scopes.map((s) => [s.writeScopeId, s]));
+  const label = (id: string) => { const scope = byId.get(id); return scope ? unitOf(world, scope, m).label : t.unknownOffer; };
+  const listOf = (items: readonly string[]) => {
+    const shown = items.slice(0, PROBLEM_OFFERS_SHOWN);
+    return t.list(shown, items.length - shown.length);
+  };
+  const parts: string[] = [];
+  if (problems.some((p) => p.code === 'NO_SCOPES')) parts.push(t.NO_SCOPES);
+  if (problems.some((p) => p.code === 'NOTHING_TO_CHANGE')) parts.push(t.NOTHING_TO_CHANGE);
+  const unknown = problems.filter((p) => p.code === 'UNKNOWN_SCOPE');
+  if (unknown.length > 0) parts.push(t.UNKNOWN_SCOPE(unknown.length));
+  const crossed = problems.flatMap((p) => (p.code === 'MIN_ABOVE_MAX' ? [p] : []));
+  if (crossed.length > 0) {
+    parts.push(t.MIN_ABOVE_MAX(crossed.length, listOf(crossed.map((p) => t.crossedOffer(label(p.writeScopeId), m.money(p.minMinor, p.currency), m.money(p.maxMinor, p.currency))))));
+  }
+  for (const code of ['BAD_AMOUNT', 'BOUND_NOT_SET'] as const) {
+    for (const bound of ['min', 'max'] as const) {
+      const hit = problems.filter((p) => p.code === code && p.bound === bound);
+      if (hit.length > 0) parts.push(t[code](bound === 'min' ? t.minPrice : t.maxPrice, hit.length, listOf(hit.map((p) => label(p.writeScopeId!)))));
+    }
+  }
+  return `${parts.join(' ')} ${t.nothingChanged}`;
 }
 
 export type DiffFlag = 'PRICE_BELOW_NEW_FLOOR' | 'PRICE_ABOVE_NEW_CEILING' | 'BIG_CHANGE' | 'MARGIN_FLOOR_ABOVE_MIN' | 'NO_EFFECT';

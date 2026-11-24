@@ -6,7 +6,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import { buildInfoFromEnv, ConfigError, createHeartbeat, secretFromEnv, type BuildInfo } from '@repracer/service-runtime';
 import { fileURLToPath } from 'node:url';
 import {
-  boundsDiffView, boundsView, bulkJobsView, bulkJobView, can, holdsOwnerActions, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, noteBlocksPricing, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
+  boundsDiffView, boundsProblemsText, boundsView, bulkJobsView, bulkJobView, can, holdsOwnerActions, canCancelBulkJob, catalogPageOf, catalogTotal, CHANNEL_PRICING_SHOWN, channelNotes, noteBlocksPricing, STRATEGY_SCOPE_EXAMPLES, onboardingView, complianceView, fingerprint, currentStrategies, IMPORT_KIND_LIST, importHistoryView, listQuery, LIST_PAGE_DEFAULT, MAX_SCOPES, OFFER_CHOICES, pageOf, parseListQuery, type ListQuery, discountCheckView, dangerousReport, decisionListView, decisionTrace, describe, expandBoundsEdit, LOCALES, messagesFor, parseBoundsEditRequest, parseFeedQuery, scopeById, unitOf,
   parseStrategyDraft, planStop, priceFeed, productList, rejectedView, stopView, strategiesView, storefrontName,
   type Locale, type Messages, type StandWorld, type StopTarget, type Viewer,
   productPage, clampOffset, feedPageQuery, stockView, stockDivergencesView, stockReturnsView, shadowView, liveRefusalText,
@@ -2004,13 +2004,11 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       }
       // Разбор запроса дёшев и остаётся в запросе: продавец узнаёт о неверной правке сразу, а не отказом задания
       const { problems } = expandBoundsEdit(world, request);
-      if (problems.length > 0) {
-        const texts = m.ui.boundsEdit.problems;
-        // Первые несколько причин и число остальных: на каталоге склейка всех проблем давала мегабайтный ответ (находка 12)
-        const shown = problems.slice(0, 10).map((p) => `${texts[p.code]}${p.writeScopeId ? ` (${p.writeScopeId}${p.bound ? `, ${p.bound}_price` : ''})` : ''}`);
-        const rest = problems.length - shown.length;
-        return fail(400, 'BAD_EDIT', rest > 0 ? `${shown.join('; ')} ${s.andMoreProblems(rest)}` : shown.join('; '));
-      }
+      /**
+       * Шаг 174 (BUG-02): отказ — ОДИН текст словами: предложения — подписью, суммы — с валютой, первые десять по имени и число остальных
+       * (на каталоге склейка всех проблем давала мегабайтный ответ — находка 12); минимум выше максимума виден здесь, до задания
+       */
+      if (problems.length > 0) return fail(400, 'BAD_EDIT', boundsProblemsText(world, problems, m));
       const asked = request.all === true ? world.state.scopes.length : request.writeScopeIds.length;
       return createJob('BOUNDS_PLAN', { request: body.request }, asked, m.ui.jobs.createdPlan);
     }

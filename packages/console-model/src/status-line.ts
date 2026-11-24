@@ -117,14 +117,23 @@ export function statusLineView(input: StatusLineInput, m: Messages): StatusLineV
  * последняя строка журнала выключения — OFF (Р-242); никогда не включённое предложение «выключенным» не считается
  */
 export function attentionReasons(world: StandWorld, scope: ConsoleScope, m: Messages): AttentionReason[] {
-  const codes = new Set(channelNotes(world, scope, m).map((n) => n.code));
+  const codes = new Set(channelNotes(world, scope, m).flatMap((n) => { const r = attentionReasonOfNote(n.code); return r ? [r] : []; }));
   const reasons: AttentionReason[] = [];
   if (scope.cost === null) reasons.push('NO_UNIT_COST');
-  if (codes.has('AUTOMATED_PRICING')) reasons.push('AUTOMATED_PRICING');
-  if (codes.has('CHANNEL_BOUNDS') || codes.has('CHANNEL_BOUNDS_LIVE')) reasons.push('CHANNEL_BOUNDS');
-  if (codes.has('LISTING_NOT_BUYABLE') || codes.has('WALMART_UNPUBLISHED')) reasons.push('NOT_BUYABLE');
+  for (const r of ['AUTOMATED_PRICING', 'CHANNEL_BOUNDS', 'NOT_BUYABLE'] as const) if (codes.has(r)) reasons.push(r);
   if (scope.pricingMode === 'OFF' && scope.pricingSwitch?.action === 'OFF') reasons.push('TURNED_OFF');
   return reasons;
+}
+
+/**
+ * Шаг 174: какая заметка канала — причина внимания. Одно правило у строки состояния и у колонки Health Offers: жёлтая строка называет свою
+ * причину в Health (наблюдение Мердана, QA-A Testing 2.0 — строка была жёлтой, а Health пуст)
+ */
+export function attentionReasonOfNote(code: string): AttentionReason | null {
+  return code === 'AUTOMATED_PRICING' ? 'AUTOMATED_PRICING'
+    : code === 'CHANNEL_BOUNDS' || code === 'CHANNEL_BOUNDS_LIVE' ? 'CHANNEL_BOUNDS'
+    : code === 'LISTING_NOT_BUYABLE' || code === 'WALMART_UNPUBLISHED' ? 'NOT_BUYABLE'
+    : null;
 }
 
 /** Фильтр Offers без базы: предложение проходит, если у него есть эта причина (ANY — любая) */

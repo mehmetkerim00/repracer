@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { BoundsIndexView } from '../api-types.ts';
 import { useResource, worldPath } from '../api.ts';
 import { Load, SectionAnchor, useMessages } from '../components.tsx';
@@ -14,6 +15,9 @@ export function CostsScreen({ worldId, section, target = null }: { worldId: stri
   const m = useMessages();
   const [rights, retry] = useResource<BoundsIndexView>(`${worldPath(worldId, 'bounds')}?offset=0&limit=1`, m.locale);
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ block: 'start' });
+  // Шаг 174 (BUG-01): импорт себестоимости или границ применён — список границ того же экрана перечитывается сам
+  const [refresh, setRefresh] = useState(0);
+  const applied = () => setRefresh((n) => n + 1);
   return (
     <section className="costs">
       <h2>{m.ui.app.screens.costs}</h2>
@@ -23,11 +27,11 @@ export function CostsScreen({ worldId, section, target = null }: { worldId: stri
         <button type="button" onClick={() => go('bounds-import')}>{m.ui.costs.importBoundsAction}</button>
       </p>
       {/* Шаг 96 (В20): `costs/edit/<предложение>` — правка границ с этим предложением выбранным, прокручена к ней */}
-      <BoundsIndex worldId={worldId} preselect={section === 'edit' ? target : null} focusEdit={section === 'edit'} />
+      <BoundsIndex worldId={worldId} preselect={section === 'edit' ? target : null} focusEdit={section === 'edit'} refresh={refresh} />
       <SectionAnchor id="cost-import" focus={section === 'import'} />
-      <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="COSTS" canEdit={view.canEdit} />}</Load>
+      <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="COSTS" canEdit={view.canEdit} onApplied={applied} />}</Load>
       <SectionAnchor id="bounds-import" focus={section === 'bounds-import'} />
-      <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="BOUNDS" canEdit={view.canEdit} shared={false} />}</Load>
+      <Load shape="cards" resource={rights} retry={retry}>{(view) => <ImportPanel worldId={worldId} kind="BOUNDS" canEdit={view.canEdit} shared={false} onApplied={applied} />}</Load>
     </section>
   );
 }

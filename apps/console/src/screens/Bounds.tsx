@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LIST_PAGE_DEFAULT, parseAmountInput, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
@@ -31,7 +31,8 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
   // Шаг 107 (G) [Р-233]: пол распродажи ниже Min, заданного продавцом в канале, — предупреждение до галочки; распродажа не блокируется
   const channelMin = view.channelBounds.channelMinMinor;
   const belowChannelMin = floorMinor !== null && channelMin !== null && floorMinor < channelMin;
-  const ackLabel = belowChannelMin ? t.ackWithChannel(c.breakEven ?? m.ui.common.noValue, money(channelMin!)) : t.ack(c.breakEven ?? m.ui.common.noValue);
+  // Шаг 174 (BUG-03): подтверждение называет убыток ниже безубыточности — без неё подтверждать нечего, и галочки нет вовсе (ниже)
+  const ackLabel = c.breakEven === null ? '' : belowChannelMin ? t.ackWithChannel(c.breakEven, money(channelMin!)) : t.ack(c.breakEven);
   const ack = ackedLabel === ackLabel;
   const post = async (path: string[], body: Record<string, unknown>) => {
     setBusy(true); setError(null); setMessage(null);
@@ -50,7 +51,7 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
   });
   // Шаг 140 [Р-227]: без посчитанной безубыточности убыток не назвать — включение закрыто, путь к себестоимости и комиссии — ссылкой
   const noBreakEven = c.breakEvenMinor === null;
-  const why = noBreakEven ? t.causes.BREAK_EVEN_UNKNOWN : floorMinor === null ? t.causes.FLOOR_INVALID : !ack ? t.causes.ACK_REQUIRED : note.trim() === '' ? t.causes.NOTE_REQUIRED : null;
+  const why = floorMinor === null ? t.causes.FLOOR_INVALID : !ack ? t.causes.ACK_REQUIRED : note.trim() === '' ? t.causes.NOTE_REQUIRED : null;
   return (
     <section className="card clearance">
       <h3>{t.title}{c.pill ? <> <Badge tone="warn">{c.pill}</Badge></> : null}</h3>
@@ -72,6 +73,15 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
             </FormActions>
           ) : null}
         </>
+      ) : noBreakEven ? (
+        /*
+          Шаг 174 (BUG-03): без посчитанной безубыточности убыток не назвать — ни поля пола, ни галочки «every sale below no value loses money»:
+          только причина и путь к себестоимости и комиссии (шаг 140 убрал включение, но оставил форму целиком)
+        */
+        <div className="clearance-unavailable">
+          <p className="notice" role="status">{t.causes.BREAK_EVEN_UNKNOWN}</p>
+          {c.canManage ? <p><a className="break-even-fill" href={href(view.worldId, 'cost-import')}>{t.addCosts}</a></p> : null}
+        </div>
       ) : c.canManage ? (
         <FieldGroup>
           <FieldGrid cols={3}>
@@ -93,7 +103,6 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
           </FieldGrid>
           <FormActions hint={why ?? t.mfaHint}>
             <button type="button" className="primary" disabled={busy || why !== null} title={why ?? undefined} onClick={enable}>{t.enable}</button>
-            {noBreakEven ? <a className="break-even-fill" href={href(view.worldId, 'cost-import')}>{t.addCosts}</a> : null}
           </FormActions>
         </FieldGroup>
       ) : <p className="muted">{t.readOnly}</p>}
@@ -201,7 +210,7 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
       <div className="floor-top">
         <section className="card floor-glance">
           <h3>{b.glance}</h3>
-          <div className="verdict-price">{view.effectiveFloor.amount}</div>
+          <div className={view.effectiveFloor.missing ? 'verdict-price muted empty-value' : 'verdict-price'}>{view.effectiveFloor.amount}</div>
           <p className="small muted">{b.effectiveFloor} · {view.effectiveFloor.source}</p>
           <dl className="receipt-summary">
             <div><dt>{m.ui.products.columns.current}</dt><dd className={view.current.missing ? 'muted' : 'cur'}>{view.current.amount}</dd></div>
@@ -303,11 +312,16 @@ export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; write
   return <BoundsDetail worldId={worldId} writeScopeId={writeScopeId} />;
 }
 
-export function BoundsIndex({ worldId, preselect = null, focusEdit = false }: { worldId: string; preselect?: string | null; focusEdit?: boolean }) {
+export function BoundsIndex({ worldId, preselect = null, focusEdit = false, refresh = 0 }: { worldId: string; preselect?: string | null; focusEdit?: boolean; refresh?: number }) {
   const m = useMessages();
   // Р-136: страница списка; массовая правка применяется к показанной странице — выбор продавца всегда виден на экране
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
-  const [resource, retry] = useResource<BoundsIndexData>(`${worldPath(worldId, 'bounds')}?offset=${query.offset}&limit=${query.limit}`, m.locale);
+  /**
+   * Шаг 174 (BUG-01): после применения правки или импорта список перечитывается сам; пока идёт чтение, экран держит прежние строки
+   * (`keepPrevious`) — форма правки с итогом задания не размонтируется
+   */
+  const [resource, retry] = useResource<BoundsIndexData>(`${worldPath(worldId, 'bounds')}?offset=${query.offset}&limit=${query.limit}`, m.locale, { keepPrevious: true });
+  useEffect(() => { if (refresh > 0) retry(); }, [refresh, retry]);
   return (
     <Load shape="table" resource={resource} retry={retry}>
       {(view) => (
@@ -315,7 +329,7 @@ export function BoundsIndex({ worldId, preselect = null, focusEdit = false }: { 
           <BoundsIndexView worldId={worldId} items={view.items} embedded />
           <Pager page={view.page} query={query} onQuery={setQuery} />
           {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
-          {view.page.total === 0 ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} preselect={preselect} /></>}
+          {view.page.total === 0 ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} preselect={preselect} onApplied={retry} /></>}
         </>
       )}
     </Load>

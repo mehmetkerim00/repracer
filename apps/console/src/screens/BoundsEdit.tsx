@@ -63,14 +63,14 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
   );
 }
 
-export function BoundsEditPanel({ worldId, items, total, canEdit, preselect = null }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; canEdit: boolean; preselect?: string | null }) {
+export function BoundsEditPanel({ worldId, items, total, canEdit, preselect = null, onApplied }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; canEdit: boolean; preselect?: string | null; onApplied?: () => void }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   if (!canEdit) return <section className="bounds-edit"><h3>{t.pageTitle}</h3><p className="notice">{t.noRight}</p></section>;
-  return <BoundsEditForm worldId={worldId} items={items} total={total} preselect={preselect} />;
+  return <BoundsEditForm worldId={worldId} items={items} total={total} preselect={preselect} onApplied={onApplied} />;
 }
 
-function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; preselect: string | null }) {
+function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; preselect: string | null; onApplied?: () => void }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   // Шаг 96 (аудит В20): «Change this floor» со страницы предложения — правка открывается с этим предложением выбранным
@@ -80,12 +80,13 @@ function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string;
   const [diff, setDiff] = useState<{ view: BoundsDiffView; request: BoundsEditRequest } | null>(null);
   const [wholeCatalog, setWholeCatalog] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  /** Шаг 174 (BUG-05): фраза запуска применения — в карточке задания, пока оно идёт (`JobProgress started`) */
+  const [started, setStarted] = useState<string | null>(null);
   /** Р-139: применение идёт фоновым заданием — экран показывает его ход, а не ждёт ответа */
   const [jobId, setJobId] = useState<string | null>(null);
   const [planJobId, setPlanJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const reset = () => { setDiff(null); setMessage(null); setJobId(null); setPlanJobId(null); };
+  const reset = () => { setDiff(null); setStarted(null); setJobId(null); setPlanJobId(null); };
   /**
    * Р-140 (шаг 30): выбор отдельных строк НЕ переживает листание и смену фильтра. Он их и не пережил бы осмысленно: выбранные
    * строки другой страницы продавцу не видны, а применяются. Страница сменилась — выбор сброшен, и это сказано на экране.
@@ -107,7 +108,7 @@ function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string;
    * из итога задания, и он же ссылается на это задание при применении: применяется ровно посчитанное, без второго расчёта.
    */
   const plan = async () => {
-    setError(null); setMessage(null); setDiff(null);
+    setError(null); setStarted(null); setDiff(null);
     const r = request();
     if (typeof r === 'string') return setError(r);
     setBusy(true);
@@ -119,8 +120,8 @@ function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string;
   const planReady = (job: BulkJobView) => {
     const result = job.result as { view?: BoundsDiffView } | null;
     const r = request();
+    // Шаг 174 (BUG-02): отказ задания называет карточка задания — второй раз формой он не повторяется
     if (job.status === 'SUCCEEDED' && result?.view && typeof r !== 'string') setDiff({ view: result.view, request: r });
-    else if (job.status === 'FAILED') setError(job.error);
   };
   const apply = async () => {
     if (!diff) return;
@@ -128,7 +129,7 @@ function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string;
     try {
       const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { planJobId, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
       // Задание экрана различий тоже забывается: иначе после применения различия вернутся и позовут применить ещё раз
-      setMessage(r.message); setJobId(r.jobId); setDiff(null); setPlanJobId(null);
+      setStarted(r.message); setJobId(r.jobId); setDiff(null); setPlanJobId(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
   };
   // Шаг 94: граница — два поля стандарта: что сделать (подпись — имя границы) и значение (подпись — сумма или процент)
@@ -185,9 +186,9 @@ function BoundsEditForm({ worldId, items, total, preselect }: { worldId: string;
       {diff ? <Help className="section-sub" text={t.shownRows(diff.view.shown.rows, diff.view.shown.of)} /> : null}
       </FieldGroup>
       {error ? <ErrorBox message={error} /> : null}
-      {message ? <p className="notice" role="status">{message}</p> : null}
       {planJobId && !diff ? <JobProgress worldId={worldId} jobId={planJobId} onFinished={planReady} /> : null}
-      {jobId ? <JobProgress worldId={worldId} jobId={jobId} /> : null}
+      {/* Шаг 174 (BUG-01): применение завершилось — таблица границ и список выбора перечитываются сами, без перезагрузки страницы */}
+      {jobId ? <JobProgress worldId={worldId} jobId={jobId} started={started} onFinished={(job) => { if (job.status === 'SUCCEEDED') onApplied?.(); }} /> : null}
       {diff ? <BoundsDiffTable view={diff.view} /> : null}
     </section>
   );

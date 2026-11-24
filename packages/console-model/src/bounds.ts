@@ -44,7 +44,8 @@ export interface BoundsView {
   minPrice: { amount: string; minor: number | null; source: string };
   maxPrice: { amount: string; minor: number | null; source: string };
   marginFloor: { minMarginBp: string | null; amount: string | null; minor: number | null; unavailable: string | null };
-  effectiveFloor: { amount: string; minor: number | null; source: string };
+  /** Шаг 174 (BUG-04): пола нет — «Not set» словами, как пустые значения везде после шага 148; `missing` — экран не ставит сумме её шрифт */
+  effectiveFloor: { amount: string; minor: number | null; source: string; missing: boolean };
   /** Шаг 102 [Р-227]: пол выше потолка — «цены заморожены: поднимите потолок или включите распродажу»; иначе null */
   frozen: string | null;
   /** Шаг 107 [Р-233]: рамки цены, заданные продавцом в канале, рядом с нашими — значения, «not provided» и предупреждения о конфликте */
@@ -271,7 +272,7 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages,
     minPrice: { amount: boundText(scope.bounds.min, c, m), minor: floor.minMinor, source: source(scope.bounds.min) },
     maxPrice: { amount: boundText(scope.bounds.max, c, m), minor: scope.bounds.max.status === 'RESOLVED' ? scope.bounds.max.amountMinor : null, source: source(scope.bounds.max) },
     marginFloor,
-    effectiveFloor: { amount: money(floor.minor), minor: floor.minor, source: floorSource },
+    effectiveFloor: { amount: floor.minor === null ? m.ui.products.notSet : money(floor.minor), minor: floor.minor, source: floorSource, missing: floor.minor === null },
     frozen,
     channelBounds: channelBoundsView(world, scope, m),
     clearance,

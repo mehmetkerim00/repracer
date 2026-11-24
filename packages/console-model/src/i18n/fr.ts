@@ -601,7 +601,6 @@ export const fr: Messages = {
       standError: 'Erreur du serveur.',
       noChannel: 'Aucun canal connecté pour l’instant : cette action nécessite un compte du canal. Commencez par la configuration.',
       method: 'Méthode non prise en charge.',
-      andMoreProblems: (n: number) => `et ${n} autres offres présentant les mêmes problèmes`,
       tooManyScopes: (asked: number, limit: number) => `${asked} offres sélectionnées ; ${limit} au maximum sont modifiées à la fois. Sélectionnez-en moins ou utilisez l’import.`,
       badRequest: 'La requête n’est pas valide.',
       busy: 'Le stock de ce vendeur est en cours de recalcul — renvoyez la même requête dans quelques secondes.',
@@ -1395,6 +1394,9 @@ export const fr: Messages = {
       columns: { margin: 'Marge', health: 'État', unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box 7 j' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Que faire',
+      /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
+      healthNoUnitCost: 'Importez le coût unitaire et les commissions de cette offre dans Coûts et planchers.',
+      healthTurnedOff: 'Une personne a désactivé la tarification automatique de cette offre. Pour que TMPrice fixe de nouveau son prix, choisissez « Activer » dans la colonne Statut.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart masque cette offre parce que le même produit est moins cher ailleurs${elsewhere ? ` (${elsewhere})` : ''}. Pour qu’elle réapparaisse, rapprochez le prix walmart.com de ce prix — seulement si votre plancher le permet. TMPrice ne modifie jamais le prix de lui-même pour cette raison.`,
       conditions: { used: 'occasion', refurbished: 'reconditionné', collectible: 'de collection' }, viewOptions: { columns: 'Colonnes', compact: 'Lignes compactes' },
       productRef: (ref: string, condition: string, gtin: string | null) => `produit ${ref} · ${condition}${gtin ? ` · EAN ${gtin}` : ''}`,
@@ -1673,7 +1675,7 @@ export const fr: Messages = {
       proposed: (price: string, change: string | null, text: string) => `Proposé ${price}${change ? ` (${change})` : ''} : ${text}`,
       keep: (text: string) => `Maintenir le prix : ${text}`,
       strategy: 'Stratégie', trigger: 'Déclencheur', before: 'Prix avant', boundsAtStrategy: 'Limites au moment du calcul', step: 'Étape du calcul', notRun: 'non vérifié : décidé avant',
-      gateOrderUnknown: 'Ordre des contrôles du Price Gate inconnu : le profil ne figure pas dans le dictionnaire',
+      gateOrderUnknown: 'L’ordre des contrôles finaux du prix n’est pas connu pour cette décision',
       floor: 'Plancher', ceiling: 'Plafond', minMargin: 'Marge minimale', fx: 'Taux de change du coût', deviation: 'Écart par rapport à la limite',
       deviationValue: (pct: string, dangerous: boolean) => `${pct} au-delà de la limite — ${dangerous ? 'rejeté, un changement dangereux (plus de 10%)' : 'rejeté ; le prix n’a pas changé'}`,
       // Шаг 137 (INV-03): в распродаже нижнюю границу заменяет пол распродажи
@@ -1764,9 +1766,9 @@ export const fr: Messages = {
       fixedFee: 'Commission fixe', fixedFeeFormula: 'par vente, selon le barème du canal', cost: 'Coût unitaire', costFormula: 'un montant par pièce',
       margin: 'Marge', marginFormula: (net: string, fee: string, fixed: string, cost: string) => `${net} − ${fee} − ${fixed} − ${cost}`,
       marginNotComputed: 'non calculable', marginOfNet: (pct: string) => `${pct} du revenu net`,
-      roundingNote: 'Les montants sont arrondis au centime le plus proche (la moitié vers le haut) ; le pourcentage de marge est le calcul exact du Price Gate, arrondi vers le bas',
+      roundingNote: 'Les montants sont arrondis au centime le plus proche (la moitié vers le haut) ; le pourcentage de marge est calculé exactement comme au contrôle final du prix, puis arrondi vers le bas',
       boundSource: (_ids: string) => 'votre réglage', boundUnresolved: 'non défini',
-      marginUnavailable: (cause: string) => `non calculable : ${cause} — le Price Gate rejette chaque prix`,
+      marginUnavailable: (cause: string) => `non calculable : ${cause} — d’ici là, chaque prix est rejeté`,
       floorNoMin: 'Le prix minimum n’est pas défini — la tarification automatique ne peut pas être activée',
       floorFromMargin: (pct: string, min: string) => `marge minimale ${pct} : au-dessus de votre prix minimum ${min}`, floorFromMin: 'issu de votre prix minimum',
       floorFromBreakEven: (min: string) => `seuil de rentabilité : au-dessus de votre prix minimum ${min}`,
@@ -1857,9 +1859,9 @@ export const fr: Messages = {
       anchorsInline: { BUYBOX: 'prix de la Buy Box', LOWEST: 'prix le plus bas', LOWER_OF_TWO: 'le plus bas des deux' }, competeWithInline: { ALL: 'toutes', CHANNEL: 'FBA uniquement', MERCHANT: 'FBM uniquement' },
       problems: { REQUIRED: 'obligatoire', NOT_A_WHOLE_AMOUNT: 'un montant comme 19.99 ou un pourcentage comme 12.5', OUT_OF_RANGE: 'hors plage', UNKNOWN_TYPE: 'type inconnu', UNSUPPORTED_TYPE: 'non calculé par le moteur' },
       pick: 'Offres pour l’aperçu', preview: 'Aperçu sur ces offres', save: 'Enregistrer et attribuer', saveHint: 'L’enregistrement n’est possible que pour l’aperçu affiché : le serveur le recalcule et refuse si quoi que ce soit a changé.',
-      columns: { offer: 'Offre', asOf: 'Données du', current: 'Actuel', proposed: 'Proposé', final: 'Après Gate', change: 'Variation', outcome: 'Résultat', reason: 'Pourquoi' },
+      columns: { offer: 'Offre', asOf: 'Données du', current: 'Actuel', proposed: 'Proposé', final: 'Prix final', change: 'Variation', outcome: 'Résultat', reason: 'Pourquoi' },
       headline: (s: { changes: number; unchanged: number; rejected: number; dangerous: number; notEvaluated: number }) =>
-        `Changeraient : ${s.changes} · inchangées : ${s.unchanged} · rejetées par le Price Gate : ${s.rejected}${s.dangerous ? ` (dangereuses : ${s.dangerous})` : ''} · non calculées : ${s.notEvaluated}`,
+        `Changeraient : ${s.changes} · inchangées : ${s.unchanged} · rejetées à vos limites : ${s.rejected}${s.dangerous ? ` (dangereuses : ${s.dangerous})` : ''} · non calculées : ${s.notEvaluated}`,
       asOfSnapshot: (when: string) => `données de la concurrence du ${when}`, asOfNow: (when: string) => `sans données de la concurrence, ${when}`, notEvaluated: 'Non calculé',
       unavailable: (text: string) => `Le canal ne fournit pas ce dont cette stratégie a besoin : ${text}`,
       dangerous: 'dangereux', saved: (version: number, offers: number) => `Enregistrée en version ${version}, attribuée à ${offers} ${offers === 1 ? 'offre' : 'offres'}.`,
@@ -1934,12 +1936,15 @@ export const fr: Messages = {
       producing: (done: number, total: number | null) => (total === null ? 'Création du fichier…' : `Création du fichier : ${done} sur ${total}`),
       interrupted: 'L’opération a été interrompue et redémarre.',
       failed: (reason: string) => `Non effectuée : ${reason}`,
-      errorUnknown: (code: string) => `erreur inattendue (code ${code}) — merci de communiquer ce code au support`,
+      // Шаг 174 (BUG-02): продавцу — слова без кода; код остаётся в журнале задания для поддержки
+      errorUnknown: (_code: string) => 'une erreur inattendue — rien n’a été modifié ; si elle se reproduit, indiquez au support quand vous avez lancé l’opération',
       doneCostImport: (rows: number, offers: number, skipped: number) =>
         `Terminé : coûts unitaires importés pour ${offers} ${offers === 1 ? 'offre' : 'offres'} (${rows} lignes, ${skipped} non associées).`,
       donePlan: (offers: number) => `Terminé : différences calculées pour ${offers} ${offers === 1 ? 'offre' : 'offres'}.`,
       createdPlan: 'Les différences sont calculées en arrière-plan. Le résultat apparaîtra ici.',
-      doneBounds: (offers: number, changed: number) => `Terminé : limites vérifiées pour ${offers} ${offers === 1 ? 'offre' : 'offres'}, ${changed} modifiées.`,
+      doneBounds: (offers: number, changed: number) => (changed === 0 ? `Aucune offre modifiée : ${offers === 1 ? 'l’offre avait' : `les ${offers} offres avaient`} déjà ces limites.`
+        : changed === offers ? `${changed} ${changed === 1 ? 'offre mise' : 'offres mises'} à jour avec succès.`
+        : `${changed} offres sur ${offers} mises à jour avec succès — les autres avaient déjà ces limites.`),
       doneStrategy: (offers: number, version: number) => `Terminé : version ${version} attribuée à ${offers} ${offers === 1 ? 'offre' : 'offres'}.`,
       doneFeedExport: (rows: number, bytes: number) => `Terminé : ${rows} entrées, ${Math.round(bytes / 1024)} Ko — le fichier est prêt à être téléchargé.`,
       doneScreenExport: (rows: number, bytes: number) => `Terminé : ${rows} ${rows === 1 ? 'ligne' : 'lignes'}, ${Math.round(bytes / 1024)} Ko — le fichier est prêt à être téléchargé.`,
@@ -1983,6 +1988,9 @@ export const fr: Messages = {
         DATA_CHANGED: 'vos données ont changé après la vérification — vérifiez à nouveau le fichier', HAS_ERRORS: 'le fichier a des lignes en erreur — rien n’a été appliqué',
         NOTHING_TO_APPLY: 'rien à modifier', CHECK_MISSING: 'la vérification de ce fichier manque — vérifiez-le à nouveau', NOT_INTERNAL_POOL: 'la source de stock n’accepte pas de fichiers',
         INVALID: 'les données n’ont pas passé les contrôles de la base de données', BAD_FILE: 'le fichier n’a pas pu être lu',
+        // Шаг 174 (BUG-02): причины правки границ, которые прежде доходили до продавца кодом
+        MIN_ABOVE_MAX: 'le prix minimum serait au-dessus du prix maximum pour au moins une offre (une limite fixée sur le produit décide) — rien n’a été modifié',
+        SCOPE_NOT_FOUND: 'une offre n’est plus dans votre catalogue — rechargez la page et choisissez à nouveau', BAD_EDIT: 'la modification est incomplète — relancez l’aperçu',
       },
     },
     /** Шаг 95 [Р-217]: Costs & floors — границы сверху, импорт себестоимости — разделом того же экрана */
@@ -2150,10 +2158,22 @@ export const fr: Messages = {
         PRICE_BELOW_NEW_FLOOR: (price: string, floor: string) => `le prix actuel ${price} est sous le nouveau prix minimum ${floor} : la prochaine décision le relèvera`,
         PRICE_ABOVE_NEW_CEILING: (price: string, ceiling: string) => `le prix actuel ${price} dépasse le nouveau prix maximum ${ceiling} : la prochaine décision le baissera`,
         BIG_CHANGE: (pct: string) => `une limite bouge de plus de ${pct}`,
-        MARGIN_FLOOR_ABOVE_MIN: (floor: string) => `le plancher de marge ${floor} reste au-dessus de votre prix minimum — le Price Gate continue de l’utiliser`,
+        MARGIN_FLOOR_ABOVE_MIN: (floor: string) => `le plancher de marge ${floor} reste au-dessus de votre prix minimum — les prix ne descendent toujours jamais sous ${floor}`,
         NO_EFFECT: 'aucun effet : la limite au niveau du produit reste déterminante',
       },
-      problems: { NO_SCOPES: 'choisissez au moins une offre', NOTHING_TO_CHANGE: 'rien à modifier', UNKNOWN_SCOPE: 'offre inconnue', BAD_AMOUNT: 'le nouveau montant n’est pas un nombre positif de centimes', BOUND_NOT_SET: 'un pourcentage nécessite une limite existante' },
+      /** Шаг 174 (BUG-02): отказ правки — один текст словами: предложения подписью, суммы — с валютой, «ничего не изменено» */
+      problems: {
+        NO_SCOPES: 'Choisissez au moins une offre.',
+        NOTHING_TO_CHANGE: 'Choisissez ce qui change : le prix minimum, le prix maximum ou les deux.',
+        UNKNOWN_SCOPE: (n: number) => `${n === 1 ? 'Une offre choisie n’est plus' : `${n} offres choisies ne sont plus`} dans votre catalogue — rechargez la page et choisissez à nouveau.`,
+        MIN_ABOVE_MAX: (n: number, list: string) => `Le prix minimum serait au-dessus du prix maximum pour ${n === 1 ? '1 offre' : `${n} offres`} : ${list}. Corrigez les valeurs et relancez l’aperçu.`,
+        crossedOffer: (offer: string, min: string, max: string) => `${offer} (minimum ${min}, maximum ${max})`,
+        BAD_AMOUNT: (bound: string, n: number, list: string) => `Le nouveau ${bound} serait nul ou négatif pour ${n === 1 ? '1 offre' : `${n} offres`} : ${list}.`,
+        BOUND_NOT_SET: (bound: string, n: number, list: string) => `Une variation en pourcentage nécessite un ${bound} existant ; il n’est pas défini pour ${n === 1 ? '1 offre' : `${n} offres`} : ${list}.`,
+        list: (shown: readonly string[], more: number) => `${shown.join(' ; ')}${more > 0 ? ` et ${more} autres` : ''}`,
+        minPrice: 'prix minimum', maxPrice: 'prix maximum', unknownOffer: 'une offre qui n’est plus dans votre catalogue',
+        nothingChanged: 'Rien n’a été modifié.',
+      },
       applied: (n: number) => `Limites de ${n} ${n === 1 ? 'offre' : 'offres'} modifiées.`,
       noRight: 'Votre rôle peut consulter les limites, mais pas les modifier.',
     },

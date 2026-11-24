@@ -1,6 +1,6 @@
 # TMPrice — Functional Design Document
 
-Nov 18, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 172.
+Nov 25, 2026 · @ITdzen · Status: living document, updated as the product evolves. This version is reconciled with `main` after step 174.
 The QA-A stand runs `main`; the footer of every page names the exact build (`Build <sha> · <time>`). Since step 146 the console is being
 redesigned issue by issue (#34, #24, #27, #29, #25, #26, #28, then the proposals #36, #35, #34 tier 2); the theme is "Spruce Hybrid" (step 167).
 
@@ -101,7 +101,7 @@ Every data screen shares the same conventions:
 | Default strategy for new offers | Per channel account (on Channels): "None" or an active strategy available on that channel | Sets it. It assigns the latest active version to newly discovered offers, but never enables sending; every auto-assignment traces back to the person who set the default | **[QA-A]** |
 | Costs & floors | Unit costs, min/max prices, margin floor, break-even, clearance; the marketplace's own Min/Max next to ours with conflict warnings (where the values are known) | Edits costs and bounds (second factor for many offers); sees which floor is effective and why | **[QA-A]** |
 | Protections | What stopped or prevented changes: floor holds ("120 price reductions prevented by your floor; $589.70 in aggregate proposed price differences", with Events / Unique SKUs / Sum; one event is one hold, however many times the price was re-checked while it lasted), stops by people, rules. Each row has one status from the shared vocabulary: Adjusted to limit, Rejected (dangerous when over 10% beyond a bound), Blocked | Reviews what the fence earned; opens each hold's receipt | **[QA-A]** |
-| Offers | Every offer: status ("On · shadow mode" in the trial), current price, margin at that price, health (errors and blocks, the most important first with what to do), strategy, effective floor, color; optional Buy Box columns (holder, price, gap, share 7d); "Repricing: On / Off", "Needs attention", "Setup" (no strategy; no minimum or maximum price) and "Money" (clearance on; below break-even) filters | Filters, sorts, bulk edits, exports offers and competitors | **[QA-A]** |
+| Offers | Every offer: status ("On · shadow mode" in the trial), current price, margin at that price, health (errors and blocks, the most important first with what to do; every reason that marks a row yellow is named in Health), strategy, effective floor, color; optional Buy Box columns (holder, price, gap, share 7d); "Repricing: On / Off", "Needs attention", "Setup" (no strategy; no minimum or maximum price) and "Money" (clearance on; below break-even) filters | Filters, sorts, bulk edits, exports offers and competitors | **[QA-A]** |
 | Turn off one offer | "Turn off" / "Enable" per offer (Owner or Manager, no second factor, optional note); "Turned off by …" on the row. A turned-off offer is not evaluated, and its queued writes are not sent | Pauses one SKU without stopping anything else | **[QA-A]** |
 | Competition | Per offer: Buy Box holder, place and gap, Buy Box share 24h / 7d / 30d by snapshots, "Why not in the Buy Box", the Amazon competitive summary with coupons and buyer-segment groups | Understands the market around one offer | **[QA-A]** |
 | Inventory | One shared stock pool per product, minus a safety buffer, fed to every channel; each channel line names its calculation with the saved buffer, cap and minimum to list (e.g. "58 to publish = 60 available − buffer 2"); reservations; what was published and confirmed; divergence; returns to decide on; filters by channel and "needs attention"; sort by reserved, and by "To publish" within a chosen channel; a preview of what a channel would get before enabling | Sets buffers, imports stock, accepts or rejects returns | **[QA-A]** |
@@ -153,7 +153,7 @@ Special cases, handled honestly:
 
 | Function | Behavior | Label |
 |---|---|---|
-| Clearance (deliberate loss) | Replaces the whole floor with a clearance floor; second factor + note + checkbox; the loss per piece and the largest total loss are shown before confirming; turns on only when break-even is computed — otherwise «Loss cannot be calculated — add unit cost and fees first» with a link to the unit cost import, refused by the database (step 140); outside clearance the floor always includes break-even; turning it off returns to the floor by a step ladder | **[QA-A]** |
+| Clearance (deliberate loss) | Replaces the whole floor with a clearance floor; second factor + note + checkbox; the loss per piece and the largest total loss are shown before confirming; turns on only when break-even is computed — otherwise the clearance section shows only «Loss cannot be calculated — add unit cost and fees first» with a link to the unit cost import (no form, no checkbox; step 174), and the database refuses it (step 140); outside clearance the floor always includes break-even; turning it off returns to the floor by a step ladder | **[QA-A]** |
 | Raise toward the floor | When the floor rises (cost, fee, min price, margin), a price below it climbs in steps no larger than the step limit, at most one step per scheduled period, with "about N steps left"; the owner is notified once per ladder. The ladder is driven by the scheduled recompute, which the demo runs every 15 minutes for its ebay.com and walmart.com offers | **[QA-A]** |
 | Floor above ceiling | When break-even exceeds the maximum price, prices freeze and the screen says "raise the maximum price or enable clearance" | **[QA-A]** |
 | Fee estimate expiry | A seller-declared fee estimate lives 90 days. A warning goes out 14 days before it ends; at expiry prices freeze with a critical alert. The alerts are raised by the scheduler | **[QA-B]** |
@@ -184,6 +184,13 @@ Import kinds:
 
 Every import is journaled with who, when and the number of rows. Progress is visible while it runs. Applying 10,000 cost rows takes
 3–11 s on CI runners.
+
+**Bulk bounds edit — [QA-A].** Costs & floors → "Change bounds": choose offers (or the whole catalog), set or shift the minimum and/or
+maximum price, preview the differences, apply.
+- A minimum above the maximum is refused before anything runs, in one message that names the offers and both amounts; nothing is changed.
+- Applying runs in the background; the bounds table and the pick list refresh by themselves when it is done, with one line
+  "Successfully updated N offers".
+- All-or-nothing, as imports; more than one offer needs a second factor.
 
 **Exports — [QA-A].** Exports exist on every data screen, in CSV and XLSX, under one rule: what you see is what you export, with the
 current filters and columns.

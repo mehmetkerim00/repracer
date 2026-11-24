@@ -32,7 +32,11 @@ function OneGo() {
   return <p className="loading job-busy" role="status">{t.elapsed(Math.floor((now - startedAt) / 1000))}</p>;
 }
 
-export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; jobId: string; onFinished?: (job: BulkJobView) => void }) {
+/**
+ * Шаг 174 (BUG-05): `started` — фраза ответа на запуск («идёт в фоне, можно уйти со страницы»). Она правда, пока задание идёт, и ложь после
+ * «Done»: живёт в карточке задания и исчезает с его завершением, а не стоит на экране рядом с итогом
+ */
+export function JobProgress({ worldId, jobId, onFinished, started = null }: { worldId: string; jobId: string; onFinished?: (job: BulkJobView) => void; started?: string | null }) {
   const m = useMessages();
   const t = m.ui.jobs;
   const [job, setJob] = useState<BulkJobView | null>(null);
@@ -61,11 +65,13 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
   }, [worldId, jobId, m.locale]);
 
   if (error && !job) return <ErrorBox message={error} />;
-  if (!job) return <p className="notice" role="status">{t.queued}</p>;
+  if (!job) return <p className="notice" role="status">{started ?? t.queued}</p>;
   return (
     <section className="job card" aria-live="polite">
       <h4>{job.title} <Badge tone={job.tone}>{job.statusText}</Badge></h4>
-      <p className="headline">{job.headline}</p>
+      {started && job.active ? <p className="notice job-started" role="status">{started}</p> : null}
+      {/* Шаг 174 (BUG-02): причина отказа — один раз: красной плашкой вместо заголовка, а не заголовком и плашкой подряд */}
+      {job.error ? <ErrorBox message={job.headline} /> : <p className="headline">{job.headline}</p>}
       {job.indeterminate ? <OneGo /> : job.progress === null ? null : (
         <progress value={job.progress} max={1} aria-label={job.headline}>{Math.round(job.progress * 100)}%</progress>
       )}
@@ -83,7 +89,6 @@ export function JobProgress({ worldId, jobId, onFinished }: { worldId: string; j
             .catch((e: unknown) => setError(errorText(e, m)))} title={t.checksum(job.artifact.sha256)}>{t.download}</button>
         </p>
       ) : null}
-      {job.error ? <ErrorBox message={job.error} /> : null}
       {error ? <p className="small muted">{error}</p> : null}
     </section>
   );

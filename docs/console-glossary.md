@@ -34,6 +34,10 @@
 - «bounds» / «Grenzen», «floor» / «Untergrenze»;
 - «strategy» / «Strategie», «Price Gate».
 
+**«Gate» без «Price» — нет** (шаг 174, QA-A Testing 2.0, BUG-02). «Price Gate» — только имя станции квитанции. В тексте продавцу — что
+проверка делает: «final price check» / «abschließende Preisprüfung» / «revisión final del precio» / «contrôle final du prix», «rejected at
+your limits», «Final price». Правило глоссария держит это на четырёх языках.
+
 ### Отправка в магазин (шаг 96)
 
 Жаргон «write / writes» на экранах не говорится: продавец читает «отправили цену в магазин», а не «запись в канал». Магазин продавца —

@@ -68,3 +68,27 @@ test('step 168: an Inventory row is marked for attention exactly when the «Need
   const v = stockView(world([]), page as never, { offset: 0, limit: 50 }, [], en);
   assert.deepEqual(Object.fromEntries(v.rows.map((r) => [r.sku, r.attention])), { plain: false, diverged: true, fba: true, below: true });
 });
+
+/**
+ * Шаг 174 (QA-A Testing 2.0, наблюдение Мердана): строка Offers жёлтая, а Health пуст — у причин «нет себестоимости или комиссии» и «выключено
+ * человеком» пометки Health не было. Каждая причина внимания строки названа в Health своим пунктом (`reason`), на всех языках
+ */
+test('step 174: every attention reason of an Offers row is a Health item — a yellow row never has an empty Health', () => {
+  const scopes = [
+    scope('nocost', { cost: null, declaredCost: null }),
+    scope('off', { pricingMode: 'OFF', pricingSwitch: { action: 'OFF', at: NOW, byMembershipId: 'mb', note: null } }),
+    scope('both', { cost: null, declaredCost: null, pricingMode: 'OFF', pricingSwitch: { action: 'OFF', at: NOW, byMembershipId: 'mb', note: null } }),
+    scope('plain'),
+  ];
+  for (const l of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(l);
+    const rows = productList(world(scopes), m).rows;
+    const named = Object.fromEntries(rows.map((r) => [r.unit.writeScopeId,
+      r.health === null ? [] : [r.health, ...r.health.more].flatMap((h) => (h.reason ? [h.reason] : []))]));
+    assert.deepEqual(named, { nocost: ['NO_UNIT_COST'], off: ['TURNED_OFF'], both: ['NO_UNIT_COST', 'TURNED_OFF'], plain: [] }, `${l}: Health names the reasons`);
+    for (const r of rows) {
+      assert.deepEqual([...named[r.unit.writeScopeId]!].sort(), [...r.attention].sort(), `${l}: ${r.unit.writeScopeId} — Health names exactly the attention reasons`);
+      for (const h of r.health === null ? [] : [r.health, ...r.health.more]) if (h.reason) assert.ok(h.text.length > 0 && !/[A-Z]{2,}_[A-Z]/.test(h.text), `${l}: words, not a code — ${h.text}`);
+    }
+  }
+});
