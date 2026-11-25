@@ -3481,6 +3481,56 @@ test('step 180 (#38): the navigation folds to icons and back on a wide screen, t
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
+/**
+ * Шаг 181 (#38): фильтры переживают навигацию. Offers: выборка — в адресе (`products/filter/…`), уход на другой экран и «назад» возвращают её,
+ * пункт меню Offers открывает ту же выборку (память вкладки); ссылка с явной выборкой важнее запомненной. Price changes: период — тот же
+ */
+test('step 181 (#38): filters survive navigation — Offers keeps its filter in the address and in the tab, Price changes keeps its search', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = colorsApi;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    const go = async (path: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${path}`)}, true)`); await settled(b, path); };
+    await go('products');
+    const all = await b.evaluate<number>(`document.querySelectorAll('table.products tbody tr').length`);
+    const value = await b.evaluate<string>(`[...document.querySelector('form.filters select').options].filter((o) => o.value)[0].value`);
+    await b.evaluate(`(() => { const sel = document.querySelector('form.filters select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(value)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(b, `document.querySelectorAll('table.products tbody tr').length < ${all}`, 'the filtered offers');
+    const filtered = await b.evaluate<number>(`document.querySelectorAll('table.products tbody tr').length`);
+    // Адрес несёт выборку
+    // Часть адреса — параметры выборки, закодированные ещё раз как часть пути: маршрут раскодирует её, выборка — свои параметры
+    await waitFor(b, `location.hash.includes('/products/filter/') && decodeURIComponent(decodeURIComponent(location.hash)).includes(${JSON.stringify(`storefront=${value}`)})`, 'the filter is in the address');
+    const address = await b.evaluate<string>('location.hash');
+    // Уход на другой экран и возврат пунктом меню — та же выборка (память вкладки)
+    await go('costs');
+    await go('products');
+    await waitFor(b, `document.querySelectorAll('table.products tbody tr').length === ${filtered}`, 'the menu brings the same filter back');
+    assert.equal(await b.evaluate<string>(`document.querySelector('form.filters select').value`), value, 'the storefront filter is still chosen');
+    // Ссылка с выборкой открывает её и в «чистой» вкладке
+    await b.evaluate(`(sessionStorage.clear(), true)`);
+    await go('stop');
+    await b.evaluate(`(location.hash = ${JSON.stringify(address)}, true)`);
+    await settled(b, 'link with a filter');
+    await waitFor(b, `document.querySelectorAll('table.products tbody tr').length === ${filtered}`, 'the address carries the filter');
+    // Price changes: поиск журнала переживает уход и возврат (период и фильтры журналов — та же память вкладки)
+    await go('feed');
+    await b.evaluate(`(() => { const i = document.querySelector('.world-content input[type=search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'Wall'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await new Promise((x) => setTimeout(x, 500));
+    await go('stop');
+    await go('feed');
+    assert.equal(await b.evaluate<string>(`document.querySelector('.world-content input[type=search]').value`), 'Wall', 'Price changes keeps its search after navigation');
+  } finally {
+    currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
   const b = browser!;
   const before = b.errors().length;
@@ -3959,6 +4009,8 @@ test('step 168: a row is yellow only for a real reason — on Offers exactly the
       // Inventory на телефоне — карточками: подложка и полоса у карточки целиком, а не у каждой ячейки. В смоук-мире у товаров причин нет — одна
       // строка помечена правкой ответа (правило причин держит тест модели), смотрится её карточка
       if (width === 375) {
+        // Шаг 181 (#38): Inventory помнит фильтр вкладки — здесь нужен весь список, а не «требует внимания», включённый выше
+        await b.evaluate(`(Object.keys(sessionStorage).filter((k) => k.startsWith('repracer.view:')).forEach((k) => sessionStorage.removeItem(k)), true)`);
         stockPatch = (body) => { body.rows[0]!.attention = true; };
         await visit('inventory', `!!document.querySelector('table.stock-table tbody tr')`);
         stockPatch = null;

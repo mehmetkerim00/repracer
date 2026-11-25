@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { rememberKey, useRemembered } from '../remember.ts';
 import { DECISION_CAUSES, FEED_MAX_DAYS, FEED_STATUS_GROUPS, LIST_PAGE_DEFAULT, type DecisionCause, periodPhrase, periodSearch, type DecisionListView, type FeedQuery, type FeedStatusGroup, type ListQuery, type Period, type PriceFeedView } from '@repracer/console-model';
 import { useResource, worldPath } from '../api.ts';
 import { DecisionsView } from './Decisions.tsx';
@@ -123,8 +124,9 @@ export function FeedScreen({ worldId, kind, initialStatus, initialPeriod, initia
   const m = useMessages();
   const f = m.ui.feed;
   // Шаг 96: период и поиск — общие для обоих видов журнала: переключение вида их не сбрасывает. Шаг 145: клик по плитке тени задаёт оба
-  const [period, setPeriod] = useState<Period>(initialPeriod ?? { preset: '7d' });
-  const [search, setSearch] = useState('');
+  // Шаг 181 (#38): период и поиск переживают навигацию; период из ссылки (плитка тени, карточка Overview) — важнее запомненного
+  const [period, setPeriod] = useRemembered<Period>(rememberKey(worldId, 'feed.period'), { preset: '7d' }, initialPeriod);
+  const [search, setSearch] = useRemembered<string>(rememberKey(worldId, 'feed.search'), '', initialPeriod || initialStatus || initialCause ? '' : undefined);
   const onKind = (next: FeedKind) => { window.location.hash = next === 'decisions' ? href(worldId, 'feed', 'decisions') : href(worldId, 'feed'); };
   return (
     <section>
@@ -149,7 +151,7 @@ interface JournalProps {
 function WriteJournal({ worldId, onKind, period, onPeriod, search, onSearch, initialStatus }: JournalProps & { initialStatus?: FeedStatusGroup }) {
   const m = useMessages();
   const f = m.ui.feed;
-  const [query, setQuery] = useState<FeedQuery>(initialStatus ? { status: initialStatus } : {});
+  const [query, setQuery] = useRemembered<FeedQuery>(rememberKey(worldId, 'feed.writes'), {}, initialStatus ? { status: initialStatus } : undefined);
   const [pickerCount, setPickerCount] = useState<string | null>(null);
   const full: FeedQuery = { ...query, period, ...(search ? { q: search } : {}) };
   const [resource, retry] = useResource<PriceFeedView>(feedPath(worldId, full), m.locale);
@@ -186,7 +188,7 @@ type DecisionQuery = ListQuery & { writeScopeId?: string; outcome?: 'CHANGED' | 
 function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch, initialCause }: JournalProps & { initialCause?: DecisionCause }) {
   const m = useMessages();
   const f = m.ui.feed;
-  const [query, setQuery] = useState<DecisionQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT, ...(initialCause ? { cause: initialCause } : {}) });
+  const [query, setQuery] = useRemembered<DecisionQuery>(rememberKey(worldId, 'feed.decisions'), { offset: 0, limit: LIST_PAGE_DEFAULT }, initialCause ? { offset: 0, limit: LIST_PAGE_DEFAULT, cause: initialCause } : undefined);
   const [pickerCount, setPickerCount] = useState<string | null>(null);
   const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit) });
   if (query.writeScopeId) params.set('writeScopeId', query.writeScopeId);

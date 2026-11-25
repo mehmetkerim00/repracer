@@ -1,4 +1,5 @@
 import { useContext, useState } from 'react';
+import { rememberKey, useRemembered } from '../remember.ts';
 import type { BulkJobView, StockDivergencesView, StockReturnsView, StockView } from '@repracer/console-model';
 import type { ListQuery } from '@repracer/console-model';
 import { syncPreview } from '@repracer/console-model';
@@ -19,9 +20,10 @@ export function StockScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   // Шаг 96.2: профиль рынка — о немецких заголовках файла говорим только там, где немецкий есть (eu, global)
   const market = useContext(MarketContext);
-  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: 50 });
+  // Шаг 181 (#38): страница и фильтр остатков переживают навигацию (память вкладки)
+  const [query, setQuery] = useRemembered<ListQuery>(rememberKey(worldId, 'inventory.page'), { offset: 0, limit: 50 });
   // Шаг 69 (K8): поиск и фильтр — параметры запроса; новая выборка начинается с первой страницы
-  const [filter, setFilter] = useState<StockFilter>(NO_FILTER);
+  const [filter, setFilter] = useRemembered<StockFilter>(rememberKey(worldId, 'inventory.filter'), NO_FILTER);
   const filterParams = stockFilterParams(filter);
   const [view, retry] = useResource<StockView>(`${worldPath(worldId, 'stock')}?offset=${query.offset}&limit=${query.limit}${filterParams}`, m.locale);
   const [divergences, retryDivergences] = useResource<StockDivergencesView>(worldPath(worldId, 'stock', 'divergences'), m.locale);

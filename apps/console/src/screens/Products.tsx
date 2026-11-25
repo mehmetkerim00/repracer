@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { canPickMore, NO_SELECTION, toggleOffer, type OfferSelection, ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_MONEY_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
@@ -7,6 +7,7 @@ import { CheckField, Field, FormActions, RowCheck } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
 import { handOver } from '../handover.ts';
+import { rememberKey, useRemembered } from '../remember.ts';
 import { BoundsIndexView } from './Bounds.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 
@@ -32,7 +33,9 @@ export const NO_OFFER_QUERY: OfferUiQuery = { storefront: '', pricing: '', atten
 export function offerQueryOfPath(part: string | null | undefined): OfferUiQuery | undefined {
   if (!part || !part.includes('=')) return undefined;
   const p = new URLSearchParams(part);
-  return { ...NO_OFFER_QUERY, storefront: p.get('storefront') ?? '', pricing: p.get('pricing') ?? '', attention: p.get('attention') ?? '', setup: p.get('setup') ?? '', money: p.get('money') ?? '' };
+  // Шаг 181 (#38): адрес несёт всю выборку экрана — и держателя Buy Box, и поиск
+  return { ...NO_OFFER_QUERY, storefront: p.get('storefront') ?? '', pricing: p.get('pricing') ?? '', attention: p.get('attention') ?? '', setup: p.get('setup') ?? '', money: p.get('money') ?? '',
+    holder: p.get('holder') ?? '', q: p.get('q') ?? '' };
 }
 /** Шаг 148 (#27): один сигнал конкуренции по умолчанию — держатель Buy Box; остальные колонки Buy Box — за «Columns» */
 const BUYBOX_DEFAULTS: Readonly<Record<(typeof BUYBOX_COLUMNS)[number], boolean>> = { bbHolder: true, bbPrice: false, bbGap: false, bbShare: false };
@@ -434,11 +437,19 @@ function OffersWithSelection(props: Parameters<typeof ProductsView>[0] & { world
 export function ProductsScreen({ worldId, initialAttention, initialQuery }: { worldId: string; initialAttention?: AttentionFilter; initialQuery?: OfferUiQuery }) {
   const m = useMessages();
   // Р-136: экран просит страницу; переключение страницы — новый запрос, как у ленты цен
-  const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  // Шаг 181 (#38): фильтр и страница переживают навигацию (память вкладки); выборка из ссылки — важнее запомненной
+  const explicit = initialQuery ?? (initialAttention ? { ...NO_OFFER_QUERY, attention: initialAttention } : undefined);
+  const [query, setQuery] = useRemembered<ListQuery>(rememberKey(worldId, 'offers.page'), { offset: 0, limit: LIST_PAGE_DEFAULT }, explicit ? { offset: 0, limit: LIST_PAGE_DEFAULT } : undefined);
   // Шаг 105: фильтр, порядок и включённые колонки Buy Box — в адресе экрана; новый фильтр или порядок — с первой страницы.
   // Шаг 146 (#34): `products/attention/<причина>` — клик по строке состояния открывает Offers с этой выборкой
   // Шаг 170 (#35): `products/filter/<параметры>` — пункт чеклиста готовности открывает Offers со своей выборкой
-  const [offerQuery, setOfferQuery] = useState<OfferUiQuery>(() => initialQuery ?? ({ ...NO_OFFER_QUERY, attention: initialAttention ?? '' }));
+  const [offerQuery, setOfferQuery] = useRemembered<OfferUiQuery>(rememberKey(worldId, 'offers.filter'), NO_OFFER_QUERY, explicit);
+  // Шаг 181 (#38): выборка — и в адресе (`products/filter/<параметры>`): ссылка несёт её, «назад» с квитанции возвращает её
+  useEffect(() => {
+    const f = { ...filterOfUi(offerQuery) } as Record<string, string>;
+    const path = Object.keys(f).length === 0 ? href(worldId, 'products') : href(worldId, 'products', 'filter', new URLSearchParams(f).toString());
+    try { if (location.hash !== path) history.replaceState(history.state, '', path); } catch { /* адрес — удобство */ }
+  }, [worldId, offerQuery]);
   // Шаг 179 (#39, уточнение Р-140): выбор для массовых операций — переживает страницы и фильтры, виден строкой выбора
   const [selection, setSelection] = useState<OfferSelection>(NO_SELECTION);
   const [review, setReview] = useState<ListQuery | null>(null);

@@ -95,6 +95,11 @@ export async function launchBrowser(): Promise<Browser> {
     });
   await send('Page.enable');
   await send('Runtime.enable');
+  /**
+   * Шаг 181 (#38): консоль помнит фильтры экранов в `sessionStorage` вкладки. Каждый тест открывает страницу заново (`open`) и начинает с
+   * чистой памяти фильтров — иначе выборка, оставленная одним тестом, приходила бы в следующий. Переходы по адресу внутри теста память держат
+   */
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: "try { for (const k of Object.keys(sessionStorage)) if (k.startsWith('repracer.view:')) sessionStorage.removeItem(k); } catch (e) {}" });
 
   const evaluate = async <T>(expression: string): Promise<T> => {
     const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { rememberKey, useRemembered } from '../remember.ts';
 import { periodSearch, type Period } from '@repracer/console-model';
 import { href, useMessages } from '../components.tsx';
 import { PeriodPicker } from '../date-range.tsx';
@@ -20,7 +21,9 @@ export function ProtectionsScreen({ worldId, tab, days, initialPeriod, floorShad
   const p = m.ui.protections;
   // Шаг 96 (II): период — общий на обе вкладки; прежний адрес `protections/rules/<1|7|30>` задаёт начальный пресет
   // Шаг 145: клик по денежной плитке тени приносит её период
-  const [period, setPeriod] = useState<Period>(initialPeriod ?? { preset: days === 1 ? '24h' : days === 30 ? '30d' : '7d' });
+  // Шаг 181 (#38): период переживает навигацию; период из ссылки (плитка тени, прежний адрес `protections/rules/<дни>`) — важнее запомненного
+  const [period, setPeriod] = useRemembered<Period>(rememberKey(worldId, 'protections.period'), { preset: '7d' },
+    initialPeriod ?? (days === 1 ? { preset: '24h' } : days === 30 ? { preset: '30d' } : undefined));
   // Шаг 104 [Р-229]: фильтр причины списка — здесь, чтобы выгрузка вкладки видела тот же фильтр; новый период его сбрасывает
   const [reason, setReason] = useState<string | null>(null);
   const choosePeriod = (p: Period) => { setPeriod(p); setReason(null); };
