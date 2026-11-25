@@ -99,9 +99,10 @@ export function StopScreenView({ view, onStop, onResume, onRelease, onReleaseDis
         {/* Шаг 79: без аккаунтов канала разделы аккаунтов и витрин — одной строкой с путём, а не двумя пустыми заголовками */}
         {view.accounts.length === 0 ? <p className="muted empty">{s.noAccounts} <a href={href(view.worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p> : (
           <>
-            <div className="cards">{view.accounts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
+            {/* Шаг 176: ключ — цель остановки, а не подпись: два аккаунта Amazon одного пространства подписаны одинаково, и React терял карточку */}
+            <div className="cards">{view.accounts.map((c) => <TargetCardView key={JSON.stringify(c.target)} card={c} {...(onStop ? { onStop } : {})} />)}</div>
             <h4>{s.storefrontsTitle}</h4>
-            <div className="cards">{view.storefronts.map((c) => <TargetCardView key={c.label} card={c} {...(onStop ? { onStop } : {})} />)}</div>
+            <div className="cards">{view.storefronts.map((c) => <TargetCardView key={JSON.stringify(c.target)} card={c} {...(onStop ? { onStop } : {})} />)}</div>
           </>
         )}
         {/* Шаг 79: что остановка не останавливает — карточкой-пояснением, а не списком на фоне страницы */}

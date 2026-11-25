@@ -86,6 +86,8 @@ test('step 124 [Р-247, Р-248]: the first build makes the database with every m
   assert.match(first.out, /PILOT DB GREEN/);
   for (const v of readFileSync(join(secrets, 'pg_role_passwords'), 'utf8').trim().split('\n').map((l) => l.split(' ')[1]!)) assert.ok(!first.out.includes(v), 'a password reached the output');
   assert.equal(psql('SELECT security.live_writes_forbidden()', DB), 't', 'live writes are forbidden on the pilot database from day one (Р-247)');
+  // Шаг 176 [Р-256]: рамка MVP — с первого дня: клиентский тенант пилота — только amazon.com
+  assert.equal(psql('SELECT security.client_channels_restricted()', DB), 't', 'client channels are Amazon US only on the pilot database from day one (Р-256)');
   assert.equal(psql(`SELECT count(*) FROM pg_authid WHERE rolname = ANY ('{${roles().join(',')}}') AND rolpassword IS NOT NULL`), String(roles().length), 'every role of the pilot has a password');
   const last = readdirSync(join(root, 'migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1)!.slice(0, 4);
   assert.match(psql(`SELECT setconfig::text FROM pg_db_role_setting WHERE setrole = 0 AND setdatabase = (SELECT oid FROM pg_database WHERE datname = '${DB}')`),
@@ -108,6 +110,26 @@ test('step 124 [Р-247, Р-248]: a deploy applies nothing new and keeps the guar
   const reset = db();
   assert.notEqual(reset.code, 0);
   assert.match(reset.out, /нет настройки repracer\.live_writes/, reset.out);
+});
+
+/**
+ * Шаг 176 [Р-256]: база пилота, собранная до шага, получает рамку MVP первой же выкладкой; явное all — решение владельца открыть клиентам другие
+ * каналы — выкладка не трогает и называет громко
+ */
+test('step 176 [Р-256]: a deploy puts the client channels frame on a database built before it; an explicit all stays open and is said loudly', () => {
+  psql(`ALTER DATABASE ${DB} SET repracer.live_writes = 'forbidden'`);
+  psql(`ALTER DATABASE ${DB} RESET repracer.client_channels`);
+  assert.equal(psql('SELECT security.client_channels_restricted()', DB), 'f', 'precondition: a database built before step 176 has no frame');
+  const framed = db();
+  assert.equal(framed.code, 0, framed.out);
+  assert.match(framed.out, /клиентам на базе \S+ — только amazon\.com/);
+  assert.equal(psql('SELECT security.client_channels_restricted()', DB), 't', 'the deploy put the frame on');
+  psql(`ALTER DATABASE ${DB} SET repracer.client_channels = 'all'`);
+  const open = db();
+  assert.equal(open.code, 0, open.out);
+  assert.match(open.out, /открыты ВСЕ каналы/, 'the deploy says so loudly');
+  assert.equal(psql('SELECT security.client_channels_restricted()', DB), 'f', 'a deploy does not put back a frame the owner lifted');
+  psql(`ALTER DATABASE ${DB} SET repracer.client_channels = 'amazon_us'`);
 });
 
 /**

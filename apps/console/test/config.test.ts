@@ -55,6 +55,20 @@ test('шаг 87 [Р-214]: профиль рынка развёртывания �
   assert.throws(() => loadConsoleConfig({ ...base, REPRACER_CONSOLE_LOCALE: 'de' }, read), /CONFIG_INVALID: REPRACER_CONSOLE_LOCALE=de is not a language of the market profile us/);
 });
 
+/**
+ * Шаг 176 [Р-256]: каталог каналов клиентского тенанта — свойство развёртывания. В профиле us по умолчанию клиент видит только amazon.com:
+ * забытая переменная не открывает ему других каналов; eu и global — все витрины профиля. amazon.com в профиле eu нет — противоречие, отказ
+ */
+test('step 176 [Р-256]: client channels — amazon_us by default in the us profile, all in eu and global; a crooked value or amazon_us in eu refuses to start', () => {
+  assert.equal(loadConsoleConfig(base, read).clientChannels, 'AMAZON_US', 'us by default: Amazon US only for clients');
+  assert.equal(loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'eu' }, read).clientChannels, 'ALL');
+  assert.equal(loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'global', REPRACER_CONSOLE_LOCALE: 'en' }, read).clientChannels, 'ALL');
+  assert.equal(loadConsoleConfig({ ...base, REPRACER_CLIENT_CHANNELS: 'all' }, read).clientChannels, 'ALL', 'explicitly all — the frozen integrations');
+  assert.equal(loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'global', REPRACER_CONSOLE_LOCALE: 'en', REPRACER_CLIENT_CHANNELS: 'amazon_us' }, read).clientChannels, 'AMAZON_US');
+  assert.throws(() => loadConsoleConfig({ ...base, REPRACER_CLIENT_CHANNELS: 'amazon' }, read), /CONFIG_INVALID: REPRACER_CLIENT_CHANNELS must be amazon_us or all, got amazon/);
+  assert.throws(() => loadConsoleConfig({ ...base, REPRACER_MARKET_PROFILE: 'eu', REPRACER_CLIENT_CHANNELS: 'amazon_us' }, read), /CONFIG_INVALID: REPRACER_CLIENT_CHANNELS=amazon_us needs a market profile with amazon\.com/);
+});
+
 test('step 164: the slow request threshold — 2 s by default, off only explicitly, a crooked value refuses to start', () => {
   assert.equal(slowRequestMsOf(undefined), 2000);
   assert.equal(slowRequestMsOf(''), 2000);

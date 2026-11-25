@@ -104,4 +104,19 @@ case "${setting}" in
   *) [ "${guard}" = t ] || fail "незнакомое значение repracer.live_writes='${setting}' обязано закрывать базу, а страж говорит ${guard}"
     echo "страж P0-09: незнакомое значение '${setting}' закрывает базу (fail-closed) — запишите forbidden или allowed явно" ;;
 esac
+# Шаг 176 [Р-256]: клиентский тенант — только amazon.com (рамка MVP Р-251). Настройку ставит первая сборка и выкладка базы, собранной до шага;
+# явное all — решение владельца открыть клиентам другие каналы, выкладка его не трогает. Демо-тенант — исключение в самой базе (0239)
+channels="$("${PSQL[@]}" -d postgres -Atc "SELECT coalesce((SELECT substr(c, length('repracer.client_channels=') + 1) FROM pg_db_role_setting s CROSS JOIN LATERAL unnest(s.setconfig) c
+  WHERE s.setrole = 0 AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = '${DB}') AND starts_with(c, 'repracer.client_channels=')), '')")"
+if [ -z "${channels}" ]; then
+  "${PSQL[@]}" -d postgres -c "ALTER DATABASE ${DB} SET repracer.client_channels = 'amazon_us'"
+  channels=amazon_us
+fi
+restricted="$("${PSQL[@]}" -d "${DB}" -Atc 'SELECT security.client_channels_restricted()')"
+case "${channels}" in
+  all) [ "${restricted}" = f ] || fail "настройка all, а страж каналов клиента говорит ${restricted}"
+    echo "ВНИМАНИЕ: клиентам на базе ${DB} открыты ВСЕ каналы (repracer.client_channels=all) — рамка MVP Р-251 снята решением владельца" ;;
+  *) [ "${restricted}" = t ] || fail "настройка repracer.client_channels='${channels}' обязана сужать каналы клиента, а страж говорит ${restricted}"
+    echo "рамка MVP [Р-256]: клиентам на базе ${DB} — только amazon.com; демо — все каналы симулятора" ;;
+esac
 echo "PILOT DB GREEN: ${DB}"

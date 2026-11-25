@@ -1787,7 +1787,9 @@ export const de: Messages = {
         creepUp: 'Standardmäßig aus. Solange die Buy Box Ihnen gehört, steigt der Preis je geplanter Neuberechnung um einen Schritt; nach dem Verlust einen Schritt zurück und Pause.',
         creepStepBp: 'Jede Anhebung in Prozent des Preises; nie mehr als das Schrittlimit Ihrer Leitplanken.',
         anchor: 'Von welchem Wettbewerbspreis das Ziel ausgeht. „Der niedrigere“ nimmt den niedrigeren aus Buy-Box-Preis und niedrigstem Preis.',
-        competeWith: 'Welche Wettbewerbsangebote zählen, nach Versandart. Ein Angebot, dessen Versandart der Kanal nicht nennt, bleibt außen vor und wird gezählt. Walmart nennt die Versandart nicht — dort ist der Filter nicht verfügbar.',
+        competeWith: 'Welche Wettbewerbsangebote zählen, nach Versandart. Ein Angebot, dessen Versandart der Kanal nicht nennt, bleibt außen vor und wird gezählt.',
+        // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
+        competeWithWalmart: 'Walmart nennt die Versandart nicht — dort ist der Filter nicht verfügbar.',
       },
       pageTitle: 'Strategien', inUse: 'Verwendete Strategien', offers: 'Angebote', draftTitle: 'Entwurf', name: 'Name', type: 'Typ',
       types: { FIXED: 'Festpreis', TARGET_MARGIN: 'Zielmarge', MATCH_BUYBOX: 'Buy Box angleichen', BEAT_LOWEST: 'Niedrigsten Preis unterbieten', WIN_BUYBOX: 'Buy Box gewinnen' },

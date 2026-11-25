@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { ConfigError, intFromEnv, requiredValue, secretFromEnv, type Env } from '@repracer/service-runtime';
-import { extendedRolesOf, marketProfileOf, marketScope, type MarketProfile } from '@repracer/console-model';
+import { type ClientChannels, clientChannelsOf, extendedRolesOf, marketProfileOf, marketScope, type MarketProfile } from '@repracer/console-model';
 
 /**
  * Р-159 (шаг 37, OQ-221): консоль продавца — РАЗВОРАЧИВАЕМЫЙ процесс, а не только сервер стенда, запускаемый руками.
@@ -27,6 +27,12 @@ export interface ConsoleConfig {
    * языки и правила консоль предлагает, и какое демо сеется: в us — американский продавец без Kaufland
    */
   market: MarketProfile;
+  /**
+   * Шаг 176 [Р-256]: каталог каналов клиентского тенанта (`REPRACER_CLIENT_CHANNELS`: amazon_us или all) — клиентские и пилотные тенанты
+   * видят и подключают только amazon.com; демо — все витрины профиля. Умолчание — по профилю: us — amazon_us (рамка MVP Р-251: забытая
+   * переменная не открывает клиенту других каналов), eu и global — all; amazon_us в профиле eu — противоречие, отказ при старте
+   */
+  clientChannels: ClientChannels;
   /**
    * Шаг 88 [Р-213]: флаг «расширенные роли» (`REPRACER_EXTENDED_ROLES`: on или off, по умолчанию off) — консоль предлагает две роли
    * (владелец и менеджер, шаг 98) или четыре (ещё администратор и оператор); назначенные роли работают в любом положении
@@ -97,6 +103,12 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
   // Шаг 87: язык развёртывания — язык профиля; немецкий первый экран в профиле us без переключателя назад — противоречие конфигурации
   if (!marketScope(market).locales.includes(locale)) {
     throw new ConfigError(`CONFIG_INVALID: REPRACER_CONSOLE_LOCALE=${locale} is not a language of the market profile ${market} (${marketScope(market).locales.join(', ')})`);
+  }
+
+  let clientChannels: ClientChannels;
+  try { clientChannels = clientChannelsOf(env.REPRACER_CLIENT_CHANNELS, market === 'us' ? 'AMAZON_US' : 'ALL'); } catch (error) { throw new ConfigError(`CONFIG_INVALID: ${(error as Error).message}`); }
+  if (clientChannels === 'AMAZON_US' && market === 'eu') {
+    throw new ConfigError('CONFIG_INVALID: REPRACER_CLIENT_CHANNELS=amazon_us needs a market profile with amazon.com (us or global), not eu');
   }
 
   const pgUrls = {} as Record<ConsoleRole, string>;
@@ -176,6 +188,7 @@ export function loadConsoleConfig(env: Env = process.env, read: (path: string) =
     distDir: requiredValue(env.REPRACER_CONSOLE_DIST, 'REPRACER_CONSOLE_DIST'),
     locale,
     market,
+    clientChannels,
     extendedRoles,
     publicDemo,
     demoUs: env.REPRACER_CONSOLE_DEMO_US === 'on',

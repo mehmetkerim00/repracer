@@ -24,7 +24,7 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
+import { type ClientChannels, type MarketScope, tenantMarketScope, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import { descriptorOf, strategyAvailableOn } from './channel-descriptors.ts';
 import {
@@ -271,6 +271,12 @@ export interface StandServices {
    */
   market?: MarketProfile;
   /**
+   * Шаг 176 [Р-256]: каталог каналов клиентского тенанта — `AMAZON_US`: клиентские и пилотные тенанты видят и подключают только
+   * amazon.com (демо — все витрины профиля всегда); не задан — `ALL`, как до шага: так библиотеку зовут стенд разработки и тесты, которым
+   * нужны сценарии eBay и Kaufland. Развёрнутая консоль задаёт его из `REPRACER_CLIENT_CHANNELS` (по умолчанию `amazon_us`)
+   */
+  clientChannels?: ClientChannels;
+  /**
    * Шаг 88 [Р-213]: флаг «расширенные роли» — вход стенда предлагает две роли для людей (владелец и менеджер, шаг 98) или четыре
    * (ещё администратор и оператор). Вход по роли, которой нет в списке, имитатор принимает: назначения прежних ролей работают
    */
@@ -325,6 +331,14 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
   const market = marketScope(services.market ?? 'global');
   // Шаг 87: миры стенда (сценарии, демо) — только те, у которых есть витрина профиля; миры тенантов продавцов не фильтруются
   const marketWorlds = worlds.filter((w) => worldInMarket(market, w.accounts));
+  // Шаг 176 [Р-256]: признак демо задан при создании тенанта и не меняется — читается из базы один раз на мир
+  const demoOf = new Map<string, Promise<boolean>>();
+  const tenantScopeOf = async (live: LiveWorld): Promise<MarketScope> => {
+    const clientChannels = services.clientChannels ?? 'ALL';
+    if (clientChannels === 'ALL') return market;
+    if (!demoOf.has(live.tenantId)) demoOf.set(live.tenantId, live.store.tenantIsDemo(live.tenantId));
+    return tenantMarketScope(market, { demo: await demoOf.get(live.tenantId)! }, clientChannels);
+  };
 
   return async function handle(req: ApiRequest): Promise<ApiResponse> {
     const url = new URL(req.url, 'http://stand');
@@ -630,7 +644,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      */
     if (parts[3] === 'connections') {
       const offered = services.connect?.(live.id) ?? null;
-      const connect = offered ? connectInMarket(offered, market) : null;
+      // Шаг 176 [Р-256]: подключение — витрины каталога каналов тенанта (клиент при «только Amazon US» — amazon.com; демо — профиль целиком)
+      const connect = offered ? connectInMarket(offered, await tenantScopeOf(live)) : null;
       const param4 = parts[4] ?? null;
       const t = m.ui.connections;
       if (req.method === 'GET' && param4 === null) {

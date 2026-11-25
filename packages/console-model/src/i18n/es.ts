@@ -1846,7 +1846,9 @@ export const es: Messages = {
         creepUp: 'Desactivado de forma predeterminada. Mientras tenga la Buy Box, el precio sube un paso por cada recálculo programado; si la pierde, vuelve atrás y se pausa.',
         creepStepBp: 'Cada subida, como porcentaje del precio; nunca más que su límite de paso.',
         anchor: 'De qué precio de la competencia parte el objetivo. «El menor de los dos» toma el más bajo entre el precio de la Buy Box y el precio más bajo.',
-        competeWith: 'Qué ofertas de la competencia cuentan, según quién gestiona su envío. Una oferta cuya logística el canal no indica queda fuera y se cuenta. Walmart no indica quién gestiona el envío: allí el filtro no está disponible.',
+        competeWith: 'Qué ofertas de la competencia cuentan, según quién gestiona su envío. Una oferta cuya logística el canal no indica queda fuera y se cuenta.',
+        // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
+        competeWithWalmart: 'Walmart no indica quién gestiona el envío: allí el filtro no está disponible.',
       },
       pageTitle: 'Estrategias', inUse: 'Estrategias en uso', offers: 'Ofertas', draftTitle: 'Borrador', name: 'Nombre', type: 'Tipo',
       types: { FIXED: 'Precio fijo', TARGET_MARGIN: 'Margen objetivo', MATCH_BUYBOX: 'Igualar la Buy Box', BEAT_LOWEST: 'Superar el precio más bajo', WIN_BUYBOX: 'Ganar la Buy Box' },

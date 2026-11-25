@@ -1846,7 +1846,9 @@ export const fr: Messages = {
         creepUp: 'Désactivé par défaut. Tant que vous détenez la Buy Box, le prix monte d’un palier à chaque recalcul planifié ; après l’avoir perdue, il revient en arrière et marque une pause.',
         creepStepBp: 'Chaque hausse, en pourcentage du prix ; jamais plus que la limite de palier de vos garde-fous.',
         anchor: 'Le prix concurrent dont part la cible. « Le plus bas des deux » prend le plus bas entre le prix de la Buy Box et le prix le plus bas.',
-        competeWith: 'Quelles offres concurrentes comptent, selon qui les expédie. Une offre dont le canal n’indique pas le mode d’expédition est écartée et comptée. Walmart n’indique pas qui expédie une offre : le filtre n’y est pas disponible.',
+        competeWith: 'Quelles offres concurrentes comptent, selon qui les expédie. Une offre dont le canal n’indique pas le mode d’expédition est écartée et comptée.',
+        // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
+        competeWithWalmart: 'Walmart n’indique pas qui expédie une offre : le filtre n’y est pas disponible.',
       },
       pageTitle: 'Stratégies', inUse: 'Stratégies utilisées', offers: 'Offres', draftTitle: 'Brouillon', name: 'Nom', type: 'Type',
       types: { FIXED: 'Prix fixe', TARGET_MARGIN: 'Marge cible', MATCH_BUYBOX: 'S’aligner sur la Buy Box', BEAT_LOWEST: 'Battre le prix le plus bas', WIN_BUYBOX: 'Remporter la Buy Box' },

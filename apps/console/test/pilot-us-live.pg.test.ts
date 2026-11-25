@@ -233,6 +233,8 @@ before(async () => {
   const roleUrls = Object.fromEntries(CONSOLE_ROLES.map((r) => [`REPRACER_CONSOLE_${r.toUpperCase()}_PG_URL`, db.url(`svc_${r}` as TestRole)]));
   consoleProcess = await startConsole({
     REPRACER_MODE: 'stand', REPRACER_CONSOLE_PORT: String(consolePort), REPRACER_MARKET_PROFILE: 'us', // шаг 87: пилот США — профиль us
+    // Шаг 176 [Р-256]: прогон держит замороженную интеграцию eBay US — каталог каналов клиента «все», а не рамка MVP «только Amazon US»
+    REPRACER_CLIENT_CHANNELS: 'all',
     REPRACER_CONSOLE_METRICS_PORT: '0', REPRACER_CONSOLE_DIST: dist,
     REPRACER_CONSOLE_PUBLIC_DEMO: 'off', REPRACER_CONSOLE_HEARTBEAT: 'off', ...roleUrls,
     REPRACER_CONSOLE_OIDC_ISSUER: provider.issuer, REPRACER_CONSOLE_OIDC_AUDIENCE: CONSOLE_AUDIENCE, REPRACER_CONSOLE_OIDC_JWKS_URL: provider.jwksUrl,

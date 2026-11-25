@@ -270,6 +270,8 @@ export async function startConsole(env: Env = process.env): Promise<RunningConso
     defaultLocale: config.locale,
     // Шаг 87 [Р-214]: профиль рынка — что консоль предлагает: каналы и витрины подключения, языки, Omnibus
     market: config.market,
+    // Шаг 176 [Р-256]: клиентский тенант — только amazon.com (демо — все витрины профиля)
+    clientChannels: config.clientChannels,
     // Шаг 88 [Р-213]: три видимые роли или пять — флаг развёртывания
     extendedRoles: config.extendedRoles,
     // Шаг 121: какой код работает — в подвале страницы и в /healthz (сборку называет развёртывание)

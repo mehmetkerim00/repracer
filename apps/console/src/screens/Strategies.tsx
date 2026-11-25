@@ -343,7 +343,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
                   {(['BUYBOX', 'LOWEST', 'LOWER_OF_TWO'] as const).map((k) => <option key={k} value={k}>{t.anchors[k]}</option>)}
                 </select></Field>
               ) : null}
-              <Field label={t.fields.competeWith} caption={t.captions.competeWith}><select value={form.competeWith} onChange={(e) => set('competeWith', e.target.value as DraftForm['competeWith'])}>
+              <Field label={t.fields.competeWith} caption={view.walmart ? `${t.captions.competeWith} ${t.captions.competeWithWalmart}` : t.captions.competeWith}><select value={form.competeWith} onChange={(e) => set('competeWith', e.target.value as DraftForm['competeWith'])}>
                 {(['ALL', 'CHANNEL', 'MERCHANT'] as const).map((k) => <option key={k} value={k}>{t.competeWithOptions[k]}</option>)}
               </select></Field>
             </FieldGrid>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { connectableInMarket, extendedRolesOf, localeInMarket, marketProfileOf, marketScope, storefrontInMarket, worldInMarket } from './market.ts';
+import { clientChannelsOf, connectableInMarket, extendedRolesOf, localeInMarket, marketProfileOf, marketScope, storefrontInMarket, tenantMarketScope, worldInMarket } from './market.ts';
 
 /**
  * Шаг 87 [Р-214]: профиль рынка. США — сейчас: amazon.com и ebay.com, английский, без Omnibus. Европа заморожена, не удалена: профиль
@@ -60,4 +60,28 @@ test('step 87: connect offers only the channels and storefronts of the profile; 
 test('step 88 (Р-213): the extended roles flag is on or off, off by default; anything else is refused, not silently off', () => {
   assert.deepEqual([extendedRolesOf(undefined), extendedRolesOf(''), extendedRolesOf('off'), extendedRolesOf('on')], [false, false, false, true]);
   assert.throws(() => extendedRolesOf('yes'), /REPRACER_EXTENDED_ROLES must be on or off, got yes/);
+});
+
+/**
+ * Шаг 176 [Р-256]: каталог каналов тенанта — клиент при «только Amazon US» видит и подключает только amazon.com профиля; демо и развёртывание
+ * «all» — профиль целиком
+ */
+test('step 176 [Р-256]: the client channel catalog narrows the profile to amazon.com; demo and «all» keep the whole profile', () => {
+  const us = marketScope('us');
+  const offered = [
+    { channel: 'AMAZON', marketplaces: ['A1PA6795UKMFR9', 'ATVPDKIKX0DER'] },
+    { channel: 'EBAY', marketplaces: ['EBAY_US'] },
+    { channel: 'WALMART', marketplaces: ['WALMART_US'] },
+  ];
+  const client = tenantMarketScope(us, { demo: false }, 'AMAZON_US');
+  assert.deepEqual(client.channels, ['AMAZON']);
+  assert.deepEqual(connectableInMarket(client, offered), [{ channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'] }], 'a client connects amazon.com only');
+  assert.deepEqual([storefrontInMarket(client, 'EBAY', 'EBAY_US'), storefrontInMarket(client, 'AMAZON', 'A1PA6795UKMFR9'), storefrontInMarket(client, 'AMAZON', 'ATVPDKIKX0DER')],
+    [false, false, true]);
+  assert.equal(tenantMarketScope(us, { demo: true }, 'AMAZON_US'), us, 'the demo keeps the three simulator channels');
+  assert.equal(tenantMarketScope(us, { demo: false }, 'ALL'), us, '«all» keeps the profile');
+  // В глобальном профиле рамка тоже сужает до amazon.com, а не до «Amazon любой витрины»
+  assert.deepEqual(connectableInMarket(tenantMarketScope(marketScope('global'), { demo: false }, 'AMAZON_US'), offered), [{ channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'] }]);
+  assert.deepEqual([clientChannelsOf(undefined, 'AMAZON_US'), clientChannelsOf('all', 'AMAZON_US'), clientChannelsOf('amazon_us', 'ALL')], ['AMAZON_US', 'ALL', 'AMAZON_US']);
+  assert.throws(() => clientChannelsOf('ALL', 'ALL'), /REPRACER_CLIENT_CHANNELS must be amazon_us or all, got ALL/);
 });

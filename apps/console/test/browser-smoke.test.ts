@@ -92,6 +92,9 @@ let step107Api: ReturnType<typeof createStandApi>;
 let step109: { writeScopeId: string };
 // Шаг 109.1: мир Amazon стенда с единицей amazon.com в долларах — профиль us
 let step109UsApi: ReturnType<typeof createStandApi>;
+/** Шаг 176 [Р-256]: развёртывание «клиентский интерфейс — только Amazon US» — клиентские миры (пустой и amazon.com) */
+let clientApi: ReturnType<typeof createStandApi>;
+let clientAmazonWorldId = '';
 /** Шаг 112 [Р-238]: 16 синтетических предложений трёх площадок с цветами товаров (профиль us) */
 let colorsApi: ReturnType<typeof createStandApi>;
 let step109Us: { writeScopeId: string };
@@ -283,6 +286,11 @@ before(async () => {
     simulator: identity.simulator,
   }, { defaultLocale: 'en', market: 'us', people: STAND_PEOPLE });
   step109Us = await prepareStep109(amazonUs[0]!, SCOPE109_US, { foreign: 'EUR' });
+  clientAmazonWorldId = amazonUs[0]!.id;
+  clientApi = createStandApi([amazonUs[0]!, empty], {
+    authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory([amazonUs[0]!, empty]) }),
+    simulator: identity.simulator,
+  }, { defaultLocale: 'en', market: 'us', clientChannels: 'AMAZON_US', connect: (worldId) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : null), people: STAND_PEOPLE });
   const colors = colorsWorld(w0.clock);
   colorsApi = createStandApi([colors], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory([colors]) }),
@@ -1957,7 +1965,9 @@ test('step 101 (C): the draft offers Anchor and Compete with where they mean som
     competeWith: { label: t.fields.competeWith, options: [t.competeWithOptions.ALL, t.competeWithOptions.CHANNEL, t.competeWithOptions.MERCHANT], caption: t.captions.competeWith },
   };
   assert.deepEqual(await fields(), [expected.competeWith], 'Match the Buy Box: only Compete with');
-  assert.match(expected.competeWith.caption, /Walmart does not say who fulfills an offer/, 'the honest caption names where the filter is unavailable');
+  // Шаг 176 [Р-256]: про Walmart подсказка говорит только пространству с аккаунтом Walmart (модель — strategies-table.test.ts); здесь его нет
+  assert.ok(!/Walmart/.test(expected.competeWith.caption), `a workspace without Walmart is not told about Walmart: ${expected.competeWith.caption}`);
+  assert.match(t.captions.competeWithWalmart, /Walmart does not say who fulfills an offer/, 'the honest Walmart sentence is kept for the workspaces that have Walmart');
   for (const type of ['BEAT_LOWEST', 'WIN_BUYBOX']) {
     await chooseType(type);
     await new Promise((x) => setTimeout(x, 200));
@@ -3161,6 +3171,90 @@ const LONG_HELP = `(() => {
  * Costs & floors — заданный минимум и действующий пол разными колонками; в списке выбора — цвет и идентификатор. Массовая правка: Preview
  * неактивна, пока не выбрано, что менять; Apply неактивна, когда правка ничего не меняет, — обе говорят почему
  */
+/**
+ * Шаг 176 [Р-256] (этап 3 отчёта «QA-A Testing 2.0», продолжение Р-251): клиентский тенант видит только Amazon US — ни предложений, ни
+ * фильтров, ни настроек, ни предупреждений eBay, Walmart и Kaufland: ни на одном экране меню, ни в скрытом «Learn more», ни в подсказке.
+ * Подключить можно только amazon.com, и прямой запрос подключения eBay сервер отклоняет. Положительный контроль [Р-94]: тот же пустой мир
+ * без флага развёртывания предлагает ebay.com и называет Walmart — правило их видит
+ */
+/** Экран дождался данных: true — показан, false — ответил ошибкой (сценарный мир в памяти ведёт не все экраны) */
+async function loadedOrError(b: Browser): Promise<boolean> {
+  await b.waitText(/./);
+  for (let i = 0; i < 600; i++) {
+    const state = await b.evaluate<{ loading: boolean; error: boolean }>(`({ loading: document.querySelector('.loading') !== null, error: document.querySelector('main .error') !== null })`);
+    if (state.error) return false;
+    if (!state.loading) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.fail('the screen kept loading');
+}
+
+const OTHER_CHANNELS = /\beBay\b|\bebay\.|\bWalmart\b|\bwalmart\.|Kaufland|kaufland\./i;
+const PAGE_WORDS = plainText(`[document.body.textContent, ...[...document.querySelectorAll('[title], [aria-label], [placeholder]')].flatMap((e) => [e.getAttribute('title'), e.getAttribute('aria-label'), e.getAttribute('placeholder')])].filter(Boolean).join(' ')`);
+
+test('step 176 [Р-256]: a client workspace shows Amazon US only — no eBay, Walmart or Kaufland on any screen; only amazon.com can be connected', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  const skipped: string[] = [];
+  const otherOnPage = async () => { const t = await b.evaluate<string>(PAGE_WORDS); const found = OTHER_CHANNELS.exec(t); return found ? `«${found[0]}» in …${t.slice(Math.max(0, found.index - 100), found.index + 60).replace(/\s+/g, ' ')}…` : null; };
+  currentApi = clientApi;
+  try {
+    await b.setViewport(1440, 900);
+    for (const worldId of [EMPTY_WORLD_ID, clientAmazonWorldId]) {
+      await b.open(pageUrl);
+      await b.waitText(en.ui.app.login.roleCan.OWNER);
+      await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+      await b.waitText(en.ui.app.worlds);
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(worldId)}/products`)}, true)`);
+      await settled(b, `client ${worldId}`);
+      const links = await b.evaluate<Array<{ text: string; href: string }>>(
+        `[...document.querySelectorAll('.nav-group a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))`);
+      assert.deepEqual(links.map((l) => l.href.split('/')[3]), MENU_US, `client ${worldId}: the menu of the us profile`);
+      for (const l of links) {
+        await b.evaluate(`(location.hash = ${JSON.stringify(l.href)}, true)`);
+        // Сценарный мир в памяти ведёт не все экраны (тени у него нет — 404): экран с ошибкой назван и пропущен, остальные судятся правилом
+        if (worldId === EMPTY_WORLD_ID) await settled(b, `client ${worldId} ${l.text}`);
+        else if (!(await loadedOrError(b))) { skipped.push(l.text); continue; }
+        assert.equal(await otherOnPage(), null, `client ${worldId}: ${l.text}`);
+      }
+    }
+    // Подключение: только amazon.com, словами; другого канала нет ни кнопкой, ни строкой «ждёт ключей»
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
+    await settled(b, 'client connections');
+    const connect = await b.evaluate<string[]>(`[...document.querySelectorAll('button')].map((x) => x.textContent.trim()).filter((x) => /^Connect/.test(x))`);
+    assert.ok(connect.length > 0 && connect.every((x) => /Amazon/.test(x)), `client: only Amazon can be connected — ${connect.join(' | ')}`);
+    assert.ok((await b.evaluate<string>(plainText('document.body.innerText'))).includes('amazon.com'), 'client: amazon.com is offered by name');
+  } finally {
+    currentApi = euApi;
+  }
+  // Прямой запрос подключения eBay мимо экрана — отказ сервера, а не скрытая кнопка
+  const token = await clientApi({ method: 'POST', url: '/api/stand-issuer/token?locale=en', body: { role: 'OWNER' } });
+  const auth = `Bearer ${(token.body as { accessToken: string }).accessToken}`;
+  const ebay = await clientApi({ method: 'POST', url: `/api/worlds/${encodeURIComponent(EMPTY_WORLD_ID)}/connections/start?locale=en`, authorization: auth, body: { channel: 'EBAY', marketplaces: ['EBAY_US'] } });
+  assert.deepEqual([ebay.status, (ebay.body as { error?: { code?: string } }).error?.code], [400, 'BAD_MARKETPLACES'], `client: connecting eBay directly is refused — ${JSON.stringify(ebay.body)}`);
+  // Контроль: без флага тот же запрос проходит проверку витрин (у пустого мира подключение «недоступно» — 409, но не BAD_MARKETPLACES)
+  const usToken = await usApi({ method: 'POST', url: '/api/stand-issuer/token?locale=en', body: { role: 'OWNER' } });
+  const usEbay = await usApi({ method: 'POST', url: `/api/worlds/${encodeURIComponent(EMPTY_WORLD_ID)}/connections/start?locale=en`,
+    authorization: `Bearer ${(usToken.body as { accessToken: string }).accessToken}`, body: { channel: 'EBAY', marketplaces: ['EBAY_US'] } });
+  assert.notEqual((usEbay.body as { error?: { code?: string } }).error?.code, 'BAD_MARKETPLACES', `without the flag ebay.com is a storefront of the us profile — ${JSON.stringify(usEbay.body)}`);
+  // Положительный контроль: без флага развёртывания тот же пустой мир предлагает ebay.com и называет Walmart — правило это видит
+  currentApi = usApi;
+  try {
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'signed in');
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${encodeURIComponent(EMPTY_WORLD_ID)}/channels`)}, true)`);
+    await settled(b, 'all-channels connections');
+    assert.ok(await otherOnPage() !== null, 'without the flag the rule sees ebay.com and Walmart');
+  } finally {
+    currentApi = euApi;
+  }
+  assert.ok(skipped.length <= 2, `the amazon.com workspace is judged on most screens; skipped: ${skipped.join(', ')}`);
+  process.stdout.write(`step 176: screens the scenario workspace does not serve — ${skipped.join(', ') || 'none'}\n`);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
   const b = browser!;
   const before = b.errors().length;

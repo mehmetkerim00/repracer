@@ -3244,3 +3244,40 @@ export const STEP172_ROWS = [
     ],
   },
 ];
+
+// Шаг 176 [Р-256] (0239): клиентский тенант — только amazon.com на базе с настройкой repracer.client_channels. Правило — одной функцией
+// у двух входов (аккаунт канала, запрос подключения); у каждого входа и у каждой части правила — своя проверка смоука с причиной [Р-94, Р-99]
+const CE = 'a client tenant connects an eBay account on a database with client channels Amazon US only (R-256)';
+export const STEP176_ROWS = [
+  {
+    row: 'шаг 176 (клиентский тенант — только Amazon US)', critical: false,
+    invariant: 'на базе с настройкой repracer.client_channels (кроме all) у тенанта не демо аккаунт канала заводится и меняется только на amazon.com, подключение другого канала не начинается; настройку видит только уровень базы; демо-тенант — исключение',
+    mutations: [
+      m(dropTrigger('a00_channel_account_client_channels_guard', 'tenant_data.channel_account'), smoke(CE)),
+      m(dropTrigger('a00_channel_authorization_request_client_channels_guard', 'tenant_data.channel_authorization_request'),
+        smoke('a client tenant starts an eBay authorization on a database with client channels Amazon US only (R-256)')),
+      // Только вставка: витрины заведённого аккаунта amazon.com расширялись бы правкой
+      m(`DROP TRIGGER a00_channel_account_client_channels_guard ON tenant_data.channel_account;
+         CREATE TRIGGER a00_channel_account_client_channels_guard BEFORE INSERT ON tenant_data.channel_account
+           FOR EACH ROW EXECUTE FUNCTION tenant_data.channel_account_client_channels_guard()`,
+        smoke('a client amazon.com account gains a European storefront on a database with client channels Amazon US only (R-256)')),
+      m(replaceInFunction('security.client_channel_refused(uuid,text,text[])', 'SELECT security.client_channels_restricted()', 'SELECT false'), smoke(CE)),
+      // Демо больше не исключение: три канала симулятора на QA закрылись бы вместе с клиентскими
+      m(replaceInFunction('security.client_channel_refused(uuid,text,text[])', 'AND NOT EXISTS (SELECT 1 FROM tenant_data.tenant t WHERE t.tenant_id = p_tenant_id AND t.demo)', ''),
+        smoke('a demo tenant connects eBay on a database with client channels Amazon US only (R-256)')),
+      // Любая витрина Amazon — amazon.de прошла бы
+      m(replaceInFunction('security.client_channel_refused(uuid,text,text[])', "p_marketplaces <@ ARRAY['ATVPDKIKX0DER']::text[]", 'true'),
+        smoke('a client tenant connects amazon.de on a database with client channels Amazon US only (R-256)')),
+      // Пустой список витрин содержится в любом — аккаунт без витрин прошёл бы как amazon.com
+      m(replaceInFunction('security.client_channel_refused(uuid,text,text[])', 'cardinality(p_marketplaces) > 0 AND ', ''),
+        smoke('an account without storefronts is not Amazon US (R-256, fail-closed)')),
+      // Настройка читается сессией: `SET repracer.client_channels = 'all'` в любом соединении снимал бы страж
+      m(replaceInFunction('security.client_channels_restricted()', 'SELECT coalesce(bool_or(',
+        "SELECT current_setting('repracer.client_channels', true) IS DISTINCT FROM 'all' AND coalesce(bool_or("),
+        smoke('a session SET does not lift the client channels guard (R-256)')),
+      // Разрешающее значение по умолчанию: опечатка открыла бы базу, а не закрыла (fail-closed)
+      m(replaceInFunction('security.client_channels_restricted()', "cfg <> 'repracer.client_channels=all'", "cfg = 'repracer.client_channels=amazon_us'"),
+        smoke('an unknown value of the database setting restricts client channels too (R-256, fail-closed)')),
+    ],
+  },
+];

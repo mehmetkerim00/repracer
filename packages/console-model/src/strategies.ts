@@ -150,6 +150,8 @@ export interface StrategyListView {
   /** Шаг 66 (ревью, находка 7): сколько таких предложений всего — список ограничен, у мигрирующего продавца Amazon их тысячи */
   channelPricingOffersTotal: number;
   canEdit: boolean;
+  /** Шаг 176 [Р-256]: у пространства есть аккаунт Walmart — подсказка «Compete with» называет его; клиент «только Amazon US» Walmart не видит */
+  walmart: boolean;
   gaps: Gap[];
 }
 
@@ -267,6 +269,7 @@ export function strategiesView(world: StandWorld, m: Messages, canEdit: boolean,
   return {
     worldId: world.id, strategies, scopes, page, canEdit,
     channelPricingOffers: channelPricingOffers.slice(0, CHANNEL_PRICING_SHOWN), channelPricingOffersTotal: channelPricingTotal,
+    walmart: world.accounts.some((a) => a.channel === 'WALMART'),
     gaps: [
       gap(m, 'POSITION_STRATEGY'),
       ...(channelPricingTotal > 0 ? [gap(m, 'CHANNEL_PRICING_OFFERS_WITHOUT_SCOPE')] : []),

@@ -36,6 +36,12 @@ under one login. Delivery: a web console ("seller console") in English, Spanish 
 **Scope of the first paid MVP: Amazon US only** (Р-251). The eBay, Walmart and EU code is kept and still runs in CI; new channel
 development is frozen until the owner decides otherwise.
 
+Client and pilot workspaces see Amazon US only (Р-256):
+- the console offers only amazon.com to connect and names no other channel on any screen;
+- the database refuses any other channel account or connection for a client workspace.
+
+The demo workspaces keep amazon.com, walmart.com and ebay.com: it is a simulator storefront, and QA retests run on it.
+
 Current status (Nov 16, 2026): pre-launch.
 - The Amazon developer profile is approved and the production app is registered (Draft). No seller has authorized it yet.
 - QA-A is live for manual QA.
@@ -211,6 +217,7 @@ current filters and columns.
 | Walmart storefront in the demo (walmart.com, simulator) | Buy Box strategy with step-up; two listings unpublished by the uncompetitive-price rule, shown as a pill and a journal event | **[QA-A]** |
 | eBay storefront in the demo (ebay.com, simulator) | Target margin and scheduled recompute | **[QA-A]** |
 | Channel simulator | A full synthetic marketplace used by the demo workspaces and by CI (chaos, demo-day and shadow-day runs). The static Amazon sandbox agreed with it as far as a static sandbox can show; live behavior is still to be proven on the first real account | **[QA-A]** |
+| Client channels | A client workspace sees and connects amazon.com only; eBay and Walmart are not offered, named or warned about. The console takes this from `REPRACER_CLIENT_CHANNELS` (amazon_us by default in the US profile), the pilot database from its own setting (step 176, Р-256) | **[QA-B]** |
 | Amazon connection flow | "Connect Amazon" on Channels → Amazon consent → the app's log-in URI → back to Amazon → our callback. The account is born in shadow and discovery starts by itself | **[QA-B]** |
 | Amazon seller authorization and live calls | The developer profile is approved (public developer; roles: Product Listing, Pricing, Inventory and Order Tracking). The production app is registered (Draft). LWA accepts the credential pair (indirect evidence: a wrong secret is rejected as `invalid_client`); no production seller token yet. Sandbox recon: 32 calls against the static sandbox (20 OK, 9 expected 400s, 3 403s); the adapter parsed every returned shape | **[LIVE]** |
 | Amazon price write and read-back | A price is written with `patchListingsItem` (asynchronous: accepted ≠ applied) and confirmed by reading it back; listing status and issues are read after every write | **[LIVE]** |

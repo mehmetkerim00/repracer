@@ -64,3 +64,14 @@ test('step 150 (#27): a version without a recorded time has no time — null, no
   const v = new Map(strategiesView(w as never, en, true).strategies.map((s) => [s.strategyId, s])).get('FIXED')!.versions;
   assert.deepEqual(v.map((x) => [x.version, x.createdAt]), [[2, null], [1, null]]);
 });
+
+/**
+ * Шаг 176 [Р-256]: подсказка «Compete with» называет Walmart (там фильтр по исполнению недоступен) только пространству с аккаунтом Walmart:
+ * клиент при «только Amazon US» Walmart не видит, а демо с walmart.com — видит
+ */
+test('step 176 [Р-256]: the strategies view says whether the workspace has a Walmart account', () => {
+  const w = world();
+  assert.equal(strategiesView({ ...w, accounts: [] } as never, en, true).walmart, false, 'no Walmart account — no Walmart sentence');
+  assert.equal(strategiesView({ ...w, accounts: [{ channelAccountId: 'acc-amazon', channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'] }] } as never, en, true).walmart, false);
+  assert.equal(strategiesView({ ...w, accounts: [{ channelAccountId: 'acc-walmart', channel: 'WALMART', marketplaces: ['WALMART_US'] }] } as never, en, true).walmart, true);
+});

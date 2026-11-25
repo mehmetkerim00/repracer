@@ -219,6 +219,22 @@ QA_STATE_DIR=deploy/pilot/state deploy/qa/detach.sh deploy deploy/pilot/deploy.s
    Путь записи после этого можно оставить: при стоящем страже процесс ничего не отправляет. Выключить —
    `deploy/pilot/compose.sh --profile live stop worker redpanda`, затем `REPRACER_PILOT_WRITE_PATH=off` в `pilot.env`.
 
+### 6а. Каналы клиента — только Amazon US [Р-256]
+
+Рамка MVP [Р-251] держится в двух местах:
+- **консоль:** клиентский тенант видит и подключает только amazon.com. Это `REPRACER_CLIENT_CHANNELS`, в профиле us по умолчанию `amazon_us`;
+- **база:** `ALTER DATABASE <база> SET repracer.client_channels = 'amazon_us'` (0239). Аккаунт канала заводится и меняется только на amazon.com,
+  подключение другого канала не начинается — отказ своей причиной.
+
+Демо-тенант — исключение в обоих местах. Настройку базы ставит первая сборка, а базе, собранной до шага 176, — первая же выкладка.
+Открыть клиентам другие каналы — решение владельца, только явным значением:
+
+```sh
+deploy/pilot/compose.sh exec -T -u postgres postgres psql -X -c "ALTER DATABASE ${REPRACER_PILOT_DB} SET repracer.client_channels = 'all'"
+```
+
+Выкладка такое значение не трогает и называет громко. Консоль тогда тоже открывают явно: `REPRACER_CLIENT_CHANNELS=all` в `pilot.env`.
+
 ## 7. Путь пилота
 
 1. Оператор открывает панель туннелем: `ssh -L 4327:127.0.0.1:4327 deploy@<сервер>`, затем `http://127.0.0.1:4327`.

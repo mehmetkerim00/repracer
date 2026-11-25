@@ -27,6 +27,11 @@ export interface MarketScope {
   omnibus: boolean;
   /** Валюты витрин профиля (посев демо и подсказки; в коде и модели EUR и USD остаются наравне [Р-57]) */
   currencies: readonly string[];
+  /**
+   * Шаг 176 [Р-256]: витрины, которые консоль предлагает и называет клиентскому тенанту, — сужение профиля каталогом каналов тенанта.
+   * Нет поля — витрины профиля целиком
+   */
+  storefronts?: Readonly<Record<string, readonly string[]>>;
 }
 
 const SCOPES: Readonly<Record<MarketProfile, MarketScope>> = {
@@ -56,6 +61,7 @@ const isUsStorefront = (channel: string, marketplace: string): boolean => (US_ST
 /** Витрина входит в профиль: канал профиля и витрина его рынка (у global — любая) */
 export function storefrontInMarket(scope: MarketScope, channel: string, marketplace: string): boolean {
   if (!scope.channels.includes(channel)) return false;
+  if (scope.storefronts && !(scope.storefronts[channel] ?? []).includes(marketplace)) return false;
   if (scope.profile === 'global') return true;
   return scope.profile === 'us' ? isUsStorefront(channel, marketplace) : !isUsStorefront(channel, marketplace);
 }
@@ -79,6 +85,33 @@ export function connectableInMarket<T extends { channel: string; marketplaces: r
     const marketplaces = c.marketplaces.filter((mp) => storefrontInMarket(scope, c.channel, mp));
     return marketplaces.length === 0 ? [] : [{ ...c, marketplaces }];
   });
+}
+
+/**
+ * Шаг 176 [Р-256] (этап 3 отчёта «QA-A Testing 2.0», продолжение Р-251): каталог каналов клиентского тенанта — свойство развёртывания
+ * `REPRACER_CLIENT_CHANNELS`: `amazon_us` — клиентские и пилотные тенанты видят и подключают только amazon.com; `all` — все витрины
+ * профиля. Демо — исключение всегда: симуляторная витрина держит три канала, на ней держатся перепроверки QA. Код и интеграции других
+ * каналов живут и проходят CI; данные тенанта каталог не прячет — их и не бывает: подключить другой канал нельзя, а база откажет и
+ * прямой записи (0239)
+ */
+export const CLIENT_CHANNELS = ['ALL', 'AMAZON_US'] as const;
+export type ClientChannels = (typeof CLIENT_CHANNELS)[number];
+
+/** Витрина MVP [Р-251]: amazon.com */
+export const AMAZON_US_ONLY: Readonly<Record<string, readonly string[]>> = { AMAZON: ['ATVPDKIKX0DER'] };
+
+/** Значение развёртывания: не задано — умолчание процесса; задано неверно — отказ, а не молчаливое умолчание */
+export function clientChannelsOf(raw: string | undefined, fallback: ClientChannels): ClientChannels {
+  if (raw === undefined || raw === '') return fallback;
+  if (raw === 'amazon_us') return 'AMAZON_US';
+  if (raw === 'all') return 'ALL';
+  throw new Error(`REPRACER_CLIENT_CHANNELS must be amazon_us or all, got ${raw}`);
+}
+
+/** Каталог каналов тенанта: демо и развёртывание «all» — профиль целиком; клиент при «amazon_us» — только amazon.com профиля */
+export function tenantMarketScope(scope: MarketScope, tenant: { demo: boolean }, clientChannels: ClientChannels): MarketScope {
+  if (tenant.demo || clientChannels === 'ALL') return scope;
+  return { ...scope, channels: scope.channels.filter((c) => c in AMAZON_US_ONLY), storefronts: AMAZON_US_ONLY };
 }
 
 /**

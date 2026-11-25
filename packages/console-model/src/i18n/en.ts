@@ -1858,7 +1858,9 @@ export const en = {
         creepUp: 'Off by default. While you hold the Buy Box, raise the price one step per scheduled recompute; after losing it, step back and pause.',
         creepStepBp: 'Each raise, as a percentage of the price; never more than the step limit of your guardrails.',
         anchor: 'Which competitor price the target starts from. Lower of the two takes whichever of the Buy Box and the lowest price is lower.',
-        competeWith: 'Which competitor offers count, by who fulfills them. An offer whose fulfillment the channel does not name is left out and counted. Walmart does not say who fulfills an offer — there the filter is unavailable.',
+        competeWith: 'Which competitor offers count, by who fulfills them. An offer whose fulfillment the channel does not name is left out and counted.',
+        // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
+        competeWithWalmart: 'Walmart does not say who fulfills an offer — there the filter is unavailable.',
       },
       pageTitle: 'Strategies', inUse: 'Strategies in use', offers: 'Offers', draftTitle: 'Draft', name: 'Name', type: 'Type',
       types: { FIXED: 'Fixed price', TARGET_MARGIN: 'Target margin', MATCH_BUYBOX: 'Match the Buy Box', BEAT_LOWEST: 'Beat the lowest price', WIN_BUYBOX: 'Win the Buy Box' },

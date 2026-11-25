@@ -89,6 +89,8 @@ services:
       REPRACER_CONSOLE_TRUST_PROXY: "on"
       REPRACER_MARKET_PROFILE: us
       REPRACER_CONSOLE_LOCALE: en
+      # Шаг 176 [Р-256]: клиент пилота — только amazon.com; открыть другие каналы — решение владельца (README, §6а)
+      REPRACER_CLIENT_CHANNELS: ${REPRACER_CLIENT_CHANNELS:-amazon_us}
     depends_on:
       postgres:
         condition: service_healthy
