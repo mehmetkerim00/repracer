@@ -1,12 +1,15 @@
-import { useState } from 'react';
-import { LIST_PAGE_DEFAULT, parseAmountInput, parsePercentInput, type ListQuery, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { useEffect, useState } from 'react';
+import { canPickMore, LIST_PAGE_DEFAULT, MAX_PICKED, NO_SELECTION, parseAmountInput, parsePercentInput, toggleOffer, type ListQuery, type OfferSelection, type StrategyDraft, type StrategyListItem, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import type { JobCreatedResponse, StrategySaveResponse } from '../api-types.ts';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 import { ImportPanel } from './Imports.tsx';
 import { ApiError, requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ProductRef, ReasonLine, shortWhen, UnitName, useMessages, When, WhenHead } from '../components.tsx';
-import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
+import { CheckField, Field, FieldGrid, FieldGroup, FormActions, RowCheck } from '../forms.tsx';
+import { BoundsIndexView } from './Bounds.tsx';
+import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
+import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -81,15 +84,34 @@ export function draftOf(f: DraftForm): unknown {
   return { name: f.name, params, deadbandMinor: minorOf(f.deadband) } satisfies Record<keyof StrategyDraft, unknown>;
 }
 
-export function PreviewTable({ view }: { view: StrategyPreviewView }) {
+export function PreviewTable({ view, worldId, jobId }: { view: StrategyPreviewView; worldId?: string; jobId?: string | null }) {
   const m = useMessages();
   const t = m.ui.strategies;
   const c = t.columns;
-  const asOfZone = commonZone(view.rows.map((r) => r.asOf));
+  /**
+   * Шаг 178 (#39, уточнение Р-140, (г)): предпросмотр перечисляет ВСЕ предложения назначения — включая выбранные вне текущего фильтра:
+   * первая страница — строки вида, следующие — из итога задания предпросмотра
+   */
+  const [page, setPage] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [more, setMore] = useState<StrategyPreviewView['rows'] | null>(null);
+  const total = view.shown.of;
+  const paged = Boolean(worldId && jobId) && total > view.rows.length;
+  useEffect(() => {
+    if (!paged || page.offset === 0) { setMore(null); return; }
+    let alive = true;
+    requestJson<{ rows: StrategyPreviewView['rows'] }>(`${worldPath(worldId!, 'strategies', 'preview', jobId!)}?offset=${page.offset}&limit=${page.limit}`, { locale: m.locale })
+      .then((x) => { if (alive) setMore(x.rows); }).catch(() => { if (alive) setMore(null); });
+    return () => { alive = false; };
+  }, [paged, worldId, jobId, page.offset, page.limit, m.locale]);
+  const rows = page.offset === 0 || !more ? view.rows : more;
+  const pageInfo = { from: total === 0 ? 0 : page.offset + 1, to: Math.min(page.offset + page.limit, total), total,
+    text: m.ui.feed.page(total === 0 ? 0 : page.offset + 1, Math.min(page.offset + page.limit, total), total), hasPrevious: page.offset > 0, hasNext: page.offset + page.limit < total };
+  const asOfZone = commonZone(rows.map((r) => r.asOf));
   return (
     <section className="preview">
       <h3>{view.draft.title}</h3>
       <p className="muted small">{view.draft.detail}</p>
+      {worldId && jobId ? <h4>{m.ui.selection.planAll(total)}</h4> : null}
       <p className="headline">{view.headline}</p>
       {view.saveBlocked ? <p className="notice" role="alert">{view.saveBlocked}</p> : null}
       {/* Шаг 79 (ревью): плотная таблица и переносимое «на момент» — колонка «почему» не уходит за край рамки */}
@@ -97,7 +119,7 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
         <table className="dense cardify">
           <thead><tr><th>{c.offer}</th><th><WhenHead label={c.asOf} zone={asOfZone} /></th><th className="num">{c.current}</th><th className="num">{c.proposed}</th><th className="num">{c.final}</th><th className="num">{c.change}</th><th>{c.outcome}</th><th>{c.reason}</th></tr></thead>
           <tbody>
-            {view.rows.map((r) => (
+            {rows.map((r) => (
               <tr key={r.unit.writeScopeId} className={r.dangerous ? 'dangerous' : ''}>
                 <td className="offer card-title"><UnitName unit={r.unit} /></td>
                 <td className="small as-of" data-label={`${c.asOf}${asOfZone ? ` · ${asOfZone}` : ''}`}><When value={r.asOf} zone={!asOfZone} /></td>
@@ -112,6 +134,7 @@ export function PreviewTable({ view }: { view: StrategyPreviewView }) {
           </tbody>
         </table>
       </div>
+      {paged ? <Pager page={pageInfo} query={page} onQuery={setPage} /> : null}
       <Gaps gaps={view.gaps} />
     </section>
   );
@@ -133,7 +156,15 @@ export function SaveConfirm({ offers, busy, onConfirm, onCancel, assign = false 
   );
 }
 
-export function StrategiesScreenView({ view, worldId, initialPreview = null, onChanged }: { view: StrategyListView; worldId: string; initialPreview?: StrategyPreviewView | null; onChanged?: () => void }) {
+/** Шаг 178 (#39): фильтры Offers у списка назначения — витрины пространства, число прошедших фильтр и весь каталог */
+export interface StrategyFilterInfo {
+  filters: { storefronts: Array<{ value: string; label: string }> };
+  matched: number | null;
+  catalogTotal: number;
+}
+
+export function StrategiesScreenView({ view, worldId, initialPreview = null, onChanged, offerQuery, onOfferQuery, pageQuery, onPage }: { view: StrategyListView & Partial<StrategyFilterInfo>; worldId: string;
+  initialPreview?: StrategyPreviewView | null; onChanged?: () => void; offerQuery?: OfferUiQuery; onOfferQuery?: (q: OfferUiQuery) => void; pageQuery?: ListQuery; onPage?: (q: ListQuery) => void }) {
   const m = useMessages();
   const t = m.ui.strategies;
   const assignable = view.scopes.filter((s) => s.assignable).map((s) => s.unit.writeScopeId);
@@ -141,7 +172,15 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
   /** OQ-169: назначается существующая версия — черновик не редактируется, превью и сохранение по её параметрам */
   const [assigning, setAssigning] = useState<StrategyListItem | null>(null);
   const [removing, setRemoving] = useState<StrategyListView['scopes'][number] | null>(null);
-  const [selected, setSelected] = useState<string[]>(assignable);
+  /**
+   * Шаг 178 (#39, уточнение Р-140): выбор переживает страницы и фильтры — только видимым. Начальный выбор — назначаемые предложения первой
+   * страницы, отмеченные явно (как было); дальше листание и фильтр его не сбрасывают
+   */
+  const [selection, setSelection] = useState<OfferSelection>(() => ({ ...NO_SELECTION, ids: assignable }));
+  const [review, setReview] = useState<ListQuery | null>(null);
+  const [search, setSearch] = useState(offerQuery?.q ?? '');
+  const filter = offerQuery ? filterOfUi(offerQuery) : {};
+  const summary = useSelectionSummary(worldId, selection, filter, view.scopes.map((sc) => sc.unit.writeScopeId), review, 0);
   const [preview, setPreview] = useState<StrategyPreviewView | null>(initialPreview);
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -153,23 +192,12 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
   const [busy, setBusy] = useState(false);
   // Шаг 78: список предложений стратегии раскрывается по ссылке «Show offers» — по умолчанию только сводка по витринам
   const [openOffers, setOpenOffers] = useState<string | null>(null);
-  /**
-   * Р-136 (ревью шага 29, находка 3): выбор относится к ПОКАЗАННОЙ странице. Он сбрасывается при листании — иначе продавец,
-   * ушедший на третью страницу, сохранял бы стратегию предложениям первой. Весь каталог выбирается отдельным флагом, и его
-   * раскрывает сервер: перечислить 10 000 идентификаторов в теле запроса нельзя.
-   */
-  const [wholeCatalog, setWholeCatalog] = useState(false);
-  const pageKey = `${view.page.from}:${view.page.to}`;
-  const [shownPage, setShownPage] = useState(pageKey);
-  if (shownPage !== pageKey) {
-    // Р-140: выбор прежней страницы не переносится; предложения НОВОЙ страницы — умолчание, и число выбранных сказано рядом
-    setShownPage(pageKey); setSelected(assignable); setWholeCatalog(false); setPreview(null); setPreviewJobId(null);
-  }
-
   const changed = () => { setPreview(null); setPreviewJobId(null); setConfirming(false); };
   const set = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => { setForm({ ...form, [key]: value }); changed(); };
-  const pick = (ids: string[]) => { setSelected(ids); setWholeCatalog(false); changed(); };
-  const scopeSelection = () => (wholeCatalog ? { all: true } : { writeScopeIds: selected });
+  const onSelection = (next: OfferSelection) => { setSelection(next); changed(); };
+  // Шаг 178: выбор раскрывает сервер — отмеченные, «все подходящие» и снятые
+  const scopeSelection = () => ({ selection });
+  const selectedCount = summary?.selected ?? selection.ids.length;
 
   /**
    * OQ-201 (шаг 30): предпросмотр — фоновое задание по ВСЕМ выбранным предложениям, а не по выборке 500. Экран показывает его
@@ -363,31 +391,55 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
       <FieldGroup className="pick-card" title={t.pick}>
       {/* Шаг 79 (ревью): без предложений выбирать нечего — пустое состояние с путём, а не форма на ноль предложений */}
       {view.page.total === 0 ? <p className="muted empty">{t.noOffers} <a href={href(worldId, 'channels', 'accounts')}>{m.ui.app.connectChannel}</a></p> : <>
-      {/* Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; страница выбирается отдельной кнопкой, и так и названа */}
-      <CheckField label={t.selectAllCatalog(view.page.total)} caption={t.selectionReset} checked={wholeCatalog} disabled={busy}
-        onChange={(v) => { setWholeCatalog(v); setSelected([]); changed(); }} />
-      <div className="buttons">
-        <button type="button" disabled={busy || wholeCatalog} onClick={() => pick(assignable)}>{t.selectPage(assignable.length)}</button>
-        <button type="button" disabled={busy || wholeCatalog} onClick={() => pick([])}>{t.selectNone}</button>
-      </div>
-      {/* Сколько выбрано — числом и всегда: без него «выбрано» читается как «то, что я вижу на этой странице» */}
-      <p className="notice" role="status">
-        {wholeCatalog ? t.selectionWhole(view.page.total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, view.page.total)}
-      </p>
-      <ul className="index pick-list">
-        {view.scopes.map((s) => (
-          <li key={s.unit.writeScopeId}>
-            {/* Шаг 175 (QA-A Testing 2.0, этап 4): в выборе — цвет и идентификатор: варианты одного товара различимы */}
-            <CheckField label={<><UnitName unit={s.unit} variant={false} /><ProductRef unit={s.unit} /></>} caption={`${s.strategy} · ${s.mode}${s.byDefaultRule ? ` · ${s.byDefaultRule}` : ''}`} disabled={!s.assignable} checked={selected.includes(s.unit.writeScopeId)}
-              {...(s.assignable ? {} : { title: t.notAssignable })}
-              onChange={(v) => pick(v ? [...selected, s.unit.writeScopeId] : selected.filter((x) => x !== s.unit.writeScopeId))} />
-            {s.channelPricing ? <div className="small pick-note"><Badge tone={s.channelPricing.tone}>{t.notAssignable}</Badge> {s.channelPricing.detail}</div> : null}
-            {s.canUnassign ? <button type="button" className="pick-action" disabled={busy} onClick={() => { setRemoving(s); setMessage(null); }}>{t.unassign}</button> : null}
-          </li>
-        ))}
-      </ul>
+      {/*
+        Шаг 178 (#39, уточнение Р-140): фильтры Offers, выбор, который переживает страницы и фильтры, и строка выбора — те же, что у правки
+        границ; таблица — предложение, его стратегия и режим, снятие стратегии
+      */}
+      {onOfferQuery && offerQuery ? (
+        <form className="filters toolbar field-toolbar" onSubmit={(e) => { e.preventDefault(); onOfferQuery({ ...offerQuery, q: search.trim() }); }}>
+          <OfferFilterFields storefronts={view.filters?.storefronts ?? []} query={offerQuery} onQuery={onOfferQuery} search={search} onSearch={setSearch} holder={false} />
+        </form>
+      ) : null}
+      {view.matched !== null && view.matched !== undefined && !review ? <Help className="section-sub" text={m.ui.products.filters.matched(view.matched, view.catalogTotal ?? view.page.total)} /> : null}
+      <SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={view.matched ?? view.page.total} storefronts={view.filters?.storefronts ?? []}
+        review={review !== null} onReview={(on) => setReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} disabled={busy} />
+      {review ? (
+        <>
+          <h4>{m.ui.selection.reviewTitle}</h4>
+          <BoundsIndexView worldId={worldId} items={summary?.review?.items ?? []} embedded heading={false} filtered
+            pick={{ picked: (id) => !selection.except.includes(id), onToggle: (id, on) => onSelection(toggleOffer(selection, id, on, true)), canPick: canPickMore(selection), disabled: busy }} />
+          {summary?.review ? <Pager page={summary.review.page} query={review} onQuery={setReview} /> : null}
+        </>
+      ) : (
+        <div className="table-wrap">
+          <table className="cardify selectable strategy-picks">
+            <thead><tr><th className="pick"><span className="visually-hidden">{t.columns.offer}</span></th><th>{t.columns.offer}</th><th>{t.pickColumns.strategy}</th><th /></tr></thead>
+            <tbody>
+              {view.scopes.map((sc) => {
+                const id = sc.unit.writeScopeId;
+                const on = isPicked(selection, summary, id);
+                return (
+                  <tr key={id} className={on ? 'picked' : undefined}>
+                    <td className="pick">
+                      <RowCheck label={m.ui.selection.pick(sc.unit.label)} checked={on} disabled={busy || !sc.assignable || (!on && !canPickMore(selection))}
+                        title={!sc.assignable ? t.notAssignable : !on && !canPickMore(selection) ? m.ui.selection.limit(MAX_PICKED) : undefined}
+                        onChange={(next) => onSelection(toggleOffer(selection, id, next, on))} />
+                    </td>
+                    {/* Шаг 175 (QA-A Testing 2.0, этап 4): в выборе — цвет и идентификатор: варианты одного товара различимы */}
+                    <td className="offer card-title"><UnitName unit={sc.unit} variant={false} /><ProductRef unit={sc.unit} />
+                      {sc.channelPricing ? <div className="small pick-note"><Badge tone={sc.channelPricing.tone}>{t.notAssignable}</Badge> {sc.channelPricing.detail}</div> : null}</td>
+                    <td data-label={t.pickColumns.strategy}>{sc.strategy}<div className="muted small">{sc.mode}{sc.byDefaultRule ? ` · ${sc.byDefaultRule}` : ''}</div></td>
+                    <td className="card-action">{sc.canUnassign ? <button type="button" className="pick-action" disabled={busy} onClick={() => { setRemoving(sc); setMessage(null); }}>{t.unassign}</button> : null}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {review ? null : <Pager page={view.page} query={pageQuery ?? { offset: 0, limit: LIST_PAGE_DEFAULT }} onQuery={(q) => onPage?.(q)} />}
       {(() => {
-        const nothing = selected.length === 0 && !wholeCatalog;
+        const nothing = selectedCount === 0;
         const saveWhy = !preview ? m.ui.forms.why.previewFirst : preview.saveBlocked !== null ? preview.saveBlocked : null;
         const hint = nothing ? m.ui.forms.why.selectOffers : view.canEdit && !busy && saveWhy && !confirming ? saveWhy : null;
         return (
@@ -419,7 +471,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
       {previewJobId ? <JobProgress worldId={worldId} jobId={previewJobId} onFinished={previewReady} /> : null}
       {/* Шаг 174 (BUG-01): назначение завершилось — список стратегий (число предложений, последнее изменение) перечитывается сам */}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} started={started} onFinished={(job) => { if (job.status === 'SUCCEEDED') onChanged?.(); }} /> : null}
-      {preview ? <PreviewTable view={preview} /> : null}
+      {preview ? <PreviewTable view={preview} worldId={worldId} jobId={previewJobId} /> : null}
       <Gaps gaps={view.gaps} />
       <span id="strategy-import" />
       <ImportPanel worldId={worldId} kind="STRATEGY" canEdit={view.canEdit} />
@@ -430,11 +482,15 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
 export function StrategiesScreen({ worldId }: { worldId: string }) {
   const m = useMessages();
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  // Шаг 178 (#39): фильтры и поиск Offers у списка назначения — по всему каталогу
+  const [offerQuery, setOfferQuery] = useState<OfferUiQuery>(NO_OFFER_QUERY);
+  const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit), ...filterOfUi(offerQuery) });
   // Шаг 174: перечитывание после назначения держит прежний список на экране — редактор с итогом задания не размонтируется
-  const [resource, retry] = useResource<StrategyListView>(`${worldPath(worldId, 'strategies')}?offset=${query.offset}&limit=${query.limit}`, m.locale, { keepPrevious: true });
+  const [resource, retry] = useResource<StrategyListView & StrategyFilterInfo>(`${worldPath(worldId, 'strategies')}?${params.toString()}`, m.locale, { keepPrevious: true });
   return (
     <Load shape="cards" resource={resource} retry={retry}>
-      {(view) => <><StrategiesScreenView view={view} worldId={worldId} onChanged={retry} /><Pager page={view.page} query={query} onQuery={setQuery} /></>}
+      {(view) => <StrategiesScreenView view={view} worldId={worldId} onChanged={retry} offerQuery={offerQuery}
+        onOfferQuery={(q) => { setOfferQuery(q); setQuery({ ...query, offset: 0 }); }} pageQuery={query} onPage={setQuery} />}
     </Load>
   );
 }

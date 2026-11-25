@@ -198,6 +198,10 @@ the differences, apply.
   (only the selected offers), "Select all N matching" (an explicit action that shows the filter as a badge).
 - Up to 1,000 offers can be ticked by hand; more is done with a filter and "Select all matching".
 - The preview lists every offer of the edit, page by page, including the ones selected outside the current filter.
+
+**Strategy assignment — [QA-A].** The assignment list on Strategies works the same way: the Offers filters and search, the selection that
+survives pages and filters, the same counter, "Select all matching" and "Review selection". The preview lists every offer of the
+assignment, page by page; saving checks that the selection is the one the preview showed.
 - A minimum above the maximum is refused before anything runs, in one message that names the offers and both amounts; nothing is changed.
 - Preview is off until you choose what to change; Apply is off when nothing would change. Both say why.
 - Each row names the offer with its color and channel ID, its bounds and its effective floor.

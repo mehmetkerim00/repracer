@@ -1791,6 +1791,8 @@ export const de: Messages = {
         // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
         competeWithWalmart: 'Walmart nennt die Versandart nicht — dort ist der Filter nicht verfügbar.',
       },
+      /** Шаг 178 (#39): колонка таблицы выбора назначения — стратегия предложения и его режим */
+      pickColumns: { strategy: 'Strategie und Modus' },
       pageTitle: 'Strategien', inUse: 'Verwendete Strategien', offers: 'Angebote', draftTitle: 'Entwurf', name: 'Name', type: 'Typ',
       types: { FIXED: 'Festpreis', TARGET_MARGIN: 'Zielmarge', MATCH_BUYBOX: 'Buy Box angleichen', BEAT_LOWEST: 'Niedrigsten Preis unterbieten', WIN_BUYBOX: 'Buy Box gewinnen' },
       fields: { priceMinor: 'Preis', targetMarginBp: 'Marge, %', undercutMinor: 'Unterbietung', deadbandMinor: 'Schwelle', holdWhenWinning: 'Bei Gewinn halten', atBound: 'Außerhalb der Grenzen', scope: 'Vergleich mit', compareLanded: 'Inklusive Versand',

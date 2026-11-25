@@ -442,7 +442,9 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
             previews.push(one);
             await progress(previews.length, 'PRODUCING');
           }
-          const view = strategyPreviewView(world, parsed.draft, previews, m, scopes.length, STRATEGY_PREVIEW_ROWS_SHOWN);
+          // Шаг 178 (#39, уточнение Р-140, (г)): все строки предпросмотра — в итоге задания (клиенту итог отдаёт только вид), вид — первые строки
+          const full = strategyPreviewView(world, parsed.draft, previews, m, scopes.length);
+          const view = { ...full, rows: full.rows.slice(0, STRATEGY_PREVIEW_ROWS_SHOWN), shown: { rows: Math.min(full.rows.length, STRATEGY_PREVIEW_ROWS_SHOWN), of: full.rows.length } };
           /**
            * Итог задания — сам экран предпросмотра: продавец читает его, а сохранение сверяется с ЭТИМ токеном, а не с новым
            * счётом. Вместе с ним записываются стратегии предложений НА МОМЕНТ предпросмотра: по ним назначение и отличает
@@ -450,6 +452,7 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
            */
           return {
             view: view as unknown as Record<string, unknown>, previewToken: view.previewToken, offers: previews.length,
+            rows: full.rows as unknown as Record<string, unknown>,
             expected: currentStrategies(world, scopes.map((sc) => sc.writeScopeId)) as unknown as Record<string, unknown>,
           };
         },

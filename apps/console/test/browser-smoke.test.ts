@@ -3335,6 +3335,55 @@ test('step 177 (#39, Р-140 amended): the selection survives filter changes and 
   }
 });
 
+/**
+ * Шаг 178 (#39, уточнение Р-140): назначение стратегии — на той же модели выбора, что правка границ: фильтры Offers, строка выбора
+ * «N selected · M outside current view», выбор переживает смену фильтра, предпросмотр называет все предложения назначения
+ */
+test('step 178 (#39, Р-140 amended): Strategies — filters, the selection bar and a preview of every offer of the assignment', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = colorsApi;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/strategies`)}, true)`);
+    await settled(b, 'strategies');
+    const t = en.ui.selection;
+    const count = () => b.evaluate<string>(`document.querySelector('.pick-card .selection-bar .selection-count')?.textContent.trim() ?? ''`);
+    const rows = () => b.evaluate<number>(`document.querySelectorAll('.pick-card table.strategy-picks tbody tr').length`);
+    await waitFor(b, `/selected/.test(document.querySelector('.pick-card .selection-bar .selection-count')?.textContent ?? '')`, 'the selection bar');
+    const total = await rows();
+    // Начальный выбор — назначаемые предложения первой страницы, отмеченные явно
+    const picked = await b.evaluate<number>(`document.querySelectorAll('.pick-card table.strategy-picks tbody tr td.pick input:checked').length`);
+    assert.ok(picked > 0 && picked <= total, `the assignable offers of the first page are ticked: ${picked} of ${total}`);
+    await waitFor(b, `document.querySelector('.pick-card .selection-bar .selection-count').textContent.trim() === ${JSON.stringify(t.counter(picked, 0))}`, 'the counter says how many', 10_000);
+    // Смена витрины: выбор остался, часть его — вне текущего вида
+    const value = await b.evaluate<string>(`[...document.querySelector('.pick-card form.filters select').options].filter((o) => o.value)[0].value`);
+    await b.evaluate(`(() => { const sel = document.querySelector('.pick-card form.filters select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(value)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(b, `document.querySelectorAll('.pick-card table.strategy-picks tbody tr').length < ${total}`, 'the filtered list');
+    const shown = await rows();
+    await waitFor(b, `(() => { const m = /^(\\d+) selected · (\\d+) outside current view$/.exec(document.querySelector('.pick-card .selection-bar .selection-count').textContent.trim()); return m !== null && Number(m[1]) === ${picked} && Number(m[2]) > 0; })()`,
+      'the selection is kept and partly outside the view', 10_000);
+    assert.ok(shown > 0, 'the storefront has offers');
+    // Предпросмотр — все предложения выбора, страницами; у черновика — имя
+    await b.evaluate(`(() => { const f = [...document.querySelectorAll('.field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(en.ui.strategies.name)});
+      const i = f.querySelector('input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'Smoke 178'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await new Promise((x) => setTimeout(x, 200));
+    await b.click(en.ui.strategies.preview, '.pick-card button');
+    await new Promise((x) => setTimeout(x, 300));
+    await runPendingJobs(colorsLive);
+    await waitFor(b, `document.querySelector('section.preview h4')?.textContent.trim() === ${JSON.stringify(t.planAll(picked))}`, 'the preview names every offer of the assignment', 20_000);
+    assert.ok(/^\S/.test(await count()), 'the counter stays');
+  } finally {
+    currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
   const b = browser!;
   const before = b.errors().length;

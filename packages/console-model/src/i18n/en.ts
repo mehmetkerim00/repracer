@@ -1862,6 +1862,8 @@ export const en = {
         // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
         competeWithWalmart: 'Walmart does not say who fulfills an offer — there the filter is unavailable.',
       },
+      /** Шаг 178 (#39): колонка таблицы выбора назначения — стратегия предложения и его режим */
+      pickColumns: { strategy: 'Strategy and mode' },
       pageTitle: 'Strategies', inUse: 'Strategies in use', offers: 'Offers', draftTitle: 'Draft', name: 'Name', type: 'Type',
       types: { FIXED: 'Fixed price', TARGET_MARGIN: 'Target margin', MATCH_BUYBOX: 'Match the Buy Box', BEAT_LOWEST: 'Beat the lowest price', WIN_BUYBOX: 'Win the Buy Box' },
       fields: { priceMinor: 'Price', targetMarginBp: 'Margin, %', undercutMinor: 'Undercut', deadbandMinor: 'Threshold', holdWhenWinning: 'Keep when winning', atBound: 'Outside bounds', scope: 'Compare against', compareLanded: 'Including shipping',

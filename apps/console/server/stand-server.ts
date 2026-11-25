@@ -24,7 +24,7 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { type ClientChannels, type MarketScope, tenantMarketScope, filterParamsOf, MAX_PICKED, parseOfferSelection, type OfferFilterParams, type OfferSelection, type ProductListView, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
+import { storefrontChoices, type ClientChannels, type MarketScope, tenantMarketScope, filterParamsOf, MAX_PICKED, parseOfferSelection, type OfferFilterParams, type OfferSelection, type ProductListView, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import { descriptorOf, strategyAvailableOn } from './channel-descriptors.ts';
 import {
@@ -989,16 +989,20 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const screen = parts[3];
     const param = parts[4] ?? null;
     /** Экраны, которые отдают и маршруты записи (ответ после действия) — одним построителем */
-    const strategiesScreen = async (canEdit: boolean, query?: ListQuery) => {
+    const strategiesScreen = async (canEdit: boolean, query?: ListQuery, oq?: NonNullable<ReturnType<typeof parseOfferQuery>>) => {
+      // Шаг 178 (#39): фильтры и поиск Offers у списка назначения — по всему каталогу той же выборкой сервера
+      const filtered = oq ? filterActive(offerFilterOf(oq)) : false;
       const [page, f, defaults] = await Promise.all([
-        catalogPageFor(listQuery(query)),
+        filtered ? selectOffers(offerDeps(), oq!, listQuery(query)) : catalogPageFor(listQuery(query)),
         facts({ first: 1, strategyUsage: { examples: STRATEGY_SCOPE_EXAMPLES }, channelPricing: { limit: CHANNEL_PRICING_SHOWN } }),
         // Шаг 103 [Р-228]: карточка стратегии называет аккаунты, для которых она — умолчание новых предложений
         live.store.defaultStrategies(live.tenantId),
       ]);
       const world = await load(page && f ? [...page.scopeIds, ...f.firstIds, ...(f.strategyUsage ?? []).flatMap((u) => u.exampleIds)] : null, { catalogPage: page, facts: f });
       world.defaultStrategies = defaults;
-      return strategiesView(world, m, canEdit, query);
+      if (filtered && page) world.catalogPage = page;
+      return { ...strategiesView(world, m, canEdit, query), filters: { storefronts: storefrontChoices(world, m) }, matched: filtered && page ? page.matched : null,
+        catalogTotal: page ? page.total : world.state.scopes.length };
     };
     /**
      * Шаг 104 [Р-229]: журнал аудита — за период и страницей (по умолчанию — 30 дней, первая страница); прежде — последние 200 без листания.
@@ -1314,7 +1318,16 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
         // Шаг 21: стратегии, лента цен, отчёт об опасных изменениях [Р-73]
         case 'strategies': {
           const query = parseListQuery(url.searchParams);
-          return query ? ok(await strategiesScreen(can(viewer.role, 'MANAGE_PRICING'), query)) : fail(400, 'BAD_PAGE', s.badRequest);
+          // Шаг 178 (#39, уточнение Р-140, (г)): предпросмотр перечисляет ВСЕ предложения назначения — страницами из итога задания
+          if (param === 'preview') {
+            const job = parts[5] && parts.length === 6 ? await live.store.bulkJob(live.tenantId, parts[5]) : null;
+            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+            if (!job || job.kind !== 'STRATEGY_PREVIEW' || job.status !== 'SUCCEEDED') return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
+            const { items: rows, page } = pageOf(((job.result ?? {}) as { rows?: unknown[] }).rows ?? [], query, m);
+            return ok({ rows, page });
+          }
+          const oq = parseOfferQuery(url.searchParams);
+          return query && oq ? ok(await strategiesScreen(can(viewer.role, 'MANAGE_PRICING'), query, oq)) : fail(400, 'BAD_PAGE', s.badRequest);
         }
         case 'feed': {
           // Шаг 23: фильтры и страница — на сервере по всему окну ленты; неверный параметр — 400, а не молчаливое «все»
@@ -1886,6 +1899,20 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * его ЗАДАНИЕМ: решение считается по каждому предложению каталога, а не по выборке 500 из 10 000. Выборка была ценой
      * синхронного ответа, а не свойством продукта, — и вместе с ответом она исчезла.
      */
+    /**
+     * Шаг 178 (#39, уточнение Р-140): предпросмотр, сохранение и назначение стратегии принимают выбор — отмеченные, «все подходящие» и снятые;
+     * раскрывает его сервер в перечень до прежних проверок: сверка с предпросмотром сравнивает раскрытые перечни (каталог изменился — отказ)
+     */
+    if (screen === 'strategies' && (param === 'preview' || param === null || param === 'assign') && body.selection !== undefined) {
+      const sel = parseOfferSelection(body.selection);
+      const ids = sel ? await expandSelection(sel) : null;
+      if (!ids) return fail(400, 'BAD_SELECTION', m.ui.selection.bad(MAX_PICKED));
+      if (ids.length > MAX_SCOPES) return fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(ids.length, MAX_SCOPES));
+      body.writeScopeIds = ids;
+      delete body.all;
+      delete body.selection;
+    }
+
     if (screen === 'strategies' && param === 'preview') {
       const parsed = parseStrategyDraft(body.draft);
       if (!parsed.ok) return fail(400, 'BAD_DRAFT', draftProblemsText(parsed.problems, m));

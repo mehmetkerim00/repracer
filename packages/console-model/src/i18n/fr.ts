@@ -1850,6 +1850,8 @@ export const fr: Messages = {
         // Шаг 176 [Р-256]: про Walmart — только пространству с аккаунтом Walmart; клиентский тенант при «только Amazon US» его не видит
         competeWithWalmart: 'Walmart n’indique pas qui expédie une offre : le filtre n’y est pas disponible.',
       },
+      /** Шаг 178 (#39): колонка таблицы выбора назначения — стратегия предложения и его режим */
+      pickColumns: { strategy: 'Stratégie et mode' },
       pageTitle: 'Stratégies', inUse: 'Stratégies utilisées', offers: 'Offres', draftTitle: 'Brouillon', name: 'Nom', type: 'Type',
       types: { FIXED: 'Prix fixe', TARGET_MARGIN: 'Marge cible', MATCH_BUYBOX: 'S’aligner sur la Buy Box', BEAT_LOWEST: 'Battre le prix le plus bas', WIN_BUYBOX: 'Remporter la Buy Box' },
       fields: { priceMinor: 'Prix', targetMarginBp: 'Marge, %', undercutMinor: 'Écart à la baisse', deadbandMinor: 'Seuil', holdWhenWinning: 'Maintenir si Buy Box gagnée', atBound: 'Hors limites', scope: 'Comparer avec', compareLanded: 'Livraison comprise',

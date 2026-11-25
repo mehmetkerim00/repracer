@@ -92,5 +92,6 @@ export function catalogPageOf(world: StandWorld, query: ListQuery, m: Messages):
   const c = world.catalogPage;
   if (!c) return pageOf(world.state.scopes, query, m);
   const byId = new Map(world.state.scopes.map((sc) => [sc.writeScopeId, sc]));
-  return { items: c.scopeIds.flatMap((id) => { const sc = byId.get(id); return sc ? [sc] : []; }), page: pageInfo({ ...query, offset: c.offset }, c.total, m) };
+  // Шаг 178 (#39): страница фильтра листается по прошедшим фильтр (`matched`), без фильтра это весь каталог
+  return { items: c.scopeIds.flatMap((id) => { const sc = byId.get(id); return sc ? [sc] : []; }), page: pageInfo({ ...query, offset: c.offset }, c.matched ?? c.total, m) };
 }

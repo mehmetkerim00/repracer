@@ -1528,6 +1528,37 @@ test('step 177 (#39, Р-140 amended): the selection survives filters — counted
   assert.deepEqual([tooMany.status, (tooMany.body as { error: { code: string } }).error.code], [400, 'BAD_SELECTION']);
 });
 
+/**
+ * Шаг 178 (#39, уточнение Р-140): назначение стратегии на той же модели выбора, что правка границ. Список назначения фильтруется по всему
+ * каталогу; предпросмотр принимает выбор и перечисляет ВСЕ его предложения страницами, включая выбранное вне фильтра; сохранение того же
+ * выбора сверяется с этим предпросмотром
+ */
+test('step 178 (#39, Р-140 amended): the strategy assignment takes the selection — filtered list, a preview of every offer, the same selection saved', async () => {
+  const id = 'kaufland/pipeline/fx-usd-floor-eur-cost';
+  const owner = await login('OWNER', 'en');
+  type Listed = StrategyListView & { filters: { storefronts: Array<{ value: string; label: string }> }; matched: number | null; catalogTotal: number };
+  const all = await get<Listed>(owner, api(id, 'strategies'));
+  const kfl = all.filters.storefronts.find((x) => x.label === 'kaufland.de')!;
+  const amz = all.filters.storefronts.find((x) => x.label === 'amazon.com')!;
+  const filtered = await get<Listed>(owner, `${api(id, 'strategies')}?storefront=${encodeURIComponent(amz.value)}`);
+  assert.deepEqual([filtered.scopes.length, filtered.matched, filtered.catalogTotal], [1, 1, all.scopes.length], 'the assignment list filters the whole catalog');
+  const inKfl = (await get<Listed>(owner, `${api(id, 'strategies')}?storefront=${encodeURIComponent(kfl.value)}`)).scopes[0]!.unit.writeScopeId;
+  const inAmz = filtered.scopes[0]!.unit.writeScopeId;
+  const selection = { ids: [inKfl], matches: [{ storefront: amz.value }], except: [] };
+  const draft = { name: 'Synthetic fixed 178', params: { type: 'FIXED', priceMinor: 2050 }, deadbandMinor: 0 };
+  const preview = await previewOf(owner, id, { draft, selection });
+  assert.equal(preview.view.shown.of, 2, 'the preview covers the picked offer and every matching one');
+  const page = (offset: number) => get<{ rows: Array<{ unit: { writeScopeId: string } }>; page: { total: number } }>(owner, `${api(id, 'strategies', 'preview', preview.jobId)}?offset=${offset}&limit=1`);
+  const [p0, p1] = [await page(0), await page(1)];
+  assert.deepEqual([p0.page.total, [p0.rows[0]!.unit.writeScopeId, p1.rows[0]!.unit.writeScopeId].sort()], [2, [inKfl, inAmz].sort()], 'every offer of the preview is listed page by page');
+  // Сохранение того же выбора сверяется с предпросмотром: создаётся задание, а не «предпросмотр устарел»
+  const saved = await call(owner, 'POST', api(id, 'strategies'), { draft, selection, strategyId: null, previewJobId: preview.jobId, previewToken: preview.view.previewToken, confirmed: true });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  // Другой выбор при том же предпросмотре — отказ: сохраняется только посчитанное
+  const other = await call(owner, 'POST', api(id, 'strategies'), { draft, selection: { ids: [inKfl], matches: [], except: [] }, strategyId: null, previewJobId: preview.jobId, previewToken: preview.view.previewToken, confirmed: true });
+  assert.deepEqual([other.status, (other.body as { error: { code: string } }).error.code], [409, 'PREVIEW_CHANGED']);
+});
+
 test('step 175: the enable refusal says «Repricing not enabled» once — in the title, not again in every reason', async () => {
   for (const locale of ['en', 'de', 'es', 'fr'] as const) {
     const m = messagesFor(locale);
