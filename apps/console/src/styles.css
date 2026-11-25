@@ -412,11 +412,20 @@ table.products tbody tr:hover td.offer, table.sticky-end tbody tr:hover td:last-
 }
 .table-head .table-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-left: auto; }
 /* «Maximize the table» — экран от 1012 px: уже на планшете содержимое во всю ширину, разворачивать нечего */
-.table-max, .table-head.only-max { display: none; }
+/* Шаг 183: ширина колонки и её ручка — тоже от 1012 px; на планшете и телефоне — раскладка по умолчанию, правила 375 и 768 прежние */
+.table-max, .reset-widths, .table-head.controls-only, .col-grip { display: none; }
 @media (width >= 63.25rem) {
   .table-max { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); min-height: var(--control-h); padding: 0; color: var(--text-2); }
   .table-max:hover, .table-max[aria-pressed='true'] { color: var(--text); background: var(--control-bg-active); }
-  .table-head.only-max { display: flex; padding-top: var(--space-1); padding-bottom: var(--space-1); }
+  .reset-widths { display: inline; }
+  .table-head.controls-only { display: flex; padding-top: var(--space-1); padding-bottom: var(--space-1); }
+  /* ширина — только у колонки, где её задали (`style` несёт --col-w), и сильнее правил колонок экранов (`table.products th` и т. п.);
+     уже содержимого колонка не становится — раскладка таблицы прежняя */
+  table th[data-col][style] { width: var(--col-w); min-width: var(--col-w); }
+  /* ручка — полоса у правого края подписи; черта видна при наведении на подпись и при фокусе с клавиатуры */
+  .col-grip { display: block; position: absolute; top: 0; right: 0; bottom: 0; width: var(--space-2); cursor: col-resize; touch-action: none; border-right: var(--border-width) solid transparent; }
+  th[data-col]:hover > .col-grip { border-right-color: var(--border); }
+  .col-grip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 }
 .th-zone { color: var(--text-2); font-weight: 400; }
 td .basis { color: var(--text); }

@@ -36,6 +36,8 @@ export interface Browser {
   setColorScheme(scheme: 'light' | 'dark' | null): Promise<void>;
   /** Шаг 100 (B): настоящее движение мыши в точку окна — состояние :hover, которого синтетическое событие страницы не даёт */
   mouseMove(x: number, y: number): Promise<void>;
+  /** Шаг 183: настоящее перетаскивание левой кнопкой мыши из точки в точку окна — события указателя, а не синтетика страницы */
+  mouseDrag(fromX: number, fromY: number, toX: number, toY: number): Promise<void>;
   /** Шаг 109: снимок видимой части окна в JPEG — для доказательств шага (смоук пишет их, только когда задан каталог снимков) */
   screenshot(): Promise<Buffer>;
   /** Исключения страницы и вызовы console.error с начала работы */
@@ -112,6 +114,14 @@ export async function launchBrowser(): Promise<Browser> {
     async open(url) { await send('Page.navigate', { url }); },
     async setViewport(width, height) { await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); },
     async mouseMove(x, y) { await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); },
+    async mouseDrag(fromX, fromY, toX, toY) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: fromX, y: fromY });
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: fromX, y: fromY, button: 'left', buttons: 1, clickCount: 1 });
+      for (let i = 1; i <= 8; i++) {
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: fromX + ((toX - fromX) * i) / 8, y: fromY + ((toY - fromY) * i) / 8, button: 'left', buttons: 1 });
+      }
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: toX, y: toY, button: 'left', buttons: 0, clickCount: 1 });
+    },
     async setColorScheme(scheme) { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme ?? '' }] }); },
     async screenshot() {
       const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 80 });

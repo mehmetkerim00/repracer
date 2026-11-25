@@ -507,6 +507,8 @@ export const de: Messages = {
       menu: 'Menü', collapseNav: 'Menü einklappen', expandNav: 'Menü ausklappen', closeMenu: 'Menü schließen',
       /** Шаг 182 (#38): таблица во всю ширину окна и обратно — доступные имена кнопки в шапке таблицы */
       maximizeTable: 'Tabelle maximieren', restoreTable: 'Tabelle wiederherstellen',
+      /** Шаг 183 (#38): ручка ширины колонки и сброс всех ширин таблицы — доступные имена */
+      resizeColumn: (name: string) => `Breite der Spalte „${name}“ ändern`, resetColumns: 'Spaltenbreiten zurücksetzen',
       metrics: { offers: 'Angebote', decisions: 'Entscheidungen 24 h', interventions: 'Eingriffe 7 Tage' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Angebote ${scopes} · Entscheidungen (24 h) ${decisionsLastDay} · Eingriffe (7 Tage) ${interventionsLastWeek}`,

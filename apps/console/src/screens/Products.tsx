@@ -8,7 +8,7 @@ import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
 import { handOver } from '../handover.ts';
 import { rememberKey, useRemembered } from '../remember.ts';
-import { TableFrame } from '../table-frame.tsx';
+import { ColHead, TableFrame } from '../table-frame.tsx';
 import { BoundsIndexView } from './Bounds.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 
@@ -162,13 +162,13 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
     const key = SORT_OF[k];
     const dir = offerQuery.sort?.key === key ? offerQuery.sort.dir : null;
     return (
-      <th key={k} className={numeric ? 'num' : undefined} aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none'}>
+      <ColHead key={k} col={k} label={c[k]} {...(numeric ? { className: 'num' } : {})} sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none'}>
         {onOfferQuery ? (
           <button type="button" className="sort-head" title={p.buybox.sortBy(c[k])} onClick={() => onOfferQuery({ ...offerQuery, sort: { key, dir: dir === 'asc' ? 'desc' : 'asc' } })}>
             {c[k]}{dir ? <Octicon name={dir === 'asc' ? 'triangle-up' : 'triangle-down'} size={16} /> : null}
           </button>
         ) : c[k]}
-      </th>
+      </ColHead>
     );
   };
   const dash = <span className="muted">–</span>;
@@ -201,7 +201,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
       {view.matched !== null ? <Help className="section-sub" text={f.matched(view.matched, view.totals.total)} /> : null}
       {selectionUi ?? null}
       {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными. Шаг 182 (#38): шапка таблицы — на экране, таблица разворачивается */}
-      {reviewList ? reviewList : view.rows.length > 0 ? <TableFrame screen="products" lead={<span>{p.totals(view.totals)}</span>} actions={(
+      {reviewList ? reviewList : view.rows.length > 0 ? <TableFrame screen="products" table="offers" lead={<span>{p.totals(view.totals)}</span>} actions={(
           <span className="view-options">
             {/* Шаг 95 [Р-217]: массовые операции — кнопкой с Offers; своего пункта меню у них нет */}
             <a className="button-link" href={href(view.worldId, 'products', 'bulk')}>{p.bulkEdit}</a>
@@ -219,13 +219,14 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
           <thead>
             <tr>
               {/* Шаг 79 (ревью): статус — сразу после предложения: широкая таблица листается под закреплённой колонкой действий, и статус не прячется */}
-              <th>{c.unit}</th><th>{c.status}</th><th className="num">{c.current}</th>
+              {/* Шаг 183 (#38): у каждой подписанной колонки — ручка ширины; память ширин — браузера */}
+              <ColHead col="unit" label={c.unit} /><ColHead col="status" label={c.status} /><ColHead col="current" label={c.current} className="num" />
               {/* Шаг 105: колонки Buy Box — рядом с текущей ценой (разрыв — наша цена минус Buy Box): включённые видны без прокрутки таблицы */}
               {col.bbHolder ? sortHead('bbHolder', false) : null}{col.bbPrice ? sortHead('bbPrice', true) : null}{col.bbGap ? sortHead('bbGap', true) : null}{col.bbShare ? sortHead('bbShare', true) : null}
-              {col.margin ? <th className="num">{c.margin}</th> : null}
-              <th className="num">{c.floor}</th>{col.ceiling ? <th className="num">{c.ceiling}</th> : null}
-              {col.strategy ? <th>{c.strategy}</th> : null}{col.health ? <th>{c.health}</th> : null}{col.lastChange ? <th>{c.lastChange}</th> : null}
-              {col.nextCheck ? <th>{c.nextCheck}</th> : null}<th />
+              {col.margin ? <ColHead col="margin" label={c.margin} className="num" /> : null}
+              <ColHead col="floor" label={c.floor} className="num" />{col.ceiling ? <ColHead col="ceiling" label={c.ceiling} className="num" /> : null}
+              {col.strategy ? <ColHead col="strategy" label={c.strategy} /> : null}{col.health ? <ColHead col="health" label={c.health} /> : null}{col.lastChange ? <ColHead col="lastChange" label={c.lastChange} /> : null}
+              {col.nextCheck ? <ColHead col="nextCheck" label={c.nextCheck} /> : null}<th />
             </tr>
           </thead>
           <tbody>

@@ -8,7 +8,7 @@ import { BoundsEditPanel } from './BoundsEdit.tsx';
 import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 import { takeHandover } from '../handover.ts';
-import { TableFrame, type TableScreen } from '../table-frame.tsx';
+import { ColHead, TableFrame, type TableScreen } from '../table-frame.tsx';
 
 /** Шаг 149 (#27, скрин владельца): пустое значение поля — нейтральный прочерк, а не «no value»; почему пусто — подписью поля */
 const EMPTY = '–';
@@ -305,10 +305,11 @@ export function BoundsIndexView({ worldId, items, embedded = false, pick, headin
       {items.length === 0 && !filtered ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
       {items.length === 0 ? null : (
-        <TableFrame {...(frame ? { screen: frame } : {})}>
+        <TableFrame table="bounds" {...(frame ? { screen: frame } : {})}>
           <table className={pick ? 'cardify selectable' : 'cardify'}>
             {/* Шаг 175 (QA-A Testing 2.0, этап 4): заданный минимум и действующий пол — разные колонки: пол бывает выше минимума (маржа, безубыточность) */}
-            <thead><tr>{pick ? <th className="pick"><span className="visually-hidden">{c.offer}</span></th> : null}<th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th className="num">{m.ui.products.columns.floor}</th><th /></tr></thead>
+            {/* Шаг 183 (#38): ручка ширины — у подписанных колонок; колонка галочки и колонка ссылки — без неё */}
+            <thead><tr>{pick ? <th className="pick"><span className="visually-hidden">{c.offer}</span></th> : null}<ColHead col="offer" label={c.offer} /><ColHead col="min" label={c.min} className="num" /><ColHead col="max" label={c.max} className="num" /><ColHead col="floor" label={m.ui.products.columns.floor} className="num" /><th /></tr></thead>
             <tbody>
               {items.map((i) => {
                 const on = pick ? pick.picked(i.writeScopeId) : false;

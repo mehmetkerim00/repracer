@@ -8,7 +8,7 @@ import { Badge, commonZone, Gaps, Help, href, Load, OfferPicker, Pager, ReasonLi
 import { Field } from '../forms.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
-import { TableFrame } from '../table-frame.tsx';
+import { ColHead, TableFrame } from '../table-frame.tsx';
 
 /**
  * Шаг 95 [Р-217]: Price changes — единственный журнал цен. «Kind» выбирает, что в нём: записи в канал (как было) или все решения —
@@ -78,14 +78,15 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
         // Шаг 104 [Р-229]: выгрузка — кнопкой «Export» в ряду фильтров (прежняя «All N entries as a file» заменена)
         // Шаг 145 (аудит UX, 1.2): у чисел — период и что они считают; число группы — фильтр ровно этой группы
         // Шаг 182 (#38): шапка таблицы — на экране, таблица разворачивается
-        <TableFrame screen="feed" lead={onQuery ? <span className="feed-counts">{f.countsLead(periodPhrase(query.period ?? { preset: '7d' }, m))}{' '}
+        <TableFrame screen="feed" table="feed" lead={onQuery ? <span className="feed-counts">{f.countsLead(periodPhrase(query.period ?? { preset: '7d' }, m))}{' '}
             {FEED_COUNT_ORDER.filter(([group, key]) => group !== 'SHADOW_HELD' || view.counts[key] > 0).map(([group, key]) => (
               <button key={group} type="button" className={`reason-filter${q.status === group ? ' on' : ''}`} aria-pressed={q.status === group}
                 onClick={() => onQuery({ ...current, status: q.status === group ? undefined : group, offset: 0 })}>{f.statusGroups[group]} <span className="count">{view.counts[key]}</span></button>
             ))}</span> : <span>{f.counts(view.counts)}</span>}
           notes={shared.map((text) => <span key={text} className="head-note">{text}</span>)}>
           <table className="feed dense sticky-end cardify clickable-rows">
-            <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
+            {/* Шаг 183 (#38): ручка ширины — у подписанных колонок */}
+            <thead><tr><ColHead col="when" label={c.when}><WhenHead label={c.when} zone={zone} /></ColHead><ColHead col="offer" label={c.offer} /><ColHead col="from" label={c.from} className="num" /><ColHead col="to" label={c.to} className="num" /><ColHead col="change" label={c.change} className="num" /><ColHead col="status" label={c.status} /><ColHead col="reason" label={c.reason} /><th /></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
                 <tr key={n} className={i.decisionId ? 'row-clickable' : undefined} onClick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) open(i.decisionId); }}>

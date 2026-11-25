@@ -534,6 +534,8 @@ export const en = {
       menu: 'Menu', collapseNav: 'Collapse the menu', expandNav: 'Expand the menu', closeMenu: 'Close menu',
       /** Шаг 182 (#38): таблица во всю ширину окна и обратно — доступные имена кнопки в шапке таблицы */
       maximizeTable: 'Maximize the table', restoreTable: 'Restore the table',
+      /** Шаг 183 (#38): ручка ширины колонки и сброс всех ширин таблицы — доступные имена */
+      resizeColumn: (name: string) => `Resize the column “${name}”`, resetColumns: 'Reset column widths',
       metrics: { offers: 'Offers', decisions: 'Decisions 24h', interventions: 'Interventions 7d' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Offers ${scopes} · decisions (24 h) ${decisionsLastDay} · interventions (7 days) ${interventionsLastWeek}`,

@@ -4,7 +4,7 @@ import { useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, receiptBack, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { CompetitorTable } from './Competition.tsx';
-import { TableFrame, type TableScreen } from '../table-frame.tsx';
+import { ColHead, TableFrame, type TableScreen } from '../table-frame.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
 /** Шаг 81: знак исхода в карточке итога — по тону решения */
@@ -19,9 +19,10 @@ export function DecisionsView({ worldId, items, frame }: { worldId: string; item
       {/* Шаг 95 [Р-217]: список решений — вид журнала Price changes (Kind: All decisions); заголовок страницы — у журнала */}
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
         // Шаг 182 (#38): на Price changes таблица решений разворачивается так же, как записи (одна память экрана)
-        <TableFrame {...(frame ? { screen: frame } : {})}>
+        <TableFrame table="decisions" {...(frame ? { screen: frame } : {})}>
           <table className="cardify clickable-rows">
-            <thead><tr><th><WhenHead label={t.columns.when} zone={zone} /></th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
+            {/* Шаг 183 (#38): ручка ширины — у подписанных колонок */}
+            <thead><tr><ColHead col="when" label={t.columns.when}><WhenHead label={t.columns.when} zone={zone} /></ColHead><ColHead col="unit" label={t.columns.unit} /><ColHead col="outcome" label={t.columns.outcome} /><ColHead col="price" label={t.columns.price} className="num" /><ColHead col="reason" label={t.columns.reason} /><th /></tr></thead>
             <tbody>
               {items.map((d) => (
                 // Шаг 96 (Б17): строка журнала ведёт на квитанцию решения целиком

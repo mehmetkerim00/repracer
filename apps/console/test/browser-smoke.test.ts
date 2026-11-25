@@ -3474,6 +3474,13 @@ test('step 180 (#38): the navigation folds to icons and back on a wide screen, t
   await b.click(en.ui.app.expandNav, 'button.nav-collapse');
   await waitFor(b, `!document.querySelector('.world-layout').classList.contains('nav-collapsed')`, 'unfolded');
   assert.equal(await width(), wide, 'back to the full navigation');
+  // Шаг 183 (найдено смоуком шага 183): состояние боковины стояло после раннего «пространство не найдено» — переход из пространства по
+  // адресу несуществующего ронял страницу («Rendered fewer hooks than expected»), теперь — карточка «не найдено»
+  await b.evaluate(`(location.hash = '#/w/no-such-workspace/products', true)`);
+  await b.waitText(en.ui.app.worldNotFoundTitle);
+  assert.deepEqual(b.errors().slice(before), [], 'a missing workspace opened from inside a workspace shows «not found», not a crash');
+  await b.evaluate(`(location.hash = ${JSON.stringify(here)}, true)`);
+  await waitFor(b, `document.querySelector('.world-layout') !== null`, 'back in the workspace after «not found»');
   // Телефон: выдвижная панель, кнопки сворачивания нет
   await b.setViewport(375, 812);
   assert.equal(await b.evaluate<string>(`getComputedStyle(document.querySelector('button.nav-collapse')).display`), 'none', 'no fold button on a phone');
@@ -3663,6 +3670,113 @@ test('step 182 (#38): the header of a wide table stays on screen; «Maximize the
     await b.evaluate('(window.scrollTo(0, 0), true)');
     await shot('offers-375');
     assert.equal(await b.evaluate<string>(`getComputedStyle(document.querySelector('button.table-max')).display`), 'none', 'no maximize button on a phone');
+    await b.setViewport(1440, 900);
+  } finally {
+    currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 183 (#38): ширина колонок меняется и запоминается. Ручка у правого края шапки колонки (от 1012 px): мышью, ← и → по 16 px,
+ * End — наибольшая, двойной щелчок — по умолчанию; «Reset column widths» — все; память — браузера по таблице. Широкая таблица листается в рамке
+ */
+test('step 183 (#38): columns resize by mouse and keyboard, the browser remembers the widths, «Reset column widths» restores them', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  // Снимки до и после (Р-254) — только при REPRACER_SMOKE_SHOTS (каталог), как у шагов 109 и 182
+  const shots = process.env.REPRACER_SMOKE_SHOTS ?? null;
+  const shot = async (name: string) => {
+    if (!shots) return;
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(shots, { recursive: true });
+    writeFileSync(`${shots}/${name}.jpg`, await b.screenshot());
+  };
+  currentApi = colorsApi;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    const go = async (path: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${path}`)}, true)`); await settled(b, path); };
+    await b.evaluate(`(Object.keys(localStorage).filter((k) => k.startsWith('repracer.table-widths:')).forEach((k) => localStorage.removeItem(k)), true)`);
+    await go('products');
+    await shot('offers-1440-header');
+    // Ручка — у каждой колонки с подписью, с доступным именем; у колонки действий её нет
+    const handles = await b.evaluate<{ labelled: number; handles: string[] }>(`(() => {
+      const heads = [...document.querySelectorAll('table.products thead th')];
+      return { labelled: heads.filter((th) => th.textContent.trim() !== '').length,
+        handles: heads.map((th) => th.querySelector('[role=separator]')?.getAttribute('aria-label')).filter(Boolean) };
+    })()`);
+    assert.equal(handles.handles.length, handles.labelled, `every labelled Offers column has a resize handle: ${JSON.stringify(handles)}`);
+    assert.ok(handles.handles.includes(en.ui.app.resizeColumn(en.ui.products.columns.status)), `the handle is named after its column: ${handles.handles.join(' | ')}`);
+    const width = (col: string) => b.evaluate<number>(`Math.round(document.querySelector('table.products thead th[data-col=${col}]').getBoundingClientRect().width)`);
+    const grip = (col: string) => b.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('table.products thead th[data-col=${col}] [role=separator]').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    const status0 = await width('status');
+    // Мышью: ручка «Status» вправо на 120 px
+    const g = await grip('status');
+    await b.mouseDrag(g.x, g.y, g.x + 120, g.y);
+    await waitFor(b, `Math.round(document.querySelector('table.products thead th[data-col=status]').getBoundingClientRect().width) >= ${status0 + 100}`, 'the Status column is wider');
+    const status1 = await width('status');
+    await b.mouseMove(g.x + 120, g.y);
+    await shot('offers-1440-status-wider');
+    assert.ok(Math.abs(status1 - (status0 + 120)) <= 4, `the column follows the mouse: ${status0} → ${status1}px for 120px`);
+    const saved = await b.evaluate<Record<string, number>>(`JSON.parse(localStorage.getItem('repracer.table-widths:offers') ?? '{}')`);
+    assert.ok(Math.abs((saved.status ?? 0) - status1) <= 4, `the browser keeps the width: ${JSON.stringify(saved)}`);
+    assert.ok(await b.evaluate<boolean>(`!!document.querySelector(${JSON.stringify(`button.reset-widths`)})`), '«Reset column widths» appears once a width is set');
+    // Возврат на экран — та же ширина
+    await go('costs');
+    await go('products');
+    assert.ok(Math.abs((await width('status')) - status1) <= 2, 'the width survives a return to the screen');
+    // Клавиатура: ← дважды — на 32 px уже
+    // Нажатия — разными задачами, как у человека: ширину следующего шага ручка меряет на отрисованной таблице
+    for (let i = 0; i < 2; i++) {
+      await b.evaluate(`(() => { const h = document.querySelector('table.products thead th[data-col=status] [role=separator]'); h.focus();
+        h.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); return true; })()`);
+      await waitFor(b, `Math.abs(Math.round(document.querySelector('table.products thead th[data-col=status]').getBoundingClientRect().width) - ${status1 - 16 * (i + 1)}) <= 2`, `step ${i + 1} by keyboard`);
+    }
+    await waitFor(b, `Math.abs(Math.round(document.querySelector('table.products thead th[data-col=status]').getBoundingClientRect().width) - ${status1 - 32}) <= 2`, 'two steps narrower by keyboard');
+    assert.equal(await b.evaluate<string | null>(`document.querySelector('table.products thead th[data-col=status] [role=separator]').getAttribute('aria-valuenow')`), String(status1 - 32), 'the handle reports its width');
+    // Двойной щелчок — колонка по умолчанию
+    const d = await grip('status');
+    await b.evaluate(`(document.querySelector('table.products thead th[data-col=status] [role=separator]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: ${d.x}, clientY: ${d.y} })), true)`);
+    await waitFor(b, `Math.abs(Math.round(document.querySelector('table.products thead th[data-col=status]').getBoundingClientRect().width) - ${status0}) <= 2`, 'double-click: the default width');
+    // Широкая таблица — листается в рамке, страница вбок не уезжает
+    // End — наибольшая ширина (образец «разделитель окна»): Health во всю ширину предела, таблица перерастает рамку
+    await b.evaluate(`(() => { const h = document.querySelector('table.products thead th[data-col=health] [role=separator]'); h.focus();
+      h.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); return true; })()`);
+    await waitFor(b, `(() => { const w = document.querySelector('table.products').closest('.table-wrap'); return w.querySelector('table').scrollWidth > w.clientWidth + 1; })()`, 'Offers wider than its frame');
+    assert.equal(await b.evaluate<string | null>(`document.querySelector('table.products thead th[data-col=health] [role=separator]').getAttribute('aria-valuenow')`), String(640), 'End — the widest column');
+    await shot('offers-1440-health-widest');
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), 'the page does not scroll sideways — the table scrolls in its frame');
+    assert.ok((await b.evaluate<Record<string, number>>(`JSON.parse(localStorage.getItem('repracer.table-widths:offers') ?? '{}')`)).health !== undefined, 'the Health width is kept');
+    // «Reset column widths» — все колонки, память стёрта
+    await b.click(en.ui.app.resetColumns, 'button.reset-widths');
+    await waitFor(b, `localStorage.getItem('repracer.table-widths:offers') === null`, 'the widths are cleared');
+    assert.ok(await b.evaluate<boolean>(`(() => { const w = document.querySelector('table.products').closest('.table-wrap'); return w.querySelector('table').scrollWidth <= w.clientWidth + 1; })()`), 'back to a table that fits its frame');
+    // Costs & floors — те же ручки; Price changes — на смоук-мире (у мира цветов журнал пуст)
+    await go('costs');
+    assert.ok(await b.evaluate<number>(`document.querySelectorAll('.costs table thead th [role=separator]').length`) >= 4, 'Costs & floors has resize handles');
+    currentApi = euApi;
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await b.waitText(en.ui.app.worlds);
+    await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+    await settled(b, 'smoke world');
+    const smokeWorld = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    for (const screen of ['feed', 'feed/decisions']) {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${smokeWorld}/${screen}`)}, true)`);
+      await settled(b, screen);
+      assert.ok(await b.evaluate<number>(`document.querySelectorAll('.journal-table table thead th [role=separator], section > .table-wrap > table thead th [role=separator]').length`) >= 4, `${screen}: Price changes has resize handles`);
+    }
+    // Телефон: ручек нет
+    await b.setViewport(375, 812);
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${smokeWorld}/products`)}, true)`);
+    await settled(b, 'phone products');
+    assert.equal(await b.evaluate<string>(`getComputedStyle(document.querySelector('table.products thead th [role=separator]')).display`), 'none', 'no resize handles on a phone');
     await b.setViewport(1440, 900);
   } finally {
     currentApi = euApi;

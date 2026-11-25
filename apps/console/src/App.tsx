@@ -249,6 +249,16 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   const redirect = redirectOf(route);
   const redirectTo = redirect ? href(route.worldId, ...redirect) : null;
   useEffect(() => { if (redirectTo) window.location.replace(redirectTo); }, [redirectTo]);
+  /**
+   * Шаг 180 (#38): свёрнутая боковина — предпочтение зрителя в этом браузере (`localStorage`, как тема); хранилище недоступно — развёрнута.
+   * На узком экране — прежняя выдвижная панель, сворачивания там нет. Шаг 183: до раннего «не найдено» — хук после него ронял страницу при
+   * переходе из пространства по адресу несуществующего
+   */
+  const [collapsed, setCollapsedState] = useState<boolean>(() => { try { return localStorage.getItem(NAV_KEY) === 'collapsed'; } catch { return false; } });
+  const setCollapsed = (on: boolean) => {
+    setCollapsedState(on);
+    try { if (on) localStorage.setItem(NAV_KEY, 'collapsed'); else localStorage.removeItem(NAV_KEY); } catch { /* предпочтение не сохранится — вид меняется всё равно */ }
+  };
   const world = worlds.find((w) => w.id === route.worldId);
   // Шаг 79: «не найдено» — карточкой с заголовком и путём обратно, а не строкой ошибки на фоне страницы
   if (!world) return <NotFound title={outer.ui.app.worldNotFoundTitle} text={outer.ui.app.worldNotFound(route.worldId)} back={outer.ui.app.backToWorlds} />;
@@ -259,15 +269,6 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   // Ревью шага 69, находка 5: у публичного демо язык не назван — он гостя (переключатель в шапке), а пояс — демо
   const m = world.locale || world.timeZone ? messagesFor(world.locale ?? outer.locale, { timeZone: world.timeZone }) : outer;
   const active = MENU_OF[route.screen] ?? route.screen;
-  /**
-   * Шаг 180 (#38): свёрнутая боковина — предпочтение зрителя в этом браузере (`localStorage`, как тема); хранилище недоступно — развёрнута.
-   * На узком экране — прежняя выдвижная панель, сворачивания там нет
-   */
-  const [collapsed, setCollapsedState] = useState<boolean>(() => { try { return localStorage.getItem(NAV_KEY) === 'collapsed'; } catch { return false; } });
-  const setCollapsed = (on: boolean) => {
-    setCollapsedState(on);
-    try { if (on) localStorage.setItem(NAV_KEY, 'collapsed'); else localStorage.removeItem(NAV_KEY); } catch { /* предпочтение не сохранится — вид меняется всё равно */ }
-  };
   return (
     <MessagesContext.Provider value={m}>
       {/* Шаг 96.1: календарь периода считает дни в поясе пространства — в том же, что сервер */}

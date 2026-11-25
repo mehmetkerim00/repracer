@@ -102,6 +102,9 @@ Every data screen shares the same conventions:
   its frame scrolls with the page under the top bar; a wider one scrolls inside a frame no taller than the window, with the first
   column pinned. "Maximize the table" (wide screens) gives the table the window width — the menu folds to icons, the content limit is
   lifted; the status line, filters, notices and pages stay on the page. The browser remembers it per screen. **[QA-A]**
+- the columns of those tables can be resized (wide screens): drag the handle at the right edge of a column header, or focus it and use
+  ← / → (Home and End — narrowest and widest); a double-click restores the column, "Reset column widths" restores the table. A column
+  never gets narrower than its content. The browser remembers the widths per table. **[QA-A]**
 
 | Screen | What it shows | What the seller does there | Label |
 |---|---|---|---|

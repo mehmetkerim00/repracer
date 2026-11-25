@@ -533,6 +533,8 @@ export const fr: Messages = {
       menu: 'Menu', collapseNav: 'Réduire le menu', expandNav: 'Déplier le menu', closeMenu: 'Fermer le menu',
       /** Шаг 182 (#38): таблица во всю ширину окна и обратно — доступные имена кнопки в шапке таблицы */
       maximizeTable: 'Agrandir le tableau', restoreTable: 'Rétablir le tableau',
+      /** Шаг 183 (#38): ручка ширины колонки и сброс всех ширин таблицы — доступные имена */
+      resizeColumn: (name: string) => `Redimensionner la colonne « ${name} »`, resetColumns: 'Réinitialiser la largeur des colonnes',
       metrics: { offers: 'Offres', decisions: 'Décisions 24 h', interventions: 'Interventions 7 j' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Offres ${scopes} · décisions (24 h) ${decisionsLastDay} · interventions (7 jours) ${interventionsLastWeek}`,
