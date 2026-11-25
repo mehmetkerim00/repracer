@@ -3434,6 +3434,53 @@ test('step 179 (#39): Offers hands its selection to the bounds edit and to the s
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
+/**
+ * Шаг 180 (#38): боковина сворачивается до иконок на широком экране и разворачивается обратно; выбор помнит браузер. Подписи пунктов меню
+ * остаются доступными именами ссылок; на узком экране — прежняя выдвижная панель, кнопки сворачивания нет
+ */
+test('step 180 (#38): the navigation folds to icons and back on a wide screen, the browser remembers it; a phone keeps the drawer', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  await b.evaluate(`(localStorage.removeItem('repracer.nav'), true)`);
+  const width = () => b.evaluate<number>(`Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)`);
+  const wide = await width();
+  const names = () => b.evaluate<string[]>(`[...document.querySelectorAll('.nav-group a')].map((a) => a.textContent.trim())`);
+  const shown = await names();
+  await b.click(en.ui.app.collapseNav, 'button.nav-collapse');
+  await waitFor(b, `document.querySelector('.world-layout').classList.contains('nav-collapsed')`, 'the navigation is folded');
+  const narrow = await width();
+  assert.ok(narrow < 80 && narrow < wide, `the folded navigation is icons only: ${narrow}px (was ${wide}px)`);
+  assert.deepEqual(await names(), shown, 'the menu items keep their names for screen readers');
+  assert.ok(await b.evaluate<boolean>(`[...document.querySelectorAll('.nav-group a .nav-label')].every((x) => x.getBoundingClientRect().width <= 1)`), 'the labels are hidden on screen');
+  assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), 'no sideways scroll');
+  // Уход на список пространств и возврат: экран пространства собирается заново и берёт выбор из хранилища браузера
+  const here = await b.evaluate<string>('location.hash');
+  await b.evaluate(`(location.hash = '#/workspaces', true)`);
+  await waitFor(b, `document.querySelector('.world-layout') === null`, 'the workspace list');
+  await b.evaluate(`(location.hash = ${JSON.stringify(here)}, true)`);
+  await waitFor(b, `document.querySelector('.world-layout') !== null`, 'back in the workspace');
+  await settled(b, 'back in the workspace');
+  assert.equal(await b.evaluate<string | null>(`localStorage.getItem('repracer.nav')`), 'collapsed', 'the choice is kept by the browser');
+  assert.ok(await b.evaluate<boolean>(`document.querySelector('.world-layout').classList.contains('nav-collapsed')`), 'the browser remembers the folded navigation');
+  await b.click(en.ui.app.expandNav, 'button.nav-collapse');
+  await waitFor(b, `!document.querySelector('.world-layout').classList.contains('nav-collapsed')`, 'unfolded');
+  assert.equal(await width(), wide, 'back to the full navigation');
+  // Телефон: выдвижная панель, кнопки сворачивания нет
+  await b.setViewport(375, 812);
+  assert.equal(await b.evaluate<string>(`getComputedStyle(document.querySelector('button.nav-collapse')).display`), 'none', 'no fold button on a phone');
+  await b.setViewport(1440, 900);
+  await b.evaluate(`(localStorage.removeItem('repracer.nav'), true)`);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
   const b = browser!;
   const before = b.errors().length;

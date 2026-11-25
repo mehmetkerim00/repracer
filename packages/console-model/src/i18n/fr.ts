@@ -530,7 +530,7 @@ export const fr: Messages = {
       gapsTitle: 'Bon à savoir sur cet écran',
       /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
       /** Шаг 85: кнопки выдвижной навигации на узких экранах — доступные имена */
-      menu: 'Menu', closeMenu: 'Fermer le menu',
+      menu: 'Menu', collapseNav: 'Réduire le menu', expandNav: 'Déplier le menu', closeMenu: 'Fermer le menu',
       metrics: { offers: 'Offres', decisions: 'Décisions 24 h', interventions: 'Interventions 7 j' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Offres ${scopes} · décisions (24 h) ${decisionsLastDay} · interventions (7 jours) ${interventionsLastWeek}`,

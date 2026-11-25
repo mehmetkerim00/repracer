@@ -83,6 +83,9 @@ export function redirectOf(route: Pick<Route, 'screen' | 'param'>): string[] | n
 /** Пункт меню экрана, у которого своего пункта нет: квитанция решения — журнал цен, страница предложения — Costs & floors */
 // Шаг 97: страница Competition предложения — из строки Offers, своего пункта меню у неё нет (меню остаётся из 9 пунктов)
 // Шаг 169 (#36): ответ «Why didn't my price change?» — тоже со строки Offers
+/** Шаг 180 (#38): ключ предпочтения «боковина свёрнута» в хранилище браузера */
+const NAV_KEY = 'repracer.nav';
+
 const MENU_OF: Readonly<Record<string, string>> = { decisions: 'feed', bounds: 'costs', competition: 'products', unchanged: 'products' };
 
 /**
@@ -256,6 +259,15 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
   // Ревью шага 69, находка 5: у публичного демо язык не назван — он гостя (переключатель в шапке), а пояс — демо
   const m = world.locale || world.timeZone ? messagesFor(world.locale ?? outer.locale, { timeZone: world.timeZone }) : outer;
   const active = MENU_OF[route.screen] ?? route.screen;
+  /**
+   * Шаг 180 (#38): свёрнутая боковина — предпочтение зрителя в этом браузере (`localStorage`, как тема); хранилище недоступно — развёрнута.
+   * На узком экране — прежняя выдвижная панель, сворачивания там нет
+   */
+  const [collapsed, setCollapsedState] = useState<boolean>(() => { try { return localStorage.getItem(NAV_KEY) === 'collapsed'; } catch { return false; } });
+  const setCollapsed = (on: boolean) => {
+    setCollapsedState(on);
+    try { if (on) localStorage.setItem(NAV_KEY, 'collapsed'); else localStorage.removeItem(NAV_KEY); } catch { /* предпочтение не сохранится — вид меняется всё равно */ }
+  };
   return (
     <MessagesContext.Provider value={m}>
       {/* Шаг 96.1: календарь периода считает дни в поясе пространства — в том же, что сервер */}
@@ -264,11 +276,14 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
       <ExportContext.Provider value={world.canExport !== false}>
       {/* Р-151: демо помечается на КАЖДОМ экране мира — деньги показываются на большинстве из них; шаг 77 — тонкой полосой под шапкой */}
       {world.demo ? <p className="demo-strip demo-banner" role="note"><Badge tone="warn">{m.ui.app.demoBadge}</Badge> {m.ui.app.demoBanner}</p> : null}
-      <div className={`world-layout${nav.open ? ' nav-open' : ''}`}>
+      <div className={`world-layout${nav.open ? ' nav-open' : ''}${collapsed ? ' nav-collapsed' : ''}`}>
       <aside className="sidebar" id="world-nav">
         <div className="sidebar-inner">
         {/* Шаг 85: крестик — только у выдвижной панели узкого экрана */}
         <button type="button" className="nav-close ghost" aria-label={m.ui.app.closeMenu} onClick={() => setOpen(false)}><Icon name="x" size={20} /></button>
+        {/* Шаг 180 (#38): на широком экране боковина сворачивается до иконок и обратно; выбор помнит браузер */}
+        <button type="button" className="nav-collapse ghost" aria-expanded={!collapsed} aria-label={collapsed ? m.ui.app.expandNav : m.ui.app.collapseNav}
+          title={collapsed ? m.ui.app.expandNav : m.ui.app.collapseNav} onClick={() => setCollapsed(!collapsed)}><Octicon name={collapsed ? 'chevron-right' : 'chevron-left'} size={20} /></button>
         <div className="workspace">
           <div className="name">{world.title}</div>
           {/* Шаг 111 [Р-237]: «All workspaces» — всегда, своим адресом списка (шаг 100 (A) показывал её только при двух и больше) */}
@@ -285,7 +300,7 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
               <div key={group} className={`nav-group${solo ? ' solo' : ''}`}>
                 {solo ? null : <div className="group-title">{m.ui.app.navGroups[group]}</div>}
                 {shown.map((key) => (
-                  <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Octicon name={NAV_ICONS[key] ?? ''} size={20} />{m.ui.app.screens[key]}</a>
+                  <a key={key} href={href(world.id, key)} className={active === key ? 'active' : ''} title={collapsed ? m.ui.app.screens[key] : undefined} aria-current={active === key ? 'page' : undefined} onClick={() => setOpen(false)}><Octicon name={NAV_ICONS[key] ?? ''} size={20} /><span className="nav-label">{m.ui.app.screens[key]}</span></a>
                 ))}
               </div>
             );

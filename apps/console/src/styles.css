@@ -120,6 +120,16 @@ main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-di
 .nav-group a:hover { background: var(--nav-hover); text-decoration: none; color: var(--nav-active-fg); }
 .nav-group a.active { background: var(--nav-selected); box-shadow: inset 3px 0 0 var(--nav-active-edge); color: var(--nav-active-fg); font-weight: var(--weight-heading); }
 .nav-group a.active .icon, .nav-group a:hover .icon { color: var(--nav-active-fg); }
+/* Шаг 180 (#38): боковина сворачивается до иконок — только на широком экране; на узком — выдвижная панель, кнопки сворачивания нет */
+.nav-collapse { display: none; }
+@media (width >= 63.25rem) {
+  .nav-collapse { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); min-height: var(--control-h); margin: 0 0 var(--space-2) var(--space-1); color: var(--sidebar-muted); }
+  .nav-collapse:hover { color: var(--nav-active-fg); background: var(--nav-hover); }
+  .world-layout.nav-collapsed { grid-template-columns: calc(var(--touch-target) + var(--space-4)) minmax(0, 1fr); }
+  .world-layout.nav-collapsed .sidebar .workspace, .world-layout.nav-collapsed .nav-group .group-title { display: none; }
+  .world-layout.nav-collapsed .nav-group a { justify-content: center; padding: var(--space-1) 0; }
+  .world-layout.nav-collapsed .nav-group a .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+}
 /* шаг 84: единые отступы страницы и предельная ширина контента — на широком мониторе ничего не размазывается */
 .world-content { min-width: 0; width: 100%; max-width: 1344px; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
 .world-content > * + * { margin-top: var(--space-4); }
