@@ -2382,15 +2382,20 @@ test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab;
     await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
     await settled(b, 'first screen');
     const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
-    const go = async (route: string) => {
+    // Шаг 183.1: `settled` сразу после смены адреса может застать прежний экран без загрузки (хеш применяется следующей задачей) — CI шага 182
+    // ввёл сумму распродажи в Offers. Экран страницы предложения ждётся своим признаком
+    const go = async (route: string, ready?: string) => {
       await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
       await settled(b, route);
+      if (ready) await waitFor(b, `!!document.querySelector(${JSON.stringify(ready)})`, `${route}: ${ready}`);
     };
+    // У двух страниц границ подряд общий признак — ждётся ссылка «Change this floor» именно этого предложения
+    const boundsOf = (id: string) => `.page-actions a[href$="/${encodeURIComponent(id)}"]`;
     const links = `[...document.querySelectorAll('.world-content a.seller-link')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href'),
       target: a.getAttribute('target'), rel: a.getAttribute('rel'), label: a.getAttribute('aria-label'), icon: !!a.querySelector('svg') }))`;
     for (const m of [en, de, es, fr]) {
       if (m !== en) await chooseLanguage(b, en.ui.app.languages[m.locale]);
-      await go(`competition/${encodeURIComponent(step107.writeScopeId)}`);
+      await go(`competition/${encodeURIComponent(step107.writeScopeId)}`, '.world-content a.seller-link');
       const found = await b.evaluate<Array<{ text: string; href: string; target: string; rel: string; label: string; icon: boolean }>>(links);
       assert.deepEqual(found.map((l) => [l.text, l.href, l.target, l.rel, l.icon]).sort(), [
         ['A2SYN1070000AA', 'https://www.amazon.de/sp?seller=A2SYN1070000AA', '_blank', 'noopener noreferrer', true],
@@ -2399,21 +2404,21 @@ test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab;
       assert.ok(found.every((l) => l.label === m.ui.competition.sellerPage(l.text)), `${m.locale}: the link says where it goes`);
       assert.equal(await b.evaluate<boolean>(`[...document.querySelectorAll('.world-content td')].some((td) => td.textContent.trim() === 'Simulated competitor 2' && !td.querySelector('a'))`), true,
         `${m.locale}: a name without an id stays text`);
-      await go(`bounds/${encodeURIComponent(step107.conflictScopeId)}`);
+      await go(`bounds/${encodeURIComponent(step107.conflictScopeId)}`, boundsOf(step107.conflictScopeId));
       const block = await b.evaluate<{ title: string; notices: string[] }>(`(() => { const s = document.querySelector('section.channel-bounds');
         return { title: s.querySelector('h3').textContent.trim(), notices: [...s.querySelectorAll('.notice.warn')].map((n) => n.textContent.trim()) }; })()`);
       assert.equal(block.title, m.ui.bounds.channelBounds.title, `${m.locale}: the block`);
       assert.equal(block.notices.length, 1, `${m.locale}: one warning — the floor below the channel minimum`);
-      await go(`bounds/${encodeURIComponent(step107.insideScopeId)}`);
+      await go(`bounds/${encodeURIComponent(step107.insideScopeId)}`, boundsOf(step107.insideScopeId));
       assert.equal(await b.evaluate<number>(`document.querySelectorAll('section.channel-bounds .notice.warn').length`), 0, `${m.locale}: no warning without a conflict`);
-      await go('products');
+      await go('products', 'table.products');
       // Шаг 162 (#27): пометка конфликта рамок — в колонке Health
       const pills = await b.evaluate<string[]>(`[...document.querySelectorAll('.world-content td.health .badge.tone-warn')].map((x) => x.textContent.trim())`);
       assert.deepEqual(pills.filter((x) => x === m.ui.products.belowChannelMin), [m.ui.products.belowChannelMin], `${m.locale}: the pill on Offers — ${pills.join(' | ')}`);
       if (m !== en) await chooseLanguage(b, m.ui.app.languages.en);
     }
     // Окно распродажи: пол ниже Min канала — предупреждение ДО галочки; галочка — к этому тексту; пол не ниже — предупреждения нет
-    await go(`bounds/${encodeURIComponent(step107.conflictScopeId)}`);
+    await go(`bounds/${encodeURIComponent(step107.conflictScopeId)}`, 'section.clearance input[inputmode="decimal"]');
     const type = (value: string) => b.evaluate(`(() => { const i = document.querySelector('section.clearance input[inputmode="decimal"]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     const order = `(() => { const w = document.querySelector('section.clearance .channel-min-warning'); const c = document.querySelector('section.clearance input[type=checkbox]');
@@ -2448,7 +2453,7 @@ test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab;
       await b.setColorScheme(scheme);
       for (const width of [1440, 375]) {
         await b.setViewport(width, 900);
-        await go(`competition/${encodeURIComponent(step107.writeScopeId)}`);
+        await go(`competition/${encodeURIComponent(step107.writeScopeId)}`, '.world-content a.seller-link');
         const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
         assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width}: Competition does not scroll sideways — ${fit.out.join('; ')}`);
         assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width}: nothing sticks out of its frame`);
