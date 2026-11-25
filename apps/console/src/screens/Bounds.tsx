@@ -79,7 +79,8 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
           только причина и путь к себестоимости и комиссии (шаг 140 убрал включение, но оставил форму целиком)
         */
         <div className="clearance-unavailable">
-          <p className="notice" role="status">{t.causes.BREAK_EVEN_UNKNOWN}</p>
+          {/* Шаг 175.1: то, чего сделать нельзя, — заметка внимания (янтарная), а не плашка статуса (зелёный тон успеха) */}
+          <p className="notice" role="note">{t.causes.BREAK_EVEN_UNKNOWN}</p>
           {c.canManage ? <p><a className="break-even-fill" href={href(view.worldId, 'cost-import')}>{t.addCosts}</a></p> : null}
         </div>
       ) : c.canManage ? (

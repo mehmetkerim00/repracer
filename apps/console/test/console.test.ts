@@ -1463,6 +1463,18 @@ test('step 174 (BUG-03, BUG-04): without break-even the clearance section is the
 });
 
 /**
+ * Шаг 175.1 (снимки шага 174): причина «Loss cannot be calculated» стояла плашкой статуса — зелёным тоном успеха (`p.notice[role=status]`),
+ * хотя это то, чего сделать нельзя. Теперь — заметкой внимания (`role="note"`, янтарный тон), как другие «нельзя, пока нет данных»
+ */
+test('step 175.1: without break-even the clearance cause is an attention note, not a green status', async () => {
+  const m = messagesFor('en');
+  const view = await get<BoundsView>(await login('OWNER', 'en'), api('kaufland/pipeline/enable-margin-without-cost', 'bounds', 'ws-price-de-4702'));
+  const markup = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view }, 'en');
+  const cause = new RegExp(`<p class="notice" role="([a-z]+)">${m.ui.bounds.clearance.causes.BREAK_EVEN_UNKNOWN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).exec(markup);
+  assert.equal(cause?.[1], 'note', `the cause is a note (amber), not a status (green): ${cause?.[0] ?? 'not found'}`);
+});
+
+/**
  * Шаг 175 (QA-A Testing 2.0, этап 4): окно отказа включения говорило «Repricing not enabled» в заголовке и ещё раз в начале КАЖДОЙ причины.
  * Теперь фраза — один раз, заголовком; причины начинаются с сути («Your minimum price is not set.»). Четыре языка
  */
