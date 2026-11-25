@@ -2081,6 +2081,17 @@ export const de: Messages = {
         NOT_INTERNAL_POOL: 'die Bestandsquelle nimmt keine Dateien an', INVALID: 'die Daten haben die Prüfungen der Datenbank nicht bestanden',
       },
     },
+    /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
+    selection: {
+      counter: (n: number, outside: number) => (n === 0 ? 'Nichts ausgewählt' : `${n} ausgewählt · ${outside} außerhalb der aktuellen Ansicht`),
+      review: 'Auswahl prüfen', reviewBack: 'Alle Angebote zeigen', reviewTitle: 'Nur die ausgewählten Angebote', clear: 'Auswahl aufheben',
+      selectAllMatching: (n: number) => (n === 1 ? 'Das 1 passende Angebot auswählen' : `Alle ${n} passenden auswählen`), selectAll: (n: number) => (n === 1 ? 'Das 1 Angebot auswählen' : `Alle ${n} Angebote auswählen`),
+      badge: (filter: string) => `Alle passenden: ${filter}`, wholeCatalog: 'der gesamte Katalog', remove: 'Entfernen',
+      pick: (label: string) => `${label} auswählen`,
+      limit: (max: number) => `Von Hand lassen sich bis zu ${max} Angebote markieren. Für mehr die Liste filtern und «Alle passenden auswählen» nutzen.`,
+      bad: (max: number) => `Die Auswahl ließ sich nicht lesen: bis zu ${max} Angebote von Hand markieren oder die Liste filtern und «Alle passenden auswählen» nutzen. Nichts wurde geändert.`,
+      planAll: (n: number) => `Alle Angebote dieser Änderung (${n})`,
+    },
     boundsEdit: {
       amountLabel: 'Neuer Betrag', percentLabel: 'Änderung, %',
       pageTitle: 'Mindest- und Höchstpreis festlegen', select: 'Angebote', minPrice: 'Mindestpreis', maxPrice: 'Höchstpreis', keep: 'unverändert', set: 'setzen auf (Betrag)', percent: 'ändern um (%)',

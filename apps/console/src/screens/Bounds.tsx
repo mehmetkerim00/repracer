@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { LIST_PAGE_DEFAULT, parseAmountInput, type BoundsView, type ListQuery, type PriceBreakdown } from '@repracer/console-model';
+import { canPickMore, LIST_PAGE_DEFAULT, MAX_PICKED, NO_SELECTION, parseAmountInput, toggleOffer, type BoundsView, type ListQuery, type OfferSelection, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, DateTimeField, errorText, Gaps, Help, href, Load, NotFound, Pager, ProductRef, SectionAnchor, UnitName, useMessages } from '../components.tsx';
-import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
+import { CheckField, Field, FieldGrid, FieldGroup, FormActions, RowCheck } from '../forms.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
+import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
+import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 
 /** Шаг 149 (#27, скрин владельца): пустое значение поля — нейтральный прочерк, а не «no value»; почему пусто — подписью поля */
 const EMPTY = '–';
@@ -275,35 +277,56 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
   );
 }
 
-export function BoundsIndexView({ worldId, items, embedded = false }: { worldId: string; items: readonly BoundsIndexItem[]; embedded?: boolean }) {
+/** Шаг 177 (#39): колонка выбора таблицы границ — галочка строки; выбор живёт у экрана и переживает страницы и фильтры */
+export interface BoundsPick {
+  picked: (id: string) => boolean;
+  onToggle: (id: string, on: boolean) => void;
+  /** Отметить ещё можно (MAX_PICKED); снять — всегда */
+  canPick: boolean;
+  disabled?: boolean;
+}
+
+export function BoundsIndexView({ worldId, items, embedded = false, pick, heading = true, filtered = false }: {
+  worldId: string; items: readonly BoundsIndexItem[]; embedded?: boolean; pick?: BoundsPick; heading?: boolean; filtered?: boolean;
+}) {
   const m = useMessages();
   const c = m.ui.bounds.indexColumns;
+  const t = m.ui.selection;
   return (
     <section>
       {/* Шаг 86: заголовок страницы — тот же текст, что пункт меню; шаг 95 [Р-217] — список границ разделом Costs & floors */}
-      {embedded ? <h3>{m.ui.costs.boundsTitle}</h3> : <h2>{m.ui.app.screens.bounds}</h2>}
-      <p className={embedded ? 'section-sub' : 'subtitle'}>{m.ui.app.subtitles.bounds}</p>
-      {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти */}
-      {items.length === 0 ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
+      {heading ? (embedded ? <h3>{m.ui.costs.boundsTitle}</h3> : <h2>{m.ui.app.screens.bounds}</h2>) : null}
+      {heading ? <p className={embedded ? 'section-sub' : 'subtitle'}>{m.ui.app.subtitles.bounds}</p> : null}
+      {/* Задача D шага 34: пустой тенант видит, почему пусто и куда идти; пустой фильтр говорит своё число строкой над таблицей */}
+      {items.length === 0 && !filtered ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
       {items.length === 0 ? null : (
         <div className="table-wrap">
-          <table className="cardify">
+          <table className={pick ? 'cardify selectable' : 'cardify'}>
             {/* Шаг 175 (QA-A Testing 2.0, этап 4): заданный минимум и действующий пол — разные колонки: пол бывает выше минимума (маржа, безубыточность) */}
-            <thead><tr><th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th className="num">{m.ui.products.columns.floor}</th><th /></tr></thead>
+            <thead><tr>{pick ? <th className="pick"><span className="visually-hidden">{c.offer}</span></th> : null}<th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th className="num">{m.ui.products.columns.floor}</th><th /></tr></thead>
             <tbody>
-              {items.map((i) => (
-                <tr key={i.writeScopeId}>
-                  <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}><UnitName unit={i} variant={false} /></a><ProductRef unit={i} /></td>
-                  {/* Шаг 152 (#27, UX-04): пустая граница — «Not set» словами, приглушённо и без моноширинного шрифта сумм */}
-                  <td className={i.minPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.min}>{i.minPrice}</td>
-                  <td className={i.maxPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.max}>{i.maxPrice}</td>
-                  <td className={i.floor.missing ? 'num muted empty-value' : 'num money cur'} data-label={m.ui.products.columns.floor}>
-                    {i.floor.missing ? i.floor.amount : <strong>{i.floor.amount}</strong>}<div className="muted small floor-parts">{i.floor.parts}</div>
-                  </td>
-                  <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
-                </tr>
-              ))}
+              {items.map((i) => {
+                const on = pick ? pick.picked(i.writeScopeId) : false;
+                return (
+                  <tr key={i.writeScopeId} className={on ? 'picked' : undefined}>
+                    {pick ? (
+                      <td className="pick">
+                        <RowCheck label={t.pick(i.label)} checked={on} disabled={pick.disabled || (!on && !pick.canPick)} title={!on && !pick.canPick ? t.limit(MAX_PICKED) : undefined}
+                          onChange={(next) => pick.onToggle(i.writeScopeId, next)} />
+                      </td>
+                    ) : null}
+                    <td className="offer card-title"><a href={href(worldId, 'bounds', i.writeScopeId)}><UnitName unit={i} variant={false} /></a><ProductRef unit={i} /></td>
+                    {/* Шаг 152 (#27, UX-04): пустая граница — «Not set» словами, приглушённо и без моноширинного шрифта сумм */}
+                    <td className={i.minPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.min}>{i.minPrice}</td>
+                    <td className={i.maxPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.max}>{i.maxPrice}</td>
+                    <td className={i.floor.missing ? 'num muted empty-value' : 'num money cur'} data-label={m.ui.products.columns.floor}>
+                      {i.floor.missing ? i.floor.amount : <strong>{i.floor.amount}</strong>}<div className="muted small floor-parts">{i.floor.parts}</div>
+                    </td>
+                    <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -319,25 +342,71 @@ export function BoundsScreen({ worldId, writeScopeId }: { worldId: string; write
 
 export function BoundsIndex({ worldId, preselect = null, focusEdit = false, refresh = 0 }: { worldId: string; preselect?: string | null; focusEdit?: boolean; refresh?: number }) {
   const m = useMessages();
-  // Р-136: страница списка; массовая правка применяется к показанной странице — выбор продавца всегда виден на экране
   const [query, setQuery] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  /** Шаг 177 (#39): фильтры и поиск — те же, что у Offers, по всему каталогу */
+  const [offerQuery, setOfferQuery] = useState<OfferUiQuery>(NO_OFFER_QUERY);
+  const [search, setSearch] = useState('');
+  const filter = filterOfUi(offerQuery);
+  const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit), ...filter });
   /**
    * Шаг 174 (BUG-01): после применения правки или импорта список перечитывается сам; пока идёт чтение, экран держит прежние строки
    * (`keepPrevious`) — форма правки с итогом задания не размонтируется
    */
-  const [resource, retry] = useResource<BoundsIndexData>(`${worldPath(worldId, 'bounds')}?offset=${query.offset}&limit=${query.limit}`, m.locale, { keepPrevious: true });
+  const [resource, retry] = useResource<BoundsIndexData>(`${worldPath(worldId, 'bounds')}?${params.toString()}`, m.locale, { keepPrevious: true });
   useEffect(() => { if (refresh > 0) retry(); }, [refresh, retry]);
+  /**
+   * Шаг 177 (#39, уточнение Р-140): выбор переживает страницы и фильтры — только видимым; «Change this floor» со страницы предложения
+   * открывает правку с этим предложением выбранным (шаг 96, В20)
+   */
+  const [selection, setSelection] = useState<OfferSelection>(preselect ? { ...NO_SELECTION, ids: [preselect] } : NO_SELECTION);
+  const [review, setReview] = useState<ListQuery | null>(null);
   return (
     <Load shape="table" resource={resource} retry={retry}>
       {(view) => (
-        <>
-          <BoundsIndexView worldId={worldId} items={view.items} embedded />
-          <Pager page={view.page} query={query} onQuery={setQuery} />
-          {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
-          {view.page.total === 0 ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} items={view.items} total={view.page.total} canEdit={view.canEdit} preselect={preselect} onApplied={retry} /></>}
-        </>
+        <BoundsSelection worldId={worldId} view={view} query={query} onQuery={setQuery} offerQuery={offerQuery}
+          onOfferQuery={(q) => { setOfferQuery(q); setQuery({ ...query, offset: 0 }); }} search={search} onSearch={setSearch} filter={filter}
+          selection={selection} onSelection={setSelection} review={review} onReview={setReview} focusEdit={focusEdit} refresh={refresh} onApplied={retry} />
       )}
     </Load>
+  );
+}
+
+function BoundsSelection({ worldId, view, query, onQuery, offerQuery, onOfferQuery, search, onSearch, filter, selection, onSelection, review, onReview, focusEdit, refresh, onApplied }: {
+  worldId: string; view: BoundsIndexData; query: ListQuery; onQuery: (q: ListQuery) => void; offerQuery: OfferUiQuery; onOfferQuery: (q: OfferUiQuery) => void;
+  search: string; onSearch: (q: string) => void; filter: Record<string, string>; selection: OfferSelection; onSelection: (s: OfferSelection) => void;
+  review: ListQuery | null; onReview: (q: ListQuery | null) => void; focusEdit: boolean; refresh: number; onApplied: () => void;
+}) {
+  const m = useMessages();
+  const filtered = Object.keys(filter).length > 0;
+  const summary = useSelectionSummary(worldId, selection, filter, view.items.map((i) => i.writeScopeId), review, refresh);
+  const items = review ? summary?.review?.items ?? [] : view.items;
+  const pick = view.canEdit ? {
+    picked: (id: string) => (review ? !selection.except.includes(id) : isPicked(selection, summary, id)),
+    onToggle: (id: string, on: boolean) => onSelection(toggleOffer(selection, id, on, review ? true : isPicked(selection, summary, id))),
+    canPick: canPickMore(selection),
+  } : undefined;
+  const matching = view.matched ?? view.page.total;
+  return (
+    <>
+      <h3>{m.ui.costs.boundsTitle}</h3>
+      <p className="section-sub">{m.ui.app.subtitles.bounds}</p>
+      {view.page.total > 0 || filtered ? (
+        <form className="filters toolbar field-toolbar" onSubmit={(e) => { e.preventDefault(); onOfferQuery({ ...offerQuery, q: search.trim() }); }}>
+          <OfferFilterFields storefronts={view.filters.storefronts} query={offerQuery} onQuery={onOfferQuery} search={search} onSearch={onSearch} holder={false} />
+        </form>
+      ) : null}
+      {view.matched !== null && !review ? <Help className="section-sub" text={m.ui.products.filters.matched(view.matched, view.catalogTotal)} /> : null}
+      {view.canEdit && (view.page.total > 0 || filtered) ? (
+        <SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={matching} storefronts={view.filters.storefronts}
+          review={review !== null} onReview={(on) => onReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} />
+      ) : null}
+      {review ? <h4>{m.ui.selection.reviewTitle}</h4> : null}
+      <BoundsIndexView worldId={worldId} items={items} embedded heading={false} filtered={filtered || review !== null} {...(pick ? { pick } : {})} />
+      {review ? (summary?.review ? <Pager page={summary.review.page} query={review} onQuery={onReview} /> : null) : <Pager page={view.page} query={query} onQuery={onQuery} />}
+      {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
+      {view.page.total === 0 && !filtered ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} selection={selection} selected={summary?.selected ?? 0}
+        canEdit={view.canEdit} onApplied={onApplied} /></>}
+    </>
   );
 }
 

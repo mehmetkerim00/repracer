@@ -1,4 +1,4 @@
-import type { BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, StopTarget, StorefrontChip, StrategyListView, Swatch } from '@repracer/console-model';
+import type { BoundsDiffView, BoundsEditRequest, HumanReason, Locale, MemberRole, PageInfo, ProductListView, StopTarget, StorefrontChip, StrategyListView, Swatch } from '@repracer/console-model';
 
 /** Контракт сервера стенда и интерфейса: экраны получают готовые модели @repracer/console-model на языке сессии [Р-72] */
 
@@ -87,6 +87,27 @@ export interface BoundsIndexView {
   /** Р-136: страница списка — каталог целевого клиента в один ответ не помещается */
   page: PageInfo;
   canEdit: boolean;
+  /** Шаг 177 (#39): фильтры Offers — витрины пространства и выбранное; число прошедших фильтр (без фильтра — null) */
+  filters: ProductListView['filters'];
+  matched: number | null;
+  /** Предложений в каталоге всего — строка «Showing N of M offers» при фильтре */
+  catalogTotal: number;
+}
+
+/** Шаг 177 (#39, уточнение Р-140): выбор виден всегда — числа считает сервер теми же выборками, что экран */
+export interface SelectionView {
+  selected: number;
+  outsideView: number;
+  /** Показанные строки, которые сейчас выбраны */
+  shownSelected: string[];
+  /** «Review selection» — страница только выбранного */
+  review: { items: BoundsIndexItem[]; page: PageInfo } | null;
+}
+
+/** Шаг 177 (уточнение Р-140, (г)): страница всех затрагиваемых предложений предпросмотра правки границ */
+export interface BoundsPlanRowsView {
+  rows: BoundsDiffView['rows'];
+  page: PageInfo;
 }
 
 export interface StopRequest {

@@ -200,11 +200,11 @@ export function boundsPlanToken(edits: readonly BoundsEditInput[], rows: readonl
 const bigChange = (before: number | null, after: number | null) =>
   before !== null && after !== null && before > 0 && Math.abs(after - before) * 10_000 > before * DANGEROUS_DEVIATION_BP;
 
-export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInput[], rows: readonly BoundsEditRow[], m: Messages): BoundsDiffView {
+function diffRowsOf(world: StandWorld, edits: readonly BoundsEditInput[], rows: readonly BoundsEditRow[], m: Messages): DiffRow[] {
   const t = m.ui.boundsEdit;
   // Предложение ищется по отображению: перебор состояния на каждую строку был квадратичным (ревью шага 29, находка 11)
   const byId = new Map(world.state.scopes.map((s) => [s.writeScopeId, s]));
-  const out = rows.map((r): DiffRow => {
+  return rows.map((r): DiffRow => {
     const scope = byId.get(r.writeScopeId)!;
     const money = (v: number | null) => m.money(v, r.currency);
     const flags: DiffRow['flags'] = [];
@@ -232,8 +232,21 @@ export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInpu
       currentPrice: money(price), flags,
     };
   });
-  // Сначала — строки с пометками: если показать можно не всё, показывается то, что важно
-  const ordered = [...out].sort((a, b) => b.flags.length - a.flags.length);
+}
+
+/**
+ * Шаг 177 (уточнение Р-140, (г)): предпросмотр перечисляет ВСЕ затрагиваемые предложения — страницами, в порядке экрана: сначала строки с
+ * пометками (сортировка устойчивая, первая страница — те же строки, что `rows` вида). Задание плана хранит строки базы в этом порядке
+ */
+export function orderedPlanRows(world: StandWorld, edits: readonly BoundsEditInput[], rows: readonly BoundsEditRow[], m: Messages): BoundsEditRow[] {
+  const out = diffRowsOf(world, edits, rows, m);
+  return rows.map((r, i) => ({ r, n: out[i]!.flags.length })).sort((a, b) => b.n - a.n).map((x) => x.r);
+}
+
+export function boundsDiffView(world: StandWorld, edits: readonly BoundsEditInput[], rows: readonly BoundsEditRow[], m: Messages, options: { keepOrder?: boolean } = {}): BoundsDiffView {
+  const out = diffRowsOf(world, edits, rows, m);
+  // Сначала — строки с пометками: если показать можно не всё, показывается то, что важно; страница плана уже упорядочена (`keepOrder`)
+  const ordered = options.keepOrder ? out : [...out].sort((a, b) => b.flags.length - a.flags.length);
   const unchanged = out.filter((r) => r.flags.some((f) => f.code === 'NO_EFFECT')).length;
   const summary = {
     scopes: out.length,

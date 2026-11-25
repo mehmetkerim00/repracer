@@ -52,6 +52,14 @@ export function Field({ label, caption = null, error = null, children, wide = fa
 }
 
 /** Чекбокс: контрол слева, подпись справа, пояснение — под подписью; стоит в сетке, а не в углу строки */
+/**
+ * Шаг 177 (#39): галочка строки таблицы выбора. Подписи над контролом у неё нет: подпись — сама строка, а доступное имя называет предложение
+ * (`label`). Только в таблицах выбора; поля форм — по-прежнему `Field` и `CheckField` (правило `scripts/form-fields.mjs`)
+ */
+export function RowCheck({ label, checked, onChange, disabled = false, title }: { label: string; checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean; title?: string }) {
+  return <input type="checkbox" className="row-check" aria-label={label} checked={checked} disabled={disabled} onChange={(e) => onChange(e.currentTarget.checked)} {...(title ? { title } : {})} />;
+}
+
 export function CheckField({ label, caption = null, checked, onChange, disabled = false, title }: {
   label: ReactNode; caption?: ReactNode | null; checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean; title?: string;
 }) {

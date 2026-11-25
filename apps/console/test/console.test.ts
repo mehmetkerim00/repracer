@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer, type ViteDevServer } from 'vite';
-import { boundsView, describe, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type OverviewView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
+import { boundsView, describe, NO_SELECTION, EXPORT_HEADERS, EXPORT_MAX_ROWS, messagesFor, type ConnectionsView, type EnableResultView, type OnboardingView, type StockView, type DecisionListView, type BulkJobView, type ComplianceView, type CompetitionView, type UnchangedView, type ReadinessView, type OverviewView, type ImportCheckView, type DiscountCheckView, type BoundsDiffView, type BoundsView, type DangerousReportView, type DecisionListItem, type DecisionTrace, type Locale, type PriceFeedView, type ProductListView, type RejectedView, type StopPlan, type StopView, type StrategyListView, type StrategyPreviewView } from '@repracer/console-model';
 import { buildStandWorlds, memoryStandDirectory, STAND_ACCOUNTS, STAND_AUDIENCE, STAND_ISSUER, type LiveWorld } from '@repracer/contract-tests/stand';
 import { createAuthenticator, staticJwks } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
@@ -819,22 +819,23 @@ test('step 23, F: bounds edit is offered only with the right; the feed filters a
   assert.equal(index.canEdit, true);
   const viewerIndex = await get<BoundsIndexView>(viewer, api(id, 'bounds'));
   assert.equal(viewerIndex.canEdit, false);
-  const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: viewerIndex.items, total: viewerIndex.page.total, canEdit: false });
+  const noRight = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, selection: NO_SELECTION, selected: 0, canEdit: false });
   // Шаг 96 (Б18): кнопка экрана различий — «Preview changes»; проверка «без права её нет» сверяется с текстом словаря и с панелью,
   // где она есть, — иначе переименование делает её тавтологией (прежняя строка «Show the differences» зеленела бы всегда)
   assert.ok(noRight.includes('Your role may view bounds but not change them.') && !noRight.includes(messagesFor('en').ui.boundsEdit.plan));
-  const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, items: index.items, total: index.page.total, canEdit: true });
+  const panel = await html('/src/screens/BoundsEdit.tsx', 'BoundsEditPanel', { worldId: id, selection: NO_SELECTION, selected: 0, canEdit: true });
   assert.ok(panel.includes(messagesFor('en').ui.boundsEdit.plan), `control: with the right the panel offers «${messagesFor('en').ui.boundsEdit.plan}»`);
   for (const text of ['set to (amount)', 'change by (%)']) assert.ok(panel.includes(text), text);
   /**
-   * Р-140 (шаг 30): «всё» — это весь каталог, а не показанная страница; выбор названного числа виден всегда, а листание его
-   * сбрасывает. Проверяется то, что читает продавец: страница названа страницей, каталог — каталогом, и оба числа настоящие.
+   * Р-140, уточнён 2026-11-25 (шаг 177, #39): «всё» — по-прежнему весь каталог, а не показанная страница, но явным действием с числом;
+   * выбор виден всегда, а листание и фильтр его больше не сбрасывают. Проверяется то, что читает продавец
    */
-  assert.ok(panel.includes(`All ${index.page.total} offers of the catalog — including those on other pages`), 'каталог назван каталогом');
-  assert.ok(panel.includes(`Select the ${index.items.length} on this page`), 'страница названа страницей, с её числом');
-  assert.ok(panel.includes('Nothing selected'), 'ничего не выбрано — сказано прямо, а не пустотой');
-  assert.ok(panel.includes('Paging or changing the filter clears the selection of individual rows.'), 'сброс выбора при листании назван до того, как он случится');
-  assert.ok(!/>Select all</.test(panel), 'кнопки «выбрать всё», означающей страницу, на экране больше нет');
+  const bar = await html('/src/screens/Selection.tsx', 'SelectionBar', { summary: { selected: 0, outsideView: 0, shownSelected: [], review: null }, selection: NO_SELECTION,
+    onSelection: () => undefined, filter: {}, matching: index.page.total, storefronts: [], review: false, onReview: () => undefined }, 'en');
+  const t177 = messagesFor('en').ui.selection;
+  assert.ok(bar.includes(t177.selectAll(index.page.total)), 'the whole catalog is an explicit action with its number');
+  assert.ok(bar.includes(t177.counter(0, 0)), 'nothing selected — said plainly, not by emptiness');
+  assert.ok(!bar.includes('clears the selection'), 'paging and filters no longer clear the selection (Р-140 amended)');
 
   const feedId = 'kaufland/pipeline/happy-path';
   const all = await get<PriceFeedView>(viewer, api(feedId, 'feed'));
@@ -1478,6 +1479,55 @@ test('step 175.1: without break-even the clearance cause is an attention note, n
  * Шаг 175 (QA-A Testing 2.0, этап 4): окно отказа включения говорило «Repricing not enabled» в заголовке и ещё раз в начале КАЖДОЙ причины.
  * Теперь фраза — один раз, заголовком; причины начинаются с сути («Your minimum price is not set.»). Четыре языка
  */
+/**
+ * Шаг 177 (#39, уточнение Р-140 2026-11-25): выбор переживает страницы и фильтры — только видимым. Сколько выбрано и сколько из этого вне
+ * текущего вида, считает сервер теми же выборками, что экран Offers; «все подходящие» раскрывает сервер, снятые вручную — вычитаются;
+ * «Review selection» — ровно выбранное; правка принимает выбор, а предпросмотр перечисляет ВСЕ затрагиваемые предложения страницами
+ */
+test('step 177 (#39, Р-140 amended): the selection survives filters — counted by the server, «all matching» expanded by it, the preview lists every offer', async () => {
+  // Мир двух витрин: kaufland.de и amazon.com, по предложению на витрину
+  const id = 'kaufland/pipeline/fx-usd-floor-eur-cost';
+  const owner = await login('OWNER', 'en');
+  type Selection = { selected: number; outsideView: number; shownSelected: string[]; review: { items: Array<{ writeScopeId: string }>; page: { total: number } } | null };
+  const all = await get<BoundsIndexView>(owner, api(id, 'bounds'));
+  const one = all.filters.storefronts.find((x) => x.label === 'kaufland.de')!;
+  const two = all.filters.storefronts.find((x) => x.label === 'amazon.com')!;
+  const inOne = await get<BoundsIndexView>(owner, `${api(id, 'bounds')}?storefront=${encodeURIComponent(one.value)}`);
+  const inTwo = await get<BoundsIndexView>(owner, `${api(id, 'bounds')}?storefront=${encodeURIComponent(two.value)}`);
+  assert.deepEqual([inOne.items.length, inTwo.items.length, inTwo.matched, inTwo.catalogTotal], [1, 1, 1, all.page.total], 'the filter is the storefront, and the whole catalog is named next to it');
+  const x = inOne.items[0]!.writeScopeId;
+  const y = inTwo.items[0]!.writeScopeId;
+  assert.notEqual(x, y);
+  const selection = async (body: unknown) => (await call(owner, 'POST', api(id, 'bounds', 'selection'), body)).body as Selection;
+  // Отмечено на kaufland.de, смотрим amazon.com: выбор не пропал и виден числом — «1 selected · 1 outside current view»
+  const moved = await selection({ selection: { ids: [x], matches: [], except: [] }, view: { storefront: two.value }, shown: [y] });
+  assert.deepEqual([moved.selected, moved.outsideView, moved.shownSelected], [1, 1, []], 'a picked offer stays selected outside the current view');
+  // «Все подходящие» amazon.com плюс отмеченное раньше; «Review selection» — ровно они
+  const chosen = { ids: [x], matches: [{ storefront: two.value }], except: [] };
+  const reviewed = await selection({ selection: chosen, view: {}, shown: [x, y], review: { offset: 0, limit: 50 } });
+  assert.deepEqual([reviewed.selected, reviewed.outsideView], [2, 0], 'all matching plus the picked one; without a filter nothing is outside the view');
+  assert.deepEqual(reviewed.review!.items.map((i) => i.writeScopeId).sort(), [x, y].sort(), 'Review selection shows exactly the selected offers');
+  const inTwoView = await selection({ selection: chosen, view: { storefront: two.value }, shown: [y] });
+  assert.deepEqual([inTwoView.outsideView, inTwoView.shownSelected], [1, [y]], 'only the offer picked on the other storefront is outside the view');
+  // Снятое вручную из «всех подходящих» — не выбрано
+  const unticked = await selection({ selection: { ...chosen, except: [y] }, view: { storefront: two.value }, shown: [y] });
+  assert.deepEqual([unticked.selected, unticked.shownSelected], [1, []], 'an offer unticked from «all matching» is not selected');
+
+  // Правка принимает выбор; предпросмотр — все затрагиваемые, страницами, включая предложение вне фильтра
+  const plan = await finishJob(id, await call(owner, 'POST', api(id, 'bounds', 'plan'), { request: { selection: chosen, min: { kind: 'PERCENT', bp: -100 } } }), 'en');
+  assert.equal(plan.status, 'SUCCEEDED', plan.error ?? '');
+  assert.equal((plan.result as { view: BoundsDiffView }).view.summary.scopes, 2, 'the edit covers exactly the selection');
+  const page = (offset: number) => get<{ rows: Array<{ unit: { writeScopeId: string } }>; page: { total: number; hasNext: boolean } }>(owner, `${api(id, 'bounds', 'plan', plan.jobId)}?offset=${offset}&limit=1`);
+  const first = await page(0);
+  assert.deepEqual([first.rows.length, first.page.total, first.page.hasNext], [1, 2, true], 'the preview pages through every offer of the edit');
+  assert.deepEqual([first.rows[0]!.unit.writeScopeId, (await page(1)).rows[0]!.unit.writeScopeId].sort(), [x, y].sort(), 'every offer of the edit is listed');
+  assert.equal((await call(owner, 'GET', `${api(id, 'bounds', 'plan', 'no-such-job')}?offset=0&limit=1`)).status, 404);
+
+  // Неверный выбор — 400 словами: больше MAX_PICKED отмеченных
+  const tooMany = await call(owner, 'POST', api(id, 'bounds', 'plan'), { request: { selection: { ids: Array.from({ length: 1001 }, (_, i) => `ws-${i}`), matches: [], except: [] }, min: { kind: 'PERCENT', bp: -100 } } });
+  assert.deepEqual([tooMany.status, (tooMany.body as { error: { code: string } }).error.code], [400, 'BAD_SELECTION']);
+});
+
 test('step 175: the enable refusal says «Repricing not enabled» once — in the title, not again in every reason', async () => {
   for (const locale of ['en', 'de', 'es', 'fr'] as const) {
     const m = messagesFor(locale);

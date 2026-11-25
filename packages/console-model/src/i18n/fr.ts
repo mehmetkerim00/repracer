@@ -2140,6 +2140,17 @@ export const fr: Messages = {
         NOT_INTERNAL_POOL: 'la source de stock n’accepte pas de fichiers', INVALID: 'les données n’ont pas passé les contrôles de la base de données',
       },
     },
+    /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
+    selection: {
+      counter: (n: number, outside: number) => (n === 0 ? 'Rien de sélectionné' : `${n} sélectionnées · ${outside} hors de la vue actuelle`),
+      review: 'Revoir la sélection', reviewBack: 'Afficher toutes les offres', reviewTitle: 'Seulement les offres sélectionnées', clear: 'Effacer la sélection',
+      selectAllMatching: (n: number) => (n === 1 ? 'Sélectionner l’offre correspondante' : `Sélectionner les ${n} correspondantes`), selectAll: (n: number) => (n === 1 ? 'Sélectionner l’offre' : `Sélectionner les ${n} offres`),
+      badge: (filter: string) => `Toutes les correspondantes : ${filter}`, wholeCatalog: 'tout le catalogue', remove: 'Retirer',
+      pick: (label: string) => `Sélectionner ${label}`,
+      limit: (max: number) => `Vous pouvez cocher à la main jusqu’à ${max} offres. Au-delà, filtrez la liste et utilisez « Sélectionner les correspondantes ».`,
+      bad: (max: number) => `La sélection n’a pas pu être lue : cochez à la main jusqu’à ${max} offres, ou filtrez la liste et utilisez « Sélectionner les correspondantes ». Rien n’a été modifié.`,
+      planAll: (n: number) => `Toutes les offres de cette modification (${n})`,
+    },
     boundsEdit: {
       amountLabel: 'Nouveau montant', percentLabel: 'Variation, %',
       pageTitle: 'Définir les prix minimum et maximum', select: 'Offres', minPrice: 'Prix minimum', maxPrice: 'Prix maximum', keep: 'inchangé', set: 'fixer à (montant)', percent: 'modifier de (%)',

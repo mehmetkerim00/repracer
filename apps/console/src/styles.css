@@ -850,6 +850,16 @@ ul.offer-list {
 ul.offer-list li { padding: var(--space-1) 0; break-inside: avoid; }
 [hidden] { display: none !important; }
 .draft-form { padding: var(--space-4) var(--space-5); }
+/* Шаг 177 (#39, уточнение Р-140): выбор виден всегда — счётчик, кнопки и бейджи «все подходящие» над таблицей выбора */
+.selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-2) 0; }
+.selection-bar .selection-count { margin: 0; font-weight: var(--weight-heading); }
+.selection-bar .buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+ul.selection-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); list-style: none; margin: 0; padding: 0; flex-basis: 100%; }
+ul.selection-badges > li { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border: 1px solid var(--accent-border); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-text); }
+table.selectable th.pick, table.selectable td.pick { width: var(--touch-target); text-align: center; }
+table.selectable td.pick input.row-check { width: var(--space-4); height: var(--space-4); margin: 0; }
+table.selectable tbody tr.picked > td { background: var(--accent-soft); }
+
 ul.pick-list {
   list-style: none; padding: var(--space-1) 0; margin: var(--space-2) 0; max-height: 420px; overflow-y: auto; background: var(--surface);
   border: var(--border-width) solid var(--border); border-radius: var(--radius);

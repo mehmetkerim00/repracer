@@ -2156,6 +2156,17 @@ export const en = {
         NOT_INTERNAL_POOL: 'the stock source does not take files', INVALID: 'the data did not pass the database checks',
       },
     },
+    /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
+    selection: {
+      counter: (n: number, outside: number) => (n === 0 ? 'Nothing selected' : `${n} selected · ${outside} outside current view`),
+      review: 'Review selection', reviewBack: 'Show all offers', reviewTitle: 'Only the selected offers', clear: 'Clear selection',
+      selectAllMatching: (n: number) => (n === 1 ? 'Select the 1 matching offer' : `Select all ${n} matching`), selectAll: (n: number) => (n === 1 ? 'Select the 1 offer' : `Select all ${n} offers`),
+      badge: (filter: string) => `All matching: ${filter}`, wholeCatalog: 'the whole catalog', remove: 'Remove',
+      pick: (label: string) => `Select ${label}`,
+      limit: (max: number) => `You can tick up to ${max} offers by hand. For more, filter the list and use «Select all matching».`,
+      bad: (max: number) => `The selection could not be read: tick up to ${max} offers by hand, or filter the list and use «Select all matching». Nothing was changed.`,
+      planAll: (n: number) => `Every offer in this edit (${n})`,
+    },
     boundsEdit: {
       amountLabel: 'New amount', percentLabel: 'Change, %',
       pageTitle: 'Set minimum & maximum price', select: 'Offers', minPrice: 'Minimum price', maxPrice: 'Maximum price', keep: 'unchanged', set: 'set to (amount)', percent: 'change by (%)',

@@ -23,7 +23,8 @@ export const CONTROLS = new Set(['input', 'select', 'textarea', 'DateTimeField',
 /** Поле стандарта: контрол внутри него получает подпись над собой и пояснение под собой */
 export const WRAPPERS = new Set(['Field']);
 /** Компоненты-контролы: в их телах контрол определяется, а не используется; только в файлах стандарта */
-export const DEFINITIONS = new Set(['Field', 'CheckField', 'DateTimeField', 'OfferPicker', 'FileDrop', 'DateRangePicker']);
+// Шаг 177 (#39): `RowCheck` — галочка строки таблицы выбора; доступное имя называет предложение, подписи над контролом нет
+export const DEFINITIONS = new Set(['Field', 'CheckField', 'RowCheck', 'DateTimeField', 'OfferPicker', 'FileDrop', 'DateRangePicker']);
 export const DEFINITION_FILES = new Set(['forms.tsx', 'components.tsx', 'date-range.tsx']);
 
 const tagName = (node) => {

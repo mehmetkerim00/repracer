@@ -2140,6 +2140,17 @@ export const es: Messages = {
         NOT_INTERNAL_POOL: 'la fuente de inventario no acepta archivos', INVALID: 'los datos no pasaron las comprobaciones de la base de datos',
       },
     },
+    /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
+    selection: {
+      counter: (n: number, outside: number) => (n === 0 ? 'Nada seleccionado' : `${n} seleccionadas · ${outside} fuera de la vista actual`),
+      review: 'Revisar selección', reviewBack: 'Mostrar todas las ofertas', reviewTitle: 'Solo las ofertas seleccionadas', clear: 'Borrar selección',
+      selectAllMatching: (n: number) => (n === 1 ? 'Seleccionar la 1 oferta que coincide' : `Seleccionar las ${n} que coinciden`), selectAll: (n: number) => (n === 1 ? 'Seleccionar la 1 oferta' : `Seleccionar las ${n} ofertas`),
+      badge: (filter: string) => `Todas las que coinciden: ${filter}`, wholeCatalog: 'todo el catálogo', remove: 'Quitar',
+      pick: (label: string) => `Seleccionar ${label}`,
+      limit: (max: number) => `Puede marcar a mano hasta ${max} ofertas. Para más, filtre la lista y use «Seleccionar las que coinciden».`,
+      bad: (max: number) => `No se pudo leer la selección: marque a mano hasta ${max} ofertas, o filtre la lista y use «Seleccionar las que coinciden». No se cambió nada.`,
+      planAll: (n: number) => `Todas las ofertas de este cambio (${n})`,
+    },
     boundsEdit: {
       amountLabel: 'Nuevo importe', percentLabel: 'Cambio, %',
       pageTitle: 'Definir precio mínimo y máximo', select: 'Ofertas', minPrice: 'Precio mínimo', maxPrice: 'Precio máximo', keep: 'sin cambios', set: 'fijar en (importe)', percent: 'cambiar en (%)',

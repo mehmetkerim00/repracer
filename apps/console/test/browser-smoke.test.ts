@@ -97,6 +97,8 @@ let clientApi: ReturnType<typeof createStandApi>;
 let clientAmazonWorldId = '';
 /** Шаг 112 [Р-238]: 16 синтетических предложений трёх площадок с цветами товаров (профиль us) */
 let colorsApi: ReturnType<typeof createStandApi>;
+/** Шаг 177 (#39): мир цветов — 16 предложений на трёх витринах США; на нём выбор переживает смену фильтра */
+let colorsLive: LiveWorld;
 let step109Us: { writeScopeId: string };
 let step107: Step107World;
 /** Шаг 99: мир смоука — по нему исполняются задания импорта (исполнителя у смоука нет, задания зовутся из теста) */
@@ -292,6 +294,7 @@ before(async () => {
     simulator: identity.simulator,
   }, { defaultLocale: 'en', market: 'us', clientChannels: 'AMAZON_US', connect: (worldId) => (worldId === EMPTY_WORLD_ID ? emptyWorldConnect : null), people: STAND_PEOPLE });
   const colors = colorsWorld(w0.clock);
+  colorsLive = colors;
   colorsApi = createStandApi([colors], {
     authenticator: createAuthenticator({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE, jwks: staticJwks(issuer.jwks), directory: memoryStandDirectory([colors]) }),
     simulator: identity.simulator,
@@ -3255,6 +3258,83 @@ test('step 176 [Р-256]: a client workspace shows Amazon US only — no eBay, Wa
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
+/**
+ * Шаг 177 (#39, уточнение Р-140 2026-11-25): выбор переживает страницы и фильтры — только видимым. Отмеченная строка не пропадает при листании
+ * и смене фильтра, счётчик «N selected · M outside current view» говорит, сколько выбранного не видно; «Select all matching» — явное действие с
+ * бейджем фильтра; «Review selection» — только выбранное; предпросмотр перечисляет все затрагиваемые, включая выбранное вне фильтра
+ */
+test('step 177 (#39, Р-140 amended): the selection survives filter changes and is always visible — counter, badge, review, a preview of every offer', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = colorsApi;
+  try {
+  await b.setViewport(1440, 900);
+  await b.setColorScheme('light');
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
+  await settled(b, 'costs');
+  const t = en.ui.selection;
+  const counter = () => b.evaluate<string>(`document.querySelector('.selection-bar .selection-count')?.textContent.trim() ?? ''`);
+  const rows = () => b.evaluate<Array<{ id: string; name: string; picked: boolean }>>(`[...document.querySelectorAll('.costs table.selectable tbody tr')].map((tr) => ({
+    id: tr.querySelector('a').getAttribute('href').split('/').pop(), name: tr.querySelector('.unit-title').textContent.trim(), picked: tr.querySelector('td.pick input').checked }))`);
+  const clickButton = (text: string) => b.evaluate<boolean>(`(() => { const x = [...document.querySelectorAll('.costs button')].find((x) => x.textContent.trim() === ${JSON.stringify(text)} && !x.disabled); if (!x) return false; x.click(); return true; })()`);
+  await waitFor(b, `document.querySelector('.selection-bar .selection-count')?.textContent.trim() === ${JSON.stringify(t.counter(0, 0))}`, 'nothing selected yet');
+  const first = (await rows())[0]!;
+  await b.evaluate(`(document.querySelectorAll('.costs table.selectable tbody tr td.pick input')[0].click(), true)`);
+  await waitFor(b, `document.querySelector('.selection-bar .selection-count').textContent.trim() === ${JSON.stringify(t.counter(1, 0))}`, 'one selected, nothing outside the view');
+  // Смена фильтра: другая витрина — выбранное не пропало, оно вне текущего вида, и это сказано числом
+  const storefronts = await b.evaluate<Array<{ value: string; label: string }>>(`[...document.querySelector('.costs form.filters select').options].filter((o) => o.value).map((o) => ({ value: o.value, label: o.textContent.trim() }))`);
+  const chooseFront = (value: string) => b.evaluate(`(() => { const sel = document.querySelector('.costs form.filters select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(value)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  // Витрина первой отмеченной строки — по её строке в фильтре: выбирается другая витрина
+  await chooseFront(storefronts[0]!.value);
+  await waitFor(b, `document.querySelectorAll('.costs table.selectable tbody tr').length > 0`, 'the first storefront');
+  const firstFront = (await rows()).some((r) => r.id === first.id) ? storefronts[0]! : storefronts[1]!;
+  const front = storefronts.find((x) => x.value !== firstFront.value)!;
+  await chooseFront(front.value);
+  await waitFor(b, `![...document.querySelectorAll('.costs table.selectable tbody tr a')].some((a) => a.getAttribute('href').endsWith(${JSON.stringify(first.id)})) && document.querySelectorAll('.costs table.selectable tbody tr').length > 0`, 'another storefront');
+  await waitFor(b, `document.querySelector('.selection-bar .selection-count').textContent.trim() === ${JSON.stringify(t.counter(1, 1))}`, 'one selected, outside the current view', 10_000);
+  const other = { name: front.label };
+  // «Select all matching» — явное действие с бейджем фильтра словами
+  const matching = (await rows()).length;
+  assert.ok(await clickButton(t.selectAllMatching(matching)), `the button «${t.selectAllMatching(matching)}»`);
+  await waitFor(b, `document.querySelector('.selection-bar .selection-count').textContent.trim() === ${JSON.stringify(t.counter(1 + matching, 1))}`, 'all matching selected, the first pick still outside the view', 10_000);
+  const badge = await b.evaluate<string>(`document.querySelector('.selection-badges li span')?.textContent.trim() ?? ''`);
+  assert.equal(badge, t.badge(`${en.ui.products.filters.storefront}${en.colon}${other.name}`), 'the badge names the filter in words');
+  assert.ok((await rows()).every((r) => r.picked), 'the matching rows show as selected');
+  // «Review selection» — только выбранное: подходящие и отмеченное раньше вне фильтра
+  assert.ok(await clickButton(t.review));
+  await waitFor(b, `[...document.querySelectorAll('.costs table.selectable tbody tr')].length === ${1 + matching}`, 'review shows the selection');
+  const reviewed = await rows();
+  assert.ok(reviewed.some((r) => r.id === first.id) && reviewed.every((r) => r.picked), `review: exactly the selected offers — ${reviewed.map((r) => r.name).join(', ')}`);
+  assert.ok(await clickButton(t.reviewBack));
+  // Предпросмотр перечисляет ВСЕ затрагиваемые — и выбранное вне фильтра
+  const e = en.ui.boundsEdit;
+  const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
+  await b.evaluate(`(() => { const sel = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'PERCENT'); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.evaluate(`(() => { const i = ${field(e.percentLabel)}.querySelector('input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '-1'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await new Promise((x) => setTimeout(x, 200));
+  await b.click(e.plan, '.bounds-edit button');
+  await new Promise((x) => setTimeout(x, 300));
+  await runPendingJobs(colorsLive);
+  await waitFor(b, `document.querySelector('.bounds-edit section.diff h4')?.textContent.trim() === ${JSON.stringify(t.planAll(1 + matching))}`, 'the preview names every offer of the edit');
+  const diffNames = await b.evaluate<string[]>(`[...document.querySelectorAll('.bounds-edit section.diff tbody tr .unit-title')].map((x) => x.textContent.trim())`);
+  assert.equal(diffNames.length, 1 + matching, `every affected offer is listed: ${diffNames.join(', ')}`);
+  assert.ok(diffNames.includes(first.name), 'including the offer selected outside the current filter');
+  await b.click(e.back, '.bounds-edit button');
+  assert.ok(await clickButton(t.clear));
+  await waitFor(b, `document.querySelector('.selection-bar .selection-count').textContent.trim() === ${JSON.stringify(t.counter(0, 0))}`, 'cleared');
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+  } finally {
+    currentApi = euApi;
+  }
+});
+
 test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
   const b = browser!;
   const before = b.errors().length;
@@ -3280,18 +3360,19 @@ test('step 175: Offers rows are compact with the channel ID shown; Costs & floor
   await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/costs`)}, true)`);
   await settled(b, 'costs');
   const costs = await b.evaluate<{ heads: string[]; picks: number; withRef: number }>(`({ heads: [...document.querySelectorAll('.costs table thead th')].map((x) => x.textContent.trim()),
-    picks: document.querySelectorAll('.bounds-edit .pick-list li').length, withRef: document.querySelectorAll('.bounds-edit .pick-list li .product-ref').length })`);
+    picks: document.querySelectorAll('.costs table.selectable tbody tr').length, withRef: document.querySelectorAll('.costs table.selectable tbody tr .product-ref').length })`);
   assert.ok(costs.heads.includes(en.ui.bounds.indexColumns.min) && costs.heads.includes(en.ui.products.columns.floor), `the minimum and the effective floor apart: ${costs.heads.join(' | ')}`);
   assert.ok(costs.withRef > 0, `the pick list names offers with their color or channel ID: ${costs.withRef} of ${costs.picks}`);
 
   const e = en.ui.boundsEdit;
   const button = (text: string) => `[...document.querySelectorAll('.bounds-edit button')].find((x) => x.textContent.trim() === ${JSON.stringify(text)})`;
-  await b.evaluate(`(document.querySelectorAll('.bounds-edit .pick-list li input')[0].click(), true)`);
+  // Шаг 177 (#39): выбор — галочкой строки таблицы Costs & floors (прежний список выбора стал этой таблицей)
+  await b.evaluate(`(document.querySelectorAll('.costs table.selectable tbody tr td.pick input')[0].click(), true)`);
   await new Promise((x) => setTimeout(x, 200));
   const keep = await b.evaluate<{ disabled: boolean; hint: string }>(`({ disabled: ${button(e.plan)}.disabled, hint: document.querySelector('.bounds-edit .form-hint')?.textContent.trim() ?? '' })`);
   assert.deepEqual(keep, { disabled: true, hint: e.problems.NOTHING_TO_CHANGE }, 'nothing chosen to change — Preview is off and says why');
   // Минимум — тот же, что у предложения: правка ничего не меняет
-  const min = await b.evaluate<string>(`document.querySelectorAll('.costs table tbody tr')[0].children[1].textContent.trim()`);
+  const min = await b.evaluate<string>(`document.querySelectorAll('.costs table tbody tr')[0].children[2].textContent.trim()`);
   const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
   await b.evaluate(`(() => { const s = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'SET'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await new Promise((x) => setTimeout(x, 200));
@@ -3336,13 +3417,14 @@ test('step 174 (BUG-01, BUG-02, BUG-05): Costs & floors — min above max is one
   assert.ok(at >= 0, 'the offer is on the first page of the bounds table');
   const read = () => b.evaluate<{ name: string; min: string; max: string; pick: string }>(`(() => {
     const tr = document.querySelectorAll('.costs table tbody tr')[${at}];
-    return { name: tr.querySelector('.unit-title').textContent.trim(), min: tr.children[1].textContent.trim(), max: tr.children[2].textContent.trim(),
-      pick: document.querySelectorAll('.bounds-edit .pick-list li')[${at}].textContent.replace(/\\s+/g, ' ').trim() }; })()`);
+    // Шаг 177 (#39): строка выбора — сама строка таблицы; первая колонка — галочка
+    return { name: tr.querySelector('.unit-title').textContent.trim(), min: tr.children[2].textContent.trim(), max: tr.children[3].textContent.trim(),
+      pick: tr.textContent.replace(/\\s+/g, ' ').trim() }; })()`);
   const was = await read();
   // Смоук-мир общий у тестов файла: границы сдвигаются на цент — соседи (шаг 163 и др.) видят почти прежние числа
   const plusCent = (text: string, otherwise: number) => { const v = Number(/(\d+\.\d{2})/.exec(text)?.[1] ?? NaN); return (Number.isFinite(v) ? v + 0.01 : otherwise).toFixed(2); };
   const amount = plusCent(was.min, 1.11);
-  await b.evaluate(`(document.querySelectorAll('.bounds-edit .pick-list li input')[${at}].click(), true)`);
+  await b.evaluate(`(document.querySelectorAll('.costs table.selectable tbody tr td.pick input')[${at}].click(), true)`);
   const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
   await b.evaluate(`(() => { const s = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'SET'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await new Promise((x) => setTimeout(x, 200));
@@ -3375,7 +3457,7 @@ test('step 174 (BUG-01, BUG-02, BUG-05): Costs & floors — min above max is one
   await runPendingJobs(smokeLive);
   await waitFor(b, `[...document.querySelectorAll('.bounds-edit section.job .badge')].some((x) => x.textContent.trim() === ${JSON.stringify(en.ui.jobs.statusLabels.SUCCEEDED)})`, 'the bulk edit is done');
   // Без перезагрузки: таблица и список выбора перечитаны сами
-  await waitFor(b, `document.querySelectorAll('.costs table tbody tr')[${at}].children[1].textContent.includes(${JSON.stringify(amount)})`, 'the bounds table shows the new minimum', 5_000);
+  await waitFor(b, `document.querySelectorAll('.costs table tbody tr')[${at}].children[2].textContent.includes(${JSON.stringify(amount)})`, 'the bounds table shows the new minimum', 5_000);
   assert.ok((await read()).pick.includes(amount), `the pick list shows the new minimum: ${(await read()).pick}`);
   const text = await b.evaluate<string>(`document.querySelector('.bounds-edit').innerText`);
   assert.ok(!text.includes(en.ui.jobs.createdBounds), 'no «in the background» after Done');
@@ -3397,7 +3479,7 @@ test('step 174 (BUG-01, BUG-02, BUG-05): Costs & floors — min above max is one
   await b.click(t.apply, '.import-bounds button');
   await new Promise((x) => setTimeout(x, 300));
   await runPendingJobs(smokeLive);
-  await waitFor(b, `document.querySelectorAll('.costs table tbody tr')[${at}].children[2].textContent.includes(${JSON.stringify(max)})`, 'the bounds table shows the imported maximum', 8_000);
+  await waitFor(b, `document.querySelectorAll('.costs table tbody tr')[${at}].children[3].textContent.includes(${JSON.stringify(max)})`, 'the bounds table shows the imported maximum', 8_000);
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
@@ -3901,7 +3983,9 @@ test('step 163 (#27): bulk edit and imports keep a summary bar of their numbers 
   // Правка границ всего каталога: минимум — «set to» 1.00; полоса — предложения, меняется, без изменений, внимание, цена вне границ
   const e = en.ui.boundsEdit;
   await b.evaluate(`(document.querySelector('.bounds-edit').scrollIntoView(), true)`);
-  await b.evaluate(`(() => { const c = [...document.querySelectorAll('.bounds-edit .check-field')].find((x) => x.textContent.includes('offers of the catalog')); c.querySelector('input').click(); return true; })()`);
+  // Шаг 177 (#39): весь каталог — явным действием строки выбора «Select all N offers» (прежняя галочка стала кнопкой с числом)
+  await b.evaluate(`(() => { const x = [...document.querySelectorAll('.selection-bar button')].find((x) => /^Select (all|the)/.test(x.textContent.trim())); x.click(); return true; })()`);
+  await waitFor(b, `!/^Nothing selected/.test(document.querySelector('.selection-bar .selection-count').textContent.trim())`, 'the whole catalog is selected');
   const field = (label: string) => `[...document.querySelectorAll('.bounds-edit .field')].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)})`;
   await b.evaluate(`(() => { const s = ${field(e.minPrice)}.querySelector('select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'SET'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await new Promise((x) => setTimeout(x, 200));

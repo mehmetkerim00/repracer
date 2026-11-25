@@ -46,6 +46,61 @@ export function offerParams(q: OfferUiQuery, bb: boolean): Record<string, string
   return exportQuery(null, { storefront: q.storefront, pricing: q.pricing, attention: q.attention, setup: q.setup, money: q.money, holder: q.holder, q: q.q, sort: q.sort?.key, dir: q.sort?.dir, bb: bb ? '1' : undefined });
 }
 /**
+ * Шаг 177 (#39): поля фильтра Offers — витрина, автоцена, «требует внимания», Setup, Money, держатель Buy Box и поиск. Одни у экрана Offers
+ * и у таблицы выбора Costs & floors: фильтр — один, и выборку по нему делает сервер одним правилом
+ */
+export function OfferFilterFields({ storefronts, query, onQuery, search, onSearch, holder = true }: { storefronts: ReadonlyArray<{ value: string; label: string }>;
+  query: OfferUiQuery; onQuery: (q: OfferUiQuery) => void; search: string; onSearch: (q: string) => void; holder?: boolean }) {
+  const m = useMessages();
+  const f = m.ui.products.filters;
+  return (
+    <>
+            <Field label={f.storefront}>
+              <select value={query.storefront} onChange={(e) => onQuery({ ...query, storefront: e.currentTarget.value })}>
+                <option value="">{f.allStorefronts}</option>
+                {storefronts.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 118: автоцена включена или выключена — по всему каталогу, как остальные фильтры */}
+            <Field label={f.pricing}>
+              <select value={query.pricing} onChange={(e) => onQuery({ ...query, pricing: e.currentTarget.value })}>
+                <option value="">{f.anyPricing}</option>
+                {OFFER_PRICING_FILTERS.map((v) => <option key={v} value={v}>{f.pricingValues[v]}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 146 (#34): «требует внимания» — та же выборка, что число строки состояния; любая причина или одна */}
+            <Field label={f.attention}>
+              <select value={query.attention} onChange={(e) => onQuery({ ...query, attention: e.currentTarget.value })}>
+                <option value="">{f.anyAttention}</option>
+                {ATTENTION_FILTERS.map((v) => <option key={v} value={v}>{f.attentionValues[v]}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 170 (#35): чего не хватает для включения — выборка пунктов «без стратегии» и «без границ» чеклиста готовности */}
+            <Field label={f.setup}>
+              <select value={query.setup} onChange={(e) => onQuery({ ...query, setup: e.currentTarget.value })}>
+                <option value="">{f.anySetup}</option>
+                {OFFER_SETUP_FILTERS.map((v) => <option key={v} value={v}>{f.setupValues[v]}</option>)}
+              </select>
+            </Field>
+            {/* Шаг 171 (#34): финансовые исключения — выборка очереди «What needs action» Daily Overview */}
+            <Field label={f.money}>
+              <select value={query.money} onChange={(e) => onQuery({ ...query, money: e.currentTarget.value })}>
+                <option value="">{f.anyMoney}</option>
+                {OFFER_MONEY_FILTERS.map((v) => <option key={v} value={v}>{f.moneyValues[v]}</option>)}
+              </select>
+            </Field>
+            {holder ? <Field label={f.holder}>
+              <select value={query.holder} onChange={(e) => onQuery({ ...query, holder: e.currentTarget.value })}>
+                <option value="">{f.anyHolder}</option>
+                {OFFER_HOLDER_FILTERS.map((h) => <option key={h} value={h}>{f.holders[h]}</option>)}
+              </select>
+            </Field> : null}
+            <Field label={f.search}><input type="search" value={search} placeholder={f.searchPlaceholder} onChange={(e) => onSearch(e.currentTarget.value)} /></Field>
+    </>
+  );
+}
+
+/**
  * «Следующая проверка» у всех предложений сейчас одна и та же («нет данных») — по умолчанию скрыта; «Канал сообщает» — когда есть что
  * сообщить. «Последнее изменение» по умолчанию скрыто: оно есть на «Why this price» и в ленте цен, а таблица должна помещаться в окно 1440
  * без прокрутки под закреплённую колонку действий (визуальное ревью шага 79); включается в «Columns»
@@ -128,49 +183,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
       */}
       {view.rows.length > 0 || filtered ? (
         <form className="filters toolbar field-toolbar export-bar" onSubmit={(e) => { e.preventDefault(); onOfferQuery?.({ ...offerQuery, q: search.trim() }); }}>
-          {onOfferQuery ? <>
-            <Field label={f.storefront}>
-              <select value={offerQuery.storefront} onChange={(e) => onOfferQuery({ ...offerQuery, storefront: e.currentTarget.value })}>
-                <option value="">{f.allStorefronts}</option>
-                {view.filters.storefronts.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
-              </select>
-            </Field>
-            {/* Шаг 118: автоцена включена или выключена — по всему каталогу, как остальные фильтры */}
-            <Field label={f.pricing}>
-              <select value={offerQuery.pricing} onChange={(e) => onOfferQuery({ ...offerQuery, pricing: e.currentTarget.value })}>
-                <option value="">{f.anyPricing}</option>
-                {OFFER_PRICING_FILTERS.map((v) => <option key={v} value={v}>{f.pricingValues[v]}</option>)}
-              </select>
-            </Field>
-            {/* Шаг 146 (#34): «требует внимания» — та же выборка, что число строки состояния; любая причина или одна */}
-            <Field label={f.attention}>
-              <select value={offerQuery.attention} onChange={(e) => onOfferQuery({ ...offerQuery, attention: e.currentTarget.value })}>
-                <option value="">{f.anyAttention}</option>
-                {ATTENTION_FILTERS.map((v) => <option key={v} value={v}>{f.attentionValues[v]}</option>)}
-              </select>
-            </Field>
-            {/* Шаг 170 (#35): чего не хватает для включения — выборка пунктов «без стратегии» и «без границ» чеклиста готовности */}
-            <Field label={f.setup}>
-              <select value={offerQuery.setup} onChange={(e) => onOfferQuery({ ...offerQuery, setup: e.currentTarget.value })}>
-                <option value="">{f.anySetup}</option>
-                {OFFER_SETUP_FILTERS.map((v) => <option key={v} value={v}>{f.setupValues[v]}</option>)}
-              </select>
-            </Field>
-            {/* Шаг 171 (#34): финансовые исключения — выборка очереди «What needs action» Daily Overview */}
-            <Field label={f.money}>
-              <select value={offerQuery.money} onChange={(e) => onOfferQuery({ ...offerQuery, money: e.currentTarget.value })}>
-                <option value="">{f.anyMoney}</option>
-                {OFFER_MONEY_FILTERS.map((v) => <option key={v} value={v}>{f.moneyValues[v]}</option>)}
-              </select>
-            </Field>
-            <Field label={f.holder}>
-              <select value={offerQuery.holder} onChange={(e) => onOfferQuery({ ...offerQuery, holder: e.currentTarget.value })}>
-                <option value="">{f.anyHolder}</option>
-                {OFFER_HOLDER_FILTERS.map((h) => <option key={h} value={h}>{f.holders[h]}</option>)}
-              </select>
-            </Field>
-            <Field label={f.search}><input type="search" value={search} placeholder={f.searchPlaceholder} onChange={(e) => setSearch(e.currentTarget.value)} /></Field>
-          </> : null}
+          {onOfferQuery ? <OfferFilterFields storefronts={view.filters.storefronts} query={offerQuery} onQuery={onOfferQuery} search={search} onSearch={setSearch} /> : null}
           {/* Строка «заголовки — по-английски» — одна, после обеих выгрузок */}
           <ExportControl worldId={view.worldId} screen="offers" note={false} query={offerParams(offerQuery, bbOn)} empty={view.rows.length === 0} />
           <ExportControl worldId={view.worldId} screen="offer-competitors" label={m.ui.export.competitors} query={offerParams(offerQuery, false)} empty={view.rows.length === 0} />

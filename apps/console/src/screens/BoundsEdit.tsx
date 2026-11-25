@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { parseAmountInput, parsePercentInput, selectionAfterPaging, type BoundAdjust, type BoundsDiffView, type BoundsEditRequest } from '@repracer/console-model';
-import type { BoundsIndexItem, JobCreatedResponse } from '../api-types.ts';
+import { useEffect, useState } from 'react';
+import { LIST_PAGE_DEFAULT, parseAmountInput, parsePercentInput, type BoundAdjust, type BoundsDiffView, type ListQuery, type OfferSelection } from '@repracer/console-model';
+import type { BoundsPlanRowsView, JobCreatedResponse } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
-import { ErrorBox, errorText, Gaps, Help, ProductRef, StickySummary, UnitName, useMessages } from '../components.tsx';
-import { CheckField, Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
+import { ErrorBox, errorText, Gaps, Pager, ProductRef, StickySummary, UnitName, useMessages } from '../components.tsx';
+import { Field, FieldGrid, FieldGroup, FormActions } from '../forms.tsx';
 import type { BulkJobView } from '@repracer/console-model';
 import { JobProgress } from './Jobs.tsx';
 
@@ -26,12 +26,31 @@ export function adjustOf(f: AdjustForm): BoundAdjust | undefined | null {
   return bp === null ? null : { kind: 'PERCENT', bp };
 }
 
-export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
+/**
+ * Шаг 177 (уточнение Р-140, (г)): предпросмотр перечисляет ВСЕ затрагиваемые предложения — включая выбранные вне текущего фильтра:
+ * первая страница — строки вида (с пометками первыми), следующие — из итога задания плана тем же порядком
+ */
+export function BoundsDiffTable({ view, worldId, planJobId }: { view: BoundsDiffView; worldId?: string; planJobId?: string | null }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   const c = t.columns;
+  const [page, setPage] = useState<ListQuery>({ offset: 0, limit: LIST_PAGE_DEFAULT });
+  const [more, setMore] = useState<BoundsPlanRowsView | null>(null);
+  const paged = Boolean(worldId && planJobId) && view.summary.scopes > view.rows.length;
+  useEffect(() => {
+    if (!paged || page.offset === 0) { setMore(null); return; }
+    let alive = true;
+    requestJson<BoundsPlanRowsView>(`${worldPath(worldId!, 'bounds', 'plan', planJobId!)}?offset=${page.offset}&limit=${page.limit}`, { locale: m.locale })
+      .then((x) => { if (alive) setMore(x); }).catch(() => { if (alive) setMore(null); });
+    return () => { alive = false; };
+  }, [paged, worldId, planJobId, page.offset, page.limit, m.locale]);
+  const rows = page.offset === 0 || !more ? view.rows : more.rows;
+  const total = view.summary.scopes;
+  const pageInfo = { from: total === 0 ? 0 : page.offset + 1, to: Math.min(page.offset + page.limit, total), total,
+    text: m.ui.feed.page(total === 0 ? 0 : page.offset + 1, Math.min(page.offset + page.limit, total), total), hasPrevious: page.offset > 0, hasNext: page.offset + page.limit < total };
   return (
     <section className="diff">
+      <h4>{m.ui.selection.planAll(total)}</h4>
       {/* Шаг 163 (#27): числа экрана различий — полосой, которая держится под шапкой, пока листаются строки; прежняя фраза — те же числа */}
       <StickySummary label={t.statsLabel} chips={([
         ['offers', view.summary.scopes, false], ['changed', view.summary.changed, true], ['unchanged', view.summary.unchanged, false],
@@ -42,7 +61,7 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
         <table>
           <thead><tr><th>{c.offer}</th><th>{c.minBefore}</th><th>{c.minAfter}</th><th>{c.maxBefore}</th><th>{c.maxAfter}</th><th>{c.price}</th><th>{c.notes}</th></tr></thead>
           <tbody>
-            {view.rows.map((r) => (
+            {rows.map((r) => (
               // Шаг 167, шаг 168: строка с пометкой внимания — подсвечена целиком (класс строки, как на Offers и Inventory)
               <tr key={r.unit.writeScopeId} className={r.tone === 'warn' ? 'attention' : undefined}>
                 {/* Шаг 79 (ревью): предложение — текстом; что именно требует внимания — в колонке пометок */}
@@ -58,27 +77,25 @@ export function BoundsDiffTable({ view }: { view: BoundsDiffView }) {
           </tbody>
         </table>
       </div>
+      {paged ? <Pager page={pageInfo} query={page} onQuery={setPage} /> : null}
       <Gaps gaps={view.gaps} />
     </section>
   );
 }
 
-export function BoundsEditPanel({ worldId, items, total, canEdit, preselect = null, onApplied }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; canEdit: boolean; preselect?: string | null; onApplied?: () => void }) {
+export function BoundsEditPanel({ worldId, selection, selected, canEdit, onApplied }: { worldId: string; selection: OfferSelection; selected: number; canEdit: boolean; onApplied?: () => void }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
   if (!canEdit) return <section className="bounds-edit"><h3>{t.pageTitle}</h3><p className="notice">{t.noRight}</p></section>;
-  return <BoundsEditForm worldId={worldId} items={items} total={total} preselect={preselect} onApplied={onApplied} />;
+  return <BoundsEditForm worldId={worldId} selection={selection} selected={selected} onApplied={onApplied} />;
 }
 
-function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { worldId: string; items: readonly BoundsIndexItem[]; total: number; preselect: string | null; onApplied?: () => void }) {
+function BoundsEditForm({ worldId, selection, selected, onApplied }: { worldId: string; selection: OfferSelection; selected: number; onApplied?: () => void }) {
   const m = useMessages();
   const t = m.ui.boundsEdit;
-  // Шаг 96 (аудит В20): «Change this floor» со страницы предложения — правка открывается с этим предложением выбранным
-  const [selected, setSelected] = useState<string[]>(preselect ? [preselect] : []);
   const [min, setMin] = useState<AdjustForm>({ mode: 'KEEP', value: '' });
   const [max, setMax] = useState<AdjustForm>({ mode: 'KEEP', value: '' });
-  const [diff, setDiff] = useState<{ view: BoundsDiffView; request: BoundsEditRequest } | null>(null);
-  const [wholeCatalog, setWholeCatalog] = useState(false);
+  const [diff, setDiff] = useState<{ view: BoundsDiffView; planJobId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Шаг 174 (BUG-05): фраза запуска применения — в карточке задания, пока оно идёт (`JobProgress started`) */
   const [started, setStarted] = useState<string | null>(null);
@@ -88,24 +105,24 @@ function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { world
   const [busy, setBusy] = useState(false);
   const reset = () => { setDiff(null); setStarted(null); setJobId(null); setPlanJobId(null); };
   /**
-   * Р-140 (шаг 30): выбор отдельных строк НЕ переживает листание и смену фильтра. Он их и не пережил бы осмысленно: выбранные
-   * строки другой страницы продавцу не видны, а применяются. Страница сменилась — выбор сброшен, и это сказано на экране.
+   * Шаг 177 (#39, уточнение Р-140): выбор переживает страницы и фильтры и виден всегда счётчиком над таблицей; изменился выбор — экран
+   * различий сброшен: применяется ровно то, что посчитано по нынешнему выбору
    */
-  const pageKey = items.map((i) => i.writeScopeId).join(',');
-  const [shownPage, setShownPage] = useState(pageKey);
-  if (shownPage !== pageKey) { setShownPage(pageKey); setSelected(selectionAfterPaging(selected, shownPage, pageKey)); setWholeCatalog(false); reset(); }
+  const selectionKey = JSON.stringify(selection);
+  const [shownSelection, setShownSelection] = useState(selectionKey);
+  if (shownSelection !== selectionKey) { setShownSelection(selectionKey); reset(); }
 
-  const request = (): BoundsEditRequest | string => {
+  const request = (): Record<string, unknown> | string => {
     const a = adjustOf(min);
     const b = adjustOf(max);
     if (a === null) return t.badInput(min.value);
     if (b === null) return t.badInput(max.value);
-    // Р-136: «весь каталог» — это выбор, а не перечисление; список из 10 000 идентификаторов не проходит предел тела запроса
-    return { ...(wholeCatalog ? { all: true, writeScopeIds: [] } : { writeScopeIds: selected }), ...(a ? { min: a } : {}), ...(b ? { max: b } : {}) };
+    // Шаг 177: выбор раскрывает сервер — отмеченные, «все подходящие» и снятые; перечень каталога в тело запроса не помещается (шаг 29)
+    return { selection, ...(a ? { min: a } : {}), ...(b ? { max: b } : {}) };
   };
   /**
-   * Задача D шага 31: экран различий считает фоновое задание — по всему каталогу, а не по странице. Экран берёт готовый ответ
-   * из итога задания, и он же ссылается на это задание при применении: применяется ровно посчитанное, без второго расчёта.
+   * Задача D шага 31: экран различий считает фоновое задание — по всему выбору, а не по странице. Экран берёт готовый ответ из итога
+   * задания, и он же ссылается на это задание при применении: применяется ровно посчитанное, без второго расчёта.
    */
   const plan = async () => {
     setError(null); setStarted(null); setDiff(null);
@@ -119,15 +136,14 @@ function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { world
   };
   const planReady = (job: BulkJobView) => {
     const result = job.result as { view?: BoundsDiffView } | null;
-    const r = request();
     // Шаг 174 (BUG-02): отказ задания называет карточка задания — второй раз формой он не повторяется
-    if (job.status === 'SUCCEEDED' && result?.view && typeof r !== 'string') setDiff({ view: result.view, request: r });
+    if (job.status === 'SUCCEEDED' && result?.view && planJobId) setDiff({ view: result.view, planJobId });
   };
   const apply = async () => {
     if (!diff) return;
     setBusy(true); setError(null);
     try {
-      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { planJobId, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
+      const r = await requestJson<JobCreatedResponse>(worldPath(worldId, 'bounds', 'apply'), { method: 'POST', body: { planJobId: diff.planJobId, planToken: diff.view.planToken, confirmed: true }, locale: m.locale });
       // Задание экрана различий тоже забывается: иначе после применения различия вернутся и позовут применить ещё раз
       setStarted(r.message); setJobId(r.jobId); setDiff(null); setPlanJobId(null);
     } catch (e) { setError(errorText(e, m)); } finally { setBusy(false); }
@@ -151,35 +167,15 @@ function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { world
   return (
     <section className="bounds-edit">
       <h3>{t.pageTitle}</h3>
-      {/* Шаг 79: выбор предложений и правка — карточкой; экран различий — своей таблицей ниже */}
-      {/* Шаг 94: выбор предложений и правка — группой полей стандарта; галочки — контрол слева, кнопки — рядом в конце */}
+      {/* Шаг 177 (#39): что выбрано — счётчиком над таблицей; здесь — что сделать с выбранным */}
       <FieldGroup title={t.select}>
-      {/* Р-136, Р-140: «всё» — это весь каталог, а не показанная страница; раскрывает выбор сервер */}
-      <CheckField label={t.selectAllCatalog(total)} caption={t.selectionReset} checked={wholeCatalog} disabled={busy}
-        onChange={(on) => { setWholeCatalog(on); setSelected([]); reset(); }} />
-      <div className="buttons">
-        <button type="button" disabled={busy || wholeCatalog} onClick={() => { setSelected(items.map((i) => i.writeScopeId)); reset(); }}>{t.selectPage(items.length)}</button>
-        <button type="button" disabled={busy || wholeCatalog} onClick={() => { setSelected([]); reset(); }}>{t.selectNone}</button>
-      </div>
-      <p className="notice" role="status">
-        {wholeCatalog ? t.selectionWhole(total) : selected.length === 0 ? t.selectionNone : t.selectionCount(selected.length, total)}
-      </p>
-      <ul className="index pick-list">
-        {items.map((i) => (
-          <li key={i.writeScopeId}>
-            {/* Шаг 175 (QA-A Testing 2.0, этап 4): в выборе — цвет и идентификатор (варианты одного товара различимы), границы и действующий пол */}
-            <CheckField label={<><UnitName unit={i} variant={false} /><ProductRef unit={i} /></>} caption={`${i.minPrice} – ${i.maxPrice} · ${m.ui.products.columns.floor}${m.colon}${i.floor.amount}`} checked={selected.includes(i.writeScopeId)}
-              onChange={(on) => { setSelected(on ? [...selected, i.writeScopeId] : selected.filter((x) => x !== i.writeScopeId)); reset(); }} />
-          </li>
-        ))}
-      </ul>
       <FieldGrid cols={4}>{adjust(t.minPrice, min, setMin)}{adjust(t.maxPrice, max, setMax)}</FieldGrid>
       {(() => {
         /**
          * Шаг 175 (QA-A Testing 2.0, этап 4): Preview и Apply неактивны, когда менять нечего, и говорят почему: не выбрано предложение, не выбрано,
          * что менять, или все выбранные уже с этими границами
          */
-        const why = selected.length === 0 && !wholeCatalog ? m.ui.forms.why.selectOffers
+        const why = selected === 0 ? m.ui.forms.why.selectOffers
           : min.mode === 'KEEP' && max.mode === 'KEEP' ? t.problems.NOTHING_TO_CHANGE : null;
         const applyWhy = diff !== null && diff.view.summary.changed === 0 ? t.nothingWouldChange : null;
         return (
@@ -190,13 +186,12 @@ function BoundsEditForm({ worldId, items, total, preselect, onApplied }: { world
           </FormActions>
         );
       })()}
-      {diff ? <Help className="section-sub" text={t.shownRows(diff.view.shown.rows, diff.view.shown.of)} /> : null}
       </FieldGroup>
       {error ? <ErrorBox message={error} /> : null}
       {planJobId && !diff ? <JobProgress worldId={worldId} jobId={planJobId} onFinished={planReady} /> : null}
       {/* Шаг 174 (BUG-01): применение завершилось — таблица границ и список выбора перечитываются сами, без перезагрузки страницы */}
       {jobId ? <JobProgress worldId={worldId} jobId={jobId} started={started} onFinished={(job) => { if (job.status === 'SUCCEEDED') onApplied?.(); }} /> : null}
-      {diff ? <BoundsDiffTable view={diff.view} /> : null}
+      {diff ? <BoundsDiffTable view={diff.view} worldId={worldId} planJobId={diff.planJobId} /> : null}
     </section>
   );
 }

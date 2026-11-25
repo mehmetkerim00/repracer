@@ -191,11 +191,16 @@ Import kinds:
 Every import is journaled with who, when and the number of rows. Progress is visible while it runs. Applying 10,000 cost rows takes
 3–11 s on CI runners.
 
-**Bulk bounds edit — [QA-A].** Costs & floors → "Change bounds": choose offers (or the whole catalog), set or shift the minimum and/or
-maximum price, preview the differences, apply.
+**Bulk bounds edit — [QA-A].** Costs & floors → "Change bounds": choose offers, set or shift the minimum and/or maximum price, preview
+the differences, apply.
+- The Costs & floors table is the selection table: a checkbox per row, the Offers filters and search over the whole catalog.
+- The selection survives pages and filters and is always visible (Р-140, amended): "N selected · M outside current view", "Review selection"
+  (only the selected offers), "Select all N matching" (an explicit action that shows the filter as a badge).
+- Up to 1,000 offers can be ticked by hand; more is done with a filter and "Select all matching".
+- The preview lists every offer of the edit, page by page, including the ones selected outside the current filter.
 - A minimum above the maximum is refused before anything runs, in one message that names the offers and both amounts; nothing is changed.
 - Preview is off until you choose what to change; Apply is off when nothing would change. Both say why.
-- The pick list names each offer with its color and channel ID, its bounds and its effective floor.
+- Each row names the offer with its color and channel ID, its bounds and its effective floor.
 - A price outside the new bounds is stated as it is; for a shadow account the preview adds that new prices are only calculated, nothing is sent.
 - Applying runs in the background; the bounds table and the pick list refresh by themselves when it is done, with one line
   "Successfully updated N offers".

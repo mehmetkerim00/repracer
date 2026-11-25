@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readTable, TABLE_ENCODINGS, type TableEncoding } from '@repracer/cost-import';
 import {
   boundsDiffView, currentStrategies, expandBoundsEdit, messagesFor, parseBoundsEditRequest,
-  parseStrategyDraft, PRICE_EVIDENCE_HEADER, priceEvidenceRows, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
+  parseStrategyDraft, orderedPlanRows, PRICE_EVIDENCE_HEADER, priceEvidenceRows, strategyPreviewView, STRATEGY_PREVIEW_ROWS_SHOWN, LOCALES,
   parseFeedQuery, PRICE_FEED_CSV_HEADER, priceFeedFileName, priceFeedRowsOf, feedPageQuery, FEED_PAGE_MAX,
   describe, unitOf, buildImportPlan, importCheckView, importMapping, importReportRows, importTemplate, IMPORT_FILE_NAMES, IMPORT_KIND_LIST, IMPORT_REPORT_HEADER,
   refineBoundsPlan, type ConsoleScope, type EnableResultView, type ImportKind, type ImportPlan, type ImportPlanContext, type Locale, type StandWorld,
@@ -348,6 +348,8 @@ export function bulkJobHandlers(options: BulkJobWorldOptions): BulkJobHandlers {
           return {
             view: view as unknown as Record<string, unknown>, planToken: view.planToken,
             edits: edits as unknown as Record<string, unknown>, offers: edits.length,
+            // Шаг 177 (уточнение Р-140, (г)): все строки базы в порядке экрана — предпросмотр листает их страницами; клиенту итог отдаёт только вид
+            rows: orderedPlanRows(world, edits, preview.rows, m) as unknown as Record<string, unknown>,
           };
         },
       };

@@ -18,13 +18,13 @@ import {
 import { DECISION_OUTCOME_GROUPS, ladderSteps, XLSX_CONTENT_TYPE, type DecisionOutcomeGroup } from '@repracer/pricing-pipeline';
 import { TABLE_ENCODINGS } from '@repracer/cost-import';
 import { APPLY_JOB_OF, buyboxCellsOf, screenExportCount, selectOffers, type AccountCompetitorInfo, type OfferQuery, type ScreenExportParams } from '@repracer/bulk-jobs/handlers';
-import type { BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
+import type { BoundsEditInput, BoundsEditRow, BulkJobInput, ConsoleCatalogFacts, ConsoleCatalogFactsQuery, ConsoleCatalogPage, DiscountAnnouncementInput, DiscountAnnouncementRow, InterventionSlice } from '@repracer/pricing-pipeline';
 import {
   buildStandWorlds, memoryStandDirectory, pgStandJoinAs, pgStandJoinMember, pgStandUsers, STAND_ACCOUNTS, STAND_PEOPLE, STAND_AUDIENCE, STAND_EMAILS, STAND_ISSUER, type LiveWorld,
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { type ClientChannels, type MarketScope, tenantMarketScope, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
+import { type ClientChannels, type MarketScope, tenantMarketScope, filterParamsOf, MAX_PICKED, parseOfferSelection, type OfferFilterParams, type OfferSelection, type ProductListView, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import { descriptorOf, strategyAvailableOn } from './channel-descriptors.ts';
 import {
@@ -160,6 +160,13 @@ function parseTarget(live: LiveWorld, raw: unknown): StopTarget | null {
     return { kind: 'STOREFRONT', channelAccountId: account.channelAccountId, marketplace: t.marketplace };
   }
   return null;
+}
+
+/** Шаг 177 (#39): строка списка границ — одна у списка Costs & floors, у «Review selection» и у таблицы выбора */
+function boundsItemsOf(list: ProductListView): BoundsIndexItem[] {
+  return list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, name: r.unit.name, storefront: r.unit.storefront, color: r.unit.color, swatch: r.unit.swatch,
+    channel: r.unit.channel, channelProductRef: r.unit.channelProductRef, gtin: r.unit.gtin, condition: r.unit.condition,
+    minPrice: r.minPrice, maxPrice: r.maxPrice, floor: { amount: r.floor.amount, parts: r.floor.parts, missing: r.floor.missing }, minPriceMissing: r.minPriceMissing, maxPriceMissing: r.maxPriceMissing }));
 }
 
 /**
@@ -904,6 +911,30 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     };
     const offerDeps = () => ({ store: live.store, tenantId: live.tenantId, now: live.clock.iso(), useDatabase: targeted !== null, world: () => load(null), m,
       accounts: accountCompetitors(), shareRange: shareRange() });
+    /** Шаг 177 (#39): фильтр экрана Offers — один у списка товаров, списка границ и «все подходящие» выбора */
+    const offerFilterOf = (oq: NonNullable<ReturnType<typeof parseOfferQuery>>) => ({ storefront: oq.storefrontValue, pricing: oq.pricing ?? null, attention: oq.attention ?? null,
+      setup: oq.setup ?? null, money: oq.money ?? null, holder: oq.holder, q: oq.q });
+    /** Все предложения под фильтром — той же выборкой, что экран Offers (база = правило экрана); неверный фильтр — null */
+    const matchingIds = async (params: OfferFilterParams): Promise<string[] | null> => {
+      const oq = parseOfferQuery(new URLSearchParams(params));
+      if (!oq) return null;
+      return (await selectOffers(offerDeps(), oq, { offset: 0, limit: MAX_SCOPES })).scopeIds;
+    };
+    /**
+     * Шаг 177 (уточнение Р-140): выбор целиком — подходящие под фильтры-бейджи, затем отмеченные вручную, без снятых. Отмеченные — только
+     * существующие предложения каталога: число выбранного не врёт из-за устаревшей отметки
+     */
+    const expandSelection = async (sel: OfferSelection): Promise<string[] | null> => {
+      const out = new Set<string>();
+      for (const f of sel.matches) {
+        const ids = await matchingIds(f);
+        if (!ids) return null;
+        for (const id of ids) out.add(id);
+      }
+      if (sel.ids.length > 0) for (const sc of (await load(sel.ids)).state.scopes) if (sel.ids.includes(sc.writeScopeId)) out.add(sc.writeScopeId);
+      for (const id of sel.except) out.delete(id);
+      return [...out];
+    };
     /**
      * Поиск предложения по подписи экрана, SKU, ключу канала и EAN. Шаг 67 (OQ-248): в базе — по тем же полям и той же подписи
      * (`unitLabel` шаблоном, имя канала аккаунта), первые `limit` в порядке каталога; мир в памяти — тем же правилом по каталогу.
@@ -1189,16 +1220,34 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
           if (param === null) {
             // Р-136: страница, а не весь каталог; список границ — тот же порядок, что у списка товаров
             const query = parseListQuery(url.searchParams);
-            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
-            const catalog = await catalogPageFor(query);
-            const list = productList(await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog }), m, query, undefined, catalog ?? undefined);
+            // Шаг 177 (#39): фильтры и поиск — те же, что у Offers, по всему каталогу
+            const oq = parseOfferQuery(url.searchParams);
+            if (!query || !oq) return fail(400, 'BAD_PAGE', s.badRequest);
+            const filter = offerFilterOf(oq);
+            const catalog = filterActive(filter) ? await selectOffers(offerDeps(), oq, query) : await catalogPageFor(query);
+            const list = productList(await load(catalog ? catalog.scopeIds : null, { catalogPage: catalog }), m, query, undefined, catalog ?? undefined, { filter });
             return ok({
-              items: list.rows.map((r): BoundsIndexItem => ({ writeScopeId: r.unit.writeScopeId, label: r.unit.label, name: r.unit.name, storefront: r.unit.storefront, color: r.unit.color, swatch: r.unit.swatch,
-                channel: r.unit.channel, channelProductRef: r.unit.channelProductRef, gtin: r.unit.gtin, condition: r.unit.condition,
-                minPrice: r.minPrice, maxPrice: r.maxPrice, floor: { amount: r.floor.amount, parts: r.floor.parts, missing: r.floor.missing }, minPriceMissing: r.minPriceMissing, maxPriceMissing: r.maxPriceMissing })),
+              filters: list.filters, matched: list.matched, catalogTotal: list.totals.total,
+              items: boundsItemsOf(list),
               page: list.page,
               canEdit: can(viewer.role, 'MANAGE_PRICING'),
             } satisfies BoundsIndexView);
+          }
+          /**
+           * Шаг 177 (уточнение Р-140, (г)): предпросмотр перечисляет ВСЕ затрагиваемые предложения — страницами из итога задания плана, в
+           * порядке экрана (с пометками первыми), включая выбранные вне текущего фильтра
+           */
+          if (param === 'plan') {
+            const query = parseListQuery(url.searchParams);
+            const job = parts[5] && parts.length === 6 ? await live.store.bulkJob(live.tenantId, parts[5]) : null;
+            if (!query) return fail(400, 'BAD_PAGE', s.badRequest);
+            if (!job || job.kind !== 'BOUNDS_PLAN' || job.status !== 'SUCCEEDED') return fail(404, 'JOB_NOT_FOUND', m.ui.jobs.notFound);
+            const stored = (job.result ?? {}) as { rows?: BoundsEditRow[]; edits?: BoundsEditInput[] };
+            const all = stored.rows ?? [];
+            const { items: rows, page } = pageOf(all, query, m);
+            const ids = new Set(rows.map((r) => r.writeScopeId));
+            const view = boundsDiffView(await load([...ids]), (stored.edits ?? []).filter((e) => ids.has(e.writeScopeId)), rows, m, { keepOrder: true });
+            return ok({ rows: view.rows, page });
           }
           const b = await boundsPage(param);
           return b ? ok(b) : fail(404, 'SCOPE_NOT_FOUND', s.notFound);
@@ -1356,7 +1405,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       || ((screen === 'stops' && parts[5] === 'resume') || ((screen === 'halts' || screen === 'distrusts') && parts[5] === 'release')) && param !== null;
     const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
       || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
-      || (screen === 'bounds' && param === 'apply') || screen === 'imports' || screen === 'exports';
+      || (screen === 'bounds' && (param === 'apply' || param === 'selection')) || screen === 'imports' || screen === 'exports';
     const oneUnit = (screen === 'scopes' && param !== null && (parts[5] === 'enable' || parts[5] === 'disable')) || (screen === 'bounds' && param !== null && parts[5] === 'clearance') ? [param]
       : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId] : null;
     const world = stopRoute ? await load([], { facts: await facts({ stopImpact: true }) })
@@ -2012,8 +2061,48 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
      * Шаг 21, задача D шага 31: экран различий массовой правки — тоже ЗАДАНИЕ. База вычисляет итог в откатываемой транзакции
      * по всему каталогу; держать это в запросе значило бы ждать ответа секунды, а потом повторять ту же работу при применении.
      */
+    /**
+     * Шаг 177 (#39, уточнение Р-140): выбор виден всегда — сколько выбрано, сколько из этого вне текущего вида, какие показанные строки выбраны
+     * и, по «Review selection», страница только выбранного. Ничего не меняет: отвечает каждому, кто видит экран
+     */
+    if (screen === 'bounds' && param === 'selection') {
+      const sel = parseOfferSelection(body.selection);
+      const view = filterParamsOf(body.view ?? {});
+      const shown = Array.isArray(body.shown) && body.shown.length <= 200 && body.shown.every((x) => typeof x === 'string') ? body.shown as string[] : null;
+      const review = body.review === undefined || body.review === null ? null : parseListQuery(new URLSearchParams(Object.entries(body.review as Record<string, unknown>).map(([k, v]) => [k, String(v)])));
+      if (!sel || !view || !shown || (body.review !== undefined && body.review !== null && !review)) return fail(400, 'BAD_SELECTION', m.ui.selection.bad(MAX_PICKED));
+      const selected = await expandSelection(sel);
+      const inView = await matchingIds(view);
+      if (!selected || !inView) return fail(400, 'BAD_SELECTION', m.ui.selection.bad(MAX_PICKED));
+      const chosen = new Set(selected);
+      const viewSet = new Set(inView);
+      const reviewPage = review ? pageOf(selected, review, m) : null;
+      const reviewWorld = reviewPage ? await load(reviewPage.items) : null;
+      return ok({
+        selected: selected.length, outsideView: selected.filter((id) => !viewSet.has(id)).length,
+        shownSelected: shown.filter((id) => chosen.has(id)),
+        review: reviewPage && reviewWorld ? {
+          items: boundsItemsOf(productList(reviewWorld, m, review!, undefined, { scopeIds: reviewPage.items, offset: clampOffset(review!, selected.length), total: selected.length,
+            matched: selected.length, enabled: 0, stopped: 0, off: 0, applying: 0, pricingHealthIssues: false })),
+          page: reviewPage.page,
+        } : null,
+      });
+    }
+
     if (screen === 'bounds' && param === 'plan') {
       if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', s.forbidden);
+      /**
+       * Шаг 177 (#39, уточнение Р-140): правка принимает выбор — отмеченные, «все подходящие» и снятые; раскрывает его сервер (тело запроса
+       * не выдержало бы перечня каталога, шаг 29). Задание получает уже раскрытый перечень — считается ровно то, что выбрано сейчас
+       */
+      if (body.request && typeof body.request === 'object' && 'selection' in (body.request as Record<string, unknown>)) {
+        const raw = body.request as Record<string, unknown>;
+        const sel = parseOfferSelection(raw.selection);
+        const ids = sel ? await expandSelection(sel) : null;
+        if (!ids) return fail(400, 'BAD_SELECTION', m.ui.selection.bad(MAX_PICKED));
+        if (ids.length > MAX_SCOPES) return fail(400, 'TOO_MANY_SCOPES', s.tooManyScopes(ids.length, MAX_SCOPES));
+        body.request = { writeScopeIds: ids, ...(raw.min ? { min: raw.min } : {}), ...(raw.max ? { max: raw.max } : {}) };
+      }
       const request = parseBoundsEditRequest(body.request);
       if (!request) {
         const asked = Array.isArray((body.request as { writeScopeIds?: unknown[] })?.writeScopeIds) ? ((body.request as { writeScopeIds: unknown[] }).writeScopeIds).length : 0;
