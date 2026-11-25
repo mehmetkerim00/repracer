@@ -662,8 +662,9 @@ const OUT_OF_BOX = `(() => {
   }
   // Шаг 99: таблица в рамке с прокруткой, ушедшая под её левый край (поле карточки шага 86 у таблицы в рамке), — срезана, а не листается:
   // выступ прежняя проверка не видит, он внутри листаемого
+  // Шаг 182: меряется сама таблица рамки, а не первый ребёнок — у рамки бывает шапка (итоги, кнопка разворота), и правило меряло её
   for (const wrap of document.querySelectorAll('.table-wrap')) {
-    const table = wrap.firstElementChild;
+    const table = wrap.querySelector(':scope > table') ?? wrap.firstElementChild;
     if (!table || !visible(wrap) || wrap.scrollLeft !== 0) continue;
     const shift = wrap.getBoundingClientRect().left + wrap.clientLeft - table.getBoundingClientRect().left;
     if (shift > 0.5) out.push(table.tagName.toLowerCase() + '.' + String(table.className) + ' starts under the left edge of its frame by ' + Math.round(shift) + 'px');
@@ -3525,6 +3526,144 @@ test('step 181 (#38): filters survive navigation — Offers keeps its filter in 
     await go('stop');
     await go('feed');
     assert.equal(await b.evaluate<string>(`document.querySelector('.world-content input[type=search]').value`), 'Wall', 'Price changes keeps its search after navigation');
+  } finally {
+    currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 182 (#38): шапка широкой таблицы остаётся на экране. Таблица помещается в рамку — шапка держится под верхней панелью при прокрутке
+ * страницы; шире рамки — рамка не выше окна, строки листаются в ней, шапка — у её верхнего края, первая колонка закреплена. «Maximize the
+ * table» отдаёт таблице ширину окна (боковина — иконками, предел ширины снят); фильтры и строка состояния остаются; выбор помнит браузер
+ */
+test('step 182 (#38): the header of a wide table stays on screen; «Maximize the table» gives it the window width and the browser remembers it', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  // Снимки до и после (Р-254) — только при REPRACER_SMOKE_SHOTS (каталог), как у шага 109
+  const shots = process.env.REPRACER_SMOKE_SHOTS ?? null;
+  const shot = async (name: string) => {
+    if (!shots) return;
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(shots, { recursive: true });
+    writeFileSync(`${shots}/${name}.jpg`, await b.screenshot());
+  };
+  currentApi = colorsApi;
+  try {
+    await b.setViewport(1440, 500);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    const go = async (path: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${path}`)}, true)`); await settled(b, path); };
+    await b.evaluate(`(Object.keys(localStorage).filter((k) => k.startsWith('repracer.table-max:')).forEach((k) => localStorage.removeItem(k)), true)`);
+    // (1) Таблица в своей рамке: страница прокручена ниже начала таблицы — шапка стоит под верхней панелью
+    // Страница прокручивается так, чтобы шапка без закрепления ушла выше края верхней панели на `shift` (строки таблицы при этом ещё на экране):
+    // закреплённая шапка стоит у края, незакреплённая — на `shift` выше. Прокрутка, которой не случилось (страница коротка), — не проверка
+    const stuck = (table: string) => b.evaluate<{ th: number; bar: number; rows: number; shift: number; missed: number } | null>(`(() => {
+      const t = document.querySelector(${JSON.stringify(table)}); if (!t) return null;
+      const th = t.querySelector('thead th'), bar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+      // короткой странице (журнал из двух строк) есть куда прокрутиться: отступ под страницей таблицу не сдвигает
+      document.body.style.paddingBottom = window.innerHeight + 'px';
+      window.scrollTo(0, 0);
+      const shift = Math.round(Math.max(20, Math.min(200, t.getBoundingClientRect().height - 2 * th.offsetHeight)));
+      const want = th.getBoundingClientRect().top - bar + shift;
+      window.scrollTo(0, want);
+      const out = { th: Math.round(th.getBoundingClientRect().top), bar: Math.round(bar), rows: t.querySelectorAll('tbody tr').length, shift, missed: Math.round(want - window.scrollY) };
+      document.body.style.paddingBottom = '';
+      return out;
+    })()`);
+    const checked: string[] = [];
+    for (const [screen, table] of [['products', 'table.products'], ['costs', '.costs table'], ['feed', 'table.feed'], ['feed/decisions', '.journal-table table, section table.clickable-rows']] as const) {
+      await go(screen);
+      if (screen === 'products') await shot('offers-1440-top');
+      const s = await stuck(table);
+      if (s) await shot(`${screen.replace('/', '-')}-1440-scrolled`);
+      if (!s || s.rows < 2) continue;
+      assert.ok(Math.abs(s.missed) <= 1, `${screen}: the page scrolled far enough to test the header — ${JSON.stringify(s)}`);
+      assert.ok(Math.abs(s.th - s.bar) <= 1, `${screen}: the table header stays under the top bar while the page scrolls — header at ${s.th}px, top bar ends at ${s.bar}px`);
+      checked.push(screen);
+    }
+    assert.ok(checked.includes('products') && checked.includes('costs'), `the rule saw Offers and Costs & floors: ${checked.join(', ')}`);
+    // Price changes: у мира цветов журнал пуст — записи и решения смотрятся на смоук-мире с неделей тени
+    currentApi = euApi;
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await b.waitText(en.ui.app.worlds);
+    await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+    await settled(b, 'smoke world');
+    const smokeWorld = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    // Записей в канал у смоук-мира одна (он в тени), решений — неделя: шапку держит общая рамка обоих видов журнала
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${smokeWorld}/feed/decisions`)}, true)`);
+    await settled(b, 'feed/decisions');
+    const decisions = await stuck('.journal-table table.clickable-rows, section > .table-wrap > table.clickable-rows');
+    assert.ok(decisions && decisions.rows >= 2 && Math.abs(decisions.missed) <= 1, `Price changes · All decisions: the page scrolled far enough to test the header — ${JSON.stringify(decisions)}`);
+    assert.ok(Math.abs(decisions.th - decisions.bar) <= 1, `Price changes: the table header stays under the top bar while the page scrolls — header at ${decisions.th}px, top bar ends at ${decisions.bar}px`);
+    assert.ok(await b.evaluate<boolean>(`!!document.querySelector('table.clickable-rows').closest('.table-wrap').querySelector('button.table-max')`), 'Price changes has «Maximize the table»');
+    currentApi = colorsApi;
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'back in the colours workspace');
+
+    // (2) Таблица шире рамки: на 1012 со всеми колонками Offers рамка не выше окна, шапка — у её края, первая колонка закреплена
+    await b.setViewport(1012, 700);
+    await go('products');
+    await b.evaluate(`([...document.querySelectorAll('details.column-picker input[type=checkbox]')].filter((x) => !x.checked).forEach((x) => (x.dataset.smoke = 'on', x.click())), true)`);
+    await waitFor(b, `(() => { const w = document.querySelector('table.products').closest('.table-wrap'); return w.querySelector('table').scrollWidth > w.clientWidth + 1; })()`, 'Offers wider than its frame');
+    const inFrame = await b.evaluate<{ height: number; room: number; th: number; frame: number; offer: number; left: number }>(`(() => {
+      const wrap = document.querySelector('table.products').closest('.table-wrap');
+      wrap.scrollIntoView({ block: 'start' });
+      wrap.scrollTop = 300; wrap.scrollLeft = 200;
+      const box = wrap.getBoundingClientRect();
+      return { height: Math.round(box.height), room: Math.round(window.innerHeight - document.querySelector('.topbar').getBoundingClientRect().bottom),
+        th: Math.round(wrap.querySelector('thead th').getBoundingClientRect().top), frame: Math.round(box.top + wrap.clientTop),
+        offer: Math.round(wrap.querySelector('tbody td.offer').getBoundingClientRect().left), left: Math.round(box.left + wrap.clientLeft) };
+    })()`);
+    await shot('offers-1012-all-columns-frame-scrolled');
+    assert.ok(inFrame.height <= inFrame.room, `the frame of a table wider than it is no taller than the window: ${inFrame.height}px, room ${inFrame.room}px`);
+    assert.ok(Math.abs(inFrame.th - inFrame.frame) <= 1, `the header stays at the top of the frame while its rows scroll: ${JSON.stringify(inFrame)}`);
+    assert.ok(Math.abs(inFrame.offer - inFrame.left) <= 1, `the offer column stays pinned while the frame scrolls sideways: ${JSON.stringify(inFrame)}`);
+    await b.evaluate(`([...document.querySelectorAll('details.column-picker input[data-smoke=on]')].forEach((x) => (delete x.dataset.smoke, x.click())), true)`);
+
+    // (3) «Maximize the table»: ширина окна; фильтры и строка состояния — на месте; выбор помнит браузер, у другого экрана — свой вид
+    await b.setViewport(1440, 900);
+    await go('products');
+    const layout = () => b.evaluate<{ sidebar: number; wrap: number; filters: boolean; status: boolean; pressed: string | null; fold: string }>(`(() => ({
+      sidebar: Math.round(document.querySelector('.sidebar').getBoundingClientRect().width), wrap: Math.round(document.querySelector('.table-wrap').getBoundingClientRect().width),
+      filters: !!document.querySelector('form.filters')?.checkVisibility(), status: !!document.querySelector('.status-line')?.checkVisibility(),
+      pressed: document.querySelector('button.table-max')?.getAttribute('aria-pressed') ?? null, fold: getComputedStyle(document.querySelector('button.nav-collapse')).display }))()`);
+    const normal = await layout();
+    assert.equal(normal.pressed, 'false', 'Offers has the «Maximize the table» button');
+    await b.click(en.ui.app.maximizeTable, 'button.table-max');
+    await waitFor(b, `!!document.querySelector('.table-wrap.maximized')`, 'the table is maximized');
+    const max = await layout();
+    await b.evaluate('(window.scrollTo(0, 0), true)');
+    await shot('offers-1440-maximized-light');
+    await b.setColorScheme('dark');
+    await shot('offers-1440-maximized-dark');
+    await b.setColorScheme(null);
+    assert.ok(max.sidebar < 80 && max.wrap > normal.wrap + 150, `the maximized table takes the window width: frame ${normal.wrap} → ${max.wrap}px, menu ${normal.sidebar} → ${max.sidebar}px`);
+    assert.deepEqual([max.filters, max.status, max.pressed, max.fold], [true, true, 'true', 'none'], 'filters and the status line stay; the button says it is pressed; the menu fold button waits');
+    assert.ok(await b.evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth'), 'no sideways page scroll');
+    assert.ok(await b.evaluate<boolean>(`!!document.querySelector(${JSON.stringify(`button.table-max[aria-label="${en.ui.app.restoreTable}"]`)})`), 'the button now restores the table');
+    assert.equal(await b.evaluate<string | null>(`localStorage.getItem('repracer.table-max:products')`), 'on', 'the browser keeps the choice');
+    await go('costs');
+    assert.ok((await layout()).sidebar > 150, 'another screen opens in its own layout — the full menu');
+    await go('products');
+    await waitFor(b, `!!document.querySelector('.table-wrap.maximized')`, 'back on Offers — maximized again');
+    await b.click(en.ui.app.restoreTable, 'button.table-max');
+    await waitFor(b, `!document.querySelector('.table-wrap.maximized')`, 'restored');
+    assert.deepEqual([(await layout()).sidebar, (await layout()).wrap], [normal.sidebar, normal.wrap], 'restored to the normal layout');
+    assert.equal(await b.evaluate<string | null>(`localStorage.getItem('repracer.table-max:products')`), null, 'the choice is cleared');
+    // Телефон: кнопки нет — содержимое и так во всю ширину
+    await b.setViewport(375, 812);
+    await b.evaluate('(window.scrollTo(0, 0), true)');
+    await shot('offers-375');
+    assert.equal(await b.evaluate<string>(`getComputedStyle(document.querySelector('button.table-max')).display`), 'none', 'no maximize button on a phone');
+    await b.setViewport(1440, 900);
   } finally {
     currentApi = euApi;
   }

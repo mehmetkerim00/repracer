@@ -8,6 +8,7 @@ import { BoundsEditPanel } from './BoundsEdit.tsx';
 import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 import { takeHandover } from '../handover.ts';
+import { TableFrame, type TableScreen } from '../table-frame.tsx';
 
 /** Шаг 149 (#27, скрин владельца): пустое значение поля — нейтральный прочерк, а не «no value»; почему пусто — подписью поля */
 const EMPTY = '–';
@@ -287,8 +288,10 @@ export interface BoundsPick {
   disabled?: boolean;
 }
 
-export function BoundsIndexView({ worldId, items, embedded = false, pick, heading = true, filtered = false }: {
+export function BoundsIndexView({ worldId, items, embedded = false, pick, heading = true, filtered = false, frame }: {
   worldId: string; items: readonly BoundsIndexItem[]; embedded?: boolean; pick?: BoundsPick; heading?: boolean; filtered?: boolean;
+  /** Шаг 182 (#38): экран, чья таблица разворачивается («Maximize the table»); без него — только закреплённая шапка */
+  frame?: TableScreen;
 }) {
   const m = useMessages();
   const c = m.ui.bounds.indexColumns;
@@ -302,7 +305,7 @@ export function BoundsIndexView({ worldId, items, embedded = false, pick, headin
       {items.length === 0 && !filtered ? <p className="notice">{m.ui.onboarding.empty.bounds} <a href={href(worldId, 'channels')}>{m.ui.onboarding.empty.startHere}</a></p> : null}
       {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
       {items.length === 0 ? null : (
-        <div className="table-wrap">
+        <TableFrame {...(frame ? { screen: frame } : {})}>
           <table className={pick ? 'cardify selectable' : 'cardify'}>
             {/* Шаг 175 (QA-A Testing 2.0, этап 4): заданный минимум и действующий пол — разные колонки: пол бывает выше минимума (маржа, безубыточность) */}
             <thead><tr>{pick ? <th className="pick"><span className="visually-hidden">{c.offer}</span></th> : null}<th>{c.offer}</th><th className="num">{c.min}</th><th className="num">{c.max}</th><th className="num">{m.ui.products.columns.floor}</th><th /></tr></thead>
@@ -330,7 +333,7 @@ export function BoundsIndexView({ worldId, items, embedded = false, pick, headin
               })}
             </tbody>
           </table>
-        </div>
+        </TableFrame>
       )}
     </section>
   );
@@ -403,7 +406,7 @@ function BoundsSelection({ worldId, view, query, onQuery, offerQuery, onOfferQue
           review={review !== null} onReview={(on) => onReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} />
       ) : null}
       {review ? <h4>{m.ui.selection.reviewTitle}</h4> : null}
-      <BoundsIndexView worldId={worldId} items={items} embedded heading={false} filtered={filtered || review !== null} {...(pick ? { pick } : {})} />
+      <BoundsIndexView worldId={worldId} items={items} embedded heading={false} filtered={filtered || review !== null} frame="costs" {...(pick ? { pick } : {})} />
       {review ? (summary?.review ? <Pager page={summary.review.page} query={review} onQuery={onReview} /> : null) : <Pager page={view.page} query={query} onQuery={onQuery} />}
       {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
       {view.page.total === 0 && !filtered ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} selection={selection} selected={summary?.selected ?? 0}

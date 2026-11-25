@@ -8,6 +8,7 @@ import { Badge, commonZone, Gaps, Help, href, Load, OfferPicker, Pager, ReasonLi
 import { Field } from '../forms.tsx';
 import { PeriodPicker } from '../date-range.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
+import { TableFrame } from '../table-frame.tsx';
 
 /**
  * Шаг 95 [Р-217]: Price changes — единственный журнал цен. «Kind» выбирает, что в нём: записи в канал (как было) или все решения —
@@ -74,15 +75,15 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
       {trialWeek ? <p className="notice trial-week">{f.trialWeek}</p> : null}
       {/* Шаг 169 (#36): пустая выборка журнала — к ответу «Why didn't my price change?» выбранного предложения за тот же период */}
       {view.items.length === 0 ? <><p className="muted empty">{f.empty}</p>{onQuery ? <UnchangedHint worldId={view.worldId} writeScopeId={q.writeScopeId ?? undefined} period={query.period ?? { preset: '7d' }} /> : null}</> : (
-        <div className="table-wrap">
-          {/* Шаг 104 [Р-229]: выгрузка — кнопкой «Export» в ряду фильтров (прежняя «All N entries as a file» заменена) */}
-          {/* Шаг 145 (аудит UX, 1.2): у чисел — период и что они считают; число группы — фильтр ровно этой группы */}
-          <div className="table-head">{onQuery ? <span className="feed-counts">{f.countsLead(periodPhrase(query.period ?? { preset: '7d' }, m))}{' '}
+        // Шаг 104 [Р-229]: выгрузка — кнопкой «Export» в ряду фильтров (прежняя «All N entries as a file» заменена)
+        // Шаг 145 (аудит UX, 1.2): у чисел — период и что они считают; число группы — фильтр ровно этой группы
+        // Шаг 182 (#38): шапка таблицы — на экране, таблица разворачивается
+        <TableFrame screen="feed" lead={onQuery ? <span className="feed-counts">{f.countsLead(periodPhrase(query.period ?? { preset: '7d' }, m))}{' '}
             {FEED_COUNT_ORDER.filter(([group, key]) => group !== 'SHADOW_HELD' || view.counts[key] > 0).map(([group, key]) => (
               <button key={group} type="button" className={`reason-filter${q.status === group ? ' on' : ''}`} aria-pressed={q.status === group}
                 onClick={() => onQuery({ ...current, status: q.status === group ? undefined : group, offset: 0 })}>{f.statusGroups[group]} <span className="count">{view.counts[key]}</span></button>
             ))}</span> : <span>{f.counts(view.counts)}</span>}
-            {shared.map((text) => <span key={text} className="head-note">{text}</span>)}</div>
+          notes={shared.map((text) => <span key={text} className="head-note">{text}</span>)}>
           <table className="feed dense sticky-end cardify clickable-rows">
             <thead><tr><th><WhenHead label={c.when} zone={zone} /></th><th>{c.offer}</th><th className="num">{c.from}</th><th className="num">{c.to}</th><th className="num">{c.change}</th><th>{c.status}</th><th>{c.reason}</th><th /></tr></thead>
             <tbody>
@@ -104,7 +105,7 @@ export function FeedScreenView({ view, onQuery, query = {} }: { view: PriceFeedV
               ))}
             </tbody>
           </table>
-        </div>
+        </TableFrame>
       )}
       {view.page.total === 0 ? null : <div className="buttons">
         <span className="small muted">{view.page.text}</span>
@@ -230,7 +231,7 @@ function DecisionJournal({ worldId, onKind, period, onPeriod, search, onSearch, 
           <>
             {view.clipped ? <p className="notice">{m.ui.period.clipped(30)}</p> : null}
             {view.search && view.search.total > view.search.shown ? <p className="notice">{f.searchLimited(view.search.shown, view.search.total)}</p> : null}
-            <DecisionsView worldId={worldId} items={view.items} />
+            <DecisionsView worldId={worldId} items={view.items} frame="feed" />
             {view.items.length === 0 ? <UnchangedHint worldId={worldId} writeScopeId={query.writeScopeId} period={period} /> : null}
             <Pager page={view.page} query={query} onQuery={(q) => setQuery({ ...query, ...q })} />
           </>

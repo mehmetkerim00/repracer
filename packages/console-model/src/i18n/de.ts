@@ -505,6 +505,8 @@ export const de: Messages = {
       /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
       /** Шаг 85: кнопки выдвижной навигации на узких экранах — доступные имена */
       menu: 'Menü', collapseNav: 'Menü einklappen', expandNav: 'Menü ausklappen', closeMenu: 'Menü schließen',
+      /** Шаг 182 (#38): таблица во всю ширину окна и обратно — доступные имена кнопки в шапке таблицы */
+      maximizeTable: 'Tabelle maximieren', restoreTable: 'Tabelle wiederherstellen',
       metrics: { offers: 'Angebote', decisions: 'Entscheidungen 24 h', interventions: 'Eingriffe 7 Tage' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Angebote ${scopes} · Entscheidungen (24 h) ${decisionsLastDay} · Eingriffe (7 Tage) ${interventionsLastWeek}`,

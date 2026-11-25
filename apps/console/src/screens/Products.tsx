@@ -8,6 +8,7 @@ import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
 import { handOver } from '../handover.ts';
 import { rememberKey, useRemembered } from '../remember.ts';
+import { TableFrame } from '../table-frame.tsx';
 import { BoundsIndexView } from './Bounds.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 
@@ -199,10 +200,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
       ) : null}
       {view.matched !== null ? <Help className="section-sub" text={f.matched(view.matched, view.totals.total)} /> : null}
       {selectionUi ?? null}
-      {reviewList ? reviewList : view.rows.length > 0 ? <div className="table-wrap">
-        {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными */}
-        <div className="table-head">
-          <span>{p.totals(view.totals)}</span>
+      {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными. Шаг 182 (#38): шапка таблицы — на экране, таблица разворачивается */}
+      {reviewList ? reviewList : view.rows.length > 0 ? <TableFrame screen="products" lead={<span>{p.totals(view.totals)}</span>} actions={(
           <span className="view-options">
             {/* Шаг 95 [Р-217]: массовые операции — кнопкой с Offers; своего пункта меню у них нет */}
             <a className="button-link" href={href(view.worldId, 'products', 'bulk')}>{p.bulkEdit}</a>
@@ -215,7 +214,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
               </div>
             </details>
           </span>
-        </div>
+        )}>
         <table className={`products sticky-end compact${col.health ? ' with-health' : ''}`}>
           <thead>
             <tr>
@@ -302,7 +301,7 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
             ))}
           </tbody>
         </table>
-      </div> : null}
+      </TableFrame> : null}
       {query && onQuery && view.rows.length > 0 ? <Pager page={view.page} query={query} onQuery={onQuery} /> : null}
       <Gaps gaps={view.gaps} />
     </section>
@@ -425,7 +424,7 @@ function OffersWithSelection(props: Parameters<typeof ProductsView>[0] & { world
   const reviewList = review ? (
     <>
       <h4>{t.reviewTitle}</h4>
-      <BoundsIndexView worldId={worldId} items={summary?.review?.items ?? []} embedded heading={false} filtered
+      <BoundsIndexView worldId={worldId} items={summary?.review?.items ?? []} embedded heading={false} filtered frame="products"
         pick={{ picked: (id) => !selection.except.includes(id), onToggle: (id, on) => onSelection(toggleOffer(selection, id, on, true)), canPick: canPickMore(selection) }} />
       {summary?.review ? <Pager page={summary.review.page} query={review} onQuery={onReview} /> : null}
     </>

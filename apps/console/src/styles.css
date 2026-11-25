@@ -125,10 +125,14 @@ main.page.world { max-width: none; margin: 0; padding: 0; display: flex; flex-di
 @media (width >= 63.25rem) {
   .nav-collapse { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); min-height: var(--control-h); margin: 0 0 var(--space-2) var(--space-1); color: var(--sidebar-muted); }
   .nav-collapse:hover { color: var(--nav-active-fg); background: var(--nav-hover); }
-  .world-layout.nav-collapsed { grid-template-columns: calc(var(--touch-target) + var(--space-4)) minmax(0, 1fr); }
-  .world-layout.nav-collapsed .sidebar .workspace, .world-layout.nav-collapsed .nav-group .group-title { display: none; }
-  .world-layout.nav-collapsed .nav-group a { justify-content: center; padding: var(--space-1) 0; }
-  .world-layout.nav-collapsed .nav-group a .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  /* Шаг 182 (#38): развёрнутая таблица («Maximize the table») сворачивает боковину до иконок тем же видом и снимает предел ширины содержимого */
+  .world-layout:is(.nav-collapsed, :has(.table-wrap.maximized)) { grid-template-columns: calc(var(--touch-target) + var(--space-4)) minmax(0, 1fr); }
+  .world-layout:is(.nav-collapsed, :has(.table-wrap.maximized)) .sidebar .workspace, .world-layout:is(.nav-collapsed, :has(.table-wrap.maximized)) .nav-group .group-title { display: none; }
+  .world-layout:is(.nav-collapsed, :has(.table-wrap.maximized)) .nav-group a { justify-content: center; padding: var(--space-1) 0; }
+  .world-layout:is(.nav-collapsed, :has(.table-wrap.maximized)) .nav-group a .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  /* пока таблица развёрнута, вид боковины решает она: свернуть или развернуть меню — после «Restore the table» */
+  .world-layout:has(.table-wrap.maximized) .nav-collapse { display: none; }
+  .world-layout:has(.table-wrap.maximized) .world-content { max-width: none; }
 }
 /* шаг 84: единые отступы страницы и предельная ширина контента — на широком мониторе ничего не размазывается */
 .world-content { min-width: 0; width: 100%; max-width: 1344px; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
@@ -390,6 +394,30 @@ table.products tbody tr:hover td.offer, table.sticky-end tbody tr:hover td:last-
 .table-head .buttons { margin: 0; }
 /* шаг 84: общая для многих строк причина — один раз при полосе итогов */
 .table-head .head-note { flex-basis: 100%; font-size: var(--font-size-sm); color: var(--text-2); }
+/*
+ * Шаг 182 (#38): шапка широкой таблицы — на экране, пока листаются строки. Помещается в рамку (`fits`, замер `TableFrame`) — рамка ничего не
+ * обрезает, шапка держится под верхней панелью при прокрутке страницы; шире рамки — рамка не выше окна, строки листаются в ней, шапка — у её
+ * края (`.table-wrap th { top: 0 }`), первая колонка закреплена. На телефоне — как было: ленты карточками, справочные таблицы листаются вбок
+ */
+.table-wrap.framed { scroll-margin-top: calc(var(--topbar-h) + var(--space-2)); }
+/* `clip`, а не `visible`: рамка не становится контейнером прокрутки (шапка держится за окно), а если таблица переросла рамку раньше, чем
+   замер снял `fits` (окно сузили), выступ обрезается рамкой, а не уводит страницу вбок; по вертикали — видно (меню колонок) */
+.table-wrap.fits { overflow-x: clip; overflow-y: visible; }
+.table-wrap.fits th { top: var(--topbar-h); }
+/* без обрезки рамкой по вертикали закругление нижних углов держат сами крайние ячейки последней строки (подсветка наведения и внимания) */
+.table-wrap.fits > table:last-child tbody tr:last-child > td:first-child { border-bottom-left-radius: var(--radius-lg); }
+.table-wrap.fits > table:last-child tbody tr:last-child > td:last-child { border-bottom-right-radius: var(--radius-lg); }
+@media (width >= 48rem) {
+  .table-wrap.framed:not(.fits) { max-height: calc(100vh - var(--topbar-h) - 2 * var(--space-4)); }
+}
+.table-head .table-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-left: auto; }
+/* «Maximize the table» — экран от 1012 px: уже на планшете содержимое во всю ширину, разворачивать нечего */
+.table-max, .table-head.only-max { display: none; }
+@media (width >= 63.25rem) {
+  .table-max { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); min-height: var(--control-h); padding: 0; color: var(--text-2); }
+  .table-max:hover, .table-max[aria-pressed='true'] { color: var(--text); background: var(--control-bg-active); }
+  .table-head.only-max { display: flex; padding-top: var(--space-1); padding-bottom: var(--space-1); }
+}
 .th-zone { color: var(--text-2); font-weight: 400; }
 td .basis { color: var(--text); }
 .table-foot { margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); border-top: 1px solid var(--table-border); background: var(--surface-muted); position: sticky; left: 0; }

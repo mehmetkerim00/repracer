@@ -93,7 +93,15 @@ Every data screen shares the same conventions:
 - a status line on top of every workspace screen: pricing mode, active stops, freshness of competitor data, and the offers that need
   attention — each number opens its own selection;
 - a row that needs attention is tinted yellow — only for a real reason: on Offers the reasons the status line counts, on Inventory the
-  rule of its "needs attention" filter.
+  rule of its "needs attention" filter;
+- on a wide screen the menu folds to icons ("Collapse the menu") and back; the browser remembers the choice. **[QA-A]**
+- filters, periods, searches and pages survive navigation within the browser tab (Offers, Price changes, Inventory, Protections); the
+  Offers filter is also in the address, so a link and "Back" carry it. A link that opens a specific selection wins over the remembered
+  one. **[QA-A]**
+- the wide tables (Offers, Costs & floors, Price changes) keep their column header on screen while the rows scroll: a table that fits
+  its frame scrolls with the page under the top bar; a wider one scrolls inside a frame no taller than the window, with the first
+  column pinned. "Maximize the table" (wide screens) gives the table the window width — the menu folds to icons, the content limit is
+  lifted; the status line, filters, notices and pages stay on the page. The browser remembers it per screen. **[QA-A]**
 
 | Screen | What it shows | What the seller does there | Label |
 |---|---|---|---|

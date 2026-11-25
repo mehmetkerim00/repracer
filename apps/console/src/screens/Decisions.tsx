@@ -4,12 +4,13 @@ import { useResource, worldPath } from '../api.ts';
 import { Badge, commonZone, Gaps, href, Load, NotFound, ReasonLine, receiptBack, useMessages, When, WhenHead, UnitName } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { CompetitorTable } from './Competition.tsx';
+import { TableFrame, type TableScreen } from '../table-frame.tsx';
 
 const STATUS_TONE: Readonly<Record<StepStatus, string>> = { OK: 'ok', STOP: 'stop', WARN: 'warn', SKIPPED: 'off', UNKNOWN: 'unknown' };
 /** Шаг 81: знак исхода в карточке итога — по тону решения */
 const VERDICT_ICON: Readonly<Record<string, string>> = { ok: 'check', warn: 'shieldCheck', stop: 'x', off: 'equal', unknown: 'help', progress: 'activity' };
 
-export function DecisionsView({ worldId, items }: { worldId: string; items: readonly DecisionListItem[] }) {
+export function DecisionsView({ worldId, items, frame }: { worldId: string; items: readonly DecisionListItem[]; frame?: TableScreen }) {
   const m = useMessages();
   const t = m.ui.trace;
   const zone = commonZone(items.map((d) => d.decidedAt));
@@ -17,7 +18,8 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
     <section>
       {/* Шаг 95 [Р-217]: список решений — вид журнала Price changes (Kind: All decisions); заголовок страницы — у журнала */}
       {items.length === 0 ? <p className="muted empty">{t.noDecisions}</p> : (
-        <div className="table-wrap">
+        // Шаг 182 (#38): на Price changes таблица решений разворачивается так же, как записи (одна память экрана)
+        <TableFrame {...(frame ? { screen: frame } : {})}>
           <table className="cardify clickable-rows">
             <thead><tr><th><WhenHead label={t.columns.when} zone={zone} /></th><th>{t.columns.unit}</th><th>{t.columns.outcome}</th><th className="num">{t.columns.price}</th><th>{t.columns.reason}</th><th /></tr></thead>
             <tbody>
@@ -35,7 +37,7 @@ export function DecisionsView({ worldId, items }: { worldId: string; items: read
               ))}
             </tbody>
           </table>
-        </div>
+        </TableFrame>
       )}
     </section>
   );

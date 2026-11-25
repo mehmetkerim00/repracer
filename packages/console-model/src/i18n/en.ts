@@ -532,6 +532,8 @@ export const en = {
       /** Шаг 84: мини-показатели карточки рабочего пространства — подпись над числом */
       /** Шаг 85: кнопки выдвижной навигации на узких экранах — доступные имена */
       menu: 'Menu', collapseNav: 'Collapse the menu', expandNav: 'Expand the menu', closeMenu: 'Close menu',
+      /** Шаг 182 (#38): таблица во всю ширину окна и обратно — доступные имена кнопки в шапке таблицы */
+      maximizeTable: 'Maximize the table', restoreTable: 'Restore the table',
       metrics: { offers: 'Offers', decisions: 'Decisions 24h', interventions: 'Interventions 7d' },
       counts: (scopes: number, decisionsLastDay: number, interventionsLastWeek: number) =>
         `Offers ${scopes} · decisions (24 h) ${decisionsLastDay} · interventions (7 days) ${interventionsLastWeek}`,
