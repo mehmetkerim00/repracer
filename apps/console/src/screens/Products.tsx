@@ -1,11 +1,14 @@
-import { useState } from 'react';
-import { ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_MONEY_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
+import { useState, type ReactNode } from 'react';
+import { canPickMore, NO_SELECTION, toggleOffer, type OfferSelection, ATTENTION_FILTERS, LIST_PAGE_DEFAULT, OFFER_HOLDER_FILTERS, OFFER_MONEY_FILTERS, OFFER_PRICING_FILTERS, OFFER_SETUP_FILTERS, type AttentionFilter, type BuyboxCells, type MissingSetup, type ListQuery, type OfferSort, type OfferSortKeyValue, type ProductListView, type ProductRow } from '@repracer/console-model';
 import { PRICING_SWITCH_NOTE_MAX, type DisableRequest, type DisableResult, type EnableResult } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, ColorVariant, ErrorBox, errorText, Gaps, Help, href, Load, Pager, ProductRef, ReasonLine, SellerName, UnitName, useMessages } from '../components.tsx';
-import { CheckField, Field, FormActions } from '../forms.tsx';
+import { CheckField, Field, FormActions, RowCheck } from '../forms.tsx';
 import { ExportControl, exportQuery } from '../export.tsx';
 import { Octicon } from '../icons.tsx';
+import { handOver } from '../handover.ts';
+import { BoundsIndexView } from './Bounds.tsx';
+import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
 
 /**
  * Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда. Шаг 105 [Р-230]: колонки Buy Box —
@@ -125,10 +128,12 @@ function readView(view: ProductListView): { columns: Record<OptionalColumn, bool
 }
 
 /** Экран A: действующий пол — главная цифра, min_price — его составляющая (шаг 12, F) */
-export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQuery = NO_OFFER_QUERY, onOfferQuery, onBuyboxColumns }: {
+export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQuery = NO_OFFER_QUERY, onOfferQuery, onBuyboxColumns, pick, selectionUi, reviewList }: {
   view: ProductListView; onEnable?: (row: ProductRow) => void; onDisable?: (row: ProductRow) => void; query?: ListQuery; onQuery?: (q: ListQuery) => void;
   /** Шаг 105: фильтр и сортировка — у экрана; без обработчика (тесты экранов) — без ряда фильтров */
   offerQuery?: OfferUiQuery; onOfferQuery?: (q: OfferUiQuery) => void; onBuyboxColumns?: (on: boolean) => void;
+  /** Шаг 179 (#39): выбор для массовых операций — галочка в ячейке предложения, строка выбора и «Review selection» вместо таблицы */
+  pick?: { picked: (id: string) => boolean; onToggle: (id: string, on: boolean) => void; canPick: boolean }; selectionUi?: ReactNode; reviewList?: ReactNode;
 }) {
   const m = useMessages();
   const p = m.ui.products;
@@ -190,7 +195,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
         </form>
       ) : null}
       {view.matched !== null ? <Help className="section-sub" text={f.matched(view.matched, view.totals.total)} /> : null}
-      {view.rows.length > 0 ? <div className="table-wrap">
+      {selectionUi ?? null}
+      {reviewList ? reviewList : view.rows.length > 0 ? <div className="table-wrap">
         {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными */}
         <div className="table-head">
           <span>{p.totals(view.totals)}</span>
@@ -225,6 +231,9 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
               // Шаг 168: строка с причиной «требует внимания» (та же, что считает строка состояния) — подсвечена
               <tr key={r.unit.writeScopeId} className={r.attention.length > 0 ? 'attention' : undefined}>
                 <td className="offer">
+                  {/* Шаг 179 (#39): галочка выбора — в ячейке предложения: колонки и закреплённая первая колонка таблицы прежние */}
+                  {pick ? <RowCheck label={m.ui.selection.pick(r.unit.label)} checked={pick.picked(r.unit.writeScopeId)}
+                    disabled={!pick.picked(r.unit.writeScopeId) && !pick.canPick} onChange={(on) => pick.onToggle(r.unit.writeScopeId, on)} /> : null}
                   <strong><UnitName unit={r.unit} variant={false} /></strong>
                   {/*
                     * Шаг 162 (#27): пометки строки (распродажа — шаг 102, истёкшая комиссия — шаг 142, пол выше потолка — шаг 102, рамки канала —
@@ -385,6 +394,43 @@ export function DisableView(props: { unit: string; done: boolean; busy: boolean;
 
 /** Шаг 112 [Р-238]: вторая строка предложения на Offers — цвет товара, идентификатор товара в канале и состояние, если оно не «новое» */
 
+/**
+ * Шаг 179 (#39): массовые операции с Offers — галочки строк, строка выбора («N selected · M outside current view», «Select all matching»,
+ * «Review selection») и переход в правку границ или назначение стратегии с этим выбором (передача — `handover.ts`)
+ */
+function OffersWithSelection(props: Parameters<typeof ProductsView>[0] & { worldId: string; selection: OfferSelection; onSelection: (s: OfferSelection) => void;
+  review: ListQuery | null; onReview: (q: ListQuery | null) => void }) {
+  const { view, worldId, selection, onSelection, review, onReview, offerQuery = NO_OFFER_QUERY } = props;
+  const m = useMessages();
+  const filter = filterOfUi(offerQuery);
+  const summary = useSelectionSummary(worldId, selection, filter, view.rows.map((r) => r.unit.writeScopeId), review, 0);
+  const t = m.ui.selection;
+  const go = (screen: 'costs' | 'strategies') => {
+    handOver(worldId, selection);
+    location.hash = screen === 'costs' ? href(worldId, 'costs', 'edit') : href(worldId, 'strategies');
+  };
+  const selectionUi = (
+    <div className="offers-selection">
+      <SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={view.matched ?? view.totals.total} storefronts={view.filters.storefronts}
+        review={review !== null} onReview={(on) => onReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} />
+      <div className="buttons">
+        <button type="button" disabled={(summary?.selected ?? 0) === 0} onClick={() => go('costs')}>{t.toBounds}</button>
+        <button type="button" disabled={(summary?.selected ?? 0) === 0} onClick={() => go('strategies')}>{t.toStrategy}</button>
+      </div>
+    </div>
+  );
+  const reviewList = review ? (
+    <>
+      <h4>{t.reviewTitle}</h4>
+      <BoundsIndexView worldId={worldId} items={summary?.review?.items ?? []} embedded heading={false} filtered
+        pick={{ picked: (id) => !selection.except.includes(id), onToggle: (id, on) => onSelection(toggleOffer(selection, id, on, true)), canPick: canPickMore(selection) }} />
+      {summary?.review ? <Pager page={summary.review.page} query={review} onQuery={onReview} /> : null}
+    </>
+  ) : null;
+  return <ProductsView {...props} pick={{ picked: (id) => isPicked(selection, summary, id), onToggle: (id, on) => onSelection(toggleOffer(selection, id, on, isPicked(selection, summary, id))), canPick: canPickMore(selection) }}
+    selectionUi={selectionUi} reviewList={reviewList} />;
+}
+
 export function ProductsScreen({ worldId, initialAttention, initialQuery }: { worldId: string; initialAttention?: AttentionFilter; initialQuery?: OfferUiQuery }) {
   const m = useMessages();
   // Р-136: экран просит страницу; переключение страницы — новый запрос, как у ленты цен
@@ -393,6 +439,9 @@ export function ProductsScreen({ worldId, initialAttention, initialQuery }: { wo
   // Шаг 146 (#34): `products/attention/<причина>` — клик по строке состояния открывает Offers с этой выборкой
   // Шаг 170 (#35): `products/filter/<параметры>` — пункт чеклиста готовности открывает Offers со своей выборкой
   const [offerQuery, setOfferQuery] = useState<OfferUiQuery>(() => initialQuery ?? ({ ...NO_OFFER_QUERY, attention: initialAttention ?? '' }));
+  // Шаг 179 (#39, уточнение Р-140): выбор для массовых операций — переживает страницы и фильтры, виден строкой выбора
+  const [selection, setSelection] = useState<OfferSelection>(NO_SELECTION);
+  const [review, setReview] = useState<ListQuery | null>(null);
   const [bb, setBb] = useState(storedBuyboxColumns);
   const params = new URLSearchParams({ offset: String(query.offset), limit: String(query.limit), ...offerParams(offerQuery, bb) });
   const [resource, retry] = useResource<ProductListView>(`${worldPath(worldId, 'products')}?${params}`, m.locale);
@@ -439,8 +488,8 @@ export function ProductsScreen({ worldId, initialAttention, initialQuery }: { wo
         missing={{ writeScopeId: row.unit.writeScopeId, items: row.missing }} /> : null}
       {off ? <DisableView unit={off.row.unit.label} done={off.done} busy={busy} error={error} onConfirm={(note) => void disable(off.row, note)} onClose={closeOff} /> : null}
       <Load shape="table" resource={resource} retry={retry}>
-        {(view) => <ProductsView view={view} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }}
-          onDisable={(r) => { setRow(null); setError(null); setOff({ row: r, done: false }); }}
+        {(view) => <OffersWithSelection view={view} worldId={worldId} query={query} onQuery={setQuery} onEnable={(r) => { setRow(r); setResult(null); void enable(r, false); }}
+          onDisable={(r) => { setRow(null); setError(null); setOff({ row: r, done: false }); }} selection={selection} onSelection={setSelection} review={review} onReview={setReview}
           offerQuery={offerQuery} onOfferQuery={(q) => { setOfferQuery(q); setQuery({ ...query, offset: 0 }); }} onBuyboxColumns={setBb} />}
       </Load>
     </>

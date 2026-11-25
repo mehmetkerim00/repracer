@@ -1923,6 +1923,8 @@ export const fr: Messages = {
     },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
+      /** Шаг 179 (#39): импорт описания товара (цвет) — свёрнутым разделом: он не весит столько же, сколько себестоимость и границы */
+      moreImports: 'Autres importations',
       links: { title: 'Lancer une modification groupée', bounds: 'Définir les prix minimum et maximum de nombreuses offres', strategies: 'Attribuer une stratégie à de nombreuses offres', costs: 'Importer les coûts unitaires', products: 'Importer les détails des produits (couleur)' },
       pageTitle: 'Opérations groupées', back: '← Offres', historyTitle: 'Opérations passées', none: 'Pas encore d’opérations groupées. Elles apparaissent ici quand vous importez des coûts unitaires, modifiez les limites de nombreuses offres ou attribuez une stratégie à de nombreuses offres.',
       kinds: {
@@ -2144,6 +2146,7 @@ export const fr: Messages = {
     },
     /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
     selection: {
+      toBounds: 'Modifier les bornes de la sélection', toStrategy: 'Attribuer une stratégie à la sélection',
       counter: (n: number, outside: number) => (n === 0 ? 'Rien de sélectionné' : `${n} sélectionnées · ${outside} hors de la vue actuelle`),
       review: 'Revoir la sélection', reviewBack: 'Afficher toutes les offres', reviewTitle: 'Seulement les offres sélectionnées', clear: 'Effacer la sélection',
       selectAllMatching: (n: number) => (n === 1 ? 'Sélectionner l’offre correspondante' : `Sélectionner les ${n} correspondantes`), selectAll: (n: number) => (n === 1 ? 'Sélectionner l’offre' : `Sélectionner les ${n} offres`),

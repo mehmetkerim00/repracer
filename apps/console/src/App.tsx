@@ -328,11 +328,15 @@ function WorldScreen({ route, worlds }: { route: Route & { worldId: string }; wo
                 <li><a className="row-link" href={href(world.id, 'strategies')}>{m.ui.jobs.links.strategies}</a></li>
                 <li><a className="row-link" href={href(world.id, 'costs', 'import')}>{m.ui.jobs.links.costs}</a></li>
                 {/* Шаг 112 [Р-238]: описание товара (цвет) — импортом здесь же, ниже */}
-                <li><a className="row-link" href={href(world.id, 'products', 'bulk', 'details')}>{m.ui.jobs.links.products}</a></li>
+                <li><a className="row-link muted small" href={href(world.id, 'products', 'bulk', 'details')}>{m.ui.jobs.links.products}</a></li>
               </ul>
             </section>
             <SectionAnchor id="product-details" focus={route.param2 === 'details'} />
-            <ImportPanel worldId={world.id} kind="PRODUCTS" canEdit={world.role !== null && can(world.role as MemberRole, 'MANAGE_CATALOG')} />
+            {/* Шаг 179 (#39): импорт цвета — свёрнутым разделом «More imports»; ссылка `products/bulk/details` открывает его сразу */}
+            <details className="card more-imports" open={route.param2 === 'details'}>
+              <summary>{m.ui.jobs.moreImports}</summary>
+              <ImportPanel worldId={world.id} kind="PRODUCTS" canEdit={world.role !== null && can(world.role as MemberRole, 'MANAGE_CATALOG')} />
+            </details>
             <JobHistory worldId={world.id} /></>
         // Шаг 146 (#34): `products/attention/<причина>` — клик по «требует внимания» строки состояния
         : route.screen === 'products' ? <ProductsScreen key={`${route.param}|${route.param2}`} worldId={world.id}

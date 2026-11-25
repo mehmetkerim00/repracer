@@ -1923,6 +1923,8 @@ export const es: Messages = {
     },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
+      /** Шаг 179 (#39): импорт описания товара (цвет) — свёрнутым разделом: он не весит столько же, сколько себестоимость и границы */
+      moreImports: 'Más importaciones',
       links: { title: 'Iniciar un cambio masivo', bounds: 'Definir precio mínimo y máximo de muchas ofertas', strategies: 'Asignar una estrategia a muchas ofertas', costs: 'Importar costos unitarios', products: 'Importar detalles de productos (color)' },
       pageTitle: 'Operaciones masivas', back: '← Ofertas', historyTitle: 'Operaciones anteriores', none: 'Todavía no hay operaciones masivas. Aparecen aquí cuando importa costos unitarios, cambia los límites de muchas ofertas o asigna una estrategia a muchas ofertas.',
       kinds: {
@@ -2144,6 +2146,7 @@ export const es: Messages = {
     },
     /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
     selection: {
+      toBounds: 'Cambiar los límites de la selección', toStrategy: 'Asignar una estrategia a la selección',
       counter: (n: number, outside: number) => (n === 0 ? 'Nada seleccionado' : `${n} seleccionadas · ${outside} fuera de la vista actual`),
       review: 'Revisar selección', reviewBack: 'Mostrar todas las ofertas', reviewTitle: 'Solo las ofertas seleccionadas', clear: 'Borrar selección',
       selectAllMatching: (n: number) => (n === 1 ? 'Seleccionar la 1 oferta que coincide' : `Seleccionar las ${n} que coinciden`), selectAll: (n: number) => (n === 1 ? 'Seleccionar la 1 oferta' : `Seleccionar las ${n} ofertas`),

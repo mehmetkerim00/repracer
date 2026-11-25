@@ -202,6 +202,10 @@ the differences, apply.
 **Strategy assignment — [QA-A].** The assignment list on Strategies works the same way: the Offers filters and search, the selection that
 survives pages and filters, the same counter, "Select all matching" and "Review selection". The preview lists every offer of the
 assignment, page by page; saving checks that the selection is the one the preview showed.
+
+**Bulk from Offers — [QA-A].** Tick offers on Offers (or "Select all matching") and open "Change bounds of the selected" or "Assign a
+strategy to the selected": the bounds edit or the strategy assignment opens with that selection. There is no bulk repricing on/off
+switch (Р-242). The color import sits folded under "More imports" on the bulk operations page.
 - A minimum above the maximum is refused before anything runs, in one message that names the offers and both amounts; nothing is changed.
 - Preview is off until you choose what to change; Apply is off when nothing would change. Both say why.
 - Each row names the offer with its color and channel ID, its bounds and its effective floor.

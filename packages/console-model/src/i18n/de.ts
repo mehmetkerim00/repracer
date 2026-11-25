@@ -1867,6 +1867,8 @@ export const de: Messages = {
       empty: 'Nichts zu exportieren: der Bildschirm zeigt keine Zeilen.',
     },
     jobs: {
+      /** Шаг 179 (#39): импорт описания товара (цвет) — свёрнутым разделом: он не весит столько же, сколько себестоимость и границы */
+      moreImports: 'Weitere Importe',
       links: { title: 'Eine Massenänderung beginnen', bounds: 'Mindest- und Höchstpreis für viele Angebote festlegen', strategies: 'Vielen Angeboten eine Strategie zuweisen', costs: 'Stückkosten importieren', products: 'Produktdetails importieren (Farbe)' },
       pageTitle: 'Massenvorgänge', back: '← Angebote', historyTitle: 'Bisherige Vorgänge', none: 'Noch keine Massenvorgänge. Sie erscheinen hier, wenn Sie Stückkosten importieren, die Grenzen vieler Angebote ändern oder vielen Angeboten eine Strategie zuweisen.',
       kinds: {
@@ -2085,6 +2087,7 @@ export const de: Messages = {
     },
     /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
     selection: {
+      toBounds: 'Grenzen der Auswahl ändern', toStrategy: 'Der Auswahl eine Strategie zuweisen',
       counter: (n: number, outside: number) => (n === 0 ? 'Nichts ausgewählt' : `${n} ausgewählt · ${outside} außerhalb der aktuellen Ansicht`),
       review: 'Auswahl prüfen', reviewBack: 'Alle Angebote zeigen', reviewTitle: 'Nur die ausgewählten Angebote', clear: 'Auswahl aufheben',
       selectAllMatching: (n: number) => (n === 1 ? 'Das 1 passende Angebot auswählen' : `Alle ${n} passenden auswählen`), selectAll: (n: number) => (n === 1 ? 'Das 1 Angebot auswählen' : `Alle ${n} Angebote auswählen`),

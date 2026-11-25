@@ -3384,6 +3384,56 @@ test('step 178 (#39, Р-140 amended): Strategies — filters, the selection bar 
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });
 
+/**
+ * Шаг 179 (#39): массовые операции с Offers — галочки строк, строка выбора и переход в правку границ или назначение стратегии с ЭТИМ выбором;
+ * импорт цвета — свёрнутым разделом «More imports» (ссылка на него открывает раздел)
+ */
+test('step 179 (#39): Offers hands its selection to the bounds edit and to the strategy assignment; the color import is folded under «More imports»', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = colorsApi;
+  try {
+    await b.setViewport(1440, 900);
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    const t = en.ui.selection;
+    const offers = async () => {
+      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+      await settled(b, 'offers');
+      await waitFor(b, `document.querySelectorAll('table.products tbody tr td.offer input.row-check').length > 1`, 'row checkboxes on Offers');
+    };
+    await offers();
+    const ids = await b.evaluate<number>(`[...document.querySelectorAll('table.products tbody tr td.offer input.row-check')].slice(0, 2).map((x) => x.click()).length`);
+    await waitFor(b, `document.querySelector('.offers-selection .selection-count').textContent.trim() === ${JSON.stringify(t.counter(2, 0))}`, 'two selected on Offers', 10_000);
+    assert.equal(ids, 2);
+    // В правку границ — с этим выбором
+    assert.ok(await b.evaluate<boolean>(`(() => { const x = [...document.querySelectorAll('.offers-selection button')].find((x) => x.textContent.trim() === ${JSON.stringify(t.toBounds)}); if (!x || x.disabled) return false; x.click(); return true; })()`), t.toBounds);
+    await waitFor(b, `location.hash.includes('/costs')`, 'Costs & floors');
+    await waitFor(b, `document.querySelector('.costs .selection-bar .selection-count')?.textContent.trim() === ${JSON.stringify(t.counter(2, 0))}`, 'the bounds edit has the same selection', 10_000);
+    assert.equal(await b.evaluate<number>(`document.querySelectorAll('.costs table.selectable tbody tr td.pick input:checked').length`), 2, 'the two offers are ticked');
+    // В назначение стратегии — с новым выбором
+    await offers();
+    await b.evaluate(`([...document.querySelectorAll('table.products tbody tr td.offer input.row-check')].slice(0, 3).forEach((x) => x.click()), true)`);
+    await waitFor(b, `document.querySelector('.offers-selection .selection-count').textContent.trim() === ${JSON.stringify(t.counter(3, 0))}`, 'three selected on Offers', 10_000);
+    assert.ok(await b.evaluate<boolean>(`(() => { const x = [...document.querySelectorAll('.offers-selection button')].find((x) => x.textContent.trim() === ${JSON.stringify(t.toStrategy)}); if (!x || x.disabled) return false; x.click(); return true; })()`), t.toStrategy);
+    await waitFor(b, `location.hash.includes('/strategies')`, 'Strategies');
+    await waitFor(b, `document.querySelector('.pick-card .selection-bar .selection-count')?.textContent.trim() === ${JSON.stringify(t.counter(3, 0))}`, 'the assignment has the same selection', 10_000);
+    // Импорт цвета — свёрнут; ссылка «details» открывает раздел
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products/bulk`)}, true)`);
+    await settled(b, 'bulk operations');
+    assert.equal(await b.evaluate<boolean>(`document.querySelector('details.more-imports').open`), false, 'the color import is folded');
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products/bulk/details`)}, true)`);
+    await settled(b, 'bulk operations, details');
+    await waitFor(b, `document.querySelector('details.more-imports')?.open === true`, 'the link opens the color import');
+  } finally {
+    currentApi = euApi;
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
 test('step 175: Offers rows are compact with the channel ID shown; Costs & floors shows the effective floor and identities in the pick list; Preview and Apply are off without a change', async () => {
   const b = browser!;
   const before = b.errors().length;

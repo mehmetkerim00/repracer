@@ -10,6 +10,7 @@ import { CheckField, Field, FieldGrid, FieldGroup, FormActions, RowCheck } from 
 import { BoundsIndexView } from './Bounds.tsx';
 import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
+import { takeHandover } from '../handover.ts';
 
 /**
  * Экран стратегий (шаги 21, 23): черновик или новая версия существующей стратегии → превью на выбранных офферах (движок и Gate на
@@ -176,7 +177,8 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
    * Шаг 178 (#39, уточнение Р-140): выбор переживает страницы и фильтры — только видимым. Начальный выбор — назначаемые предложения первой
    * страницы, отмеченные явно (как было); дальше листание и фильтр его не сбрасывают
    */
-  const [selection, setSelection] = useState<OfferSelection>(() => ({ ...NO_SELECTION, ids: assignable }));
+  // Шаг 179 (#39): выбор, переданный с Offers, — первым
+  const [selection, setSelection] = useState<OfferSelection>(() => takeHandover(worldId) ?? { ...NO_SELECTION, ids: assignable });
   const [review, setReview] = useState<ListQuery | null>(null);
   const [search, setSearch] = useState(offerQuery?.q ?? '');
   const filter = offerQuery ? filterOfUi(offerQuery) : {};

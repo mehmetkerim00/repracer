@@ -7,6 +7,7 @@ import { CheckField, Field, FieldGrid, FieldGroup, FormActions, RowCheck } from 
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
 import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
+import { takeHandover } from '../handover.ts';
 
 /** Шаг 149 (#27, скрин владельца): пустое значение поля — нейтральный прочерк, а не «no value»; почему пусто — подписью поля */
 const EMPTY = '–';
@@ -358,7 +359,8 @@ export function BoundsIndex({ worldId, preselect = null, focusEdit = false, refr
    * Шаг 177 (#39, уточнение Р-140): выбор переживает страницы и фильтры — только видимым; «Change this floor» со страницы предложения
    * открывает правку с этим предложением выбранным (шаг 96, В20)
    */
-  const [selection, setSelection] = useState<OfferSelection>(preselect ? { ...NO_SELECTION, ids: [preselect] } : NO_SELECTION);
+  // Шаг 179 (#39): выбор, переданный с Offers, — первым
+  const [selection, setSelection] = useState<OfferSelection>(() => takeHandover(worldId) ?? (preselect ? { ...NO_SELECTION, ids: [preselect] } : NO_SELECTION));
   const [review, setReview] = useState<ListQuery | null>(null);
   return (
     <Load shape="table" resource={resource} retry={retry}>

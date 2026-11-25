@@ -1936,6 +1936,8 @@ export const en = {
     },
     jobs: {
       // Шаг 96 (решение по варианту шага 95): на странице — три ссылки на массовые правки
+      /** Шаг 179 (#39): импорт описания товара (цвет) — свёрнутым разделом: он не весит столько же, сколько себестоимость и границы */
+      moreImports: 'More imports',
       links: { title: 'Start a bulk change', bounds: 'Set minimum & maximum price for many offers', strategies: 'Assign a strategy to many offers', costs: 'Import unit costs', products: 'Import product details (color)' },
       pageTitle: 'Bulk operations', back: '← Offers', historyTitle: 'Past operations', none: 'No bulk operations yet. They appear here when you import unit costs, change the bounds of many offers or assign a strategy to many offers.',
       kinds: {
@@ -2160,6 +2162,7 @@ export const en = {
     },
     /** Шаг 177 (#39, уточнение Р-140): выбор для массовых операций — виден всегда, переживает страницы и фильтры */
     selection: {
+      toBounds: 'Change bounds of the selected', toStrategy: 'Assign a strategy to the selected',
       counter: (n: number, outside: number) => (n === 0 ? 'Nothing selected' : `${n} selected · ${outside} outside current view`),
       review: 'Review selection', reviewBack: 'Show all offers', reviewTitle: 'Only the selected offers', clear: 'Clear selection',
       selectAllMatching: (n: number) => (n === 1 ? 'Select the 1 matching offer' : `Select all ${n} matching`), selectAll: (n: number) => (n === 1 ? 'Select the 1 offer' : `Select all ${n} offers`),

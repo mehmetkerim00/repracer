@@ -856,6 +856,12 @@ ul.offer-list li { padding: var(--space-1) 0; break-inside: avoid; }
 .selection-bar .buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 ul.selection-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); list-style: none; margin: 0; padding: 0; flex-basis: 100%; }
 ul.selection-badges > li { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border: 1px solid var(--accent-border); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-text); }
+/* Шаг 179 (#39): выбор на Offers — строка выбора и переходы к массовым операциям; галочка — в ячейке предложения */
+.offers-selection { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.offers-selection > .buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+table.products td.offer input.row-check { width: var(--space-4); height: var(--space-4); margin: 0 var(--space-2) 0 0; vertical-align: middle; }
+/* Шаг 179 (#39): импорт описания товара (цвет) — свёрнутым разделом «More imports» */
+details.more-imports > summary { cursor: pointer; font-weight: var(--weight-heading); min-height: var(--touch-target); display: flex; align-items: center; }
 table.selectable th.pick, table.selectable td.pick { width: var(--touch-target); text-align: center; }
 table.selectable td.pick input.row-check { width: var(--space-4); height: var(--space-4); margin: 0; }
 table.selectable tbody tr.picked > td { background: var(--accent-soft); }
