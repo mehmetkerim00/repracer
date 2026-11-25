@@ -71,7 +71,7 @@ test('step 150 (#27): a version without a recorded time has no time — null, no
  */
 test('step 176 [Р-256]: the strategies view says whether the workspace has a Walmart account', () => {
   const w = world();
-  assert.equal(strategiesView({ ...w, accounts: [] } as never, en, true).walmart, false, 'no Walmart account — no Walmart sentence');
-  assert.equal(strategiesView({ ...w, accounts: [{ channelAccountId: 'acc-amazon', channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'] }] } as never, en, true).walmart, false);
-  assert.equal(strategiesView({ ...w, accounts: [{ channelAccountId: 'acc-walmart', channel: 'WALMART', marketplaces: ['WALMART_US'] }] } as never, en, true).walmart, true);
+  assert.equal(strategiesView({ ...(w as object), accounts: [] } as never, en, true).walmart, false, 'no Walmart account — no Walmart sentence');
+  assert.equal(strategiesView({ ...(w as object), accounts: [{ channelAccountId: 'acc-amazon', channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'] }] } as never, en, true).walmart, false);
+  assert.equal(strategiesView({ ...(w as object), accounts: [{ channelAccountId: 'acc-walmart', channel: 'WALMART', marketplaces: ['WALMART_US'] }] } as never, en, true).walmart, true);
 });
