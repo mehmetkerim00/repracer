@@ -166,17 +166,23 @@ export class PgStockStore implements StockStore {
       const { rows: [source] } = await tx.query(`SELECT mode FROM tenant_data.stock_source WHERE tenant_id = $1 AND stock_source_id = $2 AND status = 'ACTIVE'`, [tenantId, stockSourceId]);
       if (!source || source.mode !== 'INTERNAL_POOL') return { status: 'NOT_INTERNAL_POOL' as const };
       await tx.query('SET LOCAL enable_nestloop = off');
+      /**
+       * Шаг 184: ключи раскрываются в подзапросе (`unnest` в списке выборки), а не LATERAL-соединением. У LATERAL по функции вложенный
+       * цикл неизбежен, и при отключённых вложенных циклах PostgreSQL прибавлял к оценке штраф 10^10: оценка проходила пороги JIT, и на
+       * PostgreSQL с LLVM оператор компилировался — секунды к шаблону, примерке и применению импорта остатков (класс шага 173.1)
+       */
       const { rows } = await tx.query(
-        `SELECT p.product_id, p.sku, p.title,
-                array_remove(array_agg(DISTINCT k.key), NULL) AS keys,
+        `SELECT x.product_id, x.sku, x.title,
+                array_remove(array_agg(DISTINCT x.key), NULL) AS keys,
                 (SELECT sp.on_hand FROM tenant_data.stock_pool sp
-                  WHERE sp.tenant_id = p.tenant_id AND sp.stock_source_id = $2 AND sp.product_id = p.product_id AND sp.location_ref = 'default') AS on_hand
-           FROM tenant_data.product p
-           LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = p.tenant_id AND om.product_id = p.product_id AND om.status = 'ACTIVE'
-           LEFT JOIN LATERAL unnest(ARRAY[p.sku, p.gtin, om.external_unit_id, om.external_sku, om.channel_product_ref]) AS k(key) ON true
-          WHERE p.tenant_id = $1
-          GROUP BY p.tenant_id, p.product_id, p.sku, p.title
-          ORDER BY p.sku NULLS LAST, p.product_id`, [tenantId, stockSourceId]);
+                  WHERE sp.tenant_id = x.tenant_id AND sp.stock_source_id = $2 AND sp.product_id = x.product_id AND sp.location_ref = 'default') AS on_hand
+           FROM (SELECT p.tenant_id, p.product_id, p.sku, p.title,
+                        unnest(ARRAY[p.sku, p.gtin, om.external_unit_id, om.external_sku, om.channel_product_ref]) AS key
+                   FROM tenant_data.product p
+                   LEFT JOIN tenant_data.offer_mapping om ON om.tenant_id = p.tenant_id AND om.product_id = p.product_id AND om.status = 'ACTIVE'
+                  WHERE p.tenant_id = $1) x
+          GROUP BY x.tenant_id, x.product_id, x.sku, x.title
+          ORDER BY x.sku NULLS LAST, x.product_id`, [tenantId, stockSourceId]);
       await tx.query('SET LOCAL enable_nestloop = on');
       return rows.map((r): StockImportTarget => ({
         productId: String(r.product_id), sku: r.sku ?? null, title: r.title ?? null,
