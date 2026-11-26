@@ -5,11 +5,22 @@
 # печатается — вывод называет только имена файлов. На сервер их копирует deploy/pilot/push-secrets.sh. Токен туннеля (tunnel.env) кладёт владелец
 # при создании туннеля (deploy/pilot/README.md, §3).
 #   deploy/pilot/secrets.sh
-# Переменные: REPRACER_PILOT_LOCAL_SECRETS (каталог), REPRACER_AMAZON_PRODUCTION_ENV (ключи приложения), REPRACER_PILOT_DB (имя базы, как в pilot.env).
+# Переменные: REPRACER_PILOT_LOCAL_SECRETS (каталог), REPRACER_AMAZON_PRODUCTION_ENV (ключи приложения), REPRACER_AMAZON_SANDBOX_ENV (ключи песочного
+# приложения — только для сверки: ни один ключ боевого не равен ключу песочного, шаг 185), REPRACER_PILOT_DB (имя базы, как в pilot.env).
 set -euo pipefail
 umask 077
 OUT="${REPRACER_PILOT_LOCAL_SECRETS:-${HOME}/.config/repracer/secrets/pilot}"
 AMAZON_ENV="${REPRACER_AMAZON_PRODUCTION_ENV:-${HOME}/.config/repracer/secrets/amazon-production.env}"
+SANDBOX_ENV="${REPRACER_AMAZON_SANDBOX_ENV:-${HOME}/.config/repracer/secrets/amazon-sandbox.env}"
+
+# Значение строки KEY= файла ключей — как текст (шаг 185, отложенное «134»): `source` исполнял весь файл, и значение с `|` (так начинаются
+# токены LWA) bash принимал за конвейер и печатал остаток. Нет строки — пусто; строк больше одной — отказ; кавычки вокруг значения снимаются
+key_line() {
+  local n
+  n=$(grep -c "^$2=" "$1" || true)
+  [ "${n}" -le 1 ] || { echo "в $1 строк $2=: ${n}, нужна одна" >&2; return 1; }
+  sed -n "s/^$2=//p" "$1" | tr -d '\r' | sed -E "s/^\"(.*)\"\$/\\1/; s/^'(.*)'\$/\\1/"
+}
 DB="${REPRACER_PILOT_DB:-repracer_pilot}"
 [[ "${DB}" =~ ^[a-z][a-z0-9_]{0,62}$ ]] || { echo "REPRACER_PILOT_DB — имя базы из строчных букв, цифр и _" >&2; exit 2; }
 command -v openssl > /dev/null || { echo "нужен openssl" >&2; exit 2; }
@@ -85,10 +96,16 @@ amazon_missing=()
 for f in amazon_lwa_client_secret amazon.env; do if [ -e "${OUT}/$f" ]; then kept+=("$f"); else amazon_missing+=("$f"); fi; done
 if [ ${#amazon_missing[@]} -gt 0 ]; then
   [ -r "${AMAZON_ENV}" ] || { echo "нет файла ключей боевого приложения Amazon: ${AMAZON_ENV}" >&2; exit 1; }
-  # Подоболочка: переменные файла ключей не переживают её и не попадают ни в окружение, ни в вывод
-  ( set -a; . "${AMAZON_ENV}"; set +a
-    for v in AMAZON_PRODUCTION_APP_ID AMAZON_PRODUCTION_LWA_CLIENT_ID AMAZON_PRODUCTION_LWA_CLIENT_SECRET; do
-      [ -n "${!v:-}" ] || { echo "в ${AMAZON_ENV} нет ${v}" >&2; exit 1; }
+  # Подоболочка: значения ключей не переживают её, не экспортируются и не попадают в вывод. Файл не исполняется (шаг 185, отложенное «134»):
+  # строки KEY= читаются как текст, и строка с другим ключом ничего не делает
+  ( for k in APP_ID LWA_CLIENT_ID LWA_CLIENT_SECRET; do
+      v="AMAZON_PRODUCTION_${k}"
+      printf -v "${v}" '%s' "$(key_line "${AMAZON_ENV}" "${v}")"
+      [ -n "${!v}" ] || { echo "в ${AMAZON_ENV} нет ${v}" >&2; exit 1; }
+      # Шаг 185: 2026-11-26 в файле ключей боевого приложения нашлись ключи песочного — пилот подключился бы к песочному приложению молча
+      if [ -r "${SANDBOX_ENV}" ] && [ "${!v}" = "$(key_line "${SANDBOX_ENV}" "AMAZON_SANDBOX_${k}")" ]; then
+        echo "${v} в ${AMAZON_ENV} совпадает с AMAZON_SANDBOX_${k} в ${SANDBOX_ENV}: это ключ песочного приложения, а не боевого" >&2; exit 1
+      fi
     done
     [ -e "${OUT}/amazon_lwa_client_secret" ] || printf '%s' "${AMAZON_PRODUCTION_LWA_CLIENT_SECRET}" > "${OUT}/amazon_lwa_client_secret"
     [ -e "${OUT}/amazon.env" ] \
