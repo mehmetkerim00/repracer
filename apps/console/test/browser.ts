@@ -40,6 +40,8 @@ export interface Browser {
   mouseDrag(fromX: number, fromY: number, toX: number, toY: number): Promise<void>;
   /** Шаг 109: снимок видимой части окна в JPEG — для доказательств шага (смоук пишет их, только когда задан каталог снимков) */
   screenshot(): Promise<Buffer>;
+  /** Шаг 184.1: стереть куки браузера — выбор языка (`repracer_locale`) не переходит из теста в тест */
+  clearCookies(): Promise<void>;
   /** Исключения страницы и вызовы console.error с начала работы */
   errors(): string[];
   close(): Promise<void>;
@@ -123,6 +125,7 @@ export async function launchBrowser(): Promise<Browser> {
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: toX, y: toY, button: 'left', buttons: 0, clickCount: 1 });
     },
     async setColorScheme(scheme) { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme ?? '' }] }); },
+    async clearCookies() { await send('Network.clearBrowserCookies'); },
     async screenshot() {
       const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 80 });
       return Buffer.from(String((r.result as { data?: string } | undefined)?.data ?? ''), 'base64');

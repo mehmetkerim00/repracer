@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
-import { after, before, test } from 'node:test';
+import { after, before, beforeEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createServer, type ViteDevServer } from 'vite';
 import { messagesFor, WALMART_UNPUBLISHED } from '@repracer/console-model';
@@ -330,6 +330,12 @@ before(async () => {
 });
 // Уборка — каждый шаг отдельно: отказ одного не оставляет открытыми остальные (CI шага 76: исключение в первом шаге оставляло стенд и
 // Vite слушать, процесс теста не завершался, и задание висело до своего срока); первый отказ — провал файла после всей уборки
+/**
+ * Шаг 184.1: каждый тест начинается без кук браузера. Выбор языка — кука на год: тест, упавший посреди цикла по языкам, оставлял её, и
+ * следующие ждали английский экран входа по 60 с — одно падение снимало шард пределом раньше, чем он печатал саму ошибку
+ */
+beforeEach(async () => { await browser?.clearCookies(); });
+
 after(async () => {
   const failures: unknown[] = [];
   const step = async (f: () => Promise<unknown> | undefined) => { try { await f(); } catch (e) { failures.push(e); } };
@@ -2034,6 +2040,16 @@ async function chooseLanguage(b: Browser, name: string, scope = '.topbar'): Prom
   await b.evaluate(`(document.querySelector(${JSON.stringify(`${scope} .lang-button`)}).click(), true)`);
   await waitFor(b, `document.querySelector(${JSON.stringify(`${scope} .lang-menu`)}) !== null`, `the language menu of ${scope} opens`);
   await b.click(name, `${scope} .lang-menu [role=menuitemradio]`);
+  /**
+   * Шаг 184.1: выбор языка — запрос к серверу, и его ответ перерисовывает экран. Тест, сменивший адрес раньше ответа, терял переход: Offers
+   * записывал поверх свой адрес (`replaceState`, шаг 181) — шаг 107 падал в 2 прогонах из 6. Ждём, пока сервер запомнил язык (кука) и экран
+   * отрисовал ответ
+   */
+  const locale = Object.entries(en.ui.app.languages).find(([, n]) => n === name)?.[0];
+  assert.ok(locale, `a language named ${name}`);
+  await waitFor(b, `document.documentElement.lang === '${locale}' && document.cookie.split('; ').includes('repracer_locale=${locale}')`, `${name} is saved`);
+  await b.evaluate(`new Promise((r) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => r(true))), 0))`);
+  await settled(b, `the screen in ${name}`);
 }
 
 /** Языки, которые предлагает меню шапки, — их родные имена; меню закрывается Esc */
@@ -2385,9 +2401,22 @@ test('step 107 [Р-232, Р-233]: seller links open the seller page in a new tab;
     // Шаг 183.1: `settled` сразу после смены адреса может застать прежний экран без загрузки (хеш применяется следующей задачей) — CI шага 182
     // ввёл сумму распродажи в Offers. Экран страницы предложения ждётся своим признаком
     const go = async (route: string, ready?: string) => {
-      await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
-      await settled(b, route);
-      if (ready) await waitFor(b, `!!document.querySelector(${JSON.stringify(ready)})`, `${route}: ${ready}`);
+      // Шаг 184.1: адрес, переписанный экраном, с которого уходили (запоздалая перерисовка), ставится ещё раз — один раз; дважды — это уже
+      // не гонка, и проверка говорит, где страница
+      const target = `#/w/${world}/${route}`;
+      for (let attempt = 1; ; attempt++) {
+        await b.evaluate(`(location.hash = ${JSON.stringify(target)}, true)`);
+        await settled(b, route);
+        if (await b.evaluate<boolean>(`location.hash === ${JSON.stringify(target)}`) || attempt === 2) break;
+      }
+      if (ready) {
+        await waitFor(b, `!!document.querySelector(${JSON.stringify(ready)})`, `${route}: ${ready}`).catch(async (error: unknown) => {
+          // Не дождались — где страница на самом деле: адрес, заголовок, первые строки
+          const where = await b.evaluate<string>(`JSON.stringify({ hash: location.hash, h1: document.querySelector('h1')?.textContent?.trim() ?? null,
+            text: (document.querySelector('.world-content')?.innerText ?? document.body.innerText).slice(0, 300) })`).catch(() => '?');
+          throw new Error(`${(error as Error).message}; the page: ${where}`);
+        });
+      }
     };
     // У двух страниц границ подряд общий признак — ждётся ссылка «Change this floor» именно этого предложения
     const boundsOf = (id: string) => `.page-actions a[href$="/${encodeURIComponent(id)}"]`;
@@ -4971,4 +5000,26 @@ test('step 150 (#27): strategies are a table — strategy, goal, offers, last ch
     await b.setViewport(1440, 900);
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 184.1: тест, упавший посреди цикла по языкам, не роняет следующие. Выбор языка — кука на год (`repracer_locale`): CI шага 184 — шаг 107
+ * упал в немецком, испанском или французском, кука осталась, и каждый следующий тест 60 с ждал английский экран входа: ещё 30 тестов по 60 с, шард
+ * снят пределом 40 минут раньше, чем напечатал саму ошибку. Пара тестов: первый оставляет экран входа на испанском, как упавший; второй ждёт
+ * английский
+ */
+test('step 184.1 (a): a test leaves the login screen in Spanish, as a test that fails inside its language loop', async () => {
+  const b = browser!;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await chooseLanguage(b, 'Español');
+  await b.waitText(es.ui.app.login.roleCan.OWNER);
+});
+
+test('step 184.1 (b): the next test starts on the English login screen all the same', async () => {
+  const b = browser!;
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER, 10_000);
+  assert.equal(await b.evaluate<string>('document.documentElement.lang'), 'en', 'the page is English');
 });
