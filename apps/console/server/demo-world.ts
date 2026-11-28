@@ -205,11 +205,13 @@ export async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: s
   /** Шаг 89: американское демо — и walmart.com (на симуляторе) */
   withWalmart = false,
   /** Шаг 91: сколько предложений у каждого аккаунта — у лёгких продавцов вида преп-центра меньше */
-  offers = DEMO_US_OFFERS):
-  Promise<{ ebay: string; amazon: string; walmart: string | null; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
+  offers = DEMO_US_OFFERS,
+  /** Шаг 186: демо-мир в виде клиента — только amazon.com, без eBay (клиент MVP видит только Amazon US, Р-256) */
+  withEbay = true):
+  Promise<{ ebay: string | null; amazon: string; walmart: string | null; accounts: Array<{ channelAccountId: string; channel: string; marketplaces: string[]; haltRelease: 'SAMPLE' | 'MANUAL_ONLY' }> }> {
   const { randomUUID } = await import('node:crypto');
   const { inTenant } = await import('@repracer/pricing-store-pg');
-  const ebay = randomUUID();
+  const ebay = withEbay ? randomUUID() : null;
   const amazon = existingAmazon ?? randomUUID();
   const walmart = withWalmart ? randomUUID() : null;
   /**
@@ -218,7 +220,7 @@ export async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: s
    */
   const suffix = seeded.tenantId.replace(/-/g, '').slice(0, 8);
   await inTenant(pools.admin, seeded.tenantId, async (tx) => {
-    const rows = [[ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US'], [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER'],
+    const rows = [...(ebay ? [[ebay, 'EBAY', null, `syn_demo_ebay_us_${suffix}`, 'EBAY_US']] as const : []), [amazon, 'AMAZON', 'NA', `A1SYNDEMOUS${suffix.toUpperCase()}`, 'ATVPDKIKX0DER'],
       ...(walmart ? [[walmart, 'WALMART', null, `syn-demo-walmart-${suffix}`, 'WALMART_US']] : [])] as const;
     for (const [id, channel, region, external, marketplace] of rows.filter((r) => !(existingAmazon && r[1] === 'AMAZON'))) {
       await tx.query(
@@ -227,7 +229,7 @@ export async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: s
     }
   }, seeded.userId);
   const n = (i: number) => String(i + 1).padStart(2, '0');
-  await store.recordDiscoveredOffers(seeded.tenantId, ebay, Array.from({ length: offers }, (_, i) => ({
+  if (ebay) await store.recordDiscoveredOffers(seeded.tenantId, ebay, Array.from({ length: offers }, (_, i) => ({
     marketplace: 'EBAY_US', externalSku: `SYN-DEMO-US-EBAY-${n(i)}`, externalUnitId: null, externalOfferId: `9640${n(i)}0000`, channelProductRef: null,
     gtin: null, condition: 'new', fulfillment: 'MERCHANT', externalListingId: `16400000${n(i)}00`, listingFormat: 'FIXED_PRICE', writable: true,
   })) as never[]);
@@ -245,7 +247,7 @@ export async function addUsAccounts(pools: DemoWorldPools, seeded: { tenantId: s
   return {
     ebay, amazon, walmart,
     accounts: [
-      { channelAccountId: ebay, channel: 'EBAY', marketplaces: ['EBAY_US'], haltRelease: 'MANUAL_ONLY' },
+      ...(ebay ? [{ channelAccountId: ebay, channel: 'EBAY', marketplaces: ['EBAY_US'], haltRelease: 'MANUAL_ONLY' as const }] : []),
       { channelAccountId: amazon, channel: 'AMAZON', marketplaces: ['ATVPDKIKX0DER'], haltRelease: 'MANUAL_ONLY' },
       ...(walmart ? [{ channelAccountId: walmart, channel: 'WALMART', marketplaces: ['WALMART_US'], haltRelease: 'MANUAL_ONLY' as const }] : []),
     ],

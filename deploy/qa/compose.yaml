@@ -71,6 +71,8 @@ services:
       REPRACER_DEMO_US: "on"
       REPRACER_DEMO_PRESS_DAYS: "7"
       REPRACER_DEMO_SELLERS: "on"
+      # Шаг 186: четвёртый демо-мир «Demo store — Amazon US» в виде клиента — только amazon.com, как увидит пилот [Р-256]
+      REPRACER_DEMO_CLIENT_VIEW: "on"
       REPRACER_DEMO_LOCALE: en
       REPRACER_DEMO_TIME_ZONE: America/New_York
       REPRACER_CONSOLE_LOCALE: en

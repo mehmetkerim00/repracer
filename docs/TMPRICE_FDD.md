@@ -10,7 +10,7 @@ Every function carries exactly one label. Descriptive sections (overview, concep
 
 | Label | Meaning |
 |---|---|
-| **[QA-A]** | Implemented; testable now on QA-A (`https://qa.tmprice.com`): three demo workspaces on the channel simulator, simulated sign-in |
+| **[QA-A]** | Implemented; testable now on QA-A (`https://qa.tmprice.com`): four demo workspaces on the channel simulator (one in the Amazon US client view), simulated sign-in |
 | **[QA-B]** | Implemented; can only be checked on QA-B (the pilot stack on a temporary machine): real sign-in, operator panel, scheduler, channel connection flow, backups and monitoring |
 | **[LIVE]** | Implemented; needs a real Amazon integration: seller authorization, notifications part B, live limits, live listing data |
 | **[DEFERRED x]** | Not implemented or deferred; `x` is the row in [docs/deferred.md](deferred.md) (row names are listed in § 15) |
@@ -40,7 +40,7 @@ Client and pilot workspaces see Amazon US only (Р-256):
 - the console offers only amazon.com to connect and names no other channel on any screen;
 - the database refuses any other channel account or connection for a client workspace.
 
-The demo workspaces keep amazon.com, walmart.com and ebay.com: it is a simulator storefront, and QA retests run on it.
+The three-channel demo workspaces keep amazon.com, walmart.com and ebay.com: it is a simulator storefront, and QA retests run on it. A fourth demo workspace, **Demo store — Amazon US**, shows the client view a pilot seller gets: amazon.com only, with the client channel rule above, on the same simulator (step 186).
 
 Current status (Nov 16, 2026): pre-launch.
 - The Amazon developer profile is approved and the production app is registered (Draft). No seller has authorized it yet.
@@ -310,7 +310,7 @@ The product moves money, so the pipeline is built to distrust itself:
 
 | Function | What it does | Label |
 |---|---|---|
-| Tenant isolation | PostgreSQL row-level security: every query runs inside one workspace's row set; cross-tenant reads are impossible at the database layer. On QA-A one login holds three workspaces, so cross-workspace checks are possible | **[QA-A]** |
+| Tenant isolation | PostgreSQL row-level security: every query runs inside one workspace's row set; cross-tenant reads are impossible at the database layer. On QA-A one login holds four workspaces, so cross-workspace checks are possible | **[QA-A]** |
 | QA cannot write to channels | A database setting on QA (and on the pilot until lifted by a two-person procedure) refuses live mode and every outgoing write; the demo workspace is the only exception | **[QA-A]** |
 | Secrets | Marketplace keys and tokens live outside the repository in permission-restricted files, are never printed to logs, chats or reports, and are passed between people only by secure means. Channel tokens are stored encrypted (AES-256-GCM); only the adapters' role can read them | **[QA-B]** |
 | Least privilege | Marketplace app roles are exactly the approved ones (Product Listing, Pricing, Inventory and Order Tracking). Each process connects to the database with its own narrow role. The operator panel is a separate, non-public process | **[QA-B]** |

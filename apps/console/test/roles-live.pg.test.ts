@@ -12,7 +12,7 @@ import type { SessionView, StandToken, WorldSummary } from '../src/api-types.ts'
 import { createIsolatedDatabase, type IsolatedDatabase } from '../../../packages/pricing-store-pg/test/isolated-db.ts';
 import { readOnlyConnections } from '../server/connect.ts';
 import { startDemoWorld, type RunningDemoWorld } from '../server/demo-world.ts';
-import { startDemoSellers, type RunningDemoSellers } from '../server/demo-sellers.ts';
+import { DEMO_CLIENT_VIEW_SELLER, DEMO_SELLERS, startDemoSellers, type RunningDemoSellers } from '../server/demo-sellers.ts';
 import { createStandApi, createStandServer } from '../server/stand-server.ts';
 
 /**
@@ -76,6 +76,8 @@ before(async () => {
     tag: 3891, standOwnerUserId: memberUsers[owner.membershipAlias]!, standOwnerEmail: owner.email,
     // Прогон — двое суток тени: живые показатели карточек есть и так, а прогон короче
     joinAs: pgStandJoinAs(admin, directory, owner.membershipAlias), pressDays: 2, locale: 'en', log: () => undefined,
+    // Шаг 186: и четвёртый мир — «Demo store — Amazon US» в виде клиента (стенд QA-A: REPRACER_DEMO_CLIENT_VIEW=on)
+    specs: [...DEMO_SELLERS, DEMO_CLIENT_VIEW_SELLER],
   });
   const issuer = createTestIssuer({ issuer: STAND_ISSUER, audience: STAND_AUDIENCE });
   const handle = createStandApi([demo.world, ...sellers.worlds], {
@@ -145,10 +147,11 @@ test('step 98 (Р-222): the manager does everything the owner does — stop cran
  * Шаг 91 (вид преп-центра): на вопрос «как я увижу своих продавцов?» отвечает экран — «Your workspaces» владельца стенда показывает
  * три пространства, у лёгких продавцов — живые показатели и свои имена; пометка демо остаётся [Р-151]. Шаг 98: у лёгких продавцов он менеджер
  */
-test('step 91, step 98: the stand owner sees three workspaces — Owner in his own, Manager at both sellers — and live figures on each seller card', async () => {
+test('step 91, step 98, step 186: the stand owner sees four workspaces — Owner in his own, Manager at the sellers — and live figures on each seller card', async () => {
   const owner = await signIn('OWNER');
   const worlds = (await call<WorldSummary[]>('GET', '/api/worlds', owner)).body;
-  assert.deepEqual(worlds.map((w) => [w.title, w.role]), [['Demo store (simulator)', 'Owner'], ['Blue Ridge Trading', 'Manager'], ['Lakeside Home Goods', 'Manager']]);
+  assert.deepEqual(worlds.map((w) => [w.title, w.role]),
+    [['Demo store (simulator)', 'Owner'], ['Blue Ridge Trading', 'Manager'], ['Lakeside Home Goods', 'Manager'], ['Demo store — Amazon US', 'Manager']]);
   for (const w of worlds.slice(1)) {
     assert.equal(w.demo, true, 'Р-151: a light seller is synthetic and marked as demo');
     assert.equal(w.description, messagesFor('en').ui.app.demoSellerDescription);
@@ -168,6 +171,37 @@ test('step 91, step 98: the stand owner sees three workspaces — Owner in his o
   const lakeside = worlds.find((w) => w.title === 'Lakeside Home Goods')!;
   const stop = (await call<StopView>('GET', `/api/worlds/${encodeURIComponent(lakeside.id)}/stop`, owner)).body;
   assert.equal(stop.permissions.canStop, true, 'the stand owner is a manager at Lakeside Home Goods');
+});
+
+/**
+ * Шаг 186 (письмо Мердана 28.11, §1): мир «Demo store — Amazon US» — то, что увидит пилот: аккаунт только amazon.com (в тени), предложения
+ * только amazon.com, подключение предлагает только Amazon. Ни eBay, ни Walmart, ни Kaufland в ответах экранов мира нет; контроль — у
+ * трёхканального демо рядом eBay есть
+ */
+test('step 186 (Merdan 28.11, §1): «Demo store — Amazon US» is the client view — amazon.com only on every screen it serves, next to the three-channel demo', async () => {
+  const owner = await signIn('OWNER');
+  const worlds = (await call<WorldSummary[]>('GET', '/api/worlds', owner)).body;
+  const client = worlds.find((w) => w.title === 'Demo store — Amazon US');
+  assert.ok(client, 'the client-view workspace is listed');
+  assert.equal(client.demo, true, 'Р-151: synthetic and marked as demo');
+  assert.ok(client.scopes > 0 && client.decisionsLastDay > 0, `live figures on the card: ${JSON.stringify(client)}`);
+  const base = `/api/worlds/${encodeURIComponent(client.id)}`;
+  const shadow = (await call<ShadowView>('GET', `${base}/shadow`, owner)).body;
+  assert.equal(shadow.accounts.length, 1, 'one channel account');
+  assert.ok(shadow.accounts.every((a) => a.writeMode === 'SHADOW'), JSON.stringify(shadow.accounts));
+  // Значения, а не ключи: признак модели экрана `"walmart":false` — не текст для человека
+  const OTHER = /(?:EBAY|ebay\.com|WALMART|walmart\.com|KAUFLAND|kaufland)(?![A-Za-z]*":)/i;
+  for (const screen of ['products', 'shadow', 'connections', 'bounds', 'strategies', 'stock', 'feed', 'stop', 'status', 'overview', 'decisions', 'dangerous']) {
+    const r = await call<unknown>('GET', `${base}/${screen}`, owner);
+    assert.equal(r.status, 200, `${screen}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    const text = JSON.stringify(r.body);
+    const found = OTHER.exec(text);
+    assert.equal(found ? `«${found[0]}» in …${text.slice(Math.max(0, found.index - 80), found.index + 40)}…` : null, null, `${screen}: no other channel`);
+  }
+  assert.match(JSON.stringify((await call<unknown>('GET', `${base}/products`, owner)).body), /ATVPDKIKX0DER|amazon\.com/, 'the offers are on amazon.com');
+  // Контроль: трёхканальное демо рядом показывает eBay — правило смотрит туда, где другие каналы есть
+  const main = worlds.find((w) => w.title === 'Demo store (simulator)')!;
+  assert.match(JSON.stringify((await call<unknown>('GET', `/api/worlds/${encodeURIComponent(main.id)}/products`, owner)).body), /EBAY/, 'the three-channel demo still has eBay');
 });
 
 /** Членство синтетического участника стенда в демо по его роли — из базы, как его увидит страж */

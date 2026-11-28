@@ -28,13 +28,27 @@ export interface DemoSellerSpec {
   titles: { amazon: number; ebay: number };
   /** Шаг 93: владелец пространства — синтетический продавец с человеческим именем; адрес — синтетический, у каждого посева свой */
   owner: { name: string; mailbox: string };
+  /** Шаг 186: есть ли у продавца аккаунт ebay.com (у мира в виде клиента — нет: только amazon.com) */
+  ebay: boolean;
+  /** Шаг 186: мир в виде клиента — каталог каналов клиента «только Amazon US» правилом шага 176 (`LiveWorld.clientView`) */
+  clientView?: boolean;
 }
 
 /** Шаг 91: два лёгких продавца; шаг 98 [Р-222]: владелец стенда — менеджер у обоих (ролей для людей две, наблюдателя нет) */
 export const DEMO_SELLERS: readonly DemoSellerSpec[] = [
-  { key: 'blue-ridge', title: 'Blue Ridge Trading', slot: 'membership-manager', offers: 6, titles: { amazon: 80, ebay: 90 }, owner: { name: 'Dana Whitfield', mailbox: 'dana.whitfield' } },
-  { key: 'lakeside', title: 'Lakeside Home Goods', slot: 'membership-manager', offers: 5, titles: { amazon: 120, ebay: 130 }, owner: { name: 'Chris Holloway', mailbox: 'chris.holloway' } },
+  { key: 'blue-ridge', title: 'Blue Ridge Trading', slot: 'membership-manager', offers: 6, titles: { amazon: 80, ebay: 90 }, owner: { name: 'Dana Whitfield', mailbox: 'dana.whitfield' }, ebay: true },
+  { key: 'lakeside', title: 'Lakeside Home Goods', slot: 'membership-manager', offers: 5, titles: { amazon: 120, ebay: 130 }, owner: { name: 'Chris Holloway', mailbox: 'chris.holloway' }, ebay: true },
 ];
+
+/**
+ * Шаг 186 (письмо Мердана 28.11, §1): четвёртый демо-мир — «Demo store — Amazon US» в виде клиента. Трёхканальное демо остаётся ради
+ * перепроверок (#30), а этот мир показывает то, что увидит пилот: только amazon.com, каталог каналов клиента [Р-256]. Симулятор и синтетика
+ * те же, что у лёгких продавцов; включается `REPRACER_DEMO_CLIENT_VIEW=on` (QA-A), подготовку показа не меняет
+ */
+export const DEMO_CLIENT_VIEW_SELLER: DemoSellerSpec = {
+  key: 'amazon-us', title: 'Demo store — Amazon US', slot: 'membership-manager', offers: 12, titles: { amazon: 140, ebay: 0 },
+  owner: { name: 'Morgan Ellis', mailbox: 'morgan.ellis' }, ebay: false, clientView: true,
+};
 
 /** Шаг 91: сколько суток тени прожать у лёгкого продавца — по умолчанию неделя, как у главного демо (недельное письмо и график полные) */
 export const DEMO_SELLER_PRESS_DAYS = 7;
@@ -59,6 +73,8 @@ export async function startDemoSellers(options: {
   standOwnerEmail: string;
   joinAs: NonNullable<Parameters<typeof import('@repracer/pricing-store-pg').seedPricingWorld>[1]['joinMember']>;
   pressDays?: number;
+  /** Шаг 186: какие продавцы — по умолчанию два лёгких продавца шага 91 */
+  specs?: readonly DemoSellerSpec[];
   locale?: 'de' | 'en' | 'es' | 'fr';
   timeZone?: string | null;
   log?: (message: string) => void;
@@ -79,7 +95,8 @@ export async function startDemoSellers(options: {
   const people: Record<string, string> = {};
   const markets: Array<{ stop(): void }> = [];
   const descriptors: Array<{ id: string; title: string; tenantId: string; accounts: unknown[]; description: string }> = [];
-  for (const [i, spec] of DEMO_SELLERS.entries()) {
+  const specs = options.specs ?? DEMO_SELLERS;
+  for (const [i, spec] of specs.entries()) {
     const tag = options.tag + i;
     const suffix = randomUUID().replace(/-/g, '').slice(0, 8);
     const seeded = await seedPricingWorld(pools.app, {
@@ -104,7 +121,7 @@ export async function startDemoSellers(options: {
     const actor = { membershipId: seeded.ownerMembershipId, userId: seeded.userId, mfa: true };
     const pathSaved = await store.saveOnboardingProgress(seeded.tenantId, { path: 'STOCK_AND_PRICING' }, actor);
     if (pathSaved !== 'SAVED') throw new Error(`demo seller onboarding path refused: ${pathSaved}`);
-    const us = await addUsAccounts(pools, seeded, store as never, seeded.channelAccountId, false, spec.offers);
+    const us = await addUsAccounts(pools, seeded, store as never, seeded.channelAccountId, false, spec.offers, spec.ebay);
     markets.push(await startDemoUsMarket({
       pools: { admin: pools.admin, scheduler: pools.scheduler }, store,
       accounts: { tenantId: seeded.tenantId, userId: seeded.userId, ownerMembershipId: seeded.ownerMembershipId, ebayAccountId: us.ebay, amazonAccountId: us.amazon, walmartAccountId: null },
@@ -116,7 +133,7 @@ export async function startDemoSellers(options: {
     const descriptor = { id: `demo/${spec.key}`, title: spec.title, tenantId: seeded.tenantId, accounts, description: '', ownName: true };
     descriptors.push(descriptor);
     worlds.push({
-      id: descriptor.id, title: descriptor.title, description: descriptor.description, ownName: true,
+      id: descriptor.id, title: descriptor.title, description: descriptor.description, ownName: true, ...(spec.clientView ? { clientView: true } : {}),
       tenantId: seeded.tenantId, accounts, identityTenantId: seeded.tenantId, membershipAlias: (id: string) => id, failures: [],
       landing: 'shadow' as const,
       store: store as never, stock, stockPipeline: createStockPipeline({ store: stock, now: () => systemClock.now() as never }),
@@ -142,7 +159,7 @@ export async function startDemoSellers(options: {
     ...(options.pgUrlsByRole ? { pgUrlsByRole: options.pgUrlsByRole } : {}),
   }, () => stopWorker).catch((error: unknown) => { if (!stopped) log(`demo sellers bulk worker stopped: ${error instanceof Error ? error.message : String(error)}`); });
   const seconds = Math.round((systemClock.nowMs() - started) / 100) / 10;
-  log(`demo sellers ready: ${DEMO_SELLERS.map((s) => `${s.title} (${s.offers} offers each on amazon.com and ebay.com)`).join(', ')}, ${pressDays} days pressed, ${seconds} s`);
+  log(`demo sellers ready: ${specs.map((s) => `${s.title} (${s.offers} offers ${s.ebay ? 'each on amazon.com and ebay.com' : 'on amazon.com, client view'})`).join(', ')}, ${pressDays} days pressed, ${seconds} s`);
   return {
     worlds, seconds, people,
     stop() {

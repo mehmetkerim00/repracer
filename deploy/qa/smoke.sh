@@ -23,11 +23,14 @@ guard="$("${C}" exec -T postgres psql -U postgres -d repracer_qa -Atc 'SELECT se
 read -r defaults orphans <<< "$("${C}" exec -T postgres psql -U postgres -d repracer_qa -At -F ' ' < "${here}/new-offers-check.sql")"
 [ "${defaults:-0}" -ge 1 ] || fail "ни у одного аккаунта не задана стратегия по умолчанию — демо США её задаёт"
 [ "${orphans}" = 0 ] || fail "у ${orphans} из ${defaults} аккаунтов со стратегией по умолчанию новые предложения не завелись — журнал стенда: compose.sh logs stand | grep 'new offers'"
-# Демо: вход имитатором владельцем — три рабочих пространства, все с пометкой демо. Токен в вывод не попадает
+# Демо: вход имитатором владельцем — четыре рабочих пространства (шаг 186: четвёртое — «Demo store — Amazon US» в виде клиента), все с
+# пометкой демо. Токен в вывод не попадает
 token="$(curl -sf -X POST -H 'content-type: application/json' -d '{"role":"OWNER"}' "${base}/api/stand-issuer/token" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
 [ -n "${token}" ] || fail "вход имитатором не выдал токен"
-demos="$(curl -sf -H "authorization: Bearer ${token}" "${base}/api/worlds" | grep -o '"demo":true' | wc -l | tr -d ' ')"
-[ "${demos}" -ge 3 ] || fail "демо-пространств ${demos}, ждали 3"
+worlds="$(curl -sf -H "authorization: Bearer ${token}" "${base}/api/worlds")"
+demos="$(printf '%s' "${worlds}" | grep -o '"demo":true' | wc -l | tr -d ' ')"
+[ "${demos}" -ge 4 ] || fail "демо-пространств ${demos}, ждали 4"
+printf '%s' "${worlds}" | grep -q '"id":"demo/amazon-us"' || fail "нет демо-мира в виде клиента demo/amazon-us (REPRACER_DEMO_CLIENT_VIEW)"
 # Снаружи: без входа Access уводит на свою страницу входа, а не отдаёт консоль
 if [ -n "${QA_PUBLIC_URL:-}" ]; then
   code="$(curl -s -o /dev/null -w '%{http_code}' "${QA_PUBLIC_URL}/")"

@@ -27,7 +27,8 @@ export interface DemoUsAccounts {
   tenantId: string;
   userId: string;
   ownerMembershipId: string;
-  ebayAccountId: string;
+  /** Шаг 186: нет — демо-мир в виде клиента, только amazon.com */
+  ebayAccountId: string | null;
   amazonAccountId: string;
   /** Шаг 89: walmart.com — на симуляторе по правилам настоящего Walmart; нет — демо без Walmart */
   walmartAccountId?: string | null;
@@ -147,7 +148,7 @@ async function configure(admin: PgPool, a: DemoUsAccounts, validFrom: string, ti
          FROM tenant_data.write_scope ws
          JOIN tenant_data.offer_mapping om ON om.tenant_id = ws.tenant_id AND om.price_write_scope_id = ws.write_scope_id
         WHERE ws.tenant_id = $1 AND ws.channel_account_id = ANY ($2::uuid[]) AND ws.field = 'PRICE'
-        ORDER BY om.external_sku`, [a.tenantId, [a.ebayAccountId, a.amazonAccountId, ...(a.walmartAccountId ? [a.walmartAccountId] : [])]]);
+        ORDER BY om.external_sku`, [a.tenantId, [...(a.ebayAccountId ? [a.ebayAccountId] : []), a.amazonAccountId, ...(a.walmartAccountId ? [a.walmartAccountId] : [])]]);
     const scopes: UsScope[] = rows.map((r) => ({
       writeScopeId: r.write_scope_id, productId: r.product_id, channelAccountId: r.channel_account_id, marketplace: r.marketplace,
       channelProductRef: r.channel_product_ref, sku: r.external_sku,
@@ -324,7 +325,7 @@ export async function startDemoUsMarket(input: {
       counts.amazon += 1;
     }
   };
-  const recomputeEbay = async () => { counts.ebay += (await ebay.recomputeScheduled(ctx(a.ebayAccountId), { limit: 100 })).scopes; };
+  const recomputeEbay = async () => { if (a.ebayAccountId) counts.ebay += (await ebay.recomputeScheduled(ctx(a.ebayAccountId), { limit: 100 })).scopes; };
   // Шаг 109: сводка — пакет до 20 товаров одним вызовом (лимит модели — 0.033 в секунду на вызов, как у адаптера)
   const summarizeAmazon = async () => {
     const queries = amazonScopes.map((s) => ({ marketplace: AMAZON_US, channelProductRef: s.channelProductRef!, condition: 'new' }));

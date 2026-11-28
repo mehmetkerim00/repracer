@@ -341,6 +341,8 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
   // Шаг 176 [Р-256]: признак демо задан при создании тенанта и не меняется — читается из базы один раз на мир
   const demoOf = new Map<string, Promise<boolean>>();
   const tenantScopeOf = async (live: LiveWorld): Promise<MarketScope> => {
+    // Шаг 186: демо-мир в виде клиента — каталог клиента «только Amazon US» тем же правилом, что у клиентского тенанта
+    if (live.clientView) return tenantMarketScope(market, { demo: false }, 'AMAZON_US');
     const clientChannels = services.clientChannels ?? 'ALL';
     if (clientChannels === 'ALL') return market;
     if (!demoOf.has(live.tenantId)) demoOf.set(live.tenantId, live.store.tenantIsDemo(live.tenantId));
@@ -2647,9 +2649,14 @@ async function main(): Promise<void> {
        * Шаг 91 (вид преп-центра): `REPRACER_DEMO_SELLERS=on` — рядом с главным демо два лёгких продавца с американскими именами; владелец
        * стенда — менеджер у обоих (шаг 98 [Р-222]: ролей для людей две). Только демо профиля us: продавцы — американские
        */
-      if (process.env.REPRACER_DEMO_SELLERS === 'on') {
-        if (market !== 'us') throw new Error('REPRACER_DEMO_SELLERS=on needs the us market profile: the sellers are American');
-        const { startDemoSellers } = await import('./demo-sellers.ts');
+      /**
+       * Шаг 186: `REPRACER_DEMO_CLIENT_VIEW=on` — ещё мир «Demo store — Amazon US» в виде клиента (только amazon.com, каталог клиента
+       * шага 176), рядом с трёхканальным демо; тем же посевом, что лёгкие продавцы
+       */
+      const clientViewOn = process.env.REPRACER_DEMO_CLIENT_VIEW === 'on';
+      if (process.env.REPRACER_DEMO_SELLERS === 'on' || clientViewOn) {
+        if (market !== 'us') throw new Error('REPRACER_DEMO_SELLERS=on and REPRACER_DEMO_CLIENT_VIEW=on need the us market profile: the sellers are American');
+        const { startDemoSellers, DEMO_SELLERS, DEMO_CLIENT_VIEW_SELLER } = await import('./demo-sellers.ts');
         const owner = STAND_ACCOUNTS.find((a) => a.role === 'OWNER')!;
         const sellers = await startDemoSellers({
           pools: {
@@ -2659,6 +2666,7 @@ async function main(): Promise<void> {
           pgUrl: url, tag: 3410, standOwnerUserId: memberUsers[owner.membershipAlias]!, standOwnerEmail: owner.email,
           joinAs: pgStandJoinAs(adminPool, directory, owner.membershipAlias),
           pressDays: pressDaysOf(process.env.REPRACER_DEMO_PRESS_DAYS),
+          specs: [...(process.env.REPRACER_DEMO_SELLERS === 'on' ? DEMO_SELLERS : []), ...(clientViewOn ? [DEMO_CLIENT_VIEW_SELLER] : [])],
           ...(LOCALES.includes(process.env.REPRACER_DEMO_LOCALE as Locale) ? { locale: process.env.REPRACER_DEMO_LOCALE as Locale } : {}),
           ...(process.env.REPRACER_DEMO_TIME_ZONE ? { timeZone: process.env.REPRACER_DEMO_TIME_ZONE } : {}),
         });

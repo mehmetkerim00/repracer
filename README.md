@@ -106,7 +106,7 @@ connected: e-mails are built but not sent (`DRY_RUN`).
 
 | Environment | Where | What runs | State |
 |---|---|---|---|
-| QA-A | `deploy/qa`, `https://qa.tmprice.com` behind Cloudflare Access | Stand with the three demo workspaces on the simulator, bulk-job worker, PostgreSQL with the live-write guard | Running; manual QA |
+| QA-A | `deploy/qa`, `https://qa.tmprice.com` behind Cloudflare Access | Stand with the four demo workspaces on the simulator (one in the Amazon US client view), bulk-job worker, PostgreSQL with the live-write guard | Running; manual QA |
 | QA-B | `deploy/pilot` on a temporary machine (`REPRACER_PILOT_STAND=qa-b`) | The pilot stack with real sign-in, operator panel, scheduler, backups and monitoring | Code ready; machine not bought yet |
 | Pilot | `deploy/pilot` on its own server | First production: console, scheduler, bulk worker, operator panel, PostgreSQL, ClickHouse, tunnel; shadow only, no broker | Code ready; server bought at launch |
 | Production profile | `deploy/production` and the per-process `deploy/*` folders | Full profile with TLS proxy, broker, receivers | Exercised by CI |
