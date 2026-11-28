@@ -3536,7 +3536,12 @@ test('step 180 (#38): the navigation folds to icons and back on a wide screen, t
 test('step 181 (#38): filters survive navigation — Offers keeps its filter in the address and in the tab, Price changes keeps its search', async () => {
   const b = browser!;
   const before = b.errors().length;
-  currentApi = colorsApi;
+  /**
+   * Красная ночь 2026-11-28 (Issue #41): пока идёт ответ с фильтром, Offers показывает скелет без строк, и ожидание «строк меньше, чем
+   * было» сходилось на нуле — в `filtered` попадал 0, а после возврата пунктом меню строк было N. Ответ с фильтром здесь всегда приходит
+   * позже: гонка постоянна, и тест обязан ждать загруженную таблицу
+   */
+  currentApi = (req) => (/\/products\?/.test(req.url) && /storefront=/.test(req.url) ? new Promise((r) => setTimeout(r, 800)).then(() => colorsApi(req)) : colorsApi(req));
   try {
     await b.setViewport(1440, 900);
     await b.open(pageUrl);
@@ -3549,7 +3554,8 @@ test('step 181 (#38): filters survive navigation — Offers keeps its filter in 
     const all = await b.evaluate<number>(`document.querySelectorAll('table.products tbody tr').length`);
     const value = await b.evaluate<string>(`[...document.querySelector('form.filters select').options].filter((o) => o.value)[0].value`);
     await b.evaluate(`(() => { const sel = document.querySelector('form.filters select'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(value)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-    await waitFor(b, `document.querySelectorAll('table.products tbody tr').length < ${all}`, 'the filtered offers');
+    // строки считаются у загруженной таблицы: пока идёт ответ, на месте таблицы — скелет без строк
+    await waitFor(b, `document.querySelector('.loading') === null && document.querySelectorAll('table.products tbody tr').length > 0 && document.querySelectorAll('table.products tbody tr').length < ${all}`, 'the filtered offers');
     const filtered = await b.evaluate<number>(`document.querySelectorAll('table.products tbody tr').length`);
     // Адрес несёт выборку
     // Часть адреса — параметры выборки, закодированные ещё раз как часть пути: маршрут раскодирует её, выборка — свои параметры
