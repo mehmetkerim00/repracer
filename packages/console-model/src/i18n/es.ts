@@ -576,7 +576,7 @@ export const es: Messages = {
         confirmReleaseDistrust: 'Sí, volver a confiar en el canal',
         releaseDistrustTitle: (label: string) => `¿Volver a confiar en el canal: ${label}?`,
         releaseDistrustText: 'Hágalo solo después de comprobar cómo trata el canal nuestros precios (por ejemplo, la base de precio en la cuenta del canal). Todos los precios vuelven a cambiar; la acción queda registrada con su nombre, un segundo factor y su nota.',
-        close: 'Cerrar', enabledTitle: (unit: string) => `Precios automáticos activados: ${unit}`, refusedTitle: (unit: string) => `Precios automáticos no activados: ${unit}`, refused: 'Rechazado', enabledBadge: 'Activado', addCost: 'Agregar el costo unitario',
+        close: 'Cerrar', enabledTitle: (unit: string) => `Precios automáticos activados: ${unit}`, refusedTitle: (unit: string) => `Precios automáticos no activados: ${unit}`, refused: 'Rechazado', setupRequired: 'Falta configuración', enabledBadge: 'Activado', addCost: 'Agregar el costo unitario',
         enableTitle: (unit: string) => `¿Activar los precios automáticos: ${unit}?`,
         enableWarnings: 'Antes de activar:',
         enableAnyway: 'Activar de todos modos',
@@ -1395,11 +1395,11 @@ export const es: Messages = {
       bulkEdit: 'Operaciones masivas',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: activadas ${t.enabled}, en curso ${t.applying}, detenidas ${t.stopped}, desactivadas ${t.off}.`,
       clock: (now: string) => `Hora simulada: ${now}.`,
-      columns: { margin: 'Margen', health: 'Estado', unit: 'Oferta', current: 'Precio actual', floor: 'Piso vigente', ceiling: 'Precio máximo', strategy: 'Estrategia', enabled: 'Activado', applying: 'En curso', lastChange: 'Último cambio', nextCheck: 'Próxima revisión', channel: 'Problemas del canal', status: 'Estado', bbHolder: 'Titular de la Buy Box', bbPrice: 'Precio de la Buy Box', bbGap: 'Diferencia', bbShare: 'Cuota de Buy Box (7 días)' },
+      columns: { margin: 'Margen', health: 'Estado', unit: 'Oferta', current: 'Precio actual', floor: 'Piso vigente', ceiling: 'Precio máximo', strategy: 'Estrategia', enabled: 'Activado', applying: 'En curso', lastChange: 'Último cambio', nextCheck: 'Próxima revisión', channel: 'Problemas del canal', status: 'Estado', bbHolder: 'Titular de la Buy Box', bbPrice: 'Precio de la Buy Box', bbGap: 'Diferencia', bbShare: 'Cuota de Buy Box (7 días)', actions: 'Acciones' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Qué hacer',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
-      healthNoUnitCost: 'Importe el costo unitario y las comisiones de esta oferta en Costos y pisos.',
+      healthNoUnitCost: 'Escriba el costo unitario y las comisiones de esta oferta en su página, o impórtelos para muchas ofertas en Costos y pisos.', healthNoUnitCostLink: 'Ingresar costo unitario y comisiones',
       healthTurnedOff: 'Una persona desactivó la fijación automática de precios de esta oferta. Para que TMPrice vuelva a fijar su precio, elija «Activar» en la columna Estado.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart oculta esta oferta porque el mismo producto está más barato en otro lugar${elsewhere ? ` (${elsewhere})` : ''}. Para que vuelva a mostrarse, acerque el precio en walmart.com a ese precio, solo si su piso lo permite. TMPrice nunca cambia el precio por esto por su cuenta.`,
       conditions: { used: 'usado', refurbished: 'reacondicionado', collectible: 'de colección' }, viewOptions: { columns: 'Columnas' },
@@ -1408,7 +1408,7 @@ export const es: Messages = {
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'ID de Walmart', EBAY: 'ID de eBay', KAUFLAND: 'ID de Kaufland' } as Record<string, string>)[channel] ?? 'ID de producto'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'datos de la competencia',
-      why: 'Por qué este precio', bounds: 'Límites y piso', noDecisions: 'aún sin decisiones', enable: 'Activar',
+      why: 'Por qué este precio', bounds: 'Límites y piso', noDecisions: 'Aún sin decisiones', moreActions: 'Más acciones para esta oferta', enable: 'Activar',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
       // Шаг 162 (#27): маржа без себестоимости — словами
       noUnitCost: 'Sin costo unitario',
@@ -2027,7 +2027,7 @@ export const es: Messages = {
       },
     },
     /** Шаг 95 [Р-217]: Costs & floors — границы сверху, импорт себестоимости — разделом того же экрана */
-    costs: { boundsTitle: 'Límites', importAction: 'Importar costos unitarios ↓', importBoundsAction: 'Importar precios mínimos y máximos ↓' },
+    costs: { bulkEditAction: 'Editar en bloque precios mínimos y máximos ↓', boundsTitle: 'Límites', importAction: 'Importar costos unitarios ↓', importBoundsAction: 'Importar precios mínimos y máximos ↓' },
     /** Шаг 95 [Р-217]: Protections — два вида защиты одной страницей */
     protections: {
       people: 'Detenido por personas', rules: 'Evitado por reglas',

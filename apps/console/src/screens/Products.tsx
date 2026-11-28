@@ -226,7 +226,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
               {col.margin ? <ColHead col="margin" label={c.margin} className="num" /> : null}
               <ColHead col="floor" label={c.floor} className="num" />{col.ceiling ? <ColHead col="ceiling" label={c.ceiling} className="num" /> : null}
               {col.strategy ? <ColHead col="strategy" label={c.strategy} /> : null}{col.health ? <ColHead col="health" label={c.health} /> : null}{col.lastChange ? <ColHead col="lastChange" label={c.lastChange} /> : null}
-              {col.nextCheck ? <ColHead col="nextCheck" label={c.nextCheck} /> : null}<th />
+              {/* Шаг 188 (§2): у колонки действий — заголовок, как у остальных; ручки ширины у неё нет */}
+              {col.nextCheck ? <ColHead col="nextCheck" label={c.nextCheck} /> : null}<th className="actions-head">{c.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -256,9 +257,10 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                 {bbOn ? bbCells(r.buybox) : null}
                 {/* Шаг 162 (#27): маржа при текущей цене — функцией Gate; пусто — словами и обычным шрифтом */}
                 {col.margin ? <td className={`num margin${r.margin.missing ? ' muted empty-value' : r.margin.bp !== null && r.margin.bp < 0 ? ' negative' : ''}`}>{r.margin.text}</td> : null}
+                {/* Шаг 188 (§2): незаданный пол — одно «Not set», причина — подсказкой (вторая строка повторяла «not set») */}
                 <td className={`num floor${r.floor.missing ? '' : ' cur'}`}>
-                  {r.floor.missing ? <span className="muted empty-value">{r.floor.amount}</span> : <strong>{r.floor.amount}</strong>}
-                  <div className="muted small floor-parts">{r.floor.parts}</div>
+                  {r.floor.missing ? <span className="muted empty-value" title={r.floor.parts}>{r.floor.amount}</span>
+                    : <><strong>{r.floor.amount}</strong><div className="muted small floor-parts">{r.floor.parts}</div></>}
                 </td>
                 {col.ceiling ? <td className={`num${r.maxPriceMissing ? ' muted empty-value' : ' cur'}`}>{r.maxPrice}</td> : null}
                 {/* Шаг 78: источник пилюлей и короткое имя; подробности стратегии — подсказкой и на «Why this price» */}
@@ -273,27 +275,32 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
                   */}
                 {col.health ? <td className="health">{r.health ? <>
                   <Cell cell={{ tone: r.health.tone, label: r.health.text, detail: r.health.detail ?? '', ...(r.health.short ? { short: r.health.short } : {}) }} />
-                  {r.health.whatToDo ? <details className="what-to-do"><summary>{r.health.whatToDo.label}</summary><p>{r.health.whatToDo.text}</p></details> : null}
+                  {r.health.whatToDo ? <details className="what-to-do"><summary>{r.health.whatToDo.label}</summary><p>{r.health.whatToDo.text}</p><WhatToDoLink worldId={view.worldId} link={r.health.whatToDo.link} /></details> : null}
                   {r.health.more.length > 0 ? (
                     <details className="what-to-do health-more"><summary>+{r.health.more.length}</summary>
                       <ul className="plain">{r.health.more.map((x) => (
-                        <li key={x.text}><Cell cell={{ tone: x.tone, label: x.text, detail: x.detail ?? '', ...(x.short ? { short: x.short } : {}) }} />{x.whatToDo ? <p className="small">{x.whatToDo.label}: {x.whatToDo.text}</p> : null}</li>
+                        <li key={x.text}><Cell cell={{ tone: x.tone, label: x.text, detail: x.detail ?? '', ...(x.short ? { short: x.short } : {}) }} />{x.whatToDo ? <><p className="small">{x.whatToDo.label}: {x.whatToDo.text}</p><WhatToDoLink worldId={view.worldId} link={x.whatToDo.link} /></> : null}</li>
                       ))}</ul>
                     </details>
                   ) : null}
                 </> : <span className="muted">–</span>}</td> : null}
                 {col.lastChange ? <td><Cell cell={r.lastChange} /></td> : null}
                 {col.nextCheck ? <td><Cell cell={r.nextCheck} /></td> : null}
-                {/* Шаг 78: одна колонка действий — основная «Why this price», под ней мелкая вторичная «Bounds» */}
+                {/*
+                  * Шаг 78: одна колонка действий — основная «Why this price», под ней вторичные. Шаг 188 (§2): «No decisions yet» — пилюлей с
+                  * заглавной; вторичные ссылки (границы, конкуренты, «почему не менялась») — под раскрытием «⋯», кнопки включения — на виду
+                  */}
                 <td className="actions">
                   {r.latestDecisionId
                     ? <a className="row-link" href={href(view.worldId, 'decisions', r.latestDecisionId)}>{p.why}</a>
-                    : <span className="muted small">{p.noDecisions}</span>}
-                  <a className="secondary-link" href={href(view.worldId, 'bounds', r.unit.writeScopeId)}>{m.ui.app.screens.bounds}</a>
-                  {/* Шаг 97 [E]: страница конкурентов предложения — ссылкой из строки, не пунктом меню */}
-                  <a className="secondary-link" href={href(view.worldId, 'competition', r.unit.writeScopeId)}>{m.ui.competition.link}</a>
-                  {/* Шаг 169 (#36): ответ из сохранённых решений предложения — почему цена не менялась */}
-                  <a className="secondary-link wrap-link" href={href(view.worldId, 'unchanged', r.unit.writeScopeId)}>{m.ui.unchanged.link}</a>
+                    : <Badge tone="off">{p.noDecisions}</Badge>}
+                  <details className="row-more"><summary aria-label={p.moreActions} title={p.moreActions}>⋯</summary><div className="row-more-links">
+                    <a className="secondary-link" href={href(view.worldId, 'bounds', r.unit.writeScopeId)}>{m.ui.app.screens.bounds}</a>
+                    {/* Шаг 97 [E]: страница конкурентов предложения — ссылкой из строки, не пунктом меню */}
+                    <a className="secondary-link" href={href(view.worldId, 'competition', r.unit.writeScopeId)}>{m.ui.competition.link}</a>
+                    {/* Шаг 169 (#36): ответ из сохранённых решений предложения — почему цена не менялась */}
+                    <a className="secondary-link wrap-link" href={href(view.worldId, 'unchanged', r.unit.writeScopeId)}>{m.ui.unchanged.link}</a>
+                  </div></details>
                   {r.canEnable && onEnable ? <button type="button" onClick={() => onEnable(r)}>{p.enable}</button> : null}
                   {/* Шаг 118: «этот SKU не трогай» — выключение автоцены одного предложения, обратно — «Enable» */}
                   {r.canDisable && onDisable ? <button type="button" onClick={() => onDisable(r)}>{m.ui.enabled.disable.button}</button> : null}
@@ -308,6 +315,14 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
     </section>
   );
 }
+
+/** Шаг 188 (§2): ссылка «что делать» туда, где это задают, — у «нет себестоимости» страница предложения с полем ввода (шаг 187) */
+function WhatToDoLink({ worldId, link }: { worldId: string; link: { label: string; writeScopeId: string } | undefined }) {
+  return link ? <p><a className="row-link" href={href(worldId, 'bounds', link.writeScopeId)}>{link.label}</a></p> : null;
+}
+
+/** Шаг 188 (§2): причина отказа, которую окно называет пунктом «что добавить» со ссылкой, второй раз строкой не повторяется */
+const SETUP_OF: Readonly<Record<string, MissingSetup>> = { COST_REQUIRED: 'UNIT_COST', MIN_PRICE_MISSING: 'MIN_PRICE', MAX_PRICE_MISSING: 'MAX_PRICE' };
 
 /** Итог попытки включения: отказы, предупреждения и явное «всё равно включить» (шаг 12, G) */
 /** Шаг 175: у причины отказа снимается приставка, которую уже сказал заголовок окна; первая буква остатка — заглавная */
@@ -326,24 +341,35 @@ export function EnableResultView(props: { unit: string; worldId?: string; result
   // Шаг 79 (ревью): заголовок говорит исход, а не повторяет вопрос после отказа; отказ — красной пилюлей
   const refused = result !== null && !result.enabled && result.problems.length > 0;
   const title = result?.enabled ? d.enabledTitle(props.unit) : refused ? d.refusedTitle(props.unit) : d.enableTitle(props.unit);
+  /**
+   * Шаг 188 (письмо Мердана 28.11, §2): причина, которую называет пункт «что добавить», строкой выше не повторяется (было трижды: заголовок,
+   * причина, пункт); отказ, которому не хватает только настройки, — «Setup required» янтарной пилюлей, иной — прежний красный «Refused»
+   */
+  const listed = new Set(props.worldId && props.missing ? props.missing.items : []);
+  const covered = (code: string) => SETUP_OF[code] !== undefined && listed.has(SETUP_OF[code]!);
+  const problems = result ? result.problems.filter((r) => !covered(r.code)) : [];
+  const setupOnly = refused && problems.length === 0;
   return (
     <div className="confirm" role="dialog" aria-modal="false" aria-labelledby="enable-title">
-      <h3 id="enable-title">{title}{refused ? <> <Badge tone="stop">{d.refused}</Badge></> : result?.enabled ? <> <Badge tone="ok">{d.enabledBadge}</Badge></> : null}</h3>
+      <h3 id="enable-title">{title}{setupOnly ? <> <Badge tone="warn">{d.setupRequired}</Badge></> : refused ? <> <Badge tone="stop">{d.refused}</Badge></> : result?.enabled ? <> <Badge tone="ok">{d.enabledBadge}</Badge></> : null}</h3>
       {props.error ? <ErrorBox message={props.error} /> : null}
       {!result ? <p className="loading" role="status">{d.busy(8)}</p> : null}
       {result?.enabled ? <p className="notice" role="status">{d.enabled}</p> : null}
       {result && result.problems.length > 0 ? (
         <>
-          <p><strong>{d.enableProblems}</strong></p>
           {/* Шаг 175 (QA-A Testing 2.0, этап 4): заголовок уже сказал «Repricing not enabled» — причины его не повторяют */}
-          <ul className="problems">{result.problems.map((r) => <li key={r.code}><ReasonLine reason={withoutPrefix(r, d.refusedTitle(''))} /></li>)}</ul>
+          {problems.length > 0 ? <>
+            <p><strong>{d.enableProblems}</strong></p>
+            <ul className="problems">{problems.map((r) => <li key={r.code}><ReasonLine reason={withoutPrefix(r, d.refusedTitle(''))} /></li>)}</ul>
+          </> : null}
           {props.worldId && props.missing && props.missing.items.length > 0 ? (
             <>
               <p><strong>{m.ui.products.missingTitle}</strong></p>
               <ul className="missing-setup">
                 {props.missing.items.map((item) => (
                   <li key={item} data-missing={item}>
-                    <a className="row-link" href={item === 'UNIT_COST' ? href(props.worldId!, 'costs', 'import') : href(props.worldId!, 'costs', 'edit', props.missing!.writeScopeId)}>{m.ui.products.missingItems[item]}</a>
+                    {/* Шаг 188: себестоимость одного предложения вводится на его странице (шаг 187); границы — правкой с ним выбранным */}
+                    <a className="row-link" href={item === 'UNIT_COST' ? href(props.worldId!, 'bounds', props.missing!.writeScopeId) : href(props.worldId!, 'costs', 'edit', props.missing!.writeScopeId)}>{m.ui.products.missingItems[item]}</a>
                   </li>
                 ))}
               </ul>

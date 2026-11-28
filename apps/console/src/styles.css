@@ -547,6 +547,10 @@ table.products td.health .cell { min-width: 100px; max-width: 140px; }
 table.products td.health .badge { white-space: normal; max-width: 100%; border-radius: var(--radius); }
 table.products.with-health td.strategy { white-space: normal; min-width: 120px; }
 table.products.compact td { padding-top: var(--base-size-6); padding-bottom: var(--base-size-6); }
+/* шаг 188 (§3): Costs & floors — суммы колонками по содержимому, рядом; ширина остаётся у предложения; строки компактные */
+table.bounds-index th.num, table.bounds-index td.num { width: 1%; white-space: nowrap; }
+table.bounds-index td .floor-parts { white-space: normal; min-width: 140px; max-width: 220px; }
+table.bounds-index td { padding-top: var(--base-size-6); padding-bottom: var(--base-size-6); }
 /* Шаг 175 (QA-A Testing 2.0, этап 4): компактные строки — стандарт; идентификатор, цвет, состав пола и ссылки строки видны всегда */
 .product-ref .badge { margin-left: var(--space-1); }
 td.strategy .strategy-name { font-weight: var(--weight-medium); }
@@ -555,6 +559,17 @@ ul.versions { list-style: none; padding: 0; margin: var(--space-2) 0 0; display:
 /* шаг 79 (ревью): вторичная ссылка — тоже ссылка, цветом акцента, только мельче основной */
 a.secondary-link { font-size: var(--font-size-xs); color: var(--accent-text); padding-left: var(--space-2); }
 a.secondary-link:hover { color: var(--accent); text-decoration: underline; }
+/* шаг 188 (§2): вторичные ссылки строки Offers — под раскрытием «⋯» (Primer: кнопка-иконка «kebab»); раскрытое — ссылками столбцом в строке */
+details.row-more > summary {
+  list-style: none; cursor: pointer; width: fit-content; padding: 0 var(--space-2); border: var(--border-width) solid var(--border); border-radius: var(--radius-sm);
+  background: var(--control-bg); color: var(--control-fg); font-weight: var(--weight-heading);
+}
+details.row-more > summary::-webkit-details-marker { display: none; }
+details.row-more[open] > summary { background: var(--control-bg-active); }
+details.row-more > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.row-more-links { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-1); }
+.row-more-links a.secondary-link { padding-left: 0; }
+.row-more-links a.wrap-link { white-space: normal; max-width: 7.5rem; }
 
 /* «Why this price →» — ссылка строки (Primer Link) */
 /* шаг 95 [Р-217]: ссылка, которая выглядит кнопкой Primer (Button как ссылка): «Bulk edit» на Offers */
@@ -1100,6 +1115,7 @@ p.notice.live-blocked { margin: 0; }
   .periods button, .segmented button, .lang-button, .lang-menu button { min-height: var(--touch-target); }
   /* шаг 96: «что делать» у пилюли — цель касания телефона */
   details.what-to-do > summary { min-height: var(--touch-target); display: flex; align-items: center; }
+  details.row-more > summary { min-height: var(--touch-target); min-width: var(--touch-target); display: inline-flex; align-items: center; justify-content: center; }
   /* шаг 150: «Details» строки стратегии — та же цель касания */
   details.strategy-details > summary { min-height: var(--touch-target); display: flex; align-items: center; }
   /* шаг 94: галочка стандарта — цель касания не ниже 44px */

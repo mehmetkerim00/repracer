@@ -550,7 +550,7 @@ export const de: Messages = {
         confirmReleaseDistrust: 'Ja, dem Kanal wieder vertrauen',
         releaseDistrustTitle: (label: string) => `Dem Kanal wieder vertrauen: ${label}?`,
         releaseDistrustText: 'Erst aufheben, nachdem geprüft wurde, wie der Kanal unsere Preise behandelt (zum Beispiel die Preisbasis im Kanalkonto). Alle Preise ändern sich wieder; die Aufhebung wird mit Ihrem Namen, zweitem Faktor und Ihrer Notiz protokolliert.',
-        close: 'Schließen', enabledTitle: (unit: string) => `Repricing eingeschaltet: ${unit}`, refusedTitle: (unit: string) => `Repricing nicht aktiviert: ${unit}`, refused: 'Abgelehnt', enabledBadge: 'Eingeschaltet', addCost: 'Stückkosten erfassen',
+        close: 'Schließen', enabledTitle: (unit: string) => `Repricing eingeschaltet: ${unit}`, refusedTitle: (unit: string) => `Repricing nicht aktiviert: ${unit}`, refused: 'Abgelehnt', setupRequired: 'Einrichtung nötig', enabledBadge: 'Eingeschaltet', addCost: 'Stückkosten erfassen',
         enableTitle: (unit: string) => `Repricing aktivieren: ${unit}?`,
         enableWarnings: 'Vor dem Aktivieren:',
         enableAnyway: 'Trotzdem aktivieren',
@@ -1342,10 +1342,10 @@ export const de: Messages = {
       bulkEdit: 'Massenvorgänge',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Gesamt ${t.total}: an ${t.enabled}, in Arbeit ${t.applying}, gestoppt ${t.stopped}, aus ${t.off}.`,
       clock: (now: string) => `Simulierte Zeit: ${now}.`,
-      columns: { margin: 'Marge', health: 'Zustand', unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil (7 Tage)' },
+      columns: { margin: 'Marge', health: 'Zustand', unit: 'Angebot', current: 'Aktueller Preis', floor: 'Untergrenze', ceiling: 'Höchstpreis', strategy: 'Strategie', enabled: 'An', applying: 'In Arbeit', lastChange: 'Letzte Änderung', nextCheck: 'Nächste Prüfung', channel: 'Probleme vom Kanal', status: 'Status', bbHolder: 'Buy-Box-Inhaber', bbPrice: 'Buy-Box-Preis', bbGap: 'Abstand', bbShare: 'Buy-Box-Anteil (7 Tage)', actions: 'Aktionen' },
       whatToDo: 'Was tun',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
-      healthNoUnitCost: 'Importieren Sie die Stückkosten und Gebühren dieses Angebots unter Kosten & Untergrenzen.',
+      healthNoUnitCost: 'Erfassen Sie die Stückkosten und Gebühren dieses Angebots auf seiner Seite oder importieren Sie sie für viele Angebote unter Kosten & Untergrenzen.', healthNoUnitCostLink: 'Stückkosten und Gebühren erfassen',
       healthTurnedOff: 'Jemand hat die automatische Preisgestaltung für dieses Angebot ausgeschaltet. Damit TMPrice den Preis wieder setzt, wählen Sie «Aktivieren» in der Spalte Status.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart blendet dieses Angebot aus, weil dasselbe Produkt anderswo günstiger ist${elsewhere ? ` (${elsewhere})` : ''}. Damit es wieder erscheint, bringen Sie den Preis auf walmart.com in die Nähe dieses Preises — nur wenn Ihre Untergrenze es erlaubt. TMPrice ändert den Preis dafür nie von sich aus.`,
       conditions: { used: 'gebraucht', refurbished: 'generalüberholt', collectible: 'Sammlerstück' }, viewOptions: { columns: 'Spalten' },
@@ -1354,7 +1354,7 @@ export const de: Messages = {
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'Walmart-ID', EBAY: 'eBay-ID', KAUFLAND: 'Kaufland-ID' } as Record<string, string>)[channel] ?? 'Produkt-ID'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'Wettbewerbsdaten',
-      why: 'Warum dieser Preis', bounds: 'Grenzen und Untergrenze', noDecisions: 'noch keine Entscheidungen', enable: 'Aktivieren',
+      why: 'Warum dieser Preis', bounds: 'Grenzen und Untergrenze', noDecisions: 'Noch keine Entscheidungen', moreActions: 'Weitere Aktionen für dieses Angebot', enable: 'Aktivieren',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
       // Шаг 162 (#27): маржа без себестоимости — словами
       noUnitCost: 'Keine Stückkosten',
@@ -1970,7 +1970,7 @@ export const de: Messages = {
         SCOPE_NOT_FOUND: 'ein Angebot ist nicht mehr in Ihrem Katalog — laden Sie die Seite neu und wählen Sie erneut', BAD_EDIT: 'die Änderung ist unvollständig — zeigen Sie die Vorschau erneut an',
       },
     },
-    costs: { boundsTitle: 'Grenzen', importAction: 'Stückkosten importieren ↓', importBoundsAction: 'Mindest- und Höchstpreise importieren ↓' },
+    costs: { bulkEditAction: 'Mindest- und Höchstpreise gesammelt ändern ↓', boundsTitle: 'Grenzen', importAction: 'Stückkosten importieren ↓', importBoundsAction: 'Mindest- und Höchstpreise importieren ↓' },
     protections: {
       people: 'Von Menschen gestoppt', rules: 'Durch Regeln verhindert',
       peopleHeadline: (n: number, phrase: string) => n === 0 ? `${phrase[0]!.toUpperCase()}${phrase.slice(1)} hat kein Mensch eine Preisänderung gestoppt` : `Menschen haben ${phrase} ${n} ${n === 1 ? 'Preisänderung' : 'Preisänderungen'} gestoppt`,

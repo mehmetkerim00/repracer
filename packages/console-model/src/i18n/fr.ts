@@ -576,7 +576,7 @@ export const fr: Messages = {
         confirmReleaseDistrust: 'Oui, refaire confiance au canal',
         releaseDistrustTitle: (label: string) => `Refaire confiance au canal : ${label} ?`,
         releaseDistrustText: 'Ne levez la défiance qu’après avoir vérifié comment le canal traite nos prix (par exemple la base de prix dans le compte du canal). Tous les prix recommencent à changer ; la levée est consignée avec votre nom, un second facteur et votre note.',
-        close: 'Fermer', enabledTitle: (unit: string) => `Tarification automatique activée : ${unit}`, refusedTitle: (unit: string) => `Tarification automatique non activée : ${unit}`, refused: 'Refusé', enabledBadge: 'Activé', addCost: 'Ajouter le coût unitaire',
+        close: 'Fermer', enabledTitle: (unit: string) => `Tarification automatique activée : ${unit}`, refusedTitle: (unit: string) => `Tarification automatique non activée : ${unit}`, refused: 'Refusé', setupRequired: 'Configuration requise', enabledBadge: 'Activé', addCost: 'Ajouter le coût unitaire',
         enableTitle: (unit: string) => `Activer la tarification automatique : ${unit} ?`,
         enableWarnings: 'Avant l’activation :',
         enableAnyway: 'Activer quand même',
@@ -1395,11 +1395,11 @@ export const fr: Messages = {
       bulkEdit: 'Opérations groupées',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total} : activées ${t.enabled}, en cours ${t.applying}, arrêtées ${t.stopped}, désactivées ${t.off}.`,
       clock: (now: string) => `Heure simulée : ${now}.`,
-      columns: { margin: 'Marge', health: 'État', unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box (7 jours)' },
+      columns: { margin: 'Marge', health: 'État', unit: 'Offre', current: 'Prix actuel', floor: 'Plancher effectif', ceiling: 'Prix maximum', strategy: 'Stratégie', enabled: 'Activé', applying: 'En cours', lastChange: 'Dernier changement', nextCheck: 'Prochain contrôle', channel: 'Problèmes signalés par le canal', status: 'Statut', bbHolder: 'Détenteur de la Buy Box', bbPrice: 'Prix de la Buy Box', bbGap: 'Écart', bbShare: 'Part de Buy Box (7 jours)', actions: 'Actions' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'Que faire',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
-      healthNoUnitCost: 'Importez le coût unitaire et les commissions de cette offre dans Coûts et planchers.',
+      healthNoUnitCost: 'Saisissez le coût unitaire et les commissions de cette offre sur sa page, ou importez-les pour de nombreuses offres dans Coûts et planchers.', healthNoUnitCostLink: 'Saisir le coût unitaire et les commissions',
       healthTurnedOff: 'Une personne a désactivé la tarification automatique de cette offre. Pour que TMPrice fixe de nouveau son prix, choisissez « Activer » dans la colonne Statut.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart masque cette offre parce que le même produit est moins cher ailleurs${elsewhere ? ` (${elsewhere})` : ''}. Pour qu’elle réapparaisse, rapprochez le prix walmart.com de ce prix — seulement si votre plancher le permet. TMPrice ne modifie jamais le prix de lui-même pour cette raison.`,
       conditions: { used: 'occasion', refurbished: 'reconditionné', collectible: 'de collection' }, viewOptions: { columns: 'Colonnes' },
@@ -1408,7 +1408,7 @@ export const fr: Messages = {
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'ID Walmart', EBAY: 'ID eBay', KAUFLAND: 'ID Kaufland' } as Record<string, string>)[channel] ?? 'ID produit'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'données de la concurrence',
-      why: 'Pourquoi ce prix', bounds: 'Limites et plancher', noDecisions: 'pas encore de décision', enable: 'Activer',
+      why: 'Pourquoi ce prix', bounds: 'Limites et plancher', noDecisions: 'Pas encore de décision', moreActions: 'Autres actions pour cette offre', enable: 'Activer',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
       // Шаг 162 (#27): маржа без себестоимости — словами
       noUnitCost: 'Pas de coût unitaire',
@@ -2027,7 +2027,7 @@ export const fr: Messages = {
       },
     },
     /** Шаг 95 [Р-217]: Costs & floors — границы сверху, импорт себестоимости — разделом того же экрана */
-    costs: { boundsTitle: 'Limites', importAction: 'Importer les coûts unitaires ↓', importBoundsAction: 'Importer les prix minimum et maximum ↓' },
+    costs: { bulkEditAction: 'Modifier en masse les prix minimum et maximum ↓', boundsTitle: 'Limites', importAction: 'Importer les coûts unitaires ↓', importBoundsAction: 'Importer les prix minimum et maximum ↓' },
     /** Шаг 95 [Р-217]: Protections — два вида защиты одной страницей */
     protections: {
       people: 'Arrêtés par des personnes', rules: 'Empêchés par des règles',

@@ -42,10 +42,11 @@ test('step 149 (#27): the floor page leads with the effective floor, the current
   assert.deepEqual([fresh.current.amount, fresh.current.missing, fresh.status.label], [en.ui.products.noPriceYet, true, en.ui.enabled.off]);
 });
 
-test('step 149 (#27): the calculation panel is folded unless it has something to explain — the floor above the ceiling, no unit cost', () => {
-  assert.equal(view(scope()).calculationOpen, false, 'a normal floor keeps the calculation folded');
-  assert.equal(view(scope({ bounds: { currency: 'USD', basis: 'NET', min: resolved(6000), max: resolved(5000) } })).calculationOpen, true, 'the floor above the ceiling opens it');
-  assert.equal(view(scope({ cost: null, declaredCost: null, bounds: { currency: 'USD', basis: 'NET', min: unset, max: unset } })).calculationOpen, true, 'no unit cost opens it');
+test('step 188 (§3, Р-254): the calculation panel is folded by default — what it used to open for is said above it: the floor above the ceiling by the plaque, a missing unit cost by its entry card', () => {
+  assert.equal('calculationOpen' in view(scope()), false, 'the page has no rule that opens the calculation');
+  assert.notEqual(view(scope({ bounds: { currency: 'USD', basis: 'NET', min: resolved(6000), max: resolved(5000) } })).frozen, null, 'the floor above the ceiling is said by the plaque');
+  const noCost = view(scope({ cost: null, declaredCost: null, bounds: { currency: 'USD', basis: 'NET', min: unset, max: unset } }));
+  assert.deepEqual([noCost.costEntry.unitCost, noCost.costEntry.currency], ['', 'USD'], 'a missing unit cost is an empty field of the entry card (step 187)');
 });
 
 test('step 149 (#27, step 142): clearance with an expired fee estimate is marked on the floor page too', () => {

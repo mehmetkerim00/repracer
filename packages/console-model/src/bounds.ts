@@ -39,8 +39,6 @@ export interface BoundsView {
   status: StatusCell;
   /** Шаг 149 (шаг 142): распродажа без действующей оценки комиссии — подписанный убыток может быть устаревшим */
   feeExpired: string | null;
-  /** Шаг 149 (#27): панель расчёта пола раскрыта сразу, только когда в ней есть что объяснить */
-  calculationOpen: boolean;
   minPrice: { amount: string; minor: number | null; source: string };
   maxPrice: { amount: string; minor: number | null; source: string };
   marginFloor: { minMarginBp: string | null; amount: string | null; minor: number | null; unavailable: string | null };
@@ -272,8 +270,6 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages,
     current: { amount: scope.currentPriceMinor === null ? m.ui.products.noPriceYet : money(scope.currentPriceMinor), missing: scope.currentPriceMinor === null },
     status: enabledCell(scope, m, world, extra.writeMode === 'SHADOW'),
     feeExpired: scope.clearance && scope.cost === null ? m.ui.products.feeExpired : null,
-    // Пол выше потолка, пол маржи не вычисляется (кроме распродажи, где он не действует законно) или нет себестоимости — раскрыто сразу
-    calculationOpen: frozen !== null || (floor.source !== 'CLEARANCE' && floor.marginUnavailableCause !== null && floor.marginUnavailableCause !== undefined) || costUnavailable !== null || cost === null,
     minPrice: { amount: boundText(scope.bounds.min, c, m), minor: floor.minMinor, source: source(scope.bounds.min) },
     maxPrice: { amount: boundText(scope.bounds.max, c, m), minor: scope.bounds.max.status === 'RESOLVED' ? scope.bounds.max.amountMinor : null, source: source(scope.bounds.max) },
     marginFloor,

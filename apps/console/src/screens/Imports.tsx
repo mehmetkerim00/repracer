@@ -136,9 +136,11 @@ export function ImportHistory({ view, controls }: {
   const m = useMessages();
   const t = m.ui.imports;
   const zone = commonZone(view.items.map((r) => r.when));
+  // Шаг 188 (письмо Мердана 28.11, §3; Р-254): журнал импортов — раскрываемым разделом, свёрнутым по умолчанию; что применено, говорит строка
+  // итога над ним
   return (
-    <section className="card import-history">
-      <h4>{t.historyTitle}</h4>
+    <details className="card more-block import-history">
+      <summary>{t.historyTitle}</summary>
       {controls ? (
         <div className="toolbar field-toolbar">
           <PeriodPicker value={controls.period} maxDays={IMPORTS_KEEP_DAYS} onChange={controls.onPeriod} />
@@ -158,7 +160,7 @@ export function ImportHistory({ view, controls }: {
         ]} />
       )}
       {controls && view.page ? <Pager page={view.page} query={controls.query} onQuery={controls.onQuery} /> : null}
-    </section>
+    </details>
   );
 }
 

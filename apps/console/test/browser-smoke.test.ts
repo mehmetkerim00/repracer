@@ -1497,6 +1497,10 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
 
   // Шаблон: задание, затем файл забирается клиентом консоли — ошибок страницы нет
   await visit('costs');
+  // Шаг 188: импорт на Costs & floors — раскрываемым разделом, свёрнутым по умолчанию; человек раскрывает его (адрес `costs/import` прежнего
+  // теста раскрывает его сам, и браузер это помнит — тогда уже открыт)
+  if (!(await b.evaluate<boolean>(`document.getElementById('cost-import-section').open`))) await b.click(t.titles.COSTS, 'details.import-section > summary');
+  await waitFor(b, `document.getElementById('cost-import-section').open`, 'the unit-cost import is open');
   await b.click(t.templateCsv, '.import-costs button');
   await new Promise((x) => setTimeout(x, 300));
   await runPendingJobs(smokeLive);
@@ -2270,6 +2274,8 @@ test('step 104 (D) [Р-229]: «Export» with CSV and XLSX on every screen with d
       await b.setViewport(width, 900);
       for (const route of new Set(EXPORT_AT.map(([r]) => r))) {
         await go(route);
+        // Шаг 188: импорты и их журналы на Costs & floors свёрнуты — геометрию ряда фильтров журнала меряем раскрытой
+        if (route === 'costs') await b.evaluate(`(document.querySelectorAll('details.import-section, details.import-history').forEach((d) => { d.open = true; }), true)`);
         const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
         assert.ok(fit.scrollWidth <= fit.width, `${scheme} ${width} ${route}: no sideways scroll — ${fit.out.join('; ')}`);
         assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${scheme} ${width} ${route}: nothing sticks out of its frame`);
@@ -3738,10 +3744,10 @@ test('step 183 (#38): columns resize by mouse and keyboard, the browser remember
     await b.evaluate(`(Object.keys(localStorage).filter((k) => k.startsWith('repracer.table-widths:')).forEach((k) => localStorage.removeItem(k)), true)`);
     await go('products');
     await shot('offers-1440-header');
-    // Ручка — у каждой колонки с подписью, с доступным именем; у колонки действий её нет
+    // Ручка — у каждой колонки с подписью, с доступным именем; у колонки действий её нет (шаг 188: у неё подпись «Actions», закреплённая колонка)
     const handles = await b.evaluate<{ labelled: number; handles: string[] }>(`(() => {
       const heads = [...document.querySelectorAll('table.products thead th')];
-      return { labelled: heads.filter((th) => th.textContent.trim() !== '').length,
+      return { labelled: heads.filter((th) => th.textContent.trim() !== '' && !th.classList.contains('actions-head')).length,
         handles: heads.map((th) => th.querySelector('[role=separator]')?.getAttribute('aria-label')).filter(Boolean) };
     })()`);
     assert.equal(handles.handles.length, handles.labelled, `every labelled Offers column has a resize handle: ${JSON.stringify(handles)}`);
@@ -5078,5 +5084,114 @@ test('step 187 (Merdan 28.11, §5): one offer — unit cost and fees typed on it
   assert.match(lines, /€7\.50/, `unit cost — ${lines}`);
   assert.match(lines, /12\.5/, `fee — ${lines}`);
   assert.match(lines, /€0\.40/, `fixed fee — ${lines}`);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 188 (письмо Мердана 28.11, §2; Р-146): заголовок числовой колонки выровнен по её числам — правый край текста подписи совпадает с
+ * правым краем суммы в первых строках (до 2 px); пояснение под суммой (состав пола) и ручка ширины колонки не считаются
+ */
+const NUM_ALIGN = `(() => {
+  const textRight = (el) => { let r = -Infinity; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (!n.textContent.trim() || n.parentElement.closest('.col-grip, .floor-parts, .visually-hidden, .small')) continue;
+      const range = document.createRange(); range.selectNodeContents(n);
+      for (const rect of range.getClientRects()) r = Math.max(r, rect.right);
+    }
+    return r; };
+  const out = [];
+  for (const table of document.querySelectorAll('.world-content table')) {
+    if (!table.checkVisibility() || getComputedStyle(table).display !== 'table') continue;
+    const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
+    heads.forEach((th, i) => {
+      if (!th.classList.contains('num')) return;
+      for (const row of [...table.tBodies[0]?.rows ?? []].slice(0, 3)) {
+        const td = row.cells[i];
+        if (!td || !td.classList.contains('num') || !td.textContent.trim()) continue;
+        const gap = Math.round(textRight(th) - textRight(td));
+        if (Math.abs(gap) > 2) { out.push((table.className || 'table') + ' «' + th.textContent.trim().slice(0, 30) + '»: header ' + gap + ' px off the numbers'); break; }
+      }
+    });
+  }
+  return out; })()`;
+
+/**
+ * Шаг 188 (письмо Мердана 28.11, §2–§3; Р-254): вторичные ссылки строки Offers — под раскрытием «⋯» (свёрнуто, по нажатию — три ссылки
+ * на виду), у колонки действий — заголовок; Costs & floors — массовая правка границ первой и главной кнопкой, оба импорта — раскрываемыми
+ * разделами, свёрнутыми по умолчанию: кнопка импорта и адрес раздела его раскрывают и приводят к нему. На 1440 и 375 страница не уезжает
+ * вбок, ничто не выступает из рамки, на телефоне касание — 44 px
+ */
+test('step 188 (Merdan 28.11, §2–§3): «⋯» opens the secondary links of an Offers row; Costs & floors — bulk edit first, the imports folded and opened by their buttons and address', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const p = en.ui.products;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  const go = async (route: string) => {
+    await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`);
+    await settled(b, route);
+  };
+  const inWindow = (id: string) => `(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return r.top >= 0 && r.top < window.innerHeight - 40; })()`;
+  const fits = async (what: string, width: number) => {
+    const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+    assert.ok(fit.scrollWidth <= fit.width, `${what}: no sideways scroll — ${fit.out.join('; ')}`);
+    assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${what}: nothing sticks out of its frame`);
+    if (width === 375) assert.deepEqual(await b.evaluate<string[]>(SMALL_TARGETS), [], `${what}: touch targets`);
+  };
+  try {
+    for (const width of [1440, 375]) {
+      await b.setViewport(width, 900);
+      await go('products');
+      await waitFor(b, `!!document.querySelector('table.products tbody tr details.row-more')`, `${width}: the «⋯» of an offer row`);
+      assert.equal(await b.evaluate<string>(`[...document.querySelectorAll('table.products thead th')].at(-1).textContent.trim()`), p.columns.actions, `${width}: the actions column has a header`);
+      const row = `document.querySelector('table.products tbody tr details.row-more')`;
+      const shown = `[...${row}.querySelectorAll('a.secondary-link')].filter((a) => a.checkVisibility()).length`;
+      assert.deepEqual(await b.evaluate<[boolean, number, string]>(`[${row}.open, ${shown}, ${row}.querySelector('summary').getAttribute('aria-label')]`), [false, 0, p.moreActions],
+        `${width}: the secondary links are folded under «⋯» with a spoken name`);
+      await b.evaluate(`(${row}.querySelector('summary').click(), true)`);
+      await waitFor(b, `${row}.open && ${shown} === 3`, `${width}: «⋯» shows the three secondary links`);
+      await fits(`${width} offers, «⋯» open`, width);
+      if (width === 1440) {
+        assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'Offers: number headers are aligned with the numbers');
+        // Положительный контроль [Р-94]: подпись числовой колонки слева от её чисел — находка правила
+        await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<table id="align-control"><thead><tr><th class="num" style="text-align:left">Control price</th></tr></thead><tbody><tr><td class="num">$1,234.00</td></tr></tbody></table>'), true)`);
+        const control = await b.evaluate<string[]>(NUM_ALIGN);
+        await b.evaluate(`(document.getElementById('align-control').remove(), true)`);
+        assert.ok(control.some((x) => x.includes('Control price')), `control: a header left of its numbers is a finding — ${JSON.stringify(control)}`);
+      }
+
+      await b.evaluate(`(localStorage.removeItem('repracer.costs.open'), true)`);
+      await go('costs');
+      await waitFor(b, `document.querySelectorAll('details.import-section').length === 2 && !!document.querySelector('.costs .page-actions button.primary')`, `${width}: the import sections and the bulk edit button`);
+      const page = await b.evaluate<{ first: string; primary: boolean; open: boolean[]; titles: string[] }>(`(() => { const first = document.querySelector('.costs .page-actions button');
+        const s = [...document.querySelectorAll('details.import-section')];
+        return { first: first.textContent.trim(), primary: first.classList.contains('primary'), open: s.map((d) => d.open), titles: s.map((d) => d.querySelector(':scope > summary').textContent.trim()) }; })()`);
+      assert.deepEqual(page, { first: en.ui.costs.bulkEditAction, primary: true, open: [false, false], titles: [en.ui.imports.titles.COSTS, en.ui.imports.titles.BOUNDS] },
+        `${width}: bulk edit first and primary; both imports folded`);
+      await fits(`${width} costs, folded`, width);
+      if (width === 1440) assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'Costs & floors: number headers are aligned with the numbers');
+      await b.click(en.ui.costs.importAction, '.costs .page-actions button');
+      await waitFor(b, `document.getElementById('cost-import-section').open && ${inWindow('cost-import')}`, `${width}: «${en.ui.costs.importAction}» opens the section and brings it into the window`);
+      await fits(`${width} costs, the unit-cost import open`, width);
+      await b.click(en.ui.costs.bulkEditAction, '.costs .page-actions button');
+      await waitFor(b, inWindow('bounds-edit'), `${width}: «${en.ui.costs.bulkEditAction}» brings the bulk edit into the window`);
+    }
+    // Адрес раздела (онбординг, прежний `cost-import`) раскрывает свой раздел, даже свёрнутый памятью браузера
+    await b.setViewport(1440, 900);
+    await b.evaluate(`(localStorage.setItem('repracer.costs.open', JSON.stringify({ 'cost-import': false })), true)`);
+    await go('products');
+    await go('costs/import');
+    await waitFor(b, `document.getElementById('cost-import-section')?.open === true`, 'costs/import opens the unit-cost import');
+  } finally {
+    await b.evaluate(`(localStorage.removeItem('repracer.costs.open'), true)`);
+    await b.setViewport(1440, 900);
+  }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

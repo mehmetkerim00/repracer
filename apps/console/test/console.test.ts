@@ -2244,12 +2244,91 @@ test('step 148 (#27, UX-05): the enable refusal lists every missing item with a 
   assert.ok(dialog.includes(en.ui.products.missingTitle), 'the dialog says what to add');
   const links = [...dialog.matchAll(/<li data-missing="([A-Z_]+)"><a class="row-link" href="([^"]+)">([^<]+)<\/a><\/li>/g)].map((x) => [x[1], x[2], x[3]]);
   assert.deepEqual(links, [
-    ['UNIT_COST', '#/w/demo%2Fus/costs/import', en.ui.products.missingItems.UNIT_COST],
+    // Шаг 188: себестоимость одного предложения вводится на его странице (шаг 187)
+    ['UNIT_COST', '#/w/demo%2Fus/bounds/ws-148', en.ui.products.missingItems.UNIT_COST],
     ['MIN_PRICE', '#/w/demo%2Fus/costs/edit/ws-148', en.ui.products.missingItems.MIN_PRICE],
     ['MAX_PRICE', '#/w/demo%2Fus/costs/edit/ws-148', en.ui.products.missingItems.MAX_PRICE],
   ], 'every missing item links to where it is set');
   // Шаг 175: причина — без «Repricing not enabled», которое уже сказал заголовок окна; суть причины прежняя
   const prefix = en.ui.app.dialog.refusedTitle('');
   const essence = refusal.problems[0]!.text.slice(prefix.length);
-  assert.ok(refusal.problems[0]!.text.startsWith(prefix) && dialog.includes(essence.charAt(0).toUpperCase() + essence.slice(1)), 'the refusal itself, without the title phrase again');
+  assert.ok(refusal.problems[0]!.text.startsWith(prefix) && !dialog.includes(essence.charAt(0).toUpperCase() + essence.slice(1)), 'the setup reason is not repeated above the list of what to add (step 188)');
+});
+
+/**
+ * Шаг 188 (письмо Мердана 28.11, §2): отказ включения, которому не хватает только настройки, — «Setup required», а не красное «Refused»;
+ * и каждое недостающее названо ОДИН раз — строкой «что добавить» со ссылкой, без той же причины строкой выше. Себестоимость одного
+ * предложения вводится на его странице (шаг 187) — ссылка ведёт туда. Отказ по другой причине — прежний «Refused», его причина видна
+ */
+test('step 188 (Merdan 28.11, §2): a setup-only refusal says «Setup required» and names each missing item once, with its link; another reason stays «Refused»', async () => {
+  for (const locale of ['en', 'de', 'es', 'fr'] as const) {
+    const m = messagesFor(locale);
+    const d = m.ui.app.dialog;
+    const prefix = d.refusedTitle('');
+    const reason = (code: string) => describe({ code, params: {} } as never, m);
+    const render = (codes: string[]) => html('/src/screens/Products.tsx', 'EnableResultView', {
+      unit: 'Desk lamp · amazon.com', worldId: 'demo/us', result: { enabled: false, problems: codes.map(reason), warnings: [] }, busy: false, error: null,
+      onAcknowledge: () => {}, onClose: () => {}, missing: { writeScopeId: 'ws-188', items: ['UNIT_COST', 'MIN_PRICE', 'MAX_PRICE'] } }, locale);
+    const badges = (markup: string) => [...markup.matchAll(/<span class="badge tone-([a-z]+)">([^<]+)<\/span>/g)].map((x) => [x[1], x[2]]);
+    const essence = (code: string) => { const t = reason(code).text.slice(prefix.length); return t.charAt(0).toLocaleUpperCase() + t.slice(1); };
+
+    const setup = await render(['COST_REQUIRED', 'MIN_PRICE_MISSING', 'MAX_PRICE_MISSING']);
+    assert.deepEqual(badges(setup), [['warn', d.setupRequired]], `${locale}: «Setup required», not «Refused»`);
+    for (const code of ['COST_REQUIRED', 'MIN_PRICE_MISSING', 'MAX_PRICE_MISSING']) assert.ok(!setup.includes(essence(code)), `${locale}: ${code} is said once — by the item to add`);
+    assert.ok(!setup.includes(d.enableProblems), `${locale}: no «cannot be enabled» heading over an empty list`);
+    const links = [...setup.matchAll(/<li data-missing="([A-Z_]+)"><a class="row-link" href="([^"]+)">/g)].map((x) => [x[1], x[2]]);
+    assert.deepEqual(links, [['UNIT_COST', '#/w/demo%2Fus/bounds/ws-188'], ['MIN_PRICE', '#/w/demo%2Fus/costs/edit/ws-188'], ['MAX_PRICE', '#/w/demo%2Fus/costs/edit/ws-188']],
+      `${locale}: the unit cost of one offer is typed on its page (step 187)`);
+
+    const mixed = await render(['STRATEGY_MISSING', 'COST_REQUIRED']);
+    assert.deepEqual(badges(mixed), [['stop', d.refused]], `${locale}: a reason other than setup stays «Refused»`);
+    assert.ok(mixed.includes(essence('STRATEGY_MISSING')) && !mixed.includes(essence('COST_REQUIRED')), `${locale}: the other reason is named, the setup one only as an item to add`);
+  }
+});
+
+/**
+ * Шаг 188 (§2): строка Offers — у колонки действий есть заголовок «Actions»; «No decisions yet» — пилюлей с заглавной; вторичные ссылки
+ * (границы, конкуренты, «почему не менялась») — под раскрытием «⋯», главная ссылка и кнопки — на виду; у «нет себестоимости» в Health →
+ * What to do — ссылка на страницу предложения, где она вводится (шаг 187); незаданный пол — одно «Not set», причина — подсказкой
+ */
+test('step 188 (Merdan 28.11, §2): Offers — an «Actions» header, «No decisions yet» as a pill, secondary links under «⋯», a settings link in What to do, one «Not set»', async () => {
+  const auth = await login('OWNER');
+  const id = 'kaufland/pipeline/enable-margin-without-cost';
+  const view = await get<ProductListView>(auth, api(id, 'products'));
+  const p = en.ui.products;
+  const noCost = view.rows.find((r) => r.unit.writeScopeId.endsWith('4702'))!;
+  assert.equal(noCost.health?.whatToDo?.link?.writeScopeId, noCost.unit.writeScopeId, 'the What to do of a missing unit cost links to the offer page');
+  const patched = { ...view, rows: view.rows.map((r) => r === noCost ? { ...r, latestDecisionId: null, floor: { amount: p.notSet, minor: null, parts: p.floorNoMin, missing: true } } : r) };
+  const markup = await html('/src/screens/Products.tsx', 'ProductsView', { view: patched });
+  assert.match(markup, new RegExp(`<th class="actions-head">${p.columns.actions}</th>`), 'the actions column has a header');
+  assert.ok(markup.includes(`<span class="badge tone-off">${p.noDecisions}</span>`) && /^[A-Z]/.test(p.noDecisions), `«${p.noDecisions}» — a pill, capitalized`);
+  const more = /<details class="row-more"><summary aria-label="([^"]+)" title="[^"]+">⋯<\/summary><div class="row-more-links">(.*?)<\/div><\/details>/.exec(markup);
+  assert.ok(more && more[1] === p.moreActions, 'the secondary links are under «⋯» with a spoken label');
+  assert.deepEqual([...more![2]!.matchAll(/<a class="secondary-link[^"]*" href="[^"]+">([^<]+)<\/a>/g)].map((x) => x[1]!.replace(/&#x27;/g, "'")), [en.ui.app.screens.bounds, en.ui.competition.link, en.ui.unchanged.link]);
+  assert.ok(markup.includes(`<p>${p.healthNoUnitCost.replace(/&/g, '&amp;')}</p><p><a class="row-link" href="#/w/${encodeURIComponent(id)}/bounds/${noCost.unit.writeScopeId}">${p.healthNoUnitCostLink}</a></p>`),
+    'What to do links to the offer page where the unit cost is typed');
+  assert.ok(!markup.includes(`<div class="muted small floor-parts">${p.floorNoMin}</div>`), 'an unset floor is one «Not set», its reason a tooltip');
+  assert.ok(markup.includes(`title="${p.floorNoMin}"`), 'the reason of the unset floor is the tooltip');
+});
+
+/**
+ * Шаг 188 (§3): страница пола — подзаголовок называет налог один раз (у США было «net (sales tax added at checkout) · sales tax added at
+ * checkout (US)»); расчёт пола свёрнут по умолчанию и без себестоимости — её поле на виду карточкой шага 187 [Р-254]. Индекс Costs & floors —
+ * незаданный пол одним «Not set»: «минимальная цена не задана» уже говорит колонка минимума рядом
+ */
+test('step 188 (Merdan 28.11, §3): the floor page names the tax once and keeps the calculation folded; the Costs & floors index says «Not set» once', async () => {
+  const auth = await login('OWNER');
+  const id = 'kaufland/pipeline/enable-margin-without-cost';
+  const rows = (await get<ProductListView>(auth, api(id, 'products'))).rows;
+  const ws = rows.find((r) => r.unit.writeScopeId.endsWith('4702'))!.unit.writeScopeId;
+  const view = await get<BoundsView>(auth, api(id, 'bounds', ws));
+  const us = { ...view, priceBasis: en.values.NET, taxRegime: en.values.SALES_TAX_EXCLUDED, currency: 'USD' };
+  const page = await html('/src/screens/Bounds.tsx', 'BoundsScreenView', { view: us });
+  const subtitle = /<p class="subtitle">(.*?)<\/p>/.exec(page)![1]!;
+  assert.equal(subtitle.split('sales tax').length - 1, 1, `the tax is named once — ${subtitle}`);
+  assert.match(page, /<details class="card more-block calc">/, 'the floor calculation is folded, even without a unit cost');
+  const index = await html('/src/screens/Bounds.tsx', 'BoundsIndexView', { worldId: id, items: [{ writeScopeId: ws, label: 'Desk lamp · kaufland.de', name: 'Desk lamp', storefront: 'kaufland.de',
+    color: null, swatch: null, channel: 'KAUFLAND', channelProductRef: '1', gtin: null, condition: 'new', minPrice: en.ui.products.notSet, maxPrice: en.ui.products.notSet,
+    floor: { amount: en.ui.products.notSet, parts: en.ui.products.floorNoMin, missing: true }, minPriceMissing: true, maxPriceMissing: true }] });
+  assert.ok(!index.includes(en.ui.products.floorNoMin), 'the index floor cell does not repeat that the minimum price is not set');
 });

@@ -577,7 +577,7 @@ export const en = {
         confirmReleaseDistrust: 'Yes, trust the channel again',
         releaseDistrustTitle: (label: string) => `Trust the channel again: ${label}?`,
         releaseDistrustText: 'Release only after checking how the channel treats our prices (for example the price basis in the channel account). All prices start changing again; the release is logged with your name, a second factor and your note.',
-        close: 'Close', enabledTitle: (unit: string) => `Repricing enabled: ${unit}`, refusedTitle: (unit: string) => `Repricing not enabled: ${unit}`, refused: 'Refused', enabledBadge: 'Enabled', addCost: 'Add the unit cost',
+        close: 'Close', enabledTitle: (unit: string) => `Repricing enabled: ${unit}`, refusedTitle: (unit: string) => `Repricing not enabled: ${unit}`, refused: 'Refused', setupRequired: 'Setup required', enabledBadge: 'Enabled', addCost: 'Add the unit cost',
         enableTitle: (unit: string) => `Enable repricing: ${unit}?`,
         enableWarnings: 'Before enabling:',
         enableAnyway: 'Enable anyway',
@@ -1402,11 +1402,11 @@ export const en = {
       bulkEdit: 'Bulk operations',
       totals: (t: { total: number; enabled: number; applying: number; stopped: number; off: number }) => `Total ${t.total}: on ${t.enabled}, in progress ${t.applying}, stopped ${t.stopped}, off ${t.off}.`,
       clock: (now: string) => `Simulated time: ${now}.`,
-      columns: { margin: 'Margin', health: 'Health', unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'Buy Box share (7 days)' },
+      columns: { margin: 'Margin', health: 'Health', unit: 'Offer', current: 'Current price', floor: 'Effective floor', ceiling: 'Maximum price', strategy: 'Strategy', enabled: 'On', applying: 'In progress', lastChange: 'Last change', nextCheck: 'Next check', channel: 'Issues from the channel', status: 'Status', bbHolder: 'Buy Box holder', bbPrice: 'Buy Box price', bbGap: 'Gap', bbShare: 'Buy Box share (7 days)', actions: 'Actions' },
       // Шаг 96 (А6): у пилюли «снят с публикации» — короткое «что делать»
       whatToDo: 'What to do',
       /** Шаг 174: что делать у причин внимания без заметки канала — пункт Health */
-      healthNoUnitCost: 'Import the unit cost and fees of this offer on Costs & floors.',
+      healthNoUnitCost: 'Type the unit cost and fees of this offer on its page, or import them for many offers on Costs & floors.', healthNoUnitCostLink: 'Enter unit cost and fees',
       healthTurnedOff: 'A person turned off automatic pricing for this offer. To let TMPrice price it again, choose «Enable» in the Status column.',
       unpublishedWhatToDo: (elsewhere: string | null) => `Walmart hides this offer because the same product is cheaper elsewhere${elsewhere ? ` (${elsewhere})` : ''}. To show it again, bring the walmart.com price close to that price — only if your floor allows. TMPrice never changes the price for this on its own.`,
       conditions: { used: 'used', refurbished: 'refurbished', collectible: 'collectible' }, viewOptions: { columns: 'Columns' },
@@ -1415,7 +1415,7 @@ export const en = {
       // «Item ID» Walmart и eBay — нет: «item» в глоссарии K9 — запрещённый синоним товара и предложения
       productId: (channel: string, ref: string, gtin: string | null) => [ref ? `${({ AMAZON: 'ASIN', WALMART: 'Walmart ID', EBAY: 'eBay ID', KAUFLAND: 'Kaufland ID' } as Record<string, string>)[channel] ?? 'Product ID'} ${ref}` : '', gtin ? `EAN ${gtin}` : ''].filter(Boolean).join(' · '),
       competitorBadge: 'competitor data',
-      why: 'Why this price', bounds: 'Bounds and floor', noDecisions: 'no decisions yet', enable: 'Enable',
+      why: 'Why this price', bounds: 'Bounds and floor', noDecisions: 'No decisions yet', moreActions: 'More actions for this offer', enable: 'Enable',
       // Шаг 148 (#27, UX-04, UX-05): пустое — словами; что добавить для включения; распродажа с истёкшей комиссией
       // Шаг 162 (#27): маржа без себестоимости — словами
       noUnitCost: 'No unit cost',
@@ -2040,7 +2040,7 @@ export const en = {
       },
     },
     /** Шаг 95 [Р-217]: Costs & floors — границы сверху, импорт себестоимости — разделом того же экрана */
-    costs: { boundsTitle: 'Bounds', importAction: 'Import unit costs ↓', importBoundsAction: 'Import minimum & maximum prices ↓' },
+    costs: { bulkEditAction: 'Bulk edit minimum & maximum prices ↓', boundsTitle: 'Bounds', importAction: 'Import unit costs ↓', importBoundsAction: 'Import minimum & maximum prices ↓' },
     /** Шаг 95 [Р-217]: Protections — два вида защиты одной страницей */
     protections: {
       people: 'Stopped by people', rules: 'Prevented by rules',

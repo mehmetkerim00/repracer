@@ -29,7 +29,9 @@ export interface FloorCell {
 
 /** Шаг 162 (#27): пункт Health — тон, слова, пояснение и «что делать» (у заметок канала, шаг 96) */
 export interface HealthItem {
-  tone: StatusCell['tone']; text: string; detail?: string; short?: string; whatToDo?: { label: string; text: string };
+  tone: StatusCell['tone']; text: string; detail?: string; short?: string;
+  /** Шаг 188 (§2): у «что делать» бывает ссылка туда, где это задают, — у «нет себестоимости» страница предложения с вводом (шаг 187) */
+  whatToDo?: { label: string; text: string; link?: { label: string; writeScopeId: string } };
   /** Шаг 174: пункт называет причину «требует внимания» строки — у жёлтой строки Health не пуст */
   reason?: AttentionReason;
 }
@@ -419,8 +421,8 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
     };
     // Шаг 174: причины внимания, у которых нет заметки канала, — своими пунктами Health; слова — те же, что у фильтра «Needs attention»
     const reasons = attentionReasons(world, scope, m);
-    const reasonItem = (reason: 'NO_UNIT_COST' | 'TURNED_OFF', whatToDo: string): HealthItem =>
-      ({ tone: 'warn', text: p.filters.attentionValues[reason], whatToDo: { label: p.whatToDo, text: whatToDo }, reason });
+    const reasonItem = (reason: 'NO_UNIT_COST' | 'TURNED_OFF', whatToDo: string, link?: string): HealthItem =>
+      ({ tone: 'warn', text: p.filters.attentionValues[reason], whatToDo: { label: p.whatToDo, text: whatToDo, ...(link ? { link: { label: link, writeScopeId: scope.writeScopeId } } : {}) }, reason });
     // Порядок важности: блокировки (stop) — пол выше потолка, затем блокирующие заметки канала; затем внимание — конфликт рамок, прочие заметки,
     // истёкшая комиссия, распродажа
     const marks: HealthItem[] = [
@@ -429,7 +431,7 @@ export function productList(world: StandWorld, m: Messages, query?: ListQuery, s
       ...(boundsPill ? [{ tone: 'warn' as const, text: boundsPill }] : []),
       ...notes.filter((n) => n.tone !== 'stop').map(noteItem),
       // Истёкшая оценка комиссии в распродаже — та же причина «нет себестоимости или комиссии», названная точнее: второго пункта нет
-      ...(reasons.includes('NO_UNIT_COST') && !feePill ? [reasonItem('NO_UNIT_COST', p.healthNoUnitCost)] : []),
+      ...(reasons.includes('NO_UNIT_COST') && !feePill ? [reasonItem('NO_UNIT_COST', p.healthNoUnitCost, p.healthNoUnitCostLink)] : []),
       ...(reasons.includes('TURNED_OFF') ? [reasonItem('TURNED_OFF', p.healthTurnedOff)] : []),
       ...(feePill ? [{ tone: 'warn' as const, text: feePill, ...(reasons.includes('NO_UNIT_COST') ? { reason: 'NO_UNIT_COST' as const } : {}) }] : []),
       ...(clearancePill ? [{ tone: 'warn' as const, text: clearancePill }] : []),

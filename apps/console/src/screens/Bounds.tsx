@@ -258,13 +258,15 @@ export function BreakdownTable({ breakdown, currency, foot = true }: { breakdown
 export function BoundsScreenView({ view, onChanged = () => undefined }: { view: BoundsView; onChanged?: () => void }) {
   const m = useMessages();
   const b = m.ui.bounds;
-  // Шаг 149: раскрытие — по модели (есть что объяснить), дальше — выбор зрителя на этой странице
-  const [calcOpen, setCalcOpen] = useState(view.calculationOpen);
+  // Шаг 188 (§3, Р-254): расчёт пола свёрнут по умолчанию всегда — пол выше потолка говорит плашка сверху, поле себестоимости — карточка
+  // шага 187; дальше — выбор зрителя на этой странице
+  const [calcOpen, setCalcOpen] = useState(false);
   return (
     <section>
       <p className="back"><a href={href(view.worldId, 'costs')}>{b.back}</a></p>
       <h2>{b.pageTitle}{view.clearance.pill ? <> <Badge tone="warn">{view.clearance.pill}</Badge></> : null}</h2>
-      <p className="subtitle">{view.unit.label} · {view.currency}, {view.priceBasis} · {view.taxRegime}</p>
+      {/* Шаг 188 (§3): налог — один раз; у США база цены («net (sales tax added at checkout)») повторяла налоговый режим */}
+      <p className="subtitle">{view.unit.label} · {view.currency}, {view.taxRegime}</p>
       {/* Шаг 96 (аудит В20): из разбивки пола — сразу в правку границ с этим предложением */}
       <p className="page-actions"><a className="button-link" href={href(view.worldId, 'costs', 'edit', view.unit.writeScopeId)}>{b.changeFloor}</a></p>
       {/* Шаг 102 [Р-227]: пол выше потолка — ни одна цена не проходит; продавцу видно, почему цены стоят, и что сделать */}
@@ -298,7 +300,7 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
 
       {/*
         Шаг 149: расчёт пола — составляющие (минимальная цена, минимальная маржа, себестоимость и комиссии, разбивки, калькулятор) — панелью.
-        Свёрнута, кроме случаев, когда в ней есть что объяснить; содержимое свёрнутой — на странице
+        Шаг 188: свёрнута по умолчанию; содержимое свёрнутой — на странице
       */}
       <details className="card more-block calc" open={calcOpen} onToggle={(e) => setCalcOpen(e.currentTarget.open)}>
         <summary>{b.calculation}</summary>
@@ -370,7 +372,8 @@ export function BoundsIndexView({ worldId, items, embedded = false, pick, headin
       {/* Шаг 79 (ревью): список границ — таблицей с шапкой и зеброй; суммы — вправо, ссылка на разбивку пола — в своей колонке */}
       {items.length === 0 ? null : (
         <TableFrame table="bounds" {...(frame ? { screen: frame } : {})}>
-          <table className={pick ? 'cardify selectable' : 'cardify'}>
+          {/* Шаг 188 (§3): плотнее — суммы колонками по содержимому, рядом друг с другом; строки — компактные, как на Offers */}
+          <table className={pick ? 'cardify selectable bounds-index' : 'cardify bounds-index'}>
             {/* Шаг 175 (QA-A Testing 2.0, этап 4): заданный минимум и действующий пол — разные колонки: пол бывает выше минимума (маржа, безубыточность) */}
             {/* Шаг 183 (#38): ручка ширины — у подписанных колонок; колонка галочки и колонка ссылки — без неё */}
             <thead><tr>{pick ? <th className="pick"><span className="visually-hidden">{c.offer}</span></th> : null}<ColHead col="offer" label={c.offer} /><ColHead col="min" label={c.min} className="num" /><ColHead col="max" label={c.max} className="num" /><ColHead col="floor" label={m.ui.products.columns.floor} className="num" /><th /></tr></thead>
@@ -389,8 +392,9 @@ export function BoundsIndexView({ worldId, items, embedded = false, pick, headin
                     {/* Шаг 152 (#27, UX-04): пустая граница — «Not set» словами, приглушённо и без моноширинного шрифта сумм */}
                     <td className={i.minPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.min}>{i.minPrice}</td>
                     <td className={i.maxPriceMissing ? 'num muted empty-value' : 'num money cur'} data-label={c.max}>{i.maxPrice}</td>
+                    {/* Шаг 188 (§3): незаданный пол — одно «Not set»: что минимум не задан, уже говорит колонка минимума рядом */}
                     <td className={i.floor.missing ? 'num muted empty-value' : 'num money cur'} data-label={m.ui.products.columns.floor}>
-                      {i.floor.missing ? i.floor.amount : <strong>{i.floor.amount}</strong>}<div className="muted small floor-parts">{i.floor.parts}</div>
+                      {i.floor.missing ? i.floor.amount : <><strong>{i.floor.amount}</strong><div className="muted small floor-parts">{i.floor.parts}</div></>}
                     </td>
                     <td className="num card-action"><a className="row-link" href={href(worldId, 'bounds', i.writeScopeId)}>{c.floor}</a></td>
                   </tr>
