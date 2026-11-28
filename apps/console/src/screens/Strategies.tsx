@@ -9,7 +9,7 @@ import { Badge, commonZone, ErrorBox, errorText, Gaps, Help, href, Load, Pager, 
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions, RowCheck } from '../forms.tsx';
 import { BoundsIndexView } from './Bounds.tsx';
 import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
-import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
+import { filterOfUi, isPicked, SelectionBar, SelectionScope, useSelectionSummary } from './Selection.tsx';
 import { takeHandover } from '../handover.ts';
 
 /**
@@ -403,8 +403,9 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
         </form>
       ) : null}
       {view.matched !== null && view.matched !== undefined && !review ? <Help className="section-sub" text={m.ui.products.filters.matched(view.matched, view.catalogTotal ?? view.page.total)} /> : null}
-      <SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={view.matched ?? view.page.total} storefronts={view.filters?.storefronts ?? []}
-        review={review !== null} onReview={(on) => setReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} disabled={busy} />
+      {/* Шаг 189 (#27, пункт 17): строка выбора держится над списком, пока листаются его строки */}
+      <SelectionScope line={<SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={view.matched ?? view.page.total} storefronts={view.filters?.storefronts ?? []}
+        review={review !== null} onReview={(on) => setReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} disabled={busy} />}>
       {review ? (
         <>
           <h4>{m.ui.selection.reviewTitle}</h4>
@@ -440,6 +441,7 @@ export function StrategiesScreenView({ view, worldId, initialPreview = null, onC
         </div>
       )}
       {review ? null : <Pager page={view.page} query={pageQuery ?? { offset: 0, limit: LIST_PAGE_DEFAULT }} onQuery={(q) => onPage?.(q)} />}
+      </SelectionScope>
       {(() => {
         const nothing = selectedCount === 0;
         const saveWhy = !preview ? m.ui.forms.why.previewFirst : preview.saveBlocked !== null ? preview.saveBlocked : null;

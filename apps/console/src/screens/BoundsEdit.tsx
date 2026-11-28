@@ -59,7 +59,8 @@ export function BoundsDiffTable({ view, worldId, planJobId }: { view: BoundsDiff
       {view.mfaRequired ? <p className="notice">{t.mfa}</p> : null}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>{c.offer}</th><th>{c.minBefore}</th><th>{c.minAfter}</th><th>{c.maxBefore}</th><th>{c.maxAfter}</th><th>{c.price}</th><th>{c.notes}</th></tr></thead>
+          {/* Шаг 189 (#27, пункт 3): подписи сумм — числовые, над своими числами (правило смоука NUM_ALIGN узнаёт колонку по ячейкам) */}
+          <thead><tr><th>{c.offer}</th><th className="num">{c.minBefore}</th><th className="num">{c.minAfter}</th><th className="num">{c.maxBefore}</th><th className="num">{c.maxAfter}</th><th className="num">{c.price}</th><th>{c.notes}</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               // Шаг 167, шаг 168: строка с пометкой внимания — подсвечена целиком (класс строки, как на Offers и Inventory)

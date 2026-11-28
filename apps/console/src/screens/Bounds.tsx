@@ -6,7 +6,7 @@ import { Badge, Cell, DateTimeField, errorText, Gaps, Help, href, Load, NotFound
 import { CheckField, Field, FieldGrid, FieldGroup, FormActions, RowCheck } from '../forms.tsx';
 import { BoundsEditPanel } from './BoundsEdit.tsx';
 import { NO_OFFER_QUERY, OfferFilterFields, type OfferUiQuery } from './Products.tsx';
-import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
+import { filterOfUi, isPicked, SelectionBar, SelectionScope, useSelectionSummary } from './Selection.tsx';
 import { takeHandover } from '../handover.ts';
 import { ColHead, TableFrame, type TableScreen } from '../table-frame.tsx';
 
@@ -470,13 +470,20 @@ function BoundsSelection({ worldId, view, query, onQuery, offerQuery, onOfferQue
         </form>
       ) : null}
       {view.matched !== null && !review ? <Help className="section-sub" text={m.ui.products.filters.matched(view.matched, view.catalogTotal)} /> : null}
-      {view.canEdit && (view.page.total > 0 || filtered) ? (
-        <SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={matching} storefronts={view.filters.storefronts}
-          review={review !== null} onReview={(on) => onReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} />
-      ) : null}
-      {review ? <h4>{m.ui.selection.reviewTitle}</h4> : null}
-      <BoundsIndexView worldId={worldId} items={items} embedded heading={false} filtered={filtered || review !== null} frame="costs" {...(pick ? { pick } : {})} />
-      {review ? (summary?.review ? <Pager page={summary.review.page} query={review} onQuery={onReview} /> : null) : <Pager page={view.page} query={query} onQuery={onQuery} />}
+      {(() => {
+        const rows = (
+          <>
+            {review ? <h4>{m.ui.selection.reviewTitle}</h4> : null}
+            <BoundsIndexView worldId={worldId} items={items} embedded heading={false} filtered={filtered || review !== null} frame="costs" {...(pick ? { pick } : {})} />
+            {review ? (summary?.review ? <Pager page={summary.review.page} query={review} onQuery={onReview} /> : null) : <Pager page={view.page} query={query} onQuery={onQuery} />}
+          </>
+        );
+        // Шаг 189 (#27, пункт 17): строка выбора держится над таблицей, пока листаются её строки
+        return view.canEdit && (view.page.total > 0 || filtered) ? (
+          <SelectionScope line={<SelectionBar summary={summary} selection={selection} onSelection={onSelection} filter={filter} matching={matching} storefronts={view.filters.storefronts}
+            review={review !== null} onReview={(on) => onReview(on ? { offset: 0, limit: LIST_PAGE_DEFAULT } : null)} />}>{rows}</SelectionScope>
+        ) : rows;
+      })()}
       {/* Шаг 79 (ревью): массовая правка на ноль предложений — не форма, её просто нет */}
       {view.page.total === 0 && !filtered ? null : <><SectionAnchor id="bounds-edit" focus={focusEdit} /><BoundsEditPanel worldId={worldId} selection={selection} selected={summary?.selected ?? 0}
         canEdit={view.canEdit} onApplied={onApplied} /></>}
