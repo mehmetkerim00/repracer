@@ -5298,24 +5298,30 @@ test('step 189 (#27, items 3 and 17): number headers over their numbers in the b
     await waitFor(b, `document.querySelectorAll('section.preview tbody tr').length > 0`, 'the strategy preview', 20_000);
     assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'the strategy preview: every number header is marked and stands over its numbers');
 
-    // (17) Строка выбора держится под верхней панелью, пока листаются строки
-    const pinned = (table: string, count: string) => b.evaluate<{ top: number; count: number; covered: string; edge: number | null; th: number; rows: number; missed: number } | null>(`(() => {
-      const tb = document.querySelector(${JSON.stringify(table)}), c = document.querySelector(${JSON.stringify(count)}); if (!tb || !c) return null;
+    // (17) Строка выбора держится под верхней панелью, пока листаются строки. Прокрутка и замер — порознь: высоту строки для шапки таблицы
+    // отдаёт ResizeObserver к следующему кадру (строка на раннере CI переносится во второй ряд), замер ждёт, пока высота догонит строку
+    const scrollInto = (table: string) => b.evaluate<number | null>(`(() => {
+      const tb = document.querySelector(${JSON.stringify(table)}); if (!tb) return null;
       const top = document.querySelector('.topbar').getBoundingClientRect().bottom;
       document.body.style.paddingBottom = window.innerHeight + 'px';
       window.scrollTo(0, 0);
       // начало таблицы уходит выше верхней панели на 160 px — её строки ещё на экране
       const want = tb.getBoundingClientRect().top - top + 160;
       window.scrollTo(0, want);
+      // + 0: отрицательный ноль протокол отладки не передаёт значением
+      return Math.round(want - window.scrollY) + 0; })()`);
+    const caughtUp = (count: string) => `(() => { const line = document.querySelector(${JSON.stringify(count)})?.closest('.selection-sticky'); if (!line) return true;
+      return Math.abs(parseFloat(getComputedStyle(line.parentElement).getPropertyValue('--selection-h')) - line.getBoundingClientRect().height) <= 1; })()`;
+    const pinned = (table: string, count: string) => b.evaluate<{ top: number; count: number; covered: string; edge: number | null; th: number; rows: number }>(`(() => {
+      const tb = document.querySelector(${JSON.stringify(table)}), c = document.querySelector(${JSON.stringify(count)});
+      const top = document.querySelector('.topbar').getBoundingClientRect().bottom;
       const r = c.getBoundingClientRect();
       const hit = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2);
       const line = c.closest('.selection-sticky');
-      const out = { top: Math.round(top), count: Math.round(r.top), covered: hit && c.contains(hit) ? '' : hit ? hit.tagName + '.' + hit.className : 'nothing',
+      return { top: Math.round(top), count: Math.round(r.top), covered: hit && c.contains(hit) ? '' : hit ? hit.tagName + '.' + hit.className : 'nothing',
         edge: line ? Math.round(line.getBoundingClientRect().bottom) : null, th: Math.round(tb.querySelector('thead th').getBoundingClientRect().top),
-        rows: tb.querySelectorAll('tbody tr').length, missed: Math.round(want - window.scrollY) };
-      document.body.style.paddingBottom = '';
-      window.scrollTo(0, 0);
-      return out; })()`);
+        rows: tb.querySelectorAll('tbody tr').length }; })()`);
+    const unscroll = () => b.evaluate(`(document.body.style.paddingBottom = '', window.scrollTo(0, 0), true)`);
     const screens = [
       { route: 'costs', pick: '.costs table.selectable tbody tr td.pick input', table: '.costs table.selectable', count: '.costs .selection-count', header: true },
       { route: 'strategies', pick: null, table: '.pick-card table.strategy-picks', count: '.pick-card .selection-count', header: false },
@@ -5329,8 +5335,12 @@ test('step 189 (#27, items 3 and 17): number headers over their numbers in the b
         await b.evaluate(`([...document.querySelectorAll(${JSON.stringify(s.pick)})].slice(0, 3).forEach((x) => x.click()), true)`);
         await waitFor(b, `document.querySelector(${JSON.stringify(s.count)}).textContent.trim() === ${JSON.stringify(t.counter(3, 0))}`, `${s.route}: three selected`, 10_000);
       }
+      const missed = await scrollInto(s.table);
+      assert.ok(missed !== null && Math.abs(missed) <= 1, `${s.route}: the page scrolled into the rows — missed by ${missed}px`);
+      await waitFor(b, caughtUp(s.count), `${s.route}: the measured height of the selection line catches up with the line`, 5_000);
       const p = await pinned(s.table, s.count);
-      assert.ok(p && p.rows >= 3 && Math.abs(p.missed) <= 1, `${s.route}: the page scrolled into the rows — ${JSON.stringify(p)}`);
+      await unscroll();
+      assert.ok(p.rows >= 3, `${s.route}: rows to scroll — ${JSON.stringify(p)}`);
       assert.ok(p.count >= p.top && p.count <= p.top + 40, `${s.route}: the selection line stays under the top bar while the rows scroll — the counter at ${p.count}px, the top bar ends at ${p.top}px`);
       assert.equal(p.covered, '', `${s.route}: nothing is drawn over the selection line`);
       if (s.header) assert.ok(p.edge !== null && Math.abs(p.th - p.edge) <= 1, `${s.route}: the table header stays right under the selection line — ${JSON.stringify(p)}`);
