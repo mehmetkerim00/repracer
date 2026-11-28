@@ -204,6 +204,35 @@ test('step 186 (Merdan 28.11, §1): «Demo store — Amazon US» is the client v
   assert.match(JSON.stringify((await call<unknown>('GET', `/api/worlds/${encodeURIComponent(main.id)}/products`, owner)).body), /EBAY/, 'the three-channel demo still has eBay');
 });
 
+/**
+ * Шаг 187 (письмо Мердана 28.11, §5) через консоль на PostgreSQL [Р-136]: себестоимость и комиссии ОДНОГО предложения — запросом страницы пола,
+ * как браузер; сохранённое страница отдаёт сразу (поля и расчёт пола), неверная сумма — отказ своей причиной
+ */
+test('step 187 (Merdan 28.11, §5): the unit cost and fees of one offer are saved from its floor page on PostgreSQL — the page shows them at once', async () => {
+  const owner = await signIn('OWNER');
+  const client = (await call<WorldSummary[]>('GET', '/api/worlds', owner)).body.find((w) => w.title === 'Demo store — Amazon US')!;
+  const base = `/api/worlds/${encodeURIComponent(client.id)}`;
+  const index = (await call<{ items: Array<{ writeScopeId: string }> }>('GET', `${base}/bounds?offset=0&limit=1`, owner)).body;
+  const id = index.items[0]!.writeScopeId;
+  // Комиссия выше тарифной (15 % у демо): пол считается по самой дорогой оценке [Р-141], и введённая становится действующей
+  const saved = await call<{ message: string; bounds: { costEntry: { unitCost: string; feePercent: string; fixedFee: string }; cost: { lines: Array<{ key: string; amount: string }> };
+    feeEstimates: Array<{ text: string; used: boolean }> } }>(
+    'POST', `${base}/bounds/${encodeURIComponent(id)}/cost`, owner, { unitCost: '6.25', feePercent: '17.5', fixedFee: '0.30' });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.message, messagesFor('en').ui.bounds.costEntry.saved);
+  assert.deepEqual(saved.body.bounds.costEntry, { ...saved.body.bounds.costEntry, unitCost: '6.25', feePercent: '17.5', fixedFee: '0.30' });
+  assert.deepEqual(saved.body.bounds.cost.lines.map((l) => [l.key, l.amount]), [['COST', '$6.25'], ['FEE', '17.5%'], ['FIXED_FEE', '$0.30']]);
+  // Р-138: оценка продавца и тарифная — рядом, действующая помечена
+  const estimates = saved.body.bounds.feeEstimates;
+  assert.equal(estimates.length, 2, JSON.stringify(estimates));
+  assert.ok(estimates.some((e) => e.used && e.text.includes('17.5%')) && estimates.some((e) => !e.used && e.text.includes('15%')), JSON.stringify(estimates));
+  // Неверная сумма — отказ своей причиной, ничего не сохранено
+  const bad = await call<{ error: { code: string } }>('POST', `${base}/bounds/${encodeURIComponent(id)}/cost`, owner, { unitCost: '6.255' });
+  assert.deepEqual([bad.status, bad.body.error.code], [400, 'AMOUNT_INVALID']);
+  const again = (await call<{ costEntry: { unitCost: string } }>('GET', `${base}/bounds/${encodeURIComponent(id)}`, owner)).body;
+  assert.equal(again.costEntry.unitCost, '6.25', 'the refused amount changed nothing');
+});
+
 /** Членство синтетического участника стенда в демо по его роли — из базы, как его увидит страж */
 async function memberOf(tenantId: string, role: string): Promise<{ membershipId: string; userId: string }> {
   const account = STAND_ACCOUNTS.find((a) => a.role === role)!;

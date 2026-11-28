@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { EXPLANATION_RULESETS } from './dictionary.ts';
 import { listingStatusStep, type LatestListingState } from './listing-status.ts';
 import { prioritizedWindow } from './reconciliation.ts';
-import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, FeeExpiryNotice, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
+import type { ClearanceChangeRow, ClearanceDisableResult, ClearanceEnableInput, ClearanceEnableResult, ClearanceEnded, FeeExpiryNotice, ClearanceRef, ClearanceState, FloorRaiseAfter, FloorRaiseCandidate, HaltSampleObservation, HaltSampleReview, NotificationLossCheck, PollCandidate, NotificationLossVerdict, SnapshotDelivery, SnapshotOutcome, DiscountAnnouncementInput, DiscountAnnouncementRow, DiscountAnnounceResult, PriceEvidenceDay, ConsoleAuditRow, MemberRoleChangeResult, ConsoleStrategyVersionRow, StrategyAssignInput, StrategyUnassignInput, StrategyUnassignResult, ConsoleDistrustRow, ConsoleOfferChannelPricingRow, ConsolePricingHealthRow, ConsoleListingStatusRow, InboundNotificationEntry, ListingStatusRecord, NotificationSourceFacts, RawInboundNotificationEntry, OfferChannelPricingObservation, DiscoveryStop, CostImportBatch, CostImportResult, OfferCostInput, OfferCostResult, BulkJobArtifact, BulkJobCreated, BulkJobInput, BulkJobKind, BulkJobOutcome, BulkJobProgress, BulkJobRow, OnboardingProgressRow, OnboardingProgressInput, OnboardingStepStatus, ChannelAccountRow, BuyboxHolderObservation, BuyboxSpanRow, CompetitionDataRow,
   BoundsImportResult, BoundsImportRowInput, ImportRunInput, ImportRunRow, StrategiesImportInput, StrategiesImportResult, ProductDetailsImportInput, ProductDetailsImportResult, DefaultStrategyResult, DefaultStrategyRow, FreshnessRow } from './store.ts';
 import { BULK_JOB_MEMBER_QUEUE_LIMIT, BULK_JOB_QUEUE_LIMIT, DECISION_CAUSES, decisionCause, OVERVIEW_VISIT_GAP_MINUTES, DECISION_OUTCOME_GROUPS, FILE_PRODUCING_JOB_KINDS, INTERVENTION_SLICE_LIMIT, PRODUCT_COLOR_FORM, READ_ONLY_JOB_KINDS } from './store.ts';
 import { feedGroupOf, type PricingSwitchRef, type ConsoleScopeRow, type ConsoleWriteRow, type ConsoleIntentRow, type DecisionCause, type DecisionCauseCount, type DecisionPage, type DecisionPageQuery, type DecisionDetail, type ScopeDecisionStats, type InterventionSlice, type FloorHoldEpisodeRow, type FloorHoldTotals, type FeedPage, type FeedPageItem, type FeedPageQuery, type FeedStatusGroup, type WorldCounters } from './store.ts';
@@ -2074,6 +2074,37 @@ export class InMemoryPricingStore implements PricingStore, WriteQueueStore {
       if (p.row.pricingMode === 'ENGINE') this.requestFloorRaise(p.row.writeScopeId, 'COST_UPDATE', this.now());
     }
     return { status: 'APPLIED', importId: planned.some((p) => p.costChanged) ? `import-${batch.fingerprint}` : null, rows: batch.rows.length, offers, ...(run ? { run } : {}) };
+  }
+
+  /**
+   * Шаг 187 (§5): себестоимость и комиссии одного предложения — тем же правилом, что строка импорта (поле без значения не меняется,
+   * валюта — предложения), без второго фактора [Р-144]. Окно массовой правки — защита базы (0103), в памяти его нет, как у правки границ
+   */
+  async setOfferCost(_tenantId: string, input: OfferCostInput, actor: AdminActor): Promise<OfferCostResult> {
+    if (!this.adminMember(actor)) return { status: 'FORBIDDEN' };
+    const row = this.scopes.get(input.writeScopeId);
+    if (!row) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    const amounts = [input.unitCostMinor, input.fixedFeeMinor].filter((v) => v !== undefined);
+    if (amounts.length === 0 && input.feeRateBp === undefined) return { status: 'INVALID', cause: 'NOTHING_TO_SAVE' };
+    if (amounts.some((v) => !Number.isSafeInteger(v) || v! < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID' };
+    if (input.feeRateBp !== undefined && (!Number.isSafeInteger(input.feeRateBp) || input.feeRateBp < 0 || input.feeRateBp >= 10_000)) return { status: 'INVALID', cause: 'AMOUNT_INVALID' };
+    if (row.currency !== input.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' };
+    if (input.unitCostMinor === undefined && !row.cost) return { status: 'INVALID', cause: 'COST_REQUIRED' };
+    const feeChanged = input.feeRateBp !== undefined || input.fixedFeeMinor !== undefined;
+    row.sellerFee = feeChanged
+      ? { feeRateBp: input.feeRateBp ?? row.sellerFee?.feeRateBp ?? null, fixedFeeMinor: input.fixedFeeMinor ?? row.sellerFee?.fixedFeeMinor ?? null }
+      : row.sellerFee ?? null;
+    row.cost = {
+      currency: input.unitCostMinor === undefined ? row.cost!.currency : input.currency,
+      costProfileId: input.unitCostMinor === undefined ? row.cost!.costProfileId : `cp-manual-${row.writeScopeId}-${(row.cost?.costProfileId ?? '').length}`,
+      unitCostMinor: input.unitCostMinor ?? row.cost!.unitCostMinor,
+      fixedFeeMinor: input.fixedFeeMinor ?? row.cost?.fixedFeeMinor ?? 0,
+      feeRateBp: input.feeRateBp ?? row.cost?.feeRateBp ?? 0,
+      tax: row.cost?.tax ?? (row.taxRegime === 'SALES_TAX_EXCLUDED' ? { regime: 'SALES_TAX_EXCLUDED' } : { regime: 'VAT_INCLUDED', vatRateBp: null }),
+    };
+    // Р-210: новая себестоимость или комиссия — запрос на переоценку, как триггер базы
+    if (row.pricingMode === 'ENGINE') this.requestFloorRaise(row.writeScopeId, 'COST_UPDATE', this.now());
+    return { status: 'SAVED' };
   }
 
   async saveStrategy(_tenantId: string, input: StrategySaveInput, actor: AdminActor): Promise<StrategySaveResult> {

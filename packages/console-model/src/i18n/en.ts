@@ -1806,6 +1806,29 @@ export const en = {
         belowMinClearance: (floor: string, min: string) => `Below the channel's own minimum — the channel will deactivate this offer. Your clearance floor ${floor} is below the channel minimum ${min}; prices below ${min} are sent, as you confirmed when you enabled clearance.`,
         aboveMax: (max: string, channelMax: string) => `Above the channel's own maximum — the channel will deactivate this offer. Your maximum price ${max} is above the channel maximum ${channelMax}; prices above ${channelMax} are not sent.`,
       },
+      // Шаг 187 (письмо Мердана 28.11, §5): себестоимость и комиссии одного предложения — вводом на странице, без таблицы
+      costEntry: {
+        title: 'Unit cost and fees',
+        intro: 'Type them for this offer — no spreadsheet needed. Each save is a new version of the unit cost, and the floor is recalculated. For many offers at once, use the import on Costs & floors.',
+        unitCost: (currency: string) => `Unit cost (${currency})`,
+        feePercent: 'Channel fee (% of the price)',
+        fixedFee: (currency: string) => `Fixed fee per sale (${currency})`,
+        keepHint: 'Leave a field empty to keep its current value.',
+        save: 'Save',
+        saved: 'Saved. The floor is recalculated with the new values.',
+        readOnly: 'Only an owner or a manager can change the unit cost and fees.',
+        otherCurrency: (amount: string) => `The current unit cost is ${amount}. Type it in the offer currency to replace it.`,
+        why: { nothing: 'Type at least one value', invalid: 'Check the amounts: numbers with up to two decimals, the fee below 100 %' },
+        causes: {
+          NOTHING_TO_SAVE: 'Nothing to save: type at least one value.',
+          AMOUNT_INVALID: 'An amount is not valid: numbers with up to two decimals, the fee below 100 %.',
+          SCOPE_NOT_FOUND: 'This offer was not found.',
+          CURRENCY_MISMATCH: 'Amounts are in the offer currency only.',
+          COST_REQUIRED: 'Type the unit cost first: a fee alone has nothing to attach to.',
+          MFA_REQUIRED_WINDOW: 'More than five offers were changed in the last ten minutes: sign in with a second factor to continue.',
+          FORBIDDEN: 'Your role may not change the unit cost and fees.',
+        },
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Clearance floor — allow selling below break-even',

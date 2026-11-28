@@ -5023,3 +5023,60 @@ test('step 184.1 (b): the next test starts on the English login screen all the s
   await b.waitText(en.ui.app.login.roleCan.OWNER, 10_000);
   assert.equal(await b.evaluate<string>('document.documentElement.lang'), 'en', 'the page is English');
 });
+
+/**
+ * Шаг 187 (письмо Мердана 28.11, §5): себестоимость и комиссии одного предложения — вводом на его странице, без таблицы. Поля стоят с нынешними
+ * значениями; «Save» без изменений недоступна и говорит почему; сохранённое видно в расчёте пола той же страницы (себестоимость и комиссия)
+ */
+test('step 187 (Merdan 28.11, §5): one offer — unit cost and fees typed on its floor page, saved, and the floor calculation shows them', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = euApi;
+  const t = en.ui.bounds.costEntry;
+  await b.setViewport(1440, 900);
+  await b.open(pageUrl);
+  await b.waitText(en.ui.app.login.roleCan.OWNER);
+  await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+  await b.waitText(en.ui.app.worlds);
+  await b.click(await b.evaluate<string>(`document.querySelector('h3 a').textContent.trim()`));
+  await settled(b, 'first screen');
+  const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+  await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/products`)}, true)`);
+  await settled(b, 'offers');
+  const page = await b.evaluate<string>(`document.querySelector('table.products tbody tr a.secondary-link').getAttribute('href')`);
+  await b.evaluate(`(location.hash = ${JSON.stringify(page)}, true)`);
+  await settled(b, 'floor page');
+  await waitFor(b, `!!document.querySelector('section.cost-entry')`, 'the unit cost card is on the floor page');
+  const form = await b.evaluate<{ title: string; labels: string[]; disabled: boolean; hint: string }>(`(() => {
+    const c = document.querySelector('section.cost-entry'); const btn = [...c.querySelectorAll('button')].find((x) => x.textContent.trim() === ${JSON.stringify(t.save)});
+    return { title: c.querySelector('h3').textContent.trim(), labels: [...c.querySelectorAll('label')].map((l) => l.textContent.trim()), disabled: btn ? btn.disabled : null, hint: c.textContent }; })()`);
+  assert.equal(form.title, t.title);
+  assert.ok([t.unitCost('EUR'), t.feePercent, t.fixedFee('EUR')].every((l) => form.labels.some((x) => x.startsWith(l))), `the three fields — ${form.labels.join(' | ')}`);
+  const set = (name: string, value: string) => b.evaluate(`(() => { const i = document.querySelector('section.cost-entry input[name="${name}"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  // Ничего не введено — «Save» недоступна и говорит почему; неверное число — тоже
+  for (const name of ['unitCost', 'feePercent', 'fixedFee']) await set(name, '');
+  await waitFor(b, `[...document.querySelectorAll('section.cost-entry button')].some((x) => x.disabled && x.title === ${JSON.stringify(t.why.nothing)})`, 'nothing typed — the button says why');
+  await set('unitCost', '7,505');
+  await waitFor(b, `[...document.querySelectorAll('section.cost-entry button')].some((x) => x.disabled && x.title === ${JSON.stringify(t.why.invalid)})`, 'three decimals — the button says why');
+  await set('unitCost', '7.50');
+  await set('feePercent', '12.5');
+  await set('fixedFee', '0.40');
+  // Кнопка становится доступной после перерисовки — нажатие раньше ушло бы в недоступную кнопку
+  await waitFor(b, `[...document.querySelectorAll('section.cost-entry button')].some((x) => x.textContent.trim() === ${JSON.stringify(t.save)} && !x.disabled)`, 'Save is available');
+  await b.evaluate(`([...document.querySelectorAll('section.cost-entry button')].find((x) => x.textContent.trim() === ${JSON.stringify(t.save)}).click(), true)`);
+  // Ответ сохранения — строка карточки (подсказка формы тоже говорит статусом и стоит там всегда)
+  await waitFor(b, `!!document.querySelector('section.cost-entry > p.notice, section.cost-entry > p.error')`, 'the save answers').catch(async (e: unknown) => {
+    const card = await b.evaluate<string>(`(() => { const c = document.querySelector('section.cost-entry'); return c ? c.outerHTML.slice(0, 1500) : 'no card: ' + location.hash; })()`);
+    throw new Error(`${e instanceof Error ? e.message : String(e)} — ${card}`);
+  });
+  assert.equal(await b.evaluate<string>(`document.querySelector('section.cost-entry > p.error')?.textContent.trim() ?? ''`), '', 'no error on save');
+  assert.equal(await b.evaluate<string>(`document.querySelector('section.cost-entry > p.notice').textContent.trim()`), t.saved, 'the save says it is saved');
+  // Расчёт пола той же страницы — новые себестоимость и комиссия (панель свёрнута, но содержимое на странице)
+  await waitFor(b, `[...document.querySelectorAll('details.calc .cost-lines li')].map((x) => x.textContent).join(' | ').includes('€7.50')`, 'the unit cost in the calculation');
+  const lines = await b.evaluate<string>(`[...document.querySelectorAll('details.calc .cost-lines li')].map((x) => x.textContent.trim()).join(' | ')`);
+  assert.match(lines, /€7\.50/, `unit cost — ${lines}`);
+  assert.match(lines, /12\.5/, `fee — ${lines}`);
+  assert.match(lines, /€0\.40/, `fixed fee — ${lines}`);
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});

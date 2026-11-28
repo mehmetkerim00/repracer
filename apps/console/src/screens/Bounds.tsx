@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { canPickMore, LIST_PAGE_DEFAULT, MAX_PICKED, NO_SELECTION, parseAmountInput, toggleOffer, type BoundsView, type ListQuery, type OfferSelection, type PriceBreakdown } from '@repracer/console-model';
+import { canPickMore, LIST_PAGE_DEFAULT, MAX_PICKED, NO_SELECTION, parseAmountInput, parsePercentInput, toggleOffer, type BoundsView, type ListQuery, type OfferSelection, type PriceBreakdown } from '@repracer/console-model';
 import type { BoundsIndexItem, BoundsIndexView as BoundsIndexData } from '../api-types.ts';
 import { requestJson, useResource, worldPath } from '../api.ts';
 import { Badge, Cell, DateTimeField, errorText, Gaps, Help, href, Load, NotFound, Pager, ProductRef, SectionAnchor, UnitName, useMessages } from '../components.tsx';
@@ -138,6 +138,67 @@ function ClearanceSection({ view, onChanged }: { view: BoundsView; onChanged: ()
 }
 
 /**
+ * Шаг 187 (письмо Мердана 28.11, §5): себестоимость и комиссии ЭТОГО предложения — вводом на странице, без таблицы. Поля — с нынешними
+ * значениями; пустое поле значение не меняет. Сохранение — новая версия себестоимости тем же путём, что у импорта; пол пересчитывает база,
+ * и страница перечитывается. Для многих предложений — импорт на Costs & floors
+ */
+function CostEntrySection({ view, onChanged }: { view: BoundsView; onChanged: () => void }) {
+  const m = useMessages();
+  const t = m.ui.bounds.costEntry;
+  const e = view.costEntry;
+  const [unitCost, setUnitCost] = useState(e.unitCost);
+  const [feePercent, setFeePercent] = useState(e.feePercent);
+  const [fixedFee, setFixedFee] = useState(e.fixedFee);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const typed = [unitCost, feePercent, fixedFee].some((x) => x.trim() !== '');
+  const valid = (unitCost.trim() === '' || parseAmountInput(unitCost) !== null) && (fixedFee.trim() === '' || parseAmountInput(fixedFee) !== null)
+    && (feePercent.trim() === '' || ((): boolean => { const bp = parsePercentInput(feePercent); return bp !== null && bp >= 0 && bp < 10_000; })());
+  const why = !typed ? t.why.nothing : !valid ? t.why.invalid : null;
+  const save = async () => {
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const r = await requestJson<{ message: string }>(worldPath(view.worldId, 'bounds', view.unit.writeScopeId, 'cost'),
+        { method: 'POST', body: { unitCost, feePercent, fixedFee }, locale: m.locale });
+      setMessage(r.message);
+      onChanged();
+    } catch (err) {
+      setError(errorText(err, m));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card cost-entry">
+      <h3>{t.title}</h3>
+      <Help className="section-sub" text={t.intro} />
+      {e.otherCurrency ? <p className="small muted">{e.otherCurrency}</p> : null}
+      {e.canEdit ? (
+        <FieldGroup>
+          <FieldGrid cols={3}>
+            <Field label={t.unitCost(e.currency)}>
+              <input type="text" inputMode="decimal" name="unitCost" value={unitCost} disabled={busy} onChange={(x) => setUnitCost(x.target.value)} />
+            </Field>
+            <Field label={t.feePercent}>
+              <input type="text" inputMode="decimal" name="feePercent" value={feePercent} disabled={busy} onChange={(x) => setFeePercent(x.target.value)} />
+            </Field>
+            <Field label={t.fixedFee(e.currency)}>
+              <input type="text" inputMode="decimal" name="fixedFee" value={fixedFee} disabled={busy} onChange={(x) => setFixedFee(x.target.value)} />
+            </Field>
+          </FieldGrid>
+          <FormActions hint={why ?? t.keepHint}>
+            <button type="button" className="primary" disabled={busy || why !== null} title={why ?? undefined} onClick={() => void save()}>{t.save}</button>
+          </FormActions>
+        </FieldGroup>
+      ) : <p className="muted">{t.readOnly}</p>}
+      {message ? <p className="notice" role="status">{message}</p> : null}
+      {error ? <p className="error" role="alert">{error}</p> : null}
+    </section>
+  );
+}
+
+/**
  * Шаг 107 [Р-233, Р-231]: рамки цены, заданные продавцом в самом канале (Amazon Min/Max на SKU), рядом с нашими: значения и «без доставки»,
  * честное «not provided» без данных канала и предупреждение — ровно при конфликте (наш пол ниже Min канала, наш потолок выше Max канала)
  */
@@ -229,6 +290,9 @@ export function BoundsScreenView({ view, onChanged = () => undefined }: { view: 
         </section>
         <ChannelBoundsSection view={view} />
       </div>
+
+      {/* Шаг 187 (§5): себестоимость и комиссии одного предложения — вводом здесь, без таблицы */}
+      <CostEntrySection view={view} onChanged={onChanged} />
 
       <ClearanceSection view={view} onChanged={onChanged} />
 
@@ -418,7 +482,11 @@ function BoundsSelection({ worldId, view, query, onQuery, offerQuery, onOfferQue
 
 function BoundsDetail({ worldId, writeScopeId }: { worldId: string; writeScopeId: string }) {
   const m = useMessages();
-  const [resource, retry] = useResource<BoundsView>(worldPath(worldId, 'bounds', writeScopeId), m.locale);
+  /**
+   * Шаг 187: после сохранения (себестоимость, распродажа) страница перечитывается и держит прежние данные (`keepPrevious`, как BUG-01 шага 174):
+   * без этого перечитывание показывало скелет, карточка собиралась заново, и строка «Saved» пропадала раньше, чем её успевали прочесть
+   */
+  const [resource, retry] = useResource<BoundsView>(worldPath(worldId, 'bounds', writeScopeId), m.locale, { keepPrevious: true });
   const missing = <NotFound title={m.ui.bounds.missingTitle} text={m.ui.bounds.missingText} back={m.ui.bounds.back} href={href(worldId, 'costs')} />;
   return <Load shape="cards" resource={resource} retry={retry} notFound={missing}>{(view) => <BoundsScreenView key={view.unit.writeScopeId} view={view} onChanged={retry} />}</Load>;
 }

@@ -1794,6 +1794,29 @@ export const fr: Messages = {
         belowMinClearance: (floor: string, min: string) => `Sous le minimum du canal lui-même — le canal désactivera cette offre. Votre plancher de déstockage ${floor} est sous le minimum du canal ${min} ; les prix sous ${min} sont envoyés, comme vous l’avez confirmé en activant le déstockage.`,
         aboveMax: (max: string, channelMax: string) => `Au-dessus du maximum du canal lui-même — le canal désactivera cette offre. Votre prix maximum ${max} dépasse le maximum du canal ${channelMax} ; les prix au-dessus de ${channelMax} ne sont pas envoyés.`,
       },
+      // Шаг 187 (письмо Мердана 28.11, §5)
+      costEntry: {
+        title: 'Coût unitaire et commissions',
+        intro: 'Saisissez-les pour cette offre, sans tableur. Chaque enregistrement crée une nouvelle version du coût unitaire et le plancher est recalculé. Pour de nombreuses offres à la fois, utilisez l’import dans Coûts et planchers.',
+        unitCost: (currency: string) => `Coût unitaire (${currency})`,
+        feePercent: 'Commission du canal (% du prix)',
+        fixedFee: (currency: string) => `Commission fixe par vente (${currency})`,
+        keepHint: 'Un champ vide garde sa valeur actuelle.',
+        save: 'Enregistrer',
+        saved: 'Enregistré. Le plancher est calculé avec les nouvelles valeurs.',
+        readOnly: 'Seul le propriétaire ou un gestionnaire peut modifier le coût unitaire et les commissions.',
+        otherCurrency: (amount: string) => `Le coût unitaire actuel est de ${amount}. Saisissez-le dans la devise de l’offre pour le remplacer.`,
+        why: { nothing: 'Saisissez au moins une valeur', invalid: 'Vérifiez les montants : nombres avec deux décimales au plus, la commission sous 100 %' },
+        causes: {
+          NOTHING_TO_SAVE: 'Rien à enregistrer : saisissez au moins une valeur.',
+          AMOUNT_INVALID: 'Un montant n’est pas valide : nombres avec deux décimales au plus, la commission sous 100 %.',
+          SCOPE_NOT_FOUND: 'Cette offre est introuvable.',
+          CURRENCY_MISMATCH: 'Les montants sont uniquement dans la devise de l’offre.',
+          COST_REQUIRED: 'Saisissez d’abord le coût unitaire : une commission seule n’a rien à quoi se rattacher.',
+          MFA_REQUIRED_WINDOW: 'Plus de cinq offres ont été modifiées au cours des dix dernières minutes : connectez-vous avec un second facteur pour continuer.',
+          FORBIDDEN: 'Votre rôle ne peut pas modifier le coût unitaire ni les commissions.',
+        },
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Plancher de déstockage — autoriser la vente sous le seuil de rentabilité',

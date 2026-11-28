@@ -582,6 +582,25 @@ export interface CostImportBatch {
   asOf?: string;
 }
 
+/**
+ * Шаг 187 (письмо Мердана 28.11, §5): себестоимость и комиссии ОДНОГО предложения — вводом на его странице. Поле без значения не меняется;
+ * валюта — валюта предложения (импорт не переводит валюты, Р-138). Второго фактора не нужно [Р-144], окно массовой правки базы держит и этот путь
+ */
+export interface OfferCostInput {
+  writeScopeId: string;
+  currency: string;
+  unitCostMinor?: number;
+  feeRateBp?: number;
+  fixedFeeMinor?: number;
+}
+
+export type OfferCostResult =
+  | { status: 'SAVED' }
+  | { status: 'FORBIDDEN' }
+  /** Окно массовой правки: больше пяти предложений за десять минут без второго фактора (шаг 28, риск 17) */
+  | { status: 'MFA_REQUIRED'; window: true }
+  | { status: 'INVALID'; cause: 'NOTHING_TO_SAVE' | 'AMOUNT_INVALID' | 'SCOPE_NOT_FOUND' | 'CURRENCY_MISMATCH' | 'COST_REQUIRED' };
+
 export type CostImportResult =
   | { status: 'PREVIEWED'; rows: number; offers: number }
   | { status: 'APPLIED'; importId: string | null; rows: number; offers: number; run?: ImportRunRow }
@@ -891,6 +910,8 @@ export interface PricingStore {
   editBounds(tenantId: string, edits: readonly BoundsEditInput[], actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<BoundsEditResult>;
   /** Р-134, Р-135: массовый импорт себестоимости — предпросмотр без записи, применение целиком и со вторым фактором */
   importCosts(tenantId: string, batch: CostImportBatch, actor: AdminActor, mode: 'PREVIEW' | 'APPLY'): Promise<CostImportResult>;
+  /** Шаг 187 (§5): себестоимость и комиссии одного предложения — тем же путём, что применение импорта, без пакета и без второго фактора */
+  setOfferCost(tenantId: string, input: OfferCostInput, actor: AdminActor): Promise<OfferCostResult>;
   /**
    * Шаг 102 [Р-227]: режим распродажи. Включает владелец или менеджер от своего имени со вторым фактором, подтверждением и запиской —
    * отказывает база (0197), хранилище переводит её отказ в причину. Выключение — одним действием, без второго фактора

@@ -1794,6 +1794,29 @@ export const es: Messages = {
         belowMinClearance: (floor: string, min: string) => `Por debajo del mínimo del propio canal: el canal desactivará esta oferta. Su piso de liquidación de ${floor} está por debajo del mínimo del canal de ${min}; los precios inferiores a ${min} se envían, como usted confirmó al activar la liquidación.`,
         aboveMax: (max: string, channelMax: string) => `Por encima del máximo del propio canal: el canal desactivará esta oferta. Su precio máximo de ${max} está por encima del máximo del canal de ${channelMax}; los precios superiores a ${channelMax} no se envían.`,
       },
+      // Шаг 187 (письмо Мердана 28.11, §5)
+      costEntry: {
+        title: 'Costo unitario y comisiones',
+        intro: 'Escríbalos para esta oferta, sin hoja de cálculo. Cada guardado es una nueva versión del costo unitario y el piso se vuelve a calcular. Para muchas ofertas a la vez, use la importación en Costos y pisos.',
+        unitCost: (currency: string) => `Costo unitario (${currency})`,
+        feePercent: 'Comisión del canal (% del precio)',
+        fixedFee: (currency: string) => `Comisión fija por venta (${currency})`,
+        keepHint: 'Un campo vacío conserva su valor actual.',
+        save: 'Guardar',
+        saved: 'Guardado. El piso se calcula con los nuevos valores.',
+        readOnly: 'Solo el propietario o un gerente pueden cambiar el costo unitario y las comisiones.',
+        otherCurrency: (amount: string) => `El costo unitario actual es ${amount}. Escríbalo en la moneda de la oferta para reemplazarlo.`,
+        why: { nothing: 'Escriba al menos un valor', invalid: 'Revise los importes: números con hasta dos decimales, la comisión por debajo del 100 %' },
+        causes: {
+          NOTHING_TO_SAVE: 'Nada que guardar: escriba al menos un valor.',
+          AMOUNT_INVALID: 'Un importe no es válido: números con hasta dos decimales, la comisión por debajo del 100 %.',
+          SCOPE_NOT_FOUND: 'No se encontró esta oferta.',
+          CURRENCY_MISMATCH: 'Los importes van solo en la moneda de la oferta.',
+          COST_REQUIRED: 'Escriba primero el costo unitario: una comisión sola no tiene a qué asociarse.',
+          MFA_REQUIRED_WINDOW: 'Se cambiaron más de cinco ofertas en los últimos diez minutos: inicie sesión con un segundo factor para continuar.',
+          FORBIDDEN: 'Su rol no puede cambiar el costo unitario ni las comisiones.',
+        },
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Piso de liquidación — permitir vender por debajo del punto de equilibrio',

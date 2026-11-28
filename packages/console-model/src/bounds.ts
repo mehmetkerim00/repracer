@@ -57,6 +57,11 @@ export interface BoundsView {
   clearance: BoundsClearanceView;
   cost: { lines: MoneyLine[]; fx: string | null; unavailable: string | null };
   /**
+   * Шаг 187 (письмо Мердана 28.11, §5): ввод себестоимости и комиссий ЭТОГО предложения на его странице — поля с нынешними значениями в валюте
+   * предложения (себестоимость в другой валюте — подписью, не в поле: импорт и ввод валюты не переводят, Р-138); комиссия — оценка продавца
+   */
+  costEntry: { canEdit: boolean; currency: string; unitCost: string; feePercent: string; fixedFee: string; otherCurrency: string | null };
+  /**
    * Р-138 (шаг 29): оценки комиссии с источниками. Когда число продавца и тарифная таблица расходятся, показываются ОБА, и
    * названо, по какому считается пол (по большему — заниженная комиссия опускала бы пол).
    */
@@ -291,8 +296,25 @@ export function boundsView(world: StandWorld, writeScopeId: string, m: Messages,
     },
     floorBreakdown: breakdown(b.floorBreakdown, floor.minor),
     currentBreakdown: breakdown(b.currentBreakdown, scope.currentPriceMinor),
+    costEntry: costEntryOf(scope, extra.canManage ?? false, m),
     calculatorCheck: b.calculatorSteps(scope.taxRegime === 'VAT_INCLUDED'),
     gaps: [gap(m, 'COST_COMPONENTS')],
+  };
+}
+
+/** Шаг 187: сумма в минимальных единицах — числом поля («6.50»), процент в базисных пунктах — как на странице («17.5», «13.25», «15») */
+const decimalOf = (minor: number) => (minor / 100).toFixed(2);
+const percentOf = (bp: number) => String(bp / 100);
+
+function costEntryOf(scope: ConsoleScope, canEdit: boolean, m: Messages): BoundsView['costEntry'] {
+  const own = scope.cost && scope.cost.currency === scope.currency ? scope.cost : null;
+  const seller = (scope.feeEstimates ?? []).find((f) => f.source === 'SELLER_DECLARED') ?? null;
+  return {
+    canEdit, currency: scope.currency,
+    unitCost: own ? decimalOf(own.unitCostMinor) : '',
+    feePercent: seller?.feeRateBp != null ? percentOf(seller.feeRateBp) : '',
+    fixedFee: seller?.fixedFeeMinor != null ? decimalOf(seller.fixedFeeMinor) : '',
+    otherCurrency: scope.cost && !own ? m.ui.bounds.costEntry.otherCurrency(m.money(scope.cost.unitCostMinor, scope.cost.currency)) : null,
   };
 }
 

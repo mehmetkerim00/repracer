@@ -25,6 +25,8 @@ import type {
   CommittedDecision,
   CostImportBatch,
   CostImportResult,
+  OfferCostInput,
+  OfferCostResult,
   ConsoleDecisionRow,
   ConsoleScopeRow,
   ConsoleState,
@@ -2054,6 +2056,68 @@ export class PgPricingStore implements PricingStore {
       if (secondFactorRefused(error)) return { status: 'MFA_REQUIRED' };
       const code = (error as { code?: string }).code;
       if (code === '42501') return { status: 'FORBIDDEN' };
+      throw error;
+    }
+  }
+
+  /**
+   * Шаг 187 (письмо Мердана 28.11, §5): себестоимость и комиссии ОДНОГО предложения — вводом на его странице. Тот же путь, что у применения
+   * импорта: новая версия себестоимости (прочие составляющие — из последней версии той же области), оценка комиссии продавца сливается с
+   * прежней (SELLER_DECLARED, 90 суток); подъём пола — триггерами базы [Р-210, Р-211]. Источник версии — MANUAL, пакета импорта нет. Второго
+   * фактора правке одного предложения не нужно [Р-144]; окно массовой правки базы (0103) держит и этот путь — его отказ переводится в причину
+   */
+  async setOfferCost(tenantId: string, input: OfferCostInput, actor: AdminActor): Promise<OfferCostResult> {
+    const amounts = [input.unitCostMinor, input.fixedFeeMinor].filter((v): v is number => v !== undefined);
+    if (amounts.length === 0 && input.feeRateBp === undefined) return { status: 'INVALID', cause: 'NOTHING_TO_SAVE' };
+    if (amounts.some((v) => !Number.isSafeInteger(v) || v < 0)) return { status: 'INVALID', cause: 'AMOUNT_INVALID' };
+    if (input.feeRateBp !== undefined && (!Number.isSafeInteger(input.feeRateBp) || input.feeRateBp < 0 || input.feeRateBp >= 10_000)) return { status: 'INVALID', cause: 'AMOUNT_INVALID' };
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.writeScopeId)) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' };
+    try {
+      return await inTenant(this.admin('setOfferCost'), tenantId, async (tx) => {
+        const { rows: [scope] } = await tx.query(
+          `SELECT s.write_scope_id, s.product_id, s.channel_account_id, s.currency,
+                  (SELECT om.marketplace FROM tenant_data.offer_mapping om
+                    WHERE om.tenant_id = s.tenant_id AND om.price_write_scope_id = s.write_scope_id ORDER BY om.created_at LIMIT 1) AS marketplace
+             FROM tenant_data.write_scope s
+            WHERE s.tenant_id = $1 AND s.write_scope_id = $2 AND s.field = 'PRICE' FOR NO KEY UPDATE`, [tenantId, input.writeScopeId]);
+        if (!scope) return { status: 'INVALID', cause: 'SCOPE_NOT_FOUND' } as const;
+        if (scope.currency !== input.currency) return { status: 'INVALID', cause: 'CURRENCY_MISMATCH' } as const;
+        if (input.unitCostMinor === undefined) {
+          const { rows: [has] } = await tx.query(`SELECT tenant_data.write_scope_has_cost($1, $2) AS ok`, [tenantId, input.writeScopeId]);
+          if (has?.ok !== true) return { status: 'INVALID', cause: 'COST_REQUIRED' } as const;
+        } else {
+          await tx.query(
+            `INSERT INTO tenant_data.cost_profile (tenant_id, product_id, channel_account_id, marketplace, version, valid_from, currency,
+                                                   purchase_cost_minor, inbound_logistics_minor, packaging_minor, handling_minor,
+                                                   outbound_shipping_minor, other_fixed_minor, source, created_by_membership_id)
+             SELECT $1, $2, $3, $4, coalesce(p.max_version, 0) + 1, now(), $5, $6,
+                    coalesce(p.inbound, 0), coalesce(p.packaging, 0), coalesce(p.handling, 0), coalesce(p.outbound, 0), coalesce(p.other_fixed, 0),
+                    'MANUAL', $7
+               FROM (SELECT max(c.version) AS max_version,
+                            (array_agg(c.inbound_logistics_minor ORDER BY c.version DESC))[1] AS inbound,
+                            (array_agg(c.packaging_minor ORDER BY c.version DESC))[1] AS packaging,
+                            (array_agg(c.handling_minor ORDER BY c.version DESC))[1] AS handling,
+                            (array_agg(c.outbound_shipping_minor ORDER BY c.version DESC))[1] AS outbound,
+                            (array_agg(c.other_fixed_minor ORDER BY c.version DESC))[1] AS other_fixed
+                       FROM tenant_data.cost_profile c
+                      WHERE c.tenant_id = $1 AND c.product_id = $2
+                        AND c.channel_account_id IS NOT DISTINCT FROM $3::uuid AND c.marketplace IS NOT DISTINCT FROM $4::text) p`,
+            [tenantId, scope.product_id, scope.channel_account_id, scope.marketplace, input.currency, input.unitCostMinor, actor.membershipId]);
+        }
+        if (input.feeRateBp !== undefined || input.fixedFeeMinor !== undefined) {
+          await tx.query(
+            `INSERT INTO channel_data.fee_estimate (tenant_id, write_scope_id, source, fee_model, computed_at, valid_until)
+             VALUES ($1, $2, 'SELLER_DECLARED', jsonb_strip_nulls(jsonb_build_object('feeRateBp', $3::int, 'fixedFeeMinor', $4::bigint)), now(), now() + interval '90 days')
+             ON CONFLICT (tenant_id, write_scope_id, source) DO UPDATE
+               SET fee_model = channel_data.fee_estimate.fee_model || EXCLUDED.fee_model,
+                   computed_at = EXCLUDED.computed_at, valid_until = EXCLUDED.valid_until`,
+            [tenantId, input.writeScopeId, input.feeRateBp ?? null, input.fixedFeeMinor ?? null]);
+        }
+        return { status: 'SAVED' } as const;
+      }, actor.userId, { mfa: actor.mfa });
+    } catch (error) {
+      if (windowRefused(error)) return { status: 'MFA_REQUIRED', window: true };
+      if ((error as { code?: string }).code === '42501') return { status: 'FORBIDDEN' };
       throw error;
     }
   }

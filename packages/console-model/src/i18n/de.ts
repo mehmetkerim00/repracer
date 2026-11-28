@@ -1736,6 +1736,29 @@ export const de: Messages = {
         belowMinClearance: (floor: string, min: string) => `Unter dem Mindestpreis im Kanal — der Kanal deaktiviert dieses Angebot. Ihre Abverkaufs-Untergrenze ${floor} liegt unter dem Mindestpreis im Kanal ${min}; Preise unter ${min} werden gesendet, wie Sie beim Einschalten des Abverkaufs bestätigt haben.`,
         aboveMax: (max: string, channelMax: string) => `Über dem Höchstpreis im Kanal — der Kanal deaktiviert dieses Angebot. Ihr Höchstpreis ${max} liegt über dem Höchstpreis im Kanal ${channelMax}; Preise über ${channelMax} werden nicht gesendet.`,
       },
+      // Шаг 187 (письмо Мердана 28.11, §5)
+      costEntry: {
+        title: 'Stückkosten und Gebühren',
+        intro: 'Direkt für dieses Angebot eingeben — ohne Tabelle. Jedes Speichern ist eine neue Version der Stückkosten, die Untergrenze wird neu berechnet. Für viele Angebote auf einmal den Import unter Kosten & Untergrenzen nutzen.',
+        unitCost: (currency: string) => `Stückkosten (${currency})`,
+        feePercent: 'Kanalgebühr (% vom Preis)',
+        fixedFee: (currency: string) => `Fixgebühr pro Verkauf (${currency})`,
+        keepHint: 'Ein leeres Feld behält seinen bisherigen Wert.',
+        save: 'Speichern',
+        saved: 'Gespeichert. Die Untergrenze wird mit den neuen Werten berechnet.',
+        readOnly: 'Nur Inhaber oder Manager können Stückkosten und Gebühren ändern.',
+        otherCurrency: (amount: string) => `Die aktuellen Stückkosten sind ${amount}. Geben Sie sie in der Währung des Angebots ein, um sie zu ersetzen.`,
+        why: { nothing: 'Mindestens einen Wert eingeben', invalid: 'Beträge prüfen: Zahlen mit höchstens zwei Nachkommastellen, die Gebühr unter 100 %' },
+        causes: {
+          NOTHING_TO_SAVE: 'Nichts zu speichern: mindestens einen Wert eingeben.',
+          AMOUNT_INVALID: 'Ein Betrag ist ungültig: Zahlen mit höchstens zwei Nachkommastellen, die Gebühr unter 100 %.',
+          SCOPE_NOT_FOUND: 'Dieses Angebot wurde nicht gefunden.',
+          CURRENCY_MISMATCH: 'Beträge nur in der Währung des Angebots.',
+          COST_REQUIRED: 'Zuerst die Stückkosten eingeben: eine Gebühr allein hat keinen Bezug.',
+          MFA_REQUIRED_WINDOW: 'In den letzten zehn Minuten wurden mehr als fünf Angebote geändert: melden Sie sich mit einem zweiten Faktor an, um fortzufahren.',
+          FORBIDDEN: 'Ihre Rolle darf Stückkosten und Gebühren nicht ändern.',
+        },
+      },
       // Шаг 102 [Р-227]: режим распродажи на странице пола
       clearance: {
         title: 'Abverkaufs-Untergrenze — Verkauf unter der Gewinnschwelle erlauben',

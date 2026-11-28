@@ -24,7 +24,7 @@ import {
 } from '@repracer/contract-tests/stand';
 import { createAuthenticator, hasSecondFactor, remoteJwks, staticJwks, type Authenticator, type Principal } from '@repracer/identity';
 import { createTestIssuer } from '@repracer/identity/test-issuer';
-import { storefrontChoices, type ClientChannels, type MarketScope, tenantMarketScope, filterParamsOf, MAX_PICKED, parseOfferSelection, type OfferFilterParams, type OfferSelection, type ProductListView, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
+import { parseAmountInput, parsePercentInput, storefrontChoices, type ClientChannels, type MarketScope, tenantMarketScope, filterParamsOf, MAX_PICKED, parseOfferSelection, type OfferFilterParams, type OfferSelection, type ProductListView, activeStrategyChoices, connectableInMarket, connectionsView, type DefaultStrategyInput, extendedRolesOf, offeredRoles, localeInMarket, marketProfileOf, marketScope, OTHER_TOOLS_ANSWERS, storefrontInMarket, worldInMarket, type MarketProfile } from '@repracer/console-model';
 import type { ChannelConnectService } from './connect.ts';
 import { descriptorOf, strategyAvailableOn } from './channel-descriptors.ts';
 import {
@@ -1421,7 +1421,7 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
     const tenantOnlyRoute = (screen === 'shadow' && param === 'mode') || (screen === 'stock' && param !== null)
       || (screen === 'onboarding' && (param === 'path' || param === 'narrow')) || (screen === 'jobs' && param !== null && parts[5] === 'cancel')
       || (screen === 'bounds' && (param === 'apply' || param === 'selection')) || screen === 'imports' || screen === 'exports';
-    const oneUnit = (screen === 'scopes' && param !== null && (parts[5] === 'enable' || parts[5] === 'disable')) || (screen === 'bounds' && param !== null && parts[5] === 'clearance') ? [param]
+    const oneUnit = (screen === 'scopes' && param !== null && (parts[5] === 'enable' || parts[5] === 'disable')) || (screen === 'bounds' && param !== null && (parts[5] === 'clearance' || parts[5] === 'cost')) ? [param]
       : screen === 'compliance' && (param === 'check' || param === 'announce' || param === 'evidence') ? [body.writeScopeId] : null;
     const world = stopRoute ? await load([], { facts: await facts({ stopImpact: true }) })
       : tenantOnlyRoute ? await load([])
@@ -2049,6 +2049,33 @@ export function createStandApi(worlds: readonly LiveWorld[], identity: StandIden
       if (on.status === 'MFA_REQUIRED') return fail(403, 'MFA_REQUIRED', texts.causes.MFA_REQUIRED);
       if (on.status === 'INVALID') return fail(400, on.cause, texts.causes[on.cause]);
       return ok({ message: texts.enabled, bounds: await boundsPage(param) });
+    }
+
+    /**
+     * Шаг 187 (письмо Мердана 28.11, §5): себестоимость и комиссии одного предложения — вводом на его странице, без таблицы. Правом цен (владелец
+     * и менеджер), без второго фактора [Р-144]; пустое поле не меняет значения; валюта — предложения. Окно массовой правки держит база
+     */
+    if (screen === 'bounds' && param !== null && parts[5] === 'cost') {
+      if (req.method !== 'POST' || parts[6] !== undefined) return fail(404, 'NOT_FOUND', s.notFound);
+      const t = m.ui.bounds.costEntry;
+      if (!can(viewer.role, 'MANAGE_PRICING')) return fail(403, 'FORBIDDEN', t.causes.FORBIDDEN);
+      const scope = scopeById(world, param);
+      if (!scope) return fail(404, 'SCOPE_NOT_FOUND', t.causes.SCOPE_NOT_FOUND);
+      const text = (key: string) => (typeof body[key] === 'string' ? (body[key] as string).trim() : '');
+      const unitCost = text('unitCost') === '' ? undefined : parseAmountInput(text('unitCost'));
+      const feeRate = text('feePercent') === '' ? undefined : parsePercentInput(text('feePercent'));
+      const fixedFee = text('fixedFee') === '' ? undefined : parseAmountInput(text('fixedFee'));
+      if (unitCost === null || fixedFee === null || feeRate === null || (feeRate !== undefined && feeRate < 0)) return fail(400, 'AMOUNT_INVALID', t.causes.AMOUNT_INVALID);
+      const saved = await live.store.setOfferCost(world.tenantId, {
+        writeScopeId: param, currency: scope.currency,
+        ...(unitCost !== undefined ? { unitCostMinor: unitCost } : {}), ...(feeRate !== undefined ? { feeRateBp: feeRate } : {}), ...(fixedFee !== undefined ? { fixedFeeMinor: fixedFee } : {}),
+      }, { membershipId: viewer.membershipId, userId: principal.userId, mfa: hasSecondFactor(principal.amr) });
+      switch (saved.status) {
+        case 'SAVED': return ok({ message: t.saved, bounds: await boundsPage(param) });
+        case 'FORBIDDEN': return fail(403, 'FORBIDDEN', t.causes.FORBIDDEN);
+        case 'MFA_REQUIRED': return fail(403, 'MFA_REQUIRED_WINDOW', t.causes.MFA_REQUIRED_WINDOW);
+        case 'INVALID': return fail(saved.cause === 'SCOPE_NOT_FOUND' ? 404 : 400, saved.cause, t.causes[saved.cause]);
+      }
     }
 
     /**

@@ -5,6 +5,8 @@ export type {
   BoundsEditResult,
   CostImportBatch,
   CostImportResult,
+  OfferCostInput,
+  OfferCostResult,
   CostImportRowInput,
   BoundsEditRow,
   StrategySaveInput,
