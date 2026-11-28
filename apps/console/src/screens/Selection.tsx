@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { canPickMore, MAX_PICKED, removeMatch, selectAllMatching, type ListQuery, type OfferFilterParams, type OfferSelection } from '@repracer/console-model';
 import type { SelectionView } from '../api-types.ts';
 import { requestJson, worldPath } from '../api.ts';
@@ -87,6 +87,34 @@ export function SelectionBar({ summary, selection, onSelection, filter, matching
         </ul>
       ) : null}
       {!canPickMore(selection) ? <p className="notice" role="note">{t.limit(MAX_PICKED)}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Шаг 189 (#27, пункт 17 ретеста Мердана): строка выбора и таблица выбора — одним блоком; от 768 px строка держится под верхней панелью,
+ * пока таблица на экране, и строки листаются под ней. Шапка таблицы, которая держится на экране (шаг 182), стоит под строкой: высоту строки
+ * блок отдаёт стилям (`--selection-h`), замер — ResizeObserver (строка растёт, когда появляются бейджи фильтров). На телефоне строка —
+ * на своём месте: закреплённая заняла бы пятую часть экрана
+ */
+export function SelectionScope({ line, children }: { line: ReactNode; children: ReactNode }) {
+  const scope = useRef<HTMLDivElement>(null);
+  const sticky = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = scope.current;
+    const el = sticky.current;
+    if (!box || !el) return undefined;
+    const measure = () => box.style.setProperty('--selection-h', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div className="selection-scope" ref={scope}>
+      <div className="selection-sticky" ref={sticky}>{line}</div>
+      {children}
     </div>
   );
 }

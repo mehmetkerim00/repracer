@@ -759,6 +759,49 @@ const CONSTANT_COLUMNS = plainText(`(() => {
   return out;
 })()`);
 
+/**
+ * Шаг 188 (письмо Мердана 28.11, §2; Р-146): заголовок числовой колонки выровнен по её числам — правый край текста подписи совпадает с
+ * правым краем суммы в первых строках (до 2 px); пояснение под суммой (состав пола) и ручка ширины колонки не считаются.
+ * Шаг 189 (#27, пункт 3): числовая колонка узнаётся по её ЯЧЕЙКАМ (`td.num`), а не по подписи — правило шага 188 пропускало подписи без
+ * `num`, и таблица различий массовой правки (подписи слева, числа справа) не проверялась вовсе. Подпись без пометки над числами — находка,
+ * даже если сейчас случайно совпала по краю; числа без пометки под числовой подписью — тоже (подпись справа, суммы слева). Число — ячейка
+ * с цифрами; колонки считаются с учётом `colSpan`
+ */
+const NUM_ALIGN = `(() => {
+  const textRight = (el) => { let r = -Infinity; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (!n.textContent.trim() || n.parentElement.closest('.col-grip, .floor-parts, .visually-hidden, .small')) continue;
+      const range = document.createRange(); range.selectNodeContents(n);
+      for (const rect of range.getClientRects()) r = Math.max(r, rect.right);
+    }
+    return r; };
+  /** ячейки ряда по номеру колонки: ячейка с colSpan > 1 колонкой не считается */
+  const byColumn = (row) => { const out = new Map(); let col = 0;
+    for (const cell of row?.cells ?? []) { if (cell.colSpan === 1) out.set(col, cell); col += cell.colSpan; }
+    return out; };
+  const out = [];
+  for (const table of document.querySelectorAll('.world-content table')) {
+    if (!table.checkVisibility() || getComputedStyle(table).display !== 'table') continue;
+    const heads = byColumn(table.tHead?.rows[0]);
+    const rows = [...table.tBodies[0]?.rows ?? []].slice(0, 3).map(byColumn);
+    for (const [col, th] of heads) {
+      // число — ячейка с цифрами: колонка ссылок строки («Why this price →») держит класс num ради края, но чисел в ней нет
+      const cells = rows.map((r) => r.get(col)).filter((td) => td && /\\d/.test(td.textContent));
+      const name = (table.className || 'table') + ' «' + (th.textContent.trim().slice(0, 30) || '(empty header)') + '»';
+      if (!th.classList.contains('num')) {
+        if (cells.some((td) => td.classList.contains('num'))) out.push(name + ': header over numbers is not marked as a number column');
+        continue;
+      }
+      for (const td of cells) {
+        // подпись числовая, а суммы под ней — нет: подпись справа, суммы слева (журнал решений до шага 189)
+        if (!td.classList.contains('num')) { out.push(name + ': the numbers under a number header are not marked as a number column'); break; }
+        const gap = Math.round(textRight(th) - textRight(td));
+        if (Math.abs(gap) > 2) { out.push(name + ': header ' + gap + ' px off the numbers'); break; }
+      }
+    }
+  }
+  return out; })()`;
+
 test('step 86, step 98 (Р-223): every menu item and the heading of its page are the same words — English, German, Spanish and French; no English dictionary string on a Spanish or French screen', async () => {
   const b = browser!;
   await b.setViewport(1440, 900);
@@ -1145,20 +1188,26 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
       await settled(b, route);
       await new Promise((x) => setTimeout(x, 300));
     };
-    const findings = async () => [...await b.evaluate<string[]>(REPEATED_IN_ROWS), ...await b.evaluate<string[]>(CONSTANT_COLUMNS)];
+    // Шаг 189 (#27, пункт 3; Р-146): заголовок над числами — числовой и стоит над ними — на каждом экране обхода, без известных исключений
+    const misaligned: Record<string, string[]> = {};
+    const findings = async (route: string) => {
+      const align = await b.evaluate<string[]>(NUM_ALIGN);
+      if (align.length) misaligned[route] = align;
+      return [...await b.evaluate<string[]>(REPEATED_IN_ROWS), ...await b.evaluate<string[]>(CONSTANT_COLUMNS)];
+    };
     // 1) оба правила на каждом экране; квитанция решения и страница предложения — тоже
     const found: Record<string, string[]> = {};
     for (const route of TABLE_ROUTES) {
       await visit(route);
-      const f = await findings();
+      const f = await findings(route);
       if (f.length) found[route] = f;
     }
     await visit('feed/decisions');
     const receipt = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
-    if (receipt) { await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`); await settled(b, 'receipt'); const f = await findings(); if (f.length) found['decisions/<id>'] = f; }
+    if (receipt) { await b.evaluate(`(location.hash = ${JSON.stringify(receipt)}, true)`); await settled(b, 'receipt'); const f = await findings('decisions/<id>'); if (f.length) found['decisions/<id>'] = f; }
     await visit('costs');
     const bounds = await b.evaluate<string | null>(`document.querySelector('.world-content table a.row-link')?.getAttribute('href') ?? null`);
-    if (bounds) { await b.evaluate(`(location.hash = ${JSON.stringify(bounds)}, true)`); await settled(b, 'bounds page'); const f = await findings(); if (f.length) found['bounds/<id>'] = f; }
+    if (bounds) { await b.evaluate(`(location.hash = ${JSON.stringify(bounds)}, true)`); await settled(b, 'bounds page'); const f = await findings('bounds/<id>'); if (f.length) found['bounds/<id>'] = f; }
     // Шаг 97 [I5]: страница Competition предложения — ссылкой из строки Offers, те же правила таблиц; меню остаётся из девяти пунктов
     await visit('products');
     const competition = await b.evaluate<string | null>(`[...document.querySelectorAll('.world-content table a.secondary-link')].find((a) => a.textContent.trim() === ${JSON.stringify(en.ui.competition.link)})?.getAttribute('href') ?? null`);
@@ -1167,7 +1216,8 @@ test('step 96.2: no service sentence repeats and no column is one value on any c
     await settled(b, 'competition page');
     assert.equal(await b.evaluate<string>(`document.querySelector('.world-content h2')?.textContent.trim() ?? ''`), en.ui.competition.pageTitle);
     assert.equal(await b.evaluate<string>(`document.querySelector('.nav-group a.active')?.getAttribute('href')?.split('/')[3] ?? ''`), 'products', 'the Competition page belongs to Offers — no menu item of its own');
-    { const f = await findings(); if (f.length) found['competition/<id>'] = f; }
+    { const f = await findings('competition/<id>'); if (f.length) found['competition/<id>'] = f; }
+    assert.deepEqual(misaligned, {}, 'every number header on every console screen is marked as a number column and stands over its numbers');
     assert.deepEqual([found['protections/rules'] ?? [], found['protections/people'] ?? []], [[], []], `Protections: tables say each thing once — ${JSON.stringify(found)}`);
     const elsewhere = Object.fromEntries(Object.entries(found).filter(([r]) => !r.startsWith('protections')));
     assert.deepEqual(elsewhere, KNOWN_TABLE_FINDINGS, 'findings outside Protections are exactly the known list of docs/deferred.md (it only shrinks)');
@@ -1537,10 +1587,13 @@ test('step 99 (Р-224): imports on their own pages — template, a check with an
     assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `${width}: nothing sticks out of its frame`);
   }
   await b.setViewport(1440, 900);
+  // Шаг 189 (#27, пункт 3): примерка импорта — подписи над числами числовые и стоят над ними (ошибки по строкам и изменения)
+  assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'the import check with an error: number headers are over the numbers');
 
   // Исправленный файл: одна строка к изменению, «Apply» — и экран называет время
   await b.click(t.back, '.import-costs button');
   await upload(`sku,unit_cost,currency\n${unit},9.99,EUR\n`, 'costs.csv');
+  assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'the import check of changes: number headers are over the numbers');
   await b.click(t.apply, '.import-costs button');
   await new Promise((x) => setTimeout(x, 300));
   // Решение владельца: пока запись идёт одной транзакцией, экран занят видимо — спиннер, «in one go» и секунды, а не «0 of N» на пустой
@@ -3608,15 +3661,19 @@ test('step 182 (#38): the header of a wide table stays on screen; «Maximize the
     // (1) Таблица в своей рамке: страница прокручена ниже начала таблицы — шапка стоит под верхней панелью
     // Страница прокручивается так, чтобы шапка без закрепления ушла выше края верхней панели на `shift` (строки таблицы при этом ещё на экране):
     // закреплённая шапка стоит у края, незакреплённая — на `shift` выше. Прокрутка, которой не случилось (страница коротка), — не проверка
+    // Шаг 189 (#27, пункт 17): у таблицы выбора над шапкой держится строка выбора — шапка стоит под ней, а не под верхней панелью
     const stuck = (table: string) => b.evaluate<{ th: number; bar: number; rows: number; shift: number; missed: number } | null>(`(() => {
       const t = document.querySelector(${JSON.stringify(table)}); if (!t) return null;
-      const th = t.querySelector('thead th'), bar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+      const th = t.querySelector('thead th'), top = document.querySelector('.topbar').getBoundingClientRect().bottom;
+      const line = t.closest('.selection-scope')?.querySelector(':scope > .selection-sticky');
+      const pinned = !!line && getComputedStyle(line).position === 'sticky';
       // короткой странице (журнал из двух строк) есть куда прокрутиться: отступ под страницей таблицу не сдвигает
       document.body.style.paddingBottom = window.innerHeight + 'px';
       window.scrollTo(0, 0);
       const shift = Math.round(Math.max(20, Math.min(200, t.getBoundingClientRect().height - 2 * th.offsetHeight)));
-      const want = th.getBoundingClientRect().top - bar + shift;
+      const want = th.getBoundingClientRect().top - top - (pinned ? line.offsetHeight : 0) + shift;
       window.scrollTo(0, want);
+      const bar = pinned ? line.getBoundingClientRect().bottom : top;
       const out = { th: Math.round(th.getBoundingClientRect().top), bar: Math.round(bar), rows: t.querySelectorAll('tbody tr').length, shift, missed: Math.round(want - window.scrollY) };
       document.body.style.paddingBottom = '';
       return out;
@@ -3629,7 +3686,7 @@ test('step 182 (#38): the header of a wide table stays on screen; «Maximize the
       if (s) await shot(`${screen.replace('/', '-')}-1440-scrolled`);
       if (!s || s.rows < 2) continue;
       assert.ok(Math.abs(s.missed) <= 1, `${screen}: the page scrolled far enough to test the header — ${JSON.stringify(s)}`);
-      assert.ok(Math.abs(s.th - s.bar) <= 1, `${screen}: the table header stays under the top bar while the page scrolls — header at ${s.th}px, top bar ends at ${s.bar}px`);
+      assert.ok(Math.abs(s.th - s.bar) <= 1, `${screen}: the table header stays under the top bar (or the pinned selection line) while the page scrolls — header at ${s.th}px, the bar above ends at ${s.bar}px`);
       checked.push(screen);
     }
     assert.ok(checked.includes('products') && checked.includes('costs'), `the rule saw Offers and Costs & floors: ${checked.join(', ')}`);
@@ -5088,34 +5145,6 @@ test('step 187 (Merdan 28.11, §5): one offer — unit cost and fees typed on it
 });
 
 /**
- * Шаг 188 (письмо Мердана 28.11, §2; Р-146): заголовок числовой колонки выровнен по её числам — правый край текста подписи совпадает с
- * правым краем суммы в первых строках (до 2 px); пояснение под суммой (состав пола) и ручка ширины колонки не считаются
- */
-const NUM_ALIGN = `(() => {
-  const textRight = (el) => { let r = -Infinity; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    for (let n = w.nextNode(); n; n = w.nextNode()) {
-      if (!n.textContent.trim() || n.parentElement.closest('.col-grip, .floor-parts, .visually-hidden, .small')) continue;
-      const range = document.createRange(); range.selectNodeContents(n);
-      for (const rect of range.getClientRects()) r = Math.max(r, rect.right);
-    }
-    return r; };
-  const out = [];
-  for (const table of document.querySelectorAll('.world-content table')) {
-    if (!table.checkVisibility() || getComputedStyle(table).display !== 'table') continue;
-    const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
-    heads.forEach((th, i) => {
-      if (!th.classList.contains('num')) return;
-      for (const row of [...table.tBodies[0]?.rows ?? []].slice(0, 3)) {
-        const td = row.cells[i];
-        if (!td || !td.classList.contains('num') || !td.textContent.trim()) continue;
-        const gap = Math.round(textRight(th) - textRight(td));
-        if (Math.abs(gap) > 2) { out.push((table.className || 'table') + ' «' + th.textContent.trim().slice(0, 30) + '»: header ' + gap + ' px off the numbers'); break; }
-      }
-    });
-  }
-  return out; })()`;
-
-/**
  * Шаг 188 (письмо Мердана 28.11, §2–§3; Р-254): вторичные ссылки строки Offers — под раскрытием «⋯» (свёрнуто, по нажатию — три ссылки
  * на виду), у колонки действий — заголовок; Costs & floors — массовая правка границ первой и главной кнопкой, оба импорта — раскрываемыми
  * разделами, свёрнутыми по умолчанию: кнопка импорта и адрес раздела его раскрывают и приводят к нему. На 1440 и 375 страница не уезжает
@@ -5192,6 +5221,127 @@ test('step 188 (Merdan 28.11, §2–§3): «⋯» opens the secondary links of a
   } finally {
     await b.evaluate(`(localStorage.removeItem('repracer.costs.open'), true)`);
     await b.setViewport(1440, 900);
+  }
+  assert.deepEqual(b.errors().slice(before), [], 'no page errors');
+});
+
+/**
+ * Шаг 189 (#27, пункты 3 и 17 ретеста Мердана 28.11; Р-146).
+ * (3) Подписи числовых колонок предпросмотров массовых операций — числовые и стоят над своими числами: правка границ и назначение
+ * стратегии (примерку импорта держит смоук шага 99, остальные экраны — обход шага 96.2). Положительный контроль нового правила — подпись
+ * без пометки над числами, совпавшая по краю.
+ * (17) Строка выбора «N selected · M outside current view» держится под верхней панелью, пока листаются строки таблицы выбора, и ничто
+ * не рисуется поверх неё; шапка таблицы, которая держится на экране (шаг 182), стоит под строкой — Costs & floors, Strategies, Offers.
+ * На телефоне строка — на своём месте (закреплённая заняла бы пятую часть экрана), страница не уезжает вбок
+ */
+test('step 189 (#27, items 3 and 17): number headers over their numbers in the bulk previews; the selection line stays under the top bar while the rows scroll', async () => {
+  const b = browser!;
+  const before = b.errors().length;
+  currentApi = colorsApi;
+  const t = en.ui.selection;
+  try {
+    await b.setViewport(1440, 900);
+    await b.setColorScheme('light');
+    await b.open(pageUrl);
+    await b.waitText(en.ui.app.login.roleCan.OWNER);
+    await b.click(en.ui.app.login.asAccount(en.values.OWNER));
+    await waitFor(b, `location.hash.startsWith('#/w/')`, 'straight into the only workspace');
+    await settled(b, 'first screen');
+    const world = (await b.evaluate<string>('location.hash')).split('/')[2]!;
+    const go = async (route: string) => { await b.evaluate(`(location.hash = ${JSON.stringify(`#/w/${world}/${route}`)}, true)`); await settled(b, route); };
+    const setField = (scope: string, label: string, tag: 'select' | 'input', value: string) => b.evaluate(`(() => {
+      const f = [...document.querySelectorAll(${JSON.stringify(`${scope} .field`)})].find((x) => x.querySelector('.field-label, label')?.textContent.trim() === ${JSON.stringify(label)});
+      const el = f.querySelector(${JSON.stringify(tag)});
+      Object.getOwnPropertyDescriptor(${tag === 'select' ? 'HTMLSelectElement' : 'HTMLInputElement'}.prototype, 'value').set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event(${JSON.stringify(tag === 'select' ? 'change' : 'input')}, { bubbles: true })); return true; })()`);
+
+    // (3) Контроли [Р-94]: подпись без пометки над числами — находка, даже если она стоит по правому краю; числовая подпись над суммами
+    // без пометки — тоже; колонка ссылок строки с классом `num`, но без цифр, — не числа
+    await go('costs');
+    await b.evaluate(`(document.querySelector('.world-content').insertAdjacentHTML('beforeend', '<table id="align-control-189"><thead><tr><th style="text-align:right">Control amount</th><th class="num">Control total</th><th></th></tr></thead><tbody><tr><td class="num">$1,234.00</td><td>$5,678.00</td><td class="num"><a href="#">Why this price</a></td></tr></tbody></table>'), true)`);
+    const control = await b.evaluate<string[]>(NUM_ALIGN);
+    await b.evaluate(`(document.getElementById('align-control-189').remove(), true)`);
+    assert.ok(control.some((x) => x.includes('Control amount') && x.includes('header over numbers is not marked')), `control: an unmarked header over numbers is a finding — ${JSON.stringify(control)}`);
+    assert.ok(control.some((x) => x.includes('Control total') && x.includes('numbers under a number header are not marked')), `control: unmarked numbers under a number header are a finding — ${JSON.stringify(control)}`);
+    assert.ok(!control.some((x) => x.includes('(empty header)')), `control: a link column is not a number column — ${JSON.stringify(control)}`);
+
+    // (3) Предпросмотр правки границ: два предложения, минимальная цена +5 %
+    await waitFor(b, `document.querySelectorAll('.costs table.selectable tbody tr td.pick input').length > 2`, 'rows to pick on Costs & floors');
+    await b.evaluate(`([...document.querySelectorAll('.costs table.selectable tbody tr td.pick input')].slice(0, 2).forEach((x) => x.click()), true)`);
+    await waitFor(b, `document.querySelector('.costs .selection-count')?.textContent.trim() === ${JSON.stringify(t.counter(2, 0))}`, 'two selected', 10_000);
+    const e = en.ui.boundsEdit;
+    await setField('.bounds-edit', e.minPrice, 'select', 'PERCENT');
+    await new Promise((x) => setTimeout(x, 200));
+    await setField('.bounds-edit', e.percentLabel, 'input', '5');
+    await new Promise((x) => setTimeout(x, 200));
+    await b.click(e.plan, '.bounds-edit button');
+    await new Promise((x) => setTimeout(x, 300));
+    await runPendingJobs(colorsLive);
+    await waitFor(b, `document.querySelectorAll('.bounds-edit section.diff tbody tr').length === 2`, 'the bounds preview lists the two offers', 20_000);
+    assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'the bounds bulk-edit preview: every number header is marked and stands over its numbers');
+    await b.click(e.back, '.bounds-edit button');
+
+    // (3) Предпросмотр назначения стратегии
+    await go('strategies');
+    await waitFor(b, `/selected/.test(document.querySelector('.pick-card .selection-bar .selection-count')?.textContent ?? '')`, 'the selection bar of the assignment');
+    await setField('', en.ui.strategies.name, 'input', 'Smoke 189');
+    await new Promise((x) => setTimeout(x, 200));
+    await b.click(en.ui.strategies.preview, '.pick-card button');
+    await new Promise((x) => setTimeout(x, 300));
+    await runPendingJobs(colorsLive);
+    await waitFor(b, `document.querySelectorAll('section.preview tbody tr').length > 0`, 'the strategy preview', 20_000);
+    assert.deepEqual(await b.evaluate<string[]>(NUM_ALIGN), [], 'the strategy preview: every number header is marked and stands over its numbers');
+
+    // (17) Строка выбора держится под верхней панелью, пока листаются строки
+    const pinned = (table: string, count: string) => b.evaluate<{ top: number; count: number; covered: string; edge: number | null; th: number; rows: number; missed: number } | null>(`(() => {
+      const tb = document.querySelector(${JSON.stringify(table)}), c = document.querySelector(${JSON.stringify(count)}); if (!tb || !c) return null;
+      const top = document.querySelector('.topbar').getBoundingClientRect().bottom;
+      document.body.style.paddingBottom = window.innerHeight + 'px';
+      window.scrollTo(0, 0);
+      // начало таблицы уходит выше верхней панели на 160 px — её строки ещё на экране
+      const want = tb.getBoundingClientRect().top - top + 160;
+      window.scrollTo(0, want);
+      const r = c.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2);
+      const line = c.closest('.selection-sticky');
+      const out = { top: Math.round(top), count: Math.round(r.top), covered: hit && c.contains(hit) ? '' : hit ? hit.tagName + '.' + hit.className : 'nothing',
+        edge: line ? Math.round(line.getBoundingClientRect().bottom) : null, th: Math.round(tb.querySelector('thead th').getBoundingClientRect().top),
+        rows: tb.querySelectorAll('tbody tr').length, missed: Math.round(want - window.scrollY) };
+      document.body.style.paddingBottom = '';
+      window.scrollTo(0, 0);
+      return out; })()`);
+    const screens = [
+      { route: 'costs', pick: '.costs table.selectable tbody tr td.pick input', table: '.costs table.selectable', count: '.costs .selection-count', header: true },
+      { route: 'strategies', pick: null, table: '.pick-card table.strategy-picks', count: '.pick-card .selection-count', header: false },
+      { route: 'products', pick: 'table.products tbody tr td.offer input.row-check', table: 'table.products', count: '.offers-selection .selection-count', header: true },
+    ] as const;
+    await b.setViewport(1440, 600);
+    for (const s of screens) {
+      await go(s.route);
+      await waitFor(b, `!!document.querySelector(${JSON.stringify(s.table)}) && /selected/.test(document.querySelector(${JSON.stringify(s.count)})?.textContent ?? '')`, `${s.route}: the selection line`);
+      if (s.pick) {
+        await b.evaluate(`([...document.querySelectorAll(${JSON.stringify(s.pick)})].slice(0, 3).forEach((x) => x.click()), true)`);
+        await waitFor(b, `document.querySelector(${JSON.stringify(s.count)}).textContent.trim() === ${JSON.stringify(t.counter(3, 0))}`, `${s.route}: three selected`, 10_000);
+      }
+      const p = await pinned(s.table, s.count);
+      assert.ok(p && p.rows >= 3 && Math.abs(p.missed) <= 1, `${s.route}: the page scrolled into the rows — ${JSON.stringify(p)}`);
+      assert.ok(p.count >= p.top && p.count <= p.top + 40, `${s.route}: the selection line stays under the top bar while the rows scroll — the counter at ${p.count}px, the top bar ends at ${p.top}px`);
+      assert.equal(p.covered, '', `${s.route}: nothing is drawn over the selection line`);
+      if (s.header) assert.ok(p.edge !== null && Math.abs(p.th - p.edge) <= 1, `${s.route}: the table header stays right under the selection line — ${JSON.stringify(p)}`);
+    }
+    // Телефон: строка — на своём месте, страница не уезжает вбок, ничто не выступает из рамки
+    await b.setViewport(375, 812);
+    for (const s of screens) {
+      await go(s.route);
+      await waitFor(b, `/selected/.test(document.querySelector(${JSON.stringify(s.count)})?.textContent ?? '')`, `375 ${s.route}: the selection line`);
+      assert.equal(await b.evaluate<string>(`getComputedStyle(document.querySelector(${JSON.stringify(s.count)}).closest('.selection-sticky') ?? document.body).position`), 'static', `375 ${s.route}: on a phone the selection line stays in place`);
+      const fit = await b.evaluate<{ scrollWidth: number; width: number; out: string[] }>(PAGE_FIT);
+      assert.ok(fit.scrollWidth <= fit.width, `375 ${s.route}: no sideways scroll — ${fit.out.join('; ')}`);
+      assert.deepEqual(await b.evaluate<string[]>(OUT_OF_BOX), [], `375 ${s.route}: nothing sticks out of its frame`);
+    }
+  } finally {
+    await b.setViewport(1440, 900);
+    currentApi = euApi;
   }
   assert.deepEqual(b.errors().slice(before), [], 'no page errors');
 });

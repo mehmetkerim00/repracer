@@ -921,6 +921,23 @@ ul.selection-badges > li { display: inline-flex; align-items: center; gap: var(-
 /* Шаг 179 (#39): выбор на Offers — строка выбора и переходы к массовым операциям; галочка — в ячейке предложения */
 .offers-selection { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
 .offers-selection > .buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/*
+ * Шаг 189 (#27, пункт 17): строка выбора — карточкой, как полоса чисел шага 163: над строками таблицы она непрозрачна. От 768 px строка
+ * держится под верхней панелью, пока на экране её таблица (блок `.selection-scope`); шапка таблицы, которая держится на экране (шаг 182), —
+ * под строкой (`--selection-h` — высота строки, замер `SelectionScope`), рамка широкой таблицы ниже строки и короче на её высоту.
+ * На телефоне строка — на своём месте
+ */
+.selection-sticky {
+  margin: var(--space-2) 0 var(--space-3); padding: var(--space-2) var(--space-3);
+  background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+.selection-sticky .selection-bar { margin: 0; }
+@media (width >= 48rem) {
+  .selection-scope > .selection-sticky { position: sticky; top: var(--topbar-h); z-index: 8; }
+  .selection-scope .table-wrap.fits th { top: calc(var(--topbar-h) + var(--selection-h, 0px)); }
+  .selection-scope .table-wrap.framed { scroll-margin-top: calc(var(--topbar-h) + var(--selection-h, 0px) + var(--space-2)); }
+  .selection-scope .table-wrap.framed:not(.fits) { max-height: calc(100vh - var(--topbar-h) - var(--selection-h, 0px) - 2 * var(--space-4)); }
+}
 table.products td.offer input.row-check { width: var(--space-4); height: var(--space-4); margin: 0 var(--space-2) 0 0; vertical-align: middle; }
 /* Шаг 179 (#39): импорт описания товара (цвет) — свёрнутым разделом «More imports» */
 details.more-imports > summary { cursor: pointer; font-weight: var(--weight-heading); min-height: var(--touch-target); display: flex; align-items: center; }

@@ -10,7 +10,7 @@ import { handOver } from '../handover.ts';
 import { rememberKey, useRemembered } from '../remember.ts';
 import { ColHead, TableFrame } from '../table-frame.tsx';
 import { BoundsIndexView } from './Bounds.tsx';
-import { filterOfUi, isPicked, SelectionBar, useSelectionSummary } from './Selection.tsx';
+import { filterOfUi, isPicked, SelectionBar, SelectionScope, useSelectionSummary } from './Selection.tsx';
 
 /**
  * Шаг 79: колонки, которые продавец может скрыть; предложение, цена, пол, статус и действия — всегда. Шаг 105 [Р-230]: колонки Buy Box —
@@ -199,7 +199,8 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
         </form>
       ) : null}
       {view.matched !== null ? <Help className="section-sub" text={f.matched(view.matched, view.totals.total)} /> : null}
-      {selectionUi ?? null}
+      {/* Шаг 189 (#27, пункт 17): строка выбора держится над таблицей, пока листаются её строки */}
+      {withSelection(selectionUi, <>
       {/* Шаг 79: итоги и вид таблицы — в её шапке; колонки выбираются, строки бывают компактными. Шаг 182 (#38): шапка таблицы — на экране, таблица разворачивается */}
       {reviewList ? reviewList : view.rows.length > 0 ? <TableFrame screen="products" table="offers" lead={<span>{p.totals(view.totals)}</span>} actions={(
           <span className="view-options">
@@ -311,9 +312,15 @@ export function ProductsView({ view, onEnable, onDisable, query, onQuery, offerQ
         </table>
       </TableFrame> : null}
       {query && onQuery && view.rows.length > 0 ? <Pager page={view.page} query={query} onQuery={onQuery} /> : null}
+      </>)}
       <Gaps gaps={view.gaps} />
     </section>
   );
+}
+
+/** Шаг 189: строка выбора и таблица — блоком `SelectionScope`; функция, а не компонент в отрисовке — таблица не монтируется заново */
+function withSelection(line: ReactNode | undefined, rows: ReactNode): ReactNode {
+  return line ? <SelectionScope line={line}>{rows}</SelectionScope> : rows;
 }
 
 /** Шаг 188 (§2): ссылка «что делать» туда, где это задают, — у «нет себестоимости» страница предложения с полем ввода (шаг 187) */
